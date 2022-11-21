@@ -1,9 +1,12 @@
 pluginManagement {
     repositories {
-        // ...
-        mavenCentral()
-        maven { url 'https://repo.spring.io/release' }
-        maven { url 'https://maven.aliyun.com/repository/public' }
+        // for RC version
+        maven { url 'https://repo.spring.io/milestone' }
+		gradlePluginPortal()
+
+        // mavenCentral()
+        // maven { url 'https://repo.spring.io/release' }
+        // maven { url 'https://maven.aliyun.com/repository/public' }
     }
 }
 
