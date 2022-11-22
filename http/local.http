@@ -1,0 +1,2 @@
+### List Coffee
+GET http://localhost:8080/api/v1/coffee/list
