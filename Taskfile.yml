@@ -1,0 +1,15 @@
+version: "3"
+
+dotenv: [".env"]
+
+tasks:
+  build:
+    cmds:
+      - gradle nativeCompile
+      - docker build -t cappuccino:$CAP_VERSION .
+  run:
+    cmds:
+      - kubectl apply -f k8s/cappuccino-deployment.yml
+  stop:
+    cmds:
+      - kubectl delete -f k8s/cappuccino-deployment.yml
