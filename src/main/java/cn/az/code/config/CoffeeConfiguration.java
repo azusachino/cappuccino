@@ -6,11 +6,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestTemplate;
 
 @Configuration
-public class CommonConfiguration {
+public class CoffeeConfiguration {
 
     @Bean
-    @ConditionalOnProperty(value = "cup.rest.enabled", havingValue = "true", matchIfMissing = false)
-    public RestTemplate restTemplate() {
+    @ConditionalOnProperty(value = "coffee.rest.enabled", havingValue = "true", matchIfMissing = false)
+    RestTemplate restTemplate() {
         return new RestTemplate();
     }
 
