@@ -10,6 +10,7 @@ plugins {
 }
 
 group = 'cn.az.code'
+// load version from .env
 version = env.fetch("CAP_VERSION")
 sourceCompatibility = '17'
 
@@ -22,7 +23,16 @@ repositories {
 }
 
 dependencies {
-	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework.boot:spring-boot-starter-webflux'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+tasks.named("bootJar") {
+	archiveClassifier = 'boot'
+}
+
+tasks.named("jar") {
+	archiveClassifier = ''
 }
 
 tasks.named('test') {

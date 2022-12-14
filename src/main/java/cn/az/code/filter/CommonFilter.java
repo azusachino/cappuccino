@@ -1,26 +1,23 @@
 package cn.az.code.filter;
 
-import java.io.IOException;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.server.WebFilter;
+import org.springframework.web.server.WebFilterChain;
 
-import jakarta.servlet.Filter;
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.ServletRequest;
-import jakarta.servlet.ServletResponse;
+import reactor.core.publisher.Mono;
 
 @Component
-public class CommonFilter implements Filter {
+public class CommonFilter implements WebFilter {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CommonFilter.class);
 
     @Override
-    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
-            throws IOException, ServletException {
-        LOGGER.info("entering common filter");
-        chain.doFilter(request, response);
+    public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+        LOGGER.info("wow, a filter, your uri is {}", exchange.getRequest().getURI());
+        return chain.filter(exchange);
     }
+
 }
