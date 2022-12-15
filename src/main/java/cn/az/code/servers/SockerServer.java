@@ -1,4 +1,4 @@
-package cn.az.code.tests;
+package cn.az.code.servers;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -8,17 +8,14 @@ import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
-import java.util.concurrent.TimeUnit;
 
-import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class DiscordServerTests {
+public class SockerServer {
+    
+    private static final Logger LOGGER = LoggerFactory.getLogger(SockerServer.class);
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(DiscordServerTests.class);
-
-    @Test
     public void startServer() throws IOException {
         // selector - buffer - channel
         Selector selector = Selector.open();
@@ -61,40 +58,5 @@ public class DiscordServerTests {
             iter.remove();
         }
         serverSocketChannel.close();
-    }
-
-    /**
-     * client side of Discord
-     * 
-     * @throws IOException
-     */
-    @Test
-    public void startClient() throws IOException {
-        InetSocketAddress socketAddress = new InetSocketAddress("127.0.0.1", 9394);
-        SocketChannel socketChannel = SocketChannel.open(socketAddress);
-        // non-blocking -> to use selector
-        socketChannel.configureBlocking(false);
-
-        // self-spin, wait for connection done
-        while (!socketChannel.finishConnect()) {
-
-        }
-
-        LOGGER.info("successfully connected to discord server");
-        ByteBuffer bb = ByteBuffer.allocate(1024);
-        bb.put("Nice to meet you".getBytes());
-        // write -> read
-        bb.flip();
-
-        socketChannel.write(bb);
-        socketChannel.shutdownOutput();
-
-        try {
-            TimeUnit.SECONDS.sleep(10L);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        socketChannel.close();
     }
 }

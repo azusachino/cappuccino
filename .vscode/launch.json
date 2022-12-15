@@ -3,9 +3,10 @@
     "configurations": [
         {
             "type": "java",
-            "name": "Launch Current File",
+            "name": "Launch EchoNettyServer",
             "request": "launch",
-            "mainClass": "${file}"
+            "mainClass": "cn.az.code.servers.EchoNettyServer",
+            "projectName": "cappuccino"
         },
         {
             "type": "java",
