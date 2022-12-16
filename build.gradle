@@ -15,15 +15,16 @@ version = env.fetch("CAP_VERSION")
 sourceCompatibility = '17'
 
 repositories {
-	// mavenCentral tsl version too low
+	// mavenCentral ssl version too low
 	// mavenCentral()
 	maven { url 'https://maven.aliyun.com/repository/central' }
 	maven { url 'https://repo.spring.io/milestone' }
-    // maven { url 'https://repo.spring.io/release' }
+    maven { url 'https://repo.spring.io/release' }
 }
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-webflux'
+	testImplementation  'org.springframework.boot:spring-boot-starter-test'
 }
 
 tasks.named("bootJar") {

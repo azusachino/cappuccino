@@ -6,5 +6,7 @@
             "path": "/opt/jvm/graalvm-ce-java17-22.3.0"
         }
     ],
-    "java.compile.nullAnalysis.mode": "automatic"
+    "java.compile.nullAnalysis.mode": "automatic",
+    "java.eclipse.downloadSources": true,
+    "java.server.launchMode": "Standard",
 }

@@ -1,6 +1,7 @@
 package cn.az.code.clients;
 
 import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -10,6 +11,7 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.util.ReferenceCountUtil;
 
 public class SimpleNettyClient {
 
@@ -46,8 +48,11 @@ public class SimpleNettyClient {
 
                                 @Override
                                 public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-                                    System.out.printf("Oh, I received from server, %s", msg.toString());
-                                    super.channelRead(ctx, msg);
+                                    ByteBuf in = (ByteBuf) msg;
+                                    byte[] bytes = in.array();
+                                    System.out.printf("Oh, I received from server, %s",
+                                            new String(bytes, 0, bytes.length));
+                                    ReferenceCountUtil.release(msg);
                                 }
 
                                 @Override
