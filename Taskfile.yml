@@ -5,7 +5,7 @@ dotenv: [".env"]
 tasks:
   build:
     cmds:
-      - gradle nativeCompile
+      - mvn -Pnative -DskipTests package
       - docker build -t cappuccino:$CAP_VERSION .
   run:
     cmds:

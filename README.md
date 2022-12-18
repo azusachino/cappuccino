@@ -2,31 +2,7 @@
 
 Spring native image sample
 
-`gradle nativeCompile`
-
-## About Gradle
-
-### settings.gradle
-
-Project Settings
-
-### build.gradle
-
-Build Scripts
-
-## Setup Gradle for VSCode
-
-Support workspaces without wrapper
-
-1. Delete ./gradlew, ./gradlew.bat, ./gradle/ from the root folder.
-2. Change setting: java.import.gradle.wrapper.enabled to false, java.import.gradle.version to _your-version_.
-
-## gradle.properties
-
-```properties
-# force to use https v1.3 to resolve bad handshake
-https.protocols=TLSv1.3
-```
+`mvn -Pnative -DskipTests package`
 
 ## Taskfile
 
