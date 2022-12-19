@@ -8,6 +8,13 @@ Spring native image sample
 
 CLI to combine different tasks.
 
+## gu
+
+```sh
+# install local stuffs
+gu -L install abc.jar
+```
+
 ## Reference
 
 - [spring native](https://docs.spring.io/spring-native/docs/current/reference/htmlsingle)

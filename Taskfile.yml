@@ -5,7 +5,13 @@ dotenv: [".env"]
 tasks:
   build:
     cmds:
+      - task: buildJar
+      - task: buildImage
+  buildJar:
+    cmds:
       - mvn -Pnative -DskipTests package
+  buildImage:
+    cmds:
       - docker build -t cappuccino:$CAP_VERSION .
   run:
     cmds:

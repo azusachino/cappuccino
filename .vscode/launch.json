@@ -3,6 +3,13 @@
     "configurations": [
         {
             "type": "java",
+            "name": "Launch InboundHandlerTests",
+            "request": "launch",
+            "mainClass": "cn.az.code.tests.InboundHandlerTests",
+            "projectName": "cappuccino"
+        },
+        {
+            "type": "java",
             "name": "Launch EchoNettyServer",
             "request": "launch",
             "mainClass": "cn.az.code.servers.EchoNettyServer",
