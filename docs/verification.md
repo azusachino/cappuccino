@@ -69,3 +69,45 @@ The requested tags resolved to checkout v7 `3d3c42e5aac5ba805825da76410c181273ba
 Criterion disposition: tagged-action/security and Dependabot configuration met; consistent platform/compiler gates met; simulator/artifact/cleanup configuration and successful runtime path met; bounded native/Mac guidance met; exact-head hosted execution met. No blocking source or local-runtime findings. Cleanup's `always()` failure path was source-reviewed, not exercised by a deliberately failing run. The lead additionally downloaded the hosted bundle, confirmed its device/result summary and inspected all three exported screenshots.
 
 This evidence-only record delta changes no Swift, tests, workflow, deployment settings, contracts or generated inputs; runtime evidence originates at `56a1ccf`. The remote-bridge, physical-device, minimum-iOS-runtime, live Mac UI and vphone limits above still apply.
+
+## Multi-app scaffold checkpoint
+
+Local acceptance verified 2026-10-05; hosted acceptance is pending. This scope adds disconnected Android alongside relocated iOS/macOS entrypoints and the shared Apple package. It includes the Android plan formerly proposed in PR #2, for consolidation into [PR #1](https://github.com/azusachino/cappuccino/pull/1). No connected feature or release is accepted here.
+
+Source/configuration commit: `a3311ab62333265ae015373bbdb0fea7cffddbe2`, including preceding Apple relocation `e45c1f1f0922943207356c429fc20764acca8d2e` and Android plan `73504a113ee23ac101e56217823da743956f031e`. Independent review covered the working tree at `e45c1f1` before the source commit; the committed tree preserves those reviewed inputs.
+
+| Compared scope | Binary diff SHA-256 |
+| --- | --- |
+| Full scaffold from PR #1 head `c66403b`, with `--no-renames` | `c7e0bf0386222233e5f48f36322a7d2caaf1dbf65a60be48dea9243f9cc48478` |
+| Same full scaffold with default rename detection | `1d473aa7c577c5412be5b589707f731c2e04437ad39868a4b7ce1d495cc5a124` |
+| Working delta from `e45c1f1` | `664efc7df73a7f72a14d5608894626bbb7807a9e22f76134e1514eda737d1033` |
+
+The first two hashes differ only in Git's representation of the Apple moves; both encodings were reproduced against the same source. They must not be compared using different rename flags.
+
+### Independent local evidence
+
+Task-created real Herdr peer `cap-scaffold-luna`, pane `w1:p5V`, independently reviewed source and executed the owning gates. The owner selected `openai-codex/gpt-6-luna` at **low** effort; lead-observed startup argv and visible runtime footer confirm that route/effort, and substantive responses prove model access. The peer did not claim provider-level attestation. Task-created peer `cap-scaffold-glm`, pane `w1:p5W`, used owner-selected `zai-coding-cn/glm-5.3-flash` at low for separate read-only build/CI and artifact review. Both had no source/index/remote-write authority.
+
+The requested `antigravity/gemini-3.8-flash` low peer returned a roughly 40-hour quota error rather than a usable response. The owner explicitly approved proceeding with Luna/GLM; no model was silently substituted. Only the failed task-owned Gemini pane `w1:p5X` was closed.
+
+| Independently performed owning command | Result |
+| --- | --- |
+| `make -C <cappuccino> validate` with scoped Xcode/SDK | Exit 0: Swift/Kotlin style, Markdown, 3 Swift and 3 Kotlin core tests, Android lint zero issues, iOS/macOS builds and both Android debug APKs. |
+| `make -C <cappuccino> ui-test-android` with explicit serial | Exit 0: 1 instrumentation test, 0 failures/errors/skips, activity recreation and saved tab/delivery selection, disabled messaging, three decoded PNGs at 1344×2992. |
+| `make -C <cappuccino> ui-test DESTINATION=…` with explicit UUID | Exit 0: 1 XCTest, 0 failures/skips; three screenshot attachments exported and visually inspected. |
+
+Environment: macOS 27.0.1, Xcode 27.0/Swift 6.4, existing JDK 21.0.11/Android SDK, Gradle 9.8.0, AGP 9.4.1 and Kotlin/Compose compiler 2.4.20. Android used only newly task-created `Cappuccino_multi_app_20261005`, API 35 ARM, serial `emulator-5560`; iOS used task-created UUID `BA94D231-CB0A-4383-B3F4-94F449175D58`, iPhone 18 Pro/iOS 27. The independent XCTest bundle is `.build/xcode/Logs/Test/Test-Cappuccino-2026.10.05_23-02-48-+0900.xcresult`.
+
+Local criteria: native layout/consuming builds met; honest disconnected UI/delivery choices met; identity/pins/license/no runtime integration met; strict native gates met; both phone journeys/images met; truthful instructions and scope met. CI configuration was reviewed, but **delivered-head hosted execution remains unverifiable until it runs**.
+
+### Failures retained and corrected
+
+- Strict lint caught stale AGP/Kotlin patch examples, missing launcher icon and missing modern backup/transfer exclusions. Actual repository releases and real resources fixed them without a baseline or suppression.
+- Compiler warnings-as-errors rejected the legacy Compose test rule. The test migrated to the documented `junit4.v2` API rather than weakening the compiler gate.
+- A passing first Android journey exported 51-byte error text as `.png`: UTP uninstalled the app before post-test `adb run-as`. Source-only reviews had wrongly assumed that export was valid. Actual image inspection disproved it. Capture now uses AndroidX platform test storage, collected before uninstall; Make requires a unique file and PNG MIME type. Missing, ambiguous and non-PNG negative fixtures are rejected. These recipe-isolation checks are not runtime gate substitutes.
+- The first independent invocation mistakenly ran workstation Make. Its root exit 0 is not app evidence; the missing Android target failed. Explicit absolute `make -C <cappuccino>` commands then passed the owning gates.
+- The original emulator service reached its harness 1800-second limit during independent reproduction. That was infrastructure timeout, not an app crash. The same task-owned AVD/serial was restarted and the missing Android journey rerun; existing equivalent Apple/build evidence was retained.
+
+Gradle's configuration deprecation was traced independently to upstream AGP/ktfmt `Configuration.setVisible` calls, not project scripts. It remains visible; no project/compiler/lint warnings were suppressed. Kotlin's fully-tested compatibility-window caveat stays explicit in [development](development.md).
+
+Physical-device/minimum-OS coverage, assisted accessibility, process death/background/network recovery, authenticated bridge, real history/delivery/approvals/grants/alerts, credential storage, signing/update distribution and vphone remain unproven. The first eventual release target is a private usable prototype. This evidence record changes no source, tests, build/workflow settings or product contracts; runtime evidence belongs to the reviewed source commit.

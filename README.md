@@ -34,7 +34,7 @@ If Command Line Tools are selected globally, use a scoped override:
 
 ```sh
 env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make validate-apple
-make ui-test DESTINATION="platform=iOS Simulator,id=<task-owned simulator-id>"
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make ui-test DESTINATION="platform=iOS Simulator,id=<task-owned simulator-id>"
 ```
 
 Discover available device types/runtimes with `xcrun simctl list devicetypes` and `xcrun simctl list runtimes`. Create a dedicated simulator with `xcrun simctl create <name> <type-id> <runtime-id>`, use its returned UUID, and shut down/delete only that task-created device after preserving evidence. UI results and synthetic screenshot attachments live in `.build/xcode/Logs/Test/`.
