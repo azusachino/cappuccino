@@ -59,8 +59,16 @@ prefixes surface as explicit `gap` entries (`seq: null` on the wire).
   restarts (in-memory ring only).
 - Polling every 400 ms via `pane.read`; no `events.subscribe` (read-only spike,
   no replay guarantees anyway).
-- `session_id` is the pane's reported agent name; `active_branch` comes from a
-  read-only `git branch --show-current` in the agent cwd.
+- `session_id` is the pane's reported agent name; unnamed agents (Herdr has no
+  name for them) are still listed for exact parity with `herdr agent list`,
+  using a deterministic fallback identity: the pane id as `session_id` and the
+  agent kind as label — no names are invented.
+- `active_branch` is honest by construction: it is reported only when the git
+  repository toplevel equals the agent cwd (the session's own repository
+  boundary, including a worktree rooted at the cwd); `branch_source` is
+  `"own"`. Any other cwd reports `active_branch: null` with
+  `branch_source: "none"` — a branch discovered from an enclosing checkout is
+  inherited context, never the session's branch.
 - No TLS: localhost bind only; tailnet exposure needs a real transport decision
   (HTTPS/WSS) before anything beyond this spike.
 
