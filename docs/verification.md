@@ -44,6 +44,30 @@ Xcode emitted the no-AppIntents-dependency metadata warning. The iOS beta runtim
 
 Not tested or implemented: authenticated remote bridge, existing-agent/session/active-branch continuity, real prompts or approvals, grants/reconnect behavior, Telegram/APNs/background delivery, physical-iPhone signing/provisioning, minimum-OS coverage, live Mac UI or vphone guest execution. The next bounded work is [the disposable-session attachment spike](plan.md#2-disposable-session-attachment-spike); no deployment or host-security change is authorized by this verification.
 
+## Daemon spike slice A checkpoint
+
+Local acceptance verified 2026-10-06 for [issue #5](https://github.com/azusachino/cappuccino/issues/5) at branch `feat/daemon-spike-a`. Scope: companion-daemon slice A only — manual pairing, existing-agent list, read-only active-branch streaming to a CLI client against one task-owned disposable session. No delivery, approvals, or tailnet exposure.
+
+Writer: `cap-spike-glm` (zai-coding-cn/glm-5.3-flash low, sole checkout writer). Independent verifier: fresh `cap-spike-verifier` pane (openai-codex/gpt-6-luna, **medium**), round 1 BLOCKED, round 2 **PASSED** (code-only; lead-owned checkpoint condition satisfied by this section). Lead held acceptance, integration and sole prompting rights on the disposable agent.
+
+Reviewed revisions: skeleton `8fb0fe2`, live-append fixes `2224a5c`/`4c87c5a`, crash fix `c1021b5`, parity/branch-honesty fix `f79c520` (verification HEAD).
+
+### Round 1 (initial verification) — BLOCKED
+
+MET: pairing (external 0600 token, visible unauthorized rejection, no secret in tree), live-append acceptance (journey log `final-journey2.log`: 4 entries events, `ACK-MARK-D` captured mid-stream, 74/74 unique ids; reconnect `reconnect-dedupe.log`: zero new/dupe ids), crash hardening (`c1021b5` materialized LCS windows; 18 tests incl. adversarial shapes), gates (Swift tests green, scoped `make validate` exit 0), honest limits docs.
+
+BLOCKING findings: (1) `Agents.swift` dropped unnamed agents, breaking exact Herdr list parity; (2) `active_branch` inherited the enclosing workstation repo for a scratch-cwd agent, misleading clients; (3) no durable checkpoint existed here. Follow-ups recorded: Herdr-name→Pi-session-UUID mapping before slice B/C reliance; plaintext-token TCP is localhost-spike-only and needs an approved authenticated transport before any tailnet/public exposure; rerun live acceptance after any stream-reconciliation change.
+
+### Round 2 (re-verification at `f79c520`) — PASSED
+
+Parity: `capctl list` ≡ `herdr agent list` as sets including unnamed `w1:p43` (pane_id fallback identity, no fabricated names; unit-tested). Branch honesty: `active_branch: null`, `branch_source: none` unless Git toplevel == agent cwd (device/inode compare; unit-tested for repo-root, nested, no-repo, empty-cwd). No regressions: 20 Swift tests green; scoped `make validate` exit 0. Daemon bound 127.0.0.1 only; disposable session identity unchanged throughout (pane `w1:p5Y`, pid 69909).
+
+### Known limits (accepted for slice A)
+
+Entries are pane lines, not semantic messages; in-memory ring (no restart durability); 400 ms polling; `session_id` is the Herdr agent name or pane-id fallback, not a Pi session UUID; NDJSON/TCP on localhost only, no TLS. Live-append robustness required three fix iterations — the churn/repaint/window regression tests are mandatory-run guards for future stream work.
+
+Physical devices, background/process-death reconciliation, delivery receipts, approvals/grants and transport hardening remain unproven and belong to slices B/C and later (issues #6–#10).
+
 ## CI-quality and macOS 26 checkpoint
 
 Verified 2026-10-05. The owner selected action version tags rather than SHA pins and a macOS 26 minimum; iOS remains 17+. This checkpoint covers CI, deployment minimums, compiler gates and native-first development guidance, not new application behavior.
