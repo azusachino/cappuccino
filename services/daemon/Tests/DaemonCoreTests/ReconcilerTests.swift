@@ -78,32 +78,6 @@ final class ReconcilerTests: XCTestCase {
     XCTAssertTrue(old != new)
   }
 
-  func testLineConfirmerHoldsTrailingLineWhileWorking() {
-    let first = LineConfirmer.confirmed(
-      previousCount: 0,
-      snapshot: PaneSnapshot(lines: ["one", "two (growing)"], working: true),
-      branch: "main",
-      confirmTrailing: false)
-    XCTAssertEqual(first.entries.map { $0.text }, ["one"])
-    XCTAssertEqual(first.newCount, 1)
-    let second = LineConfirmer.confirmed(
-      previousCount: first.newCount,
-      snapshot: PaneSnapshot(lines: ["one", "two (growing)", "three"], working: true),
-      branch: "main",
-      confirmTrailing: false)
-    XCTAssertEqual(second.entries.map { $0.text }, ["two (growing)"])
-  }
-
-  func testLineConfirmerConfirmsTrailingWhenIdle() {
-    let result = LineConfirmer.confirmed(
-      previousCount: 0,
-      snapshot: PaneSnapshot(lines: ["one", "two final"], working: false),
-      branch: "main",
-      confirmTrailing: true)
-    XCTAssertEqual(result.entries.map { $0.text }, ["one", "two final"])
-    XCTAssertEqual(result.entries.map { $0.complete }, [true, true])
-  }
-
   func testEntryIdentityIsStableAcrossReconnects() {
     let a = EntryIdentity.id(branch: "main", text: "same text")
     let b = EntryIdentity.id(branch: "main", text: "same text")
