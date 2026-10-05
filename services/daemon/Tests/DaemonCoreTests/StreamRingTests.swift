@@ -116,6 +116,77 @@ final class StreamRingTests: XCTestCase {
   }
 }
 
+/// Adversarial pane shapes from the acceptance crash: a pane larger than the
+/// LCS window made Array(suffix:) hand back a slice with non-zero base indices,
+/// which the alignment walk indexed from 0 — an out-of-bounds fatal that killed
+/// the daemon on the first poll of the target session.
+final class AdversarialPaneTests: XCTestCase {
+  private func wide(_ count: Int, stamp: String = "0") -> [String] {
+    var lines = (1...count).map { "pane-line-\($0)-" + String(repeating: "x", count: $0 % 90) }
+    lines += ["──────", "~/work (main)", "↑\(stamp) $\(stamp) (auto) · zai 7%"]
+    return lines
+  }
+
+  func testPaneLargerThanWindowDoesNotCrashAndDetectsAppend() {
+    let ring = StreamRing()
+    let base = ring.ingest(
+      snapshot: PaneSnapshot(lines: wide(600, stamp: "1k"), working: false),
+      branch: "main", confirmTrailing: true)
+    XCTAssertEqual(base.count, 603)
+    var grown = wide(600, stamp: "2k")
+    grown.insert("APPEND-MARKER-1", at: 600)
+    let first = ring.ingest(
+      snapshot: PaneSnapshot(lines: grown, working: true),
+      branch: "main", confirmTrailing: false)
+    let second = ring.ingest(
+      snapshot: PaneSnapshot(lines: grown, working: false),
+      branch: "main", confirmTrailing: true)
+    let emitted = (first + second).map { $0.text }
+    XCTAssertTrue(Set(emitted).contains("APPEND-MARKER-1"))
+    XCTAssertEqual(
+      ring.replay(after: -1).entries.filter { $0.text == "APPEND-MARKER-1" }.count, 1)
+  }
+
+  func testAdversarialShapesSurvive() {
+    let ring = StreamRing()
+    // Empty read.
+    XCTAssertEqual(ring.ingest(
+      snapshot: PaneSnapshot(lines: [], working: false),
+      branch: "main", confirmTrailing: true), [])
+    // Single line.
+    _ = ring.ingest(
+      snapshot: PaneSnapshot(lines: ["only"], working: false),
+      branch: "main", confirmTrailing: true)
+    // Box-drawing, combining marks, wide glyphs, control-ish content.
+    let odd = [
+      "─\u{0338}\u{0301} box \u{2028} combining",
+      "cafe\u{0301} 漢字 カナ 🎉 width",
+      String(repeating: "─", count: 400),
+      "\u{7f}\u{1b}[31m escape-ish",
+    ]
+    let a = ring.ingest(
+      snapshot: PaneSnapshot(lines: odd, working: false),
+      branch: "main", confirmTrailing: true)
+    XCTAssertEqual(a.count, 4)
+    // Rapid shrink and regrow across window boundary.
+    _ = ring.ingest(
+      snapshot: PaneSnapshot(lines: wide(600), working: true),
+      branch: "main", confirmTrailing: false)
+    _ = ring.ingest(
+      snapshot: PaneSnapshot(lines: wide(3), working: true),
+      branch: "main", confirmTrailing: false)
+    let regrown = ring.ingest(
+      snapshot: PaneSnapshot(lines: wide(80), working: true),
+      branch: "main", confirmTrailing: false)
+    XCTAssertLessThanOrEqual(regrown.count, 80)
+    // Branch churn on top of everything still resets cleanly.
+    _ = ring.ingest(
+      snapshot: PaneSnapshot(lines: ["fresh"], working: false),
+      branch: "feat/next", confirmTrailing: true)
+    XCTAssertEqual(ring.generation, 1)
+  }
+}
+
 final class LineDiffTests: XCTestCase {
   func testIdenticalLinesAlignCompletely() {
     let (matched, last) = LineDiff.align(previous: ["a", "b", "c"], current: ["a", "b", "c"])

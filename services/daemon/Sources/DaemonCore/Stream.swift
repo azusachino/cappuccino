@@ -38,13 +38,18 @@ public enum LineDiff {
   public static func align(previous: [String], current: [String])
     -> (matched: Set<Int>, lastMatch: Int)
   {
-    let prev = previous.suffix(window)
-    let cur = current.suffix(window)
+    // Materialize the windowed slices as arrays: ArraySlice keeps its base
+    // indices (suffix of a 2000-line pane starts at 1488), and the walk below
+    // indexes from 0. Indexing a slice from 0 is an out-of-bounds fatal —
+    // exactly what killed the daemon on the first >window pane.
+    let prev = Array(previous.suffix(window))
+    let cur = Array(current.suffix(window))
     let offset = current.count - cur.count
     let n = prev.count
     let m = cur.count
     var matched = Set<Int>()
     guard n > 0, m > 0 else { return (matched, -1) }
+    precondition(n <= window && m <= window, "LCS window must bound both inputs")
     // dp[i][j] = LCS length of prev[i...] and cur[j...]
     var dp = [[Int]](repeating: [Int](repeating: 0, count: m + 1), count: n + 1)
     for i in stride(from: n - 1, through: 0, by: -1) {
