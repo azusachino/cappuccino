@@ -111,3 +111,20 @@ Local criteria: native layout/consuming builds met; honest disconnected UI/deliv
 Gradle's configuration deprecation was traced independently to upstream AGP/ktfmt `Configuration.setVisible` calls, not project scripts. It remains visible; no project/compiler/lint warnings were suppressed. Kotlin's fully-tested compatibility-window caveat stays explicit in [development](development.md).
 
 Physical-device/minimum-OS coverage, assisted accessibility, process death/background/network recovery, authenticated bridge, real history/delivery/approvals/grants/alerts, credential storage, signing/update distribution and vphone remain unproven. The first eventual release target is a private usable prototype. This evidence record changes no source, tests, build/workflow settings or product contracts; runtime evidence belongs to the reviewed source commit.
+
+### Delivered-head hosted checkpoint
+
+Hosted acceptance verified 2026-10-05 at PR #1 head `75694c3` (run [37325757158](https://github.com/azusachino/cappuccino/actions/runs/37325757158), jobs `android` and `check`, both success).
+
+The first delivered-head run `37324470442` failed before any test: the hosted runner's AVD catalog has no `pixel_8_pro` device (`Error: No device found matching --device pixel_8_pro`), so AVD creation never produced an emulator and the artifact step correctly found no results. The optional `profile:` input was removed in `75694c3`; every other job input, gate and artifact path is unchanged. This was workflow-infrastructure only; no app source changed after `a3311ab`.
+
+At `75694c3`, both required jobs succeeded on their hosted runners:
+
+| Job | Evidence |
+| --- | --- |
+| `check` (macOS) | `make validate-apple`, one task-created simulator, iPhone shell 1 test/0 failures/0 skips, XCTest bundle `Test-Cappuccino-2026.10.05_14-36-56-+0000.xcresult` (artifact `iphone-shell-37325757158-1`, 348,273 bytes), simulator deleted. |
+| `android` (Ubuntu) | `make validate-android`, API 35 x86_64 Google APIs emulator with KVM rule, instrumentation `disconnectedJourneyAndRecreation` 1/0/0/0 (JUnit XML in artifact), three collected PNGs (artifact `android-shell-37325757158-1`, 113,034 bytes), emulator shutdown owned by the runner action. |
+
+The lead downloaded both artifacts. The Android JUnit XML reports 1 test, 0 failures/errors/skips on `emulator-5554`; the exported screenshots are real PNGs. The iPhone bundle summary reports 1 passed, 0 failed, 0 skipped. Hosted Android screenshots are 320×640 low-resolution; the Chats capture shows the app's correct disconnected state **behind a system `Pixel Launcher isn't responding` ANR dialog** caused by hosted-emulator load. The journey's semantic assertions passed independently of that dialog. This is recorded honestly as a hosted-environment artifact, not suppressed; a later CI tuning slice may raise emulator resources, and physical-device evidence remains a separate requirement.
+
+Cancelled/stale runs (`37324470442` and superseded watchers) are retained in history as failure evidence; the merged PR #2 and this PR's checks all conclude at `75694c3`. Delivered-head hosted acceptance is complete for this skeleton scope; the limits in the local checkpoint above still apply.
