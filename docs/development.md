@@ -8,6 +8,10 @@ Use SwiftUI and standard platform APIs first. Primitive view state stays in `@St
 
 No TCA, dependency container, persistence framework or transport dependency is adopted by the skeleton. Evaluate a maintained library only against a demonstrated need, its supported platforms, maintenance/license, concurrency behavior and testability. Native Foundation networking applies if HTTP/WebSocket is selected; it is not an SSH client. Do not invent cryptography or rely on tailnet membership as authorization.
 
+## Android planning
+
+The owner chose connected iPhone first, native Android next, then Mac-specific UX. [Android planning](android-plan.md) proposes Kotlin/Jetpack Compose, lifecycle-aware state and small pure-logic/I/O/UI boundaries. It does not replace the Apple implementation with Flutter, React Native or Kotlin Multiplatform, add Android dependencies, select an SDK minimum or freeze an unproven transport contract. Android build/test targets are future work; the commands and CI below currently cover Apple only.
+
 ## Mac preparation
 
 The separate Mac target shares the core and currently compiles the same empty shell. A native Mac slice still needs sidebar/detail presentation, keyboard/menu commands, text selection, appropriate window state and actual Mac UI tests. Do not treat a successful build as desktop interaction acceptance or force the phone's tab layout onto the finished Mac product.

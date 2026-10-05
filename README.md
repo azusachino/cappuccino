@@ -1,10 +1,10 @@
 # Cappuccino
 
-A personal native iPhone/macOS companion for conversations and attention from agents already running on your Herdr machines.
+A personal native companion for conversations and attention from agents already running on your Herdr machines. Current code targets iPhone/macOS; the owner-selected roadmap is connected iPhone first, native Android next, then Mac-specific UX.
 
 **Current state:** disconnected SwiftUI skeleton, a small Swift core and hermetic/simulator checks. It does not connect to machines, send prompts, approve tools or deliver notifications yet. There is no agent launcher or terminal emulator.
 
-Read [intent](docs/intent.md), [plan](docs/plan.md) and [source research](docs/discovery.md). Existing remote agents keep their process/session lifetime; the phone attaches and detaches.
+Read [intent](docs/intent.md), [plan](docs/plan.md), [Android plan](docs/android-plan.md) and [source research](docs/discovery.md). Android is planned only: no Android code, Gradle wrapper, build commands or CI job exists yet. Existing remote agents keep their process/session lifetime; the phone attaches and detaches.
 
 ## Develop
 

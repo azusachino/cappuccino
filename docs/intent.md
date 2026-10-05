@@ -1,6 +1,6 @@
 # Cappuccino intent
 
-Confirmed by the owner on 2026-10-05 after grilling. Initial scope is a personal iPhone prototype, followed by macOS. The owner authorized repository skeleton initialization separately after confirming this intent.
+Confirmed by the owner on 2026-10-05 after grilling; repository skeleton initialization was authorized separately. The owner subsequently selected iPhone first, native Android next, then Mac-specific UX. The current implementation remains an Apple-only disconnected skeleton; Android planning is not authorization to build or install it.
 
 ## Outcome
 
@@ -10,7 +10,7 @@ Herdr and Pi own process/session lifetime. Opening the app never launches, repla
 
 ## First prototype
 
-- Personal use, Pi first, mostly coding tasks, iPhone first; macOS follows.
+- Personal use, Pi first, mostly coding tasks. Prove the existing-session bridge and connected iPhone journey first; Android follows before Mac-specific UX. The existing Mac build target stays intact.
 - Manually register and authenticate machines on private LAN/tailnet connections. No public ingress or cloud relay.
 - Direct agent conversations and one cross-machine attention inbox; no coordinating assistant.
 - Full history of the selected session's active branch, with code blocks and expandable tool details.
@@ -29,4 +29,4 @@ Agent spawning/termination, arbitrary other extensions' terminal dialogs, remote
 
 The skeleton is not a working remote client. Attachment, bridge transport, authentication, approval correlation, grants and Telegram delivery need separate verified slices. Implementation choices cannot relax session continuity or fail-closed decisions.
 
-[Discovery](discovery.md) holds primary-source findings and limits. [Plan](plan.md) defines the skeleton and the bounded feasibility spike before the full client.
+[Discovery](discovery.md) holds the earlier Apple/bridge research and its limits. [Plan](plan.md) defines the bounded feasibility spike and platform order; [Android plan](android-plan.md) defines the later native client without changing these safety requirements.

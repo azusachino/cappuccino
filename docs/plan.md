@@ -1,6 +1,6 @@
 # Native skeleton and attachment feasibility
 
-[Intent](intent.md) is confirmed. This plan separates repository initialization from proving remote attachment. Live execution belongs in Asobi (`cappuccino:native-skeleton`, followed by an attachment task), not a duplicated Markdown task board.
+[Intent](intent.md) is confirmed. The owner selected existing-session bridge feasibility → connected iPhone → native Android → Mac-specific UX. This plan separates those slices from the delivered Apple skeleton. Live execution belongs in Asobi, not a duplicated Markdown task board; Android implementation is not part of this planning change.
 
 ## 1. Repository skeleton
 
@@ -37,11 +37,19 @@ Prove, in order:
 
 Failure at any prerequisite stops dependent claims. Idle extension reload is supported by inspected Pi source, but a working authenticated companion is not proven yet. Decide the smallest transport and pairing mechanism only with evidence from this spike; do not publish a protocol or bind public ingress as part of scaffolding.
 
-## 3. Native attachment slice
+## 3. Connected iPhone slice
 
-After the spike, connect one paired machine to the app and prove the actual journey: existing-agent list → active transcript → reply or approval → detach/reconnect. Broaden to multiple machines with machine-scoped identity and per-machine failure states. Keep unsupported actions visibly unavailable.
+After the spike, connect one paired machine to the iPhone app and prove the actual journey: existing-agent list → active transcript → reply or approval → detach/reconnect. Broaden to multiple machines with machine-scoped identity and per-machine failure states. Keep unsupported actions visibly unavailable.
 
 Telegram is a later, separately configured slice: generic attention only, no code/prompt payload, no remote approval buttons, and no credentials in source/tests. Long-term installation remains a separate decision from free on-device prototyping.
+
+## 4. Native Android client
+
+After the connected iPhone acceptance checkpoint, follow [the Android plan](android-plan.md): honest Kotlin/Compose shell → paired machine and existing-agent list → active-branch transcript → explicit delivery → typed approvals/grants → lifecycle and real-device acceptance. Reuse proven bridge behavior and synthetic compatibility fixtures, not the SwiftUI implementation. Transport/authentication and wire-format decisions still depend on section 2; no shared protocol is published by this plan.
+
+## 5. Mac-specific UX
+
+Keep the existing macOS 26 build target throughout earlier slices. After Android acceptance, develop the sidebar/detail, keyboard/menu, selection and window behavior described in [development](development.md#mac-preparation), with an actual Mac runtime journey. A shared shell build is not Mac UX acceptance.
 
 ## Verification and authority
 
