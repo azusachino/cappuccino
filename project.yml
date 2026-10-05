@@ -15,15 +15,18 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
 packages:
-  CappuccinoCore:
-    path: .
+  CappuccinoApple:
+    path: packages/apple
 targets:
   Cappuccino:
     type: application
     platform: iOS
-    sources: [App]
+    sources:
+      - path: apps/ios
+        excludes: [UITests]
     dependencies:
-      - package: CappuccinoCore
+      - package: CappuccinoApple
+        product: CappuccinoUI
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.azusachino.cappuccino
@@ -34,9 +37,10 @@ targets:
   CappuccinoMac:
     type: application
     platform: macOS
-    sources: [App]
+    sources: [apps/macos]
     dependencies:
-      - package: CappuccinoCore
+      - package: CappuccinoApple
+        product: CappuccinoUI
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.azusachino.cappuccino.mac
@@ -44,7 +48,7 @@ targets:
   CappuccinoUITests:
     type: bundle.ui-testing
     platform: iOS
-    sources: [UITests]
+    sources: [apps/ios/UITests]
     dependencies:
       - target: Cappuccino
 schemes:

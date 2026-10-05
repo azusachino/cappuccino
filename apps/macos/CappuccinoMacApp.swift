@@ -1,7 +1,8 @@
+import CappuccinoUI
 import SwiftUI
 
 @main
-struct CappuccinoApp: App {
+struct CappuccinoMacApp: App {
   var body: some Scene {
     WindowGroup {
       ContentView()

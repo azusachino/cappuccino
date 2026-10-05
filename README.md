@@ -6,6 +6,10 @@ A personal native companion for conversations and attention from agents already 
 
 Read [intent](docs/intent.md), [plan](docs/plan.md), [Android plan](docs/android-plan.md) and [source research](docs/discovery.md). Android is planned only: no Android code, Gradle wrapper, build commands or CI job exists yet. Existing remote agents keep their process/session lifetime; the phone attaches and detaches.
 
+## Layout
+
+Apple app entry points live in `apps/ios/` and `apps/macos/`. `packages/apple/` is a local SwiftPM package with separate `CappuccinoCore` and reusable `CappuccinoUI` targets plus core tests. iPhone UI smoke is under `apps/ios/UITests/`. Root `project.yml` generates both native app targets; no monorepo framework is needed.
+
 ## Develop
 
 Requires macOS 26+, Xcode 26+ with Swift 6.2+, and mise. No API keys, Herdr runtime or Apple Developer membership is needed for the tests or unsigned Simulator builds.

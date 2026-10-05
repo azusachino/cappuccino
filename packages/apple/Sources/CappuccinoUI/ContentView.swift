@@ -1,11 +1,13 @@
 import CappuccinoCore
 import SwiftUI
 
-struct ContentView: View {
+public struct ContentView: View {
   @State private var delivery = MessageDelivery.followUp
   @State private var draft = ""
 
-  var body: some View {
+  public init() {}
+
+  public var body: some View {
     TabView {
       NavigationStack {
         ContentUnavailableView(

@@ -2,6 +2,7 @@ SHELL := bash
 MISE := mise exec --
 SWIFT := xcrun swift
 FORMAT := xcrun swift-format
+SWIFT_PATHS := packages/apple/Package.swift packages/apple/Sources packages/apple/Tests apps/ios apps/macos
 XCODEBUILD := xcodebuild -project Cappuccino.xcodeproj -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO
 DESTINATION ?=
 
@@ -19,10 +20,10 @@ generate: ## Generate the ignored Xcode project from project.yml
 	$(MISE) xcodegen generate --spec project.yml
 
 fmt: md-format ## Format Swift and Markdown
-	$(FORMAT) format --in-place --recursive Package.swift Sources Tests App UITests
+	$(FORMAT) format --in-place --recursive $(SWIFT_PATHS)
 
 fmt-check: ## Check Swift style
-	$(FORMAT) lint --strict --recursive Package.swift Sources Tests App UITests
+	$(FORMAT) lint --strict --recursive $(SWIFT_PATHS)
 
 md-format: ## Format Markdown
 	$(MISE) rumdl fmt .
@@ -31,7 +32,7 @@ md-check: ## Check Markdown
 	$(MISE) rumdl check .
 
 test: ## Run hermetic core tests with compiler warnings as errors
-	$(SWIFT) test -Xswiftc -warnings-as-errors
+	$(SWIFT) test --package-path packages/apple -Xswiftc -warnings-as-errors
 
 check: fmt-check md-check test ## Focused local and CI gate
 

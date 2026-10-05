@@ -6,7 +6,7 @@ Native Apple companion for existing, long-running Herdr/Pi agents. Read [intent]
 
 - Current source is a disconnected app skeleton. Keep unavailable actions explicit; sample data never represents a real attachment.
 - Herdr/Pi own agent lifetime. Attach/detach preserves the remote process and session. Setup reload is explicit and idle-only.
-- Keep core logic in `Sources/CappuccinoCore/`, UI in `App/`, hermetic tests in `Tests/`, and shell smoke in `UITests/`.
+- Apple shared code and hermetic tests live in `packages/apple/`; iPhone entry/UI tests in `apps/ios/`, Mac entry/platform UI in `apps/macos/`. The core target stays independent of the shared SwiftUI target.
 - Use Swift 6, two-space indentation and `make fmt`. Comments explain non-obvious constraints; names explain behavior. Prefer standard Swift/SwiftUI APIs and concrete types to speculative services or factories.
 - Edit `project.yml`, not generated `Cappuccino.xcodeproj`. Xcode supplies Swift; `.mise.toml` pins the tools Make invokes.
 
