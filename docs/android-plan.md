@@ -1,6 +1,6 @@
 # Native Android client plan
 
-The owner selected iPhone first, Android next on 2026-10-05. This is a plan, not an implemented client or Android installation approval. Keep the delivered Apple skeleton and macOS 26 build target; Mac-specific UX follows Android. [Intent](intent.md) remains the shared product and safety authority, and [the main plan](plan.md) owns bridge/iPhone prerequisites. Live implementation tasks belong in Asobi when their slice starts.
+The owner selected iPhone first, Android next on 2026-10-05. The later owner-approved scaffold prepares a disconnected Compose app at `apps/android/`; connected slices below remain a plan, not installation approval. Keep the delivered Apple skeleton and macOS 26 build target; Mac-specific UX follows Android. [Intent](intent.md) remains the shared product and safety authority, and [the main plan](plan.md) owns bridge/iPhone prerequisites. Live implementation tasks belong in Asobi when their slice starts.
 
 ## Architecture direction
 
@@ -12,10 +12,10 @@ The bridge spike must settle transport, pairing and reconciliation before Androi
 
 ## Before implementation
 
-- Accept the disposable existing-session spike and one connected iPhone journey. Android planning can precede them; Android implementation follows them.
-- Record the owner's target phone, Android version and distribution needs; choose `minSdk`, `compileSdk` and `targetSdk` explicitly. Do not infer an Android minimum from iOS 17 or macOS 26.
-- Check current official compatibility requirements and pin a working JDK/Gradle/AGP/Kotlin/Compose toolchain. Prove SDK/emulator availability before advertising CI commands. No versions or dependencies are installed by this plan.
-- Start the client in an Android-specific build directory without moving the existing Apple source. Update owning instructions and Make help when actual commands exist; do not describe proposed targets as runnable today.
+- Accept the disposable existing-session spike and one connected iPhone journey before connected Android implementation. The independently buildable disconnected scaffold does not remove these prerequisites.
+- Scaffold minimum is API 26, compile/target API 37. Record the owner's actual target phone, OS and distribution needs before accepting device compatibility; these SDK choices are not physical-device evidence.
+- The scaffold pins JDK 21/Gradle 9.8.0/AGP 9.4.1/Kotlin and Compose compiler 2.4.20, Compose BOM 2026.09.00 and Activity 1.13.0. AGP built-in Kotlin stays enabled; the explicit compiler upgrade follows its documented mechanism. Wrapper distribution and JAR checksums are checked against upstream. See [development](development.md) for upstream compatibility limits and actual gates.
+- `apps/android/` is the native Gradle root; separate `apps/ios/`, `apps/macos/` and `packages/apple/` retain Apple's native builds. [README](../README.md) documents actual Make entry points.
 
 ## Ordered acceptance slices
 
@@ -59,7 +59,7 @@ Each slice keeps unsupported actions visibly unavailable. Use synthetic fixtures
 
 ## Build, CI and distribution boundary
 
-Add Android Make entry points wrapping real Gradle tasks for format/static checks, hermetic unit tests, APK assembly and Compose instrumentation. Pin compatible tools through the wrapper/mise as appropriate. Use current released action tags, least-privilege job permissions, task-owned emulators and bounded synthetic test artifacts, matching the owner's CI preference. Preserve Apple gates; do not substitute Android checks for them. Treat project Kotlin compiler warnings as errors; do not silence compiler/lint diagnostics or skip critical-path tests to obtain green CI. Emulator acceleration/runner support and exact versions must be validated in the eventual hosted job.
+Android Make entry points wrap Gradle format/static checks, hermetic unit tests, APK assembly and Compose instrumentation. Tools are pinned through the wrapper/version catalog; root mise supplies Apple/Markdown tooling. Use current released action tags, least-privilege job permissions, task-owned emulators and bounded synthetic test artifacts, matching the owner's CI preference. Preserve Apple gates; do not substitute Android checks for them. Treat project Kotlin compiler warnings as errors; do not silence compiler/lint diagnostics or skip critical-path tests to obtain green CI. Emulator acceleration/runner support and exact versions must be validated in the eventual hosted job.
 
 Debug APK assembly can use disposable development signing; release keys, production pairing data and real transcripts never enter source, CI logs or test artifacts. Android signing is distinct from Apple's seven-day Personal Team provisioning, but installation/update/signing-key handling and device policy still require actual-phone acceptance. No store listing, production signing-key creation, device-setting changes, FCM setup or deployment is authorized by this document.
 
@@ -67,7 +67,7 @@ Before each implementation slice is accepted, run its actual logic/static/build 
 
 ## Open decisions
 
-Target phone/minimum Android version; exact build-tool versions and CI emulator image; prototype installation/signing-key lifecycle; credential-storage details; and bridge transport/authentication/wire/reconciliation details remain unresolved. These block their owning implementation slices, not this planning checkpoint. Scope excludes agent orchestration, terminal emulation, public ingress/cloud relay and automatic discovery, as on iPhone.
+Actual target phone/OS acceptance; prototype installation/signing-key lifecycle; credential-storage details; and bridge transport/authentication/wire/reconciliation details remain unresolved. The scaffold's SDK/toolchain/image choices are explicit, but do not prove physical-device or connected behavior. These block their owning implementation slices, not this planning checkpoint. Scope excludes agent orchestration, terminal emulation, public ingress/cloud relay and automatic discovery, as on iPhone.
 
 ## Primary sources
 

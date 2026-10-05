@@ -1,6 +1,6 @@
 # Cappuccino intent
 
-Confirmed by the owner on 2026-10-05 after grilling; repository skeleton initialization was authorized separately. The owner subsequently selected iPhone first, native Android next, then Mac-specific UX. The current implementation remains an Apple-only disconnected skeleton; Android planning is not authorization to build or install it.
+Confirmed by the owner on 2026-10-05 after grilling; repository skeleton initialization was authorized separately. The owner subsequently selected iPhone first, native Android next, then Mac-specific UX. The owner later approved buildable Android/iOS/macOS skeletons in one PR. Current implementation remains disconnected; that scaffold approval does not authorize connected features, physical-device installation or deployment.
 
 ## Outcome
 

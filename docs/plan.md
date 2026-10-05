@@ -1,17 +1,17 @@
 # Native skeleton and attachment feasibility
 
-[Intent](intent.md) is confirmed. The owner selected existing-session bridge feasibility → connected iPhone → native Android → Mac-specific UX. This plan separates those slices from the delivered Apple skeleton. Live execution belongs in Asobi, not a duplicated Markdown task board; Android implementation is not part of this planning change.
+[Intent](intent.md) is confirmed. The owner selected existing-session bridge feasibility → connected iPhone → native Android → Mac-specific UX. These connected slices are separate from the owner-approved disconnected Android/iOS/macOS scaffold. Live execution belongs in Asobi; detailed connected acceptance and task decomposition belong in the owning parent/task issues after the framework discussion.
 
 ## 1. Repository skeleton
 
-Replace the stale Java/Gradle sample, retaining Git history and the existing GPL-3.0 license. Use Swift 6, a dependency-free SwiftPM core and shared SwiftUI shell. XcodeGen's pinned declarative project generates iOS and macOS app targets; generated projects/build output stay ignored. Make owns local/CI gates, mise pins non-Xcode tools, swift-format owns Swift style, and rumdl owns Markdown.
+Replace the stale Java/Gradle sample, retaining Git history and the existing GPL-3.0 license. Use Swift 6, a dependency-free SwiftPM core and shared SwiftUI shell for Apple, and Kotlin/Compose in one native Android app module. XcodeGen's pinned declarative project generates iOS and macOS app targets; generated projects/build output stay ignored. Make owns local/CI gates, mise pins non-Xcode tools, swift-format owns Swift style, and rumdl owns Markdown.
 
 Acceptance:
 
-- Source is split only into core, app and tests; no speculative bridge/service abstraction or fake networking.
+- Native entrypoints live in `apps/android`, `apps/ios` and `apps/macos`; `packages/apple` contains shared Apple core/UI/tests. Android keeps pure logic, UI and platform I/O separate within its app module. No speculative bridge/service abstraction or fake networking.
 - Chats, Attention and Machines have honest empty states. Sending is disabled until attachment exists; the Nudge/Follow-up distinction is visible.
 - A session identifier is machine-scoped. Hermetic tests cover that identity separation and the message-delivery choices; no live sessions or credentials are read.
-- `make check`, `make build-ios`, `make build-macos` and `make ui-test` pass. UI smoke launches the shell, checks its disconnected state/disabled send, and visits Attention and Machines.
+- `make validate-apple` and `make validate-android` pass, as do explicitly device-selected `make ui-test` and `make ui-test-android`. UI smoke launches each phone shell, checks disconnected states/disabled messaging and explicit delivery choices, and visits Attention and Machines. Android activity recreation preserves selection.
 - README, CONTRIBUTING and AGENTS name the actual commands and implementation limits. CI runs the same structural/test/build gates without credentials or deployment.
 
 Deployment targets are iOS 17 and macOS 26; the owner raised the Mac minimum after the initial skeleton checkpoint. Xcode 26+ supplies the Swift 6.2 package toolchain and swift-format. These are build requirements, not a claim of hardware acceptance across every supported OS. [Development and quality](development.md) records the native-first framework choice, platform-specific Mac work and CI/behavior gates.
@@ -45,7 +45,7 @@ Telegram is a later, separately configured slice: generic attention only, no cod
 
 ## 4. Native Android client
 
-After the connected iPhone acceptance checkpoint, follow [the Android plan](android-plan.md): honest Kotlin/Compose shell → paired machine and existing-agent list → active-branch transcript → explicit delivery → typed approvals/grants → lifecycle and real-device acceptance. Reuse proven bridge behavior and synthetic compatibility fixtures, not the SwiftUI implementation. Transport/authentication and wire-format decisions still depend on section 2; no shared protocol is published by this plan.
+The disconnected Kotlin/Compose shell can be prepared independently. After the connected iPhone acceptance checkpoint, follow [the Android plan](android-plan.md): paired machine and existing-agent list → active-branch transcript → explicit delivery → typed approvals/grants → lifecycle and real-device acceptance. Reuse proven bridge behavior and synthetic compatibility fixtures, not the SwiftUI implementation. Transport/authentication and wire-format decisions still depend on section 2; no shared protocol is published by this plan.
 
 ## 5. Mac-specific UX
 
