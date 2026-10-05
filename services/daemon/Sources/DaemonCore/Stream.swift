@@ -2,16 +2,20 @@ import Foundation
 
 // Pure logic that turns successive pane reads into confirmed-complete entries.
 //
-// Rule (documented wire behavior): only the trailing line of a poll can still
-// be growing. A line becomes a durable entry when a later line follows it, or
-// when the poll happens while the agent is idle (quiescence). This is what
-// keeps a partial trailing line from ever being rendered complete.
+// The pi TUI repaints constantly: status header/footer lines (token counts,
+// rates, timestamps) mutate in place every poll, and scrollback can compact.
+// Positional diffs cannot survive that, so alignment is by LONGEST COMMON
+// SUBSEQUENCE between the previous and current snapshots. Lines of the current
+// snapshot that the LCS leaves unmatched AFTER the last matched line are
+// candidates: genuinely appended content, or churn that happened to land at
+// the tail.
 //
-// Pane reads are diffed by CONTENT, never by absolute row index: the pi TUI
-// repaints and compacts its scrollback, so the same text can move between rows
-// and the visible line count can shrink between polls. The daemon finds the
-// longest overlap between the previous snapshot's suffix and the current
-// snapshot's prefix and emits only the truly new lines after that overlap.
+// Candidates become entries only when they are STABLE — seen in two
+// consecutive polls — or immediately when the agent is idle (quiescence).
+// Volatile footer churn changes every poll and therefore never stabilizes
+// while the agent works; real transcript lines persist and are emitted within
+// one poll. A line whose content id is already in the ring is never emitted
+// again, which keeps repeated blank/separator lines from spamming history.
 
 public struct PaneSnapshot: Sendable, Equatable {
   public var lines: [String]
@@ -24,27 +28,50 @@ public struct PaneSnapshot: Sendable, Equatable {
 }
 
 public enum LineDiff {
-  /// Returns the lines appended after the previous snapshot, or nil when there
-  /// is no recognizable continuity (full repaint/clear): the caller must then
-  /// re-baseline without emitting anything, or reset on a branch change.
-  public static func appendedLines(previous: [String], current: [String]) -> [String]? {
-    if previous.isEmpty {
-      return current
-    }
-    if current.count >= previous.count,
-      Array(current.prefix(previous.count)) == previous
-    {
-      return Array(current.dropFirst(previous.count))
-    }
-    // Pane compacted or repainted: find the largest k where the previous
-    // snapshot's suffix of length k equals the current snapshot's prefix.
-    let maxOverlap = min(previous.count, current.count)
-    for k in stride(from: maxOverlap, through: 1, by: -1) {
-      if Array(previous.suffix(k)) == Array(current.prefix(k)) {
-        return Array(current.dropFirst(k))
+  /// Maximum window used for the LCS alignment; `pane.read` is capped upstream
+  /// but this bounds the quadratic DP regardless.
+  static let window = 512
+
+  /// Indices of `current` lines matched by the LCS with `previous`, plus the
+  /// index in `current` of the last match. Returns nil only when both sides
+  /// are empty of any common ground.
+  public static func align(previous: [String], current: [String])
+    -> (matched: Set<Int>, lastMatch: Int)
+  {
+    let prev = previous.suffix(window)
+    let cur = current.suffix(window)
+    let offset = current.count - cur.count
+    let n = prev.count
+    let m = cur.count
+    var matched = Set<Int>()
+    guard n > 0, m > 0 else { return (matched, -1) }
+    // dp[i][j] = LCS length of prev[i...] and cur[j...]
+    var dp = [[Int]](repeating: [Int](repeating: 0, count: m + 1), count: n + 1)
+    for i in stride(from: n - 1, through: 0, by: -1) {
+      for j in stride(from: m - 1, through: 0, by: -1) {
+        if prev[i] == cur[j] {
+          dp[i][j] = dp[i + 1][j + 1] + 1
+        } else {
+          dp[i][j] = max(dp[i + 1][j], dp[i][j + 1])
+        }
       }
     }
-    return nil
+    var i = 0
+    var j = 0
+    var lastMatch = -1
+    while i < n, j < m {
+      if prev[i] == cur[j] {
+        matched.insert(j + offset)
+        lastMatch = j + offset
+        i += 1
+        j += 1
+      } else if dp[i + 1][j] >= dp[i][j + 1] {
+        i += 1
+      } else {
+        j += 1
+      }
+    }
+    return (matched, lastMatch)
   }
 }
 
@@ -95,10 +122,13 @@ public enum Reconciler {
 public final class StreamRing: @unchecked Sendable {
   private let lock = NSLock()
   private var entries: [TranscriptEntry] = []
+  private var seenIds = Set<String>()
   private var storedLines: [String] = []
-  /// A trailing line held back because the agent was working when it appeared;
-  /// confirmed on the next idle poll (quiescence).
-  private var heldTrailing: String?
+  /// Content ids seen as candidates in the previous poll; a candidate that is
+  /// still present one poll later (matched or still unmatched) is stable
+  /// content. Volatile footer churn changes every poll and never stabilizes
+  /// while the agent works.
+  private var previousCandidateIds: Set<String> = []
   private var nextSeq = 1
   private var lastBranch: String?
   /// Bumped when the active branch changes: clients must reset (no abandoned
@@ -107,53 +137,65 @@ public final class StreamRing: @unchecked Sendable {
 
   public init() {}
 
-  public func ingest(snapshot: PaneSnapshot, branch: String?, confirmTrailing: Bool)
-    -> [TranscriptEntry]
-  {
+  public func ingest(
+    snapshot: PaneSnapshot, branch: String?, confirmTrailing: Bool, trace: String = ""
+  ) -> [TranscriptEntry] {
     lock.lock()
     defer { lock.unlock() }
     if let branch, branch != lastBranch, lastBranch != nil {
       generation += 1
       entries = []
+      seenIds = []
       storedLines = []
-      heldTrailing = nil
+      previousCandidateIds = []
+      Trace.log("\(trace): branch changed to \(branch) -> reset, generation \(generation)")
     }
     lastBranch = branch
 
-    guard let appended = LineDiff.appendedLines(
-      previous: storedLines, current: snapshot.lines)
-    else {
-      // Unrecognizable repaint: re-baseline quietly rather than fabricate
-      // entries; the next poll re-establishes continuity.
-      storedLines = snapshot.lines
-      heldTrailing = nil
-      return []
+    let (matched, lastMatch) = LineDiff.align(previous: storedLines, current: snapshot.lines)
+
+    // Candidates: current lines the LCS left unmatched. Genuinely appended
+    // content is unmatched (the previous snapshot had no such line); header
+    // and footer churn is unmatched too, but its content changes every poll.
+    // Candidates that are still present one poll later (as unmatched lines or
+    // newly matched into the stable region) are real content; candidates that
+    // vanish were churn. Quiescence (agent idle) confirms fresh candidates
+    // immediately instead of waiting a poll.
+    var candidateIds = Set<String>()
+    var currentIds = Set<String>()
+    for text in snapshot.lines {
+      let id = EntryIdentity.id(branch: branch, text: text)
+      currentIds.insert(id)
+    }
+    for (index, text) in snapshot.lines.enumerated() where !matched.contains(index) {
+      candidateIds.insert(EntryIdentity.id(branch: branch, text: text))
     }
 
-    var pending = appended
-    if confirmTrailing {
-      // Idle: a previously held trailing line is now confirmed too, as long as
-      // it is still the line right before the appended content.
-      if let held = heldTrailing, storedLines.last == held {
-        pending.insert(held, at: 0)
-      }
-      heldTrailing = nil
-    } else if let last = appended.last {
-      // Working: hold the trailing line back until a later line or idleness
-      // confirms it.
-      heldTrailing = last
-      pending = Array(appended.dropLast())
+    var stableIds = currentIds.intersection(previousCandidateIds)
+    if confirmTrailing { stableIds.formUnion(candidateIds) }
+    // A pure compaction (everything matched, nothing new) must not wipe the
+    // pending candidate set: lines that arrived just before the compaction
+    // still need their confirming poll.
+    if !candidateIds.isEmpty || snapshot.lines.count >= storedLines.count {
+      previousCandidateIds = candidateIds
     }
-    storedLines = snapshot.lines
 
-    let newEntries: [TranscriptEntry] = pending.map { text in
+    var newEntries: [TranscriptEntry] = []
+    for text in snapshot.lines {
+      let id = EntryIdentity.id(branch: branch, text: text)
+      guard !seenIds.contains(id), stableIds.contains(id) else { continue }
+      seenIds.insert(id)
       let entry = TranscriptEntry(
-        seq: nextSeq, id: EntryIdentity.id(branch: branch, text: text), kind: "output",
-        text: text, branch: branch, complete: true)
+        seq: nextSeq, id: id, kind: "output", text: text, branch: branch, complete: true)
       nextSeq += 1
-      return entry
+      newEntries.append(entry)
     }
     entries = Reconciler.append(entries, newEntries)
+    Trace.log(
+      "\(trace): cur=\(snapshot.lines.count) lastMatch=\(lastMatch) " +
+        "candidates=\(candidateIds.count) stable=\(stableIds.count) " +
+        "emitted=\(newEntries.count) working=\(snapshot.working)")
+    storedLines = snapshot.lines
     return newEntries
   }
 

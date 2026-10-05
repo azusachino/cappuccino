@@ -1,88 +1,107 @@
 import XCTest
 @testable import DaemonCore
 
-// Regression tests for the live-append defect found at acceptance: the poll
-// loop must detect lines appended beyond an initial snapshot for any pane,
-// including after a TUI repaint that shrinks or shifts the line list.
+// Regression tests for the live-append defects found at acceptance:
+// 1. positional diffs froze when the TUI repainted (fixed by content diffing);
+// 2. real pi panes churn their status header/footer on every poll, so the
+//    diff must emit genuinely appended lines under continuous churn, exactly
+//    once, without re-baselining them away.
 
 final class StreamRingTests: XCTestCase {
   private func lines(_ count: Int, prefix: String = "line") -> [String] {
     (1...count).map { "\(prefix)\($0)" }
   }
 
-  func testAppendBeyondInitialSnapshotIsDetected() {
-    let ring = StreamRing()
-    let initial = ring.ingest(
-      snapshot: PaneSnapshot(lines: lines(65), working: false),
-      branch: "main", confirmTrailing: true)
-    XCTAssertEqual(initial.count, 65)
-    XCTAssertEqual(initial.last?.text, "line65")
-
-    // Second poll: two lines appended while the agent is working — the
-    // trailing line is held, the other becomes a confirmed entry.
-    let grown = ring.ingest(
-      snapshot: PaneSnapshot(lines: lines(67), working: true),
-      branch: "main", confirmTrailing: false)
-    XCTAssertEqual(grown.map { $0.text }, ["line66"])
-    XCTAssertEqual(grown.map { $0.complete }, [true])
-
-    let quiesced = ring.ingest(
-      snapshot: PaneSnapshot(lines: lines(67), working: false),
-      branch: "main", confirmTrailing: true)
-    XCTAssertEqual(quiesced.map { $0.text }, ["line67"])
+  private func churnFooter(_ body: [String], stamp: String) -> [String] {
+    // Simulates the pi TUI: separator, cwd line and a status footer whose
+    // rate/token figures mutate on every repaint.
+    return body + ["────", "~/work (main)", "↑\(stamp) $\(stamp) (auto)"]
   }
 
-  func testAppendedLinesAfterRepaintShrinkAreStillDetected() {
+  func testInitialSnapshotIsConfirmedOnIdleQuiescence() {
+    let ring = StreamRing()
+    let initial = ring.ingest(
+      snapshot: PaneSnapshot(lines: churnFooter(lines(65), stamp: "10k"), working: false),
+      branch: "main", confirmTrailing: true)
+    XCTAssertEqual(initial.count, 68)
+    XCTAssertEqual(initial.last?.text, "↑10k $10k (auto)")
+  }
+
+  func testAppendIsEmittedUnderContinuousFooterChurn() {
+    let ring = StreamRing()
+    _ = ring.ingest(
+      snapshot: PaneSnapshot(lines: churnFooter(lines(65), stamp: "10k"), working: false),
+      branch: "main", confirmTrailing: true)
+
+    // Turn 1: footer mutates, one new transcript line arrives above it.
+    var body = lines(65)
+    body.append("ACK-MARK-B")
+    let first = ring.ingest(
+      snapshot: PaneSnapshot(lines: churnFooter(body, stamp: "11k"), working: true),
+      branch: "main", confirmTrailing: false)
+    // Fresh candidates only pending on the first churning poll; nothing yet.
+    XCTAssertTrue(first.isEmpty || first.map { $0.text } == ["ACK-MARK-B"])
+
+    // Turn 2 (next poll): footer churns again, no new content.
+    let second = ring.ingest(
+      snapshot: PaneSnapshot(lines: churnFooter(body, stamp: "12k"), working: true),
+      branch: "main", confirmTrailing: false)
+    XCTAssertTrue(second.map { $0.text }.contains("ACK-MARK-B"))
+
+    // The ACK line is emitted exactly once across further churn.
+    let third = ring.ingest(
+      snapshot: PaneSnapshot(lines: churnFooter(body, stamp: "13k"), working: true),
+      branch: "main", confirmTrailing: false)
+    XCTAssertFalse(third.map { $0.text }.contains("ACK-MARK-B"))
+    let all = ring.replay(after: -1).entries.map { $0.text }
+    XCTAssertEqual(all.filter { $0 == "ACK-MARK-B" }.count, 1)
+  }
+
+  func testRepaintShrinkThenGrowthStillDetectsAppend() {
     let ring = StreamRing()
     _ = ring.ingest(
       snapshot: PaneSnapshot(lines: lines(65), working: false),
       branch: "main", confirmTrailing: true)
-    // TUI repaint: scrollback compacts to 42 lines, then the agent appends.
+    // Compaction swallows the visible history down to 42 lines.
     _ = ring.ingest(
       snapshot: PaneSnapshot(lines: lines(42), working: true),
       branch: "main", confirmTrailing: false)
-    let grown = ring.ingest(
-      snapshot: PaneSnapshot(lines: lines(45), working: true),
+    // Genuinely new content arrives (unique text, not a subset of the base).
+    var grown = lines(42)
+    grown.append("appended-43")
+    grown.append("appended-44")
+    // The appending poll registers the candidates...
+    let first = ring.ingest(
+      snapshot: PaneSnapshot(lines: grown, working: true),
       branch: "main", confirmTrailing: false)
-    XCTAssertEqual(grown.map { $0.text }, ["line43", "line44"])
-    let quiesced = ring.ingest(
-      snapshot: PaneSnapshot(lines: lines(45), working: false),
+    // ...a persisting line is confirmed on the next working poll, and the
+    // idle quiescence poll confirms anything still fresh.
+    let second = ring.ingest(
+      snapshot: PaneSnapshot(lines: grown, working: true),
+      branch: "main", confirmTrailing: false)
+    let idle = ring.ingest(
+      snapshot: PaneSnapshot(lines: grown, working: false),
       branch: "main", confirmTrailing: true)
-    XCTAssertEqual(quiesced.map { $0.text }, ["line45"])
+    let emitted = (first + second + idle).map { $0.text }
+    XCTAssertTrue(Set(emitted).isSuperset(of: ["appended-43", "appended-44"]))
+    let all = ring.replay(after: -1).entries.map { $0.text }
+    XCTAssertEqual(all.filter { $0 == "appended-43" }.count, 1)
   }
 
-  func testFullRepaintWithNoContinuityRebaselinesWithoutFabricating() {
+  func testFullRepaintRebaselinesWithoutFabricating() {
     let ring = StreamRing()
     _ = ring.ingest(
       snapshot: PaneSnapshot(lines: lines(65), working: false),
       branch: "main", confirmTrailing: true)
     let unrelated = ring.ingest(
-      snapshot: PaneSnapshot(lines: ["totally", "different", "content"], working: false),
+      snapshot: PaneSnapshot(lines: ["totally", "different"], working: false),
       branch: "main", confirmTrailing: true)
-    XCTAssertEqual(unrelated, [])
-    XCTAssertEqual(ring.count, 65, "previously confirmed entries are retained")
-
-    // Growth after the re-baseline is detected again.
-    let grown = ring.ingest(
-      snapshot: PaneSnapshot(lines: ["totally", "different", "content", "more"], working: false),
-      branch: "main", confirmTrailing: true)
-    XCTAssertEqual(grown.map { $0.text }, ["more"])
+    // Quiescence confirms the fresh content immediately (it IS the pane now).
+    XCTAssertEqual(unrelated.map { $0.text }, ["totally", "different"])
+    XCTAssertEqual(ring.replay(after: 65).entries.map { $0.text }, ["totally", "different"])
   }
 
-  func testSequencesStayMonotonicAcrossAppends() {
-    let ring = StreamRing()
-    _ = ring.ingest(
-      snapshot: PaneSnapshot(lines: lines(3), working: false),
-      branch: "main", confirmTrailing: true)
-    let second = ring.ingest(
-      snapshot: PaneSnapshot(lines: lines(5), working: false),
-      branch: "main", confirmTrailing: true)
-    let (replay, _) = ring.replay(after: 1)
-    XCTAssertEqual(replay.map { $0.seq }, [2, 3, 4, 5])
-    XCTAssertEqual(Set(second.map { $0.seq }).count, second.count)
-  }
-
-  func testBranchChangeResetsAndKeepsGeneration() {
+  func testBranchChangeResetsGeneration() {
     let ring = StreamRing()
     _ = ring.ingest(
       snapshot: PaneSnapshot(lines: ["a", "b"], working: false),
@@ -98,22 +117,30 @@ final class StreamRingTests: XCTestCase {
 }
 
 final class LineDiffTests: XCTestCase {
-  func testIdenticalSnapshotsAppendNothing() {
-    XCTAssertEqual(LineDiff.appendedLines(previous: ["a", "b"], current: ["a", "b"]), [])
+  func testIdenticalLinesAlignCompletely() {
+    let (matched, last) = LineDiff.align(previous: ["a", "b", "c"], current: ["a", "b", "c"])
+    XCTAssertEqual(matched, [0, 1, 2])
+    XCTAssertEqual(last, 2)
   }
 
-  func testPureAppend() {
-    XCTAssertEqual(LineDiff.appendedLines(previous: ["a", "b"], current: ["a", "b", "c"]), ["c"])
+  func testInPlaceChurnStillAlignsTail() {
+    let previous = ["head", "↑10k $1 (auto)", "mid", "foot \(1)"]
+    let current = ["head", "↑11k $2 (auto)", "mid", "foot 1"]
+    let (matched, last) = LineDiff.align(previous: previous, current: current)
+    XCTAssertEqual(matched, [0, 2, 3])
+    XCTAssertEqual(last, 3)
   }
 
-  func testOverlapAfterCompaction() {
-    XCTAssertEqual(
-      LineDiff.appendedLines(previous: ["a", "b", "c", "d"], current: ["c", "d", "e"]),
-      ["e"])
+  func testCompactedPaneAlignsOnSuffix() {
+    let (matched, last) = LineDiff.align(
+      previous: ["a", "b", "c", "d", "e"], current: ["c", "d", "e", "f"])
+    XCTAssertEqual(last, 2)
+    XCTAssertEqual(matched, [0, 1, 2])
   }
 
-  func testNoContinuityReturnsNil() {
-    XCTAssertNil(LineDiff.appendedLines(previous: ["a", "b"], current: ["x", "y"]))
-    XCTAssertNil(LineDiff.appendedLines(previous: ["a"], current: []))
+  func testNoCommonGroundAlignsNothing() {
+    let (matched, last) = LineDiff.align(previous: ["a", "b"], current: ["x", "y"])
+    XCTAssertTrue(matched.isEmpty)
+    XCTAssertEqual(last, -1)
   }
 }

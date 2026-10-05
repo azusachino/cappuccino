@@ -131,7 +131,8 @@ public final class DaemonState: @unchecked Sendable {
         _ = stream.ring.ingest(
           snapshot: PaneSnapshot(lines: lines, working: agent?.working ?? true),
           branch: agent?.activeBranch,
-          confirmTrailing: confirmTrailing)
+          confirmTrailing: confirmTrailing,
+          trace: sessionId)
         lock.lock()
         condition.broadcast()
         lock.unlock()
