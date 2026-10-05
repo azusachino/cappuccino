@@ -2,7 +2,7 @@
 
 A personal native companion for conversations and attention from agents already running on your Herdr machines. The connected-feature order is bridge feasibility, connected iPhone, Android, then Mac-specific UX.
 
-**Current state:** disconnected native shells and hermetic core tests. No machine connection, prompt delivery, tool approval or notification is implemented. There is no agent launcher or terminal emulator.
+**Current state:** disconnected native shells and hermetic core tests, plus an iPhone Machines pairing/agent-list flow against the local reference daemon (TCP wire v0, `services/daemon/`) behind the client's `DaemonServing` transport seam. Per the 2026-10-06 architecture pivot, SSH-exec driving the existing `herdr` CLI is the product transport and is not implemented yet; the daemon is a reference transport only, so nothing here is production remote access. No prompt delivery, tool approval, live transcript or tailnet exposure is implemented; the pairing token stays in the device Keychain. There is no agent launcher or terminal emulator.
 
 Read [intent](docs/intent.md), [plan](docs/plan.md), [Android plan](docs/android-plan.md) and [source research](docs/discovery.md). Existing remote agents keep their process/session lifetime; future clients attach and detach.
 
