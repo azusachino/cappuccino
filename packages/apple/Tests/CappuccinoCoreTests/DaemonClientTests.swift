@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import CappuccinoCore
 
 /// Scripted line connection: queues daemon responses, captures what the
@@ -56,7 +57,7 @@ struct FakeConnector: LineConnecting {
 
   @Test func pairSendsTokenAndReturnsMachine() async throws {
     let connection = FakeLineConnection(responses: [
-      #"{"event":"paired","machine_id":"m-42","protocol":1}"#,
+      #"{"event":"paired","machine_id":"m-42","protocol":1}"#
     ])
     let client = DaemonClient(
       connector: FakeConnector { connection }, host: "h", port: 1, timeout: 1)
@@ -82,7 +83,9 @@ struct FakeConnector: LineConnecting {
   }
 
   @Test func listMapsAgentsEvent() async throws {
-    let client = client([#"{"event":"agents","machine_id":"m-1","agents":[{"machine_id":"m-1","session_id":"s-aurora","pane_id":"w1:a","label":"pi","agent":"pi","status":"working","working":true,"cwd":"/t","active_branch":"feat/x","branch_source":"own"},{"machine_id":"m-1","session_id":"w1:b","pane_id":"w1:b","label":"pi","agent":"pi","status":"idle","working":false,"cwd":"/t","active_branch":null,"branch_source":"none"}]}"#])
+    let client = client([
+      #"{"event":"agents","machine_id":"m-1","agents":[{"machine_id":"m-1","session_id":"s-aurora","pane_id":"w1:a","label":"pi","agent":"pi","status":"working","working":true,"cwd":"/t","active_branch":"feat/x","branch_source":"own"},{"machine_id":"m-1","session_id":"w1:b","pane_id":"w1:b","label":"pi","agent":"pi","status":"idle","working":false,"cwd":"/t","active_branch":null,"branch_source":"none"}]}"#
+    ])
     let rows = try await client.listAgents(token: "t")
     #expect(rows.count == 2)
     #expect(rows[0].branch == "feat/x")
@@ -109,7 +112,7 @@ struct FakeConnector: LineConnecting {
 
   @Test func requestSendsExactlyOneLine() async throws {
     let connection = FakeLineConnection(responses: [
-      #"{"event":"agents","machine_id":"m","agents":[]}"#,
+      #"{"event":"agents","machine_id":"m","agents":[]}"#
     ])
     let client = DaemonClient(
       connector: FakeConnector { connection }, host: "h", port: 1, timeout: 1)

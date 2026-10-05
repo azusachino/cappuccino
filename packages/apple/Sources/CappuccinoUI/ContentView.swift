@@ -69,7 +69,9 @@ public struct ContentView: View {
       }
       .tabItem { Label("Attention", systemImage: "tray") }
 
-      MachinesView(model: MachinesModel(daemon: Self.daemonForProcess(), tokens: Self.tokensForProcess()))
+      MachinesView(
+        model: MachinesModel(daemon: Self.daemonForProcess(), tokens: Self.tokensForProcess())
+      )
       .tabItem { Label("Machines", systemImage: "desktopcomputer") }
     }
   }

@@ -107,14 +107,16 @@ public final class TCPLineConnection: LineConnection, @unchecked Sendable {
 
   public func send(_ payload: Data) async throws {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-      connection.send(content: payload, completion: .contentProcessed { error in
-        if let error {
-          continuation.resume(
-            throwing: DaemonClientError.unreachable("send failed: \(error.localizedDescription)"))
-        } else {
-          continuation.resume()
-        }
-      })
+      connection.send(
+        content: payload,
+        completion: .contentProcessed { error in
+          if let error {
+            continuation.resume(
+              throwing: DaemonClientError.unreachable("send failed: \(error.localizedDescription)"))
+          } else {
+            continuation.resume()
+          }
+        })
     }
   }
 
@@ -138,7 +140,8 @@ public final class TCPLineConnection: LineConnection, @unchecked Sendable {
         content, _, isComplete, error in
         if let error {
           continuation.resume(
-            throwing: DaemonClientError.unreachable("receive failed: \(error.localizedDescription)"))
+            throwing: DaemonClientError.unreachable("receive failed: \(error.localizedDescription)")
+          )
         } else if let content {
           continuation.resume(returning: Data(content))
         } else if isComplete {

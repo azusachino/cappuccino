@@ -42,14 +42,16 @@ final class CappuccinoUITests: XCTestCase {
     tokenField.tap()
     tokenField.typeText("wrong-token")
     app.buttons["Pair machine"].tap()
-    XCTAssertTrue(app.staticTexts["Pairing token rejected by the daemon."].waitForExistence(timeout: 5))
+    XCTAssertTrue(
+      app.staticTexts["Pairing token rejected by the daemon."].waitForExistence(timeout: 5))
     capture("Pairing rejected", app: app)
 
     // Correct token: paired, fixture agents render.
     tokenField.tap()
     tokenField.typeText("demo-ok")
     app.buttons["Pair machine"].tap()
-    let failureText = app.staticTexts["pairing-error"].exists
+    let failureText =
+      app.staticTexts["pairing-error"].exists
       ? app.staticTexts["pairing-error"].label : "no pairing error shown"
     XCTAssertTrue(
       app.staticTexts["pi on harus-mini"].waitForExistence(timeout: 5),

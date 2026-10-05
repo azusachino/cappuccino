@@ -182,10 +182,12 @@ struct PairingSheet: View {
     VStack(alignment: .leading, spacing: 8) {
       Text("Paste the one-time pairing token")
         .font(.subheadline.weight(.medium))
-      SecureField("Pairing token", text: Binding(get: { model.tokenInput }, set: { model.tokenInput = $0 }))
-        .textFieldStyle(.roundedBorder)
-        .autocorrectionDisabled()
-        .accessibilityIdentifier("pairing-token")
+      SecureField(
+        "Pairing token", text: Binding(get: { model.tokenInput }, set: { model.tokenInput = $0 })
+      )
+      .textFieldStyle(.roundedBorder)
+      .autocorrectionDisabled()
+      .accessibilityIdentifier("pairing-token")
       Button("Pair machine") {
         Task { await model.pair() }
       }

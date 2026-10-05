@@ -20,7 +20,9 @@ public struct KeychainTokenStore: TokenStoring {
   public let service: String
   public let account: String
 
-  public init(service: String = "com.azusachino.cappuccino.daemon", account: String = "pairing-token") {
+  public init(
+    service: String = "com.azusachino.cappuccino.daemon", account: String = "pairing-token"
+  ) {
     self.service = service
     self.account = account
   }
