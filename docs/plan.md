@@ -14,7 +14,7 @@ Acceptance:
 - `make check`, `make build-ios`, `make build-macos` and `make ui-test` pass. UI smoke launches the shell, checks its disconnected state/disabled send, and visits Attention and Machines.
 - README, CONTRIBUTING and AGENTS name the actual commands and implementation limits. CI runs the same structural/test/build gates without credentials or deployment.
 
-Initial deployment targets are iOS 17 and macOS 14, supporting the standard SwiftUI empty-state components. Xcode 16+ supplies Swift 6 and swift-format. These are skeleton build requirements, not a claim of hardware acceptance across every supported OS.
+Deployment targets are iOS 17 and macOS 26; the owner raised the Mac minimum after the initial skeleton checkpoint. Xcode 26+ supplies the Swift 6.2 package toolchain and swift-format. These are build requirements, not a claim of hardware acceptance across every supported OS. [Development and quality](development.md) records the native-first framework choice, platform-specific Mac work and CI/behavior gates.
 
 The owner conventions used here are Make/mise, two-space indentation, pure logic separate from I/O, hermetic checks, small conventional commits, and comments explaining non-obvious constraints rather than narrating code. There was no existing owned Swift project/style configuration in this checkout; use Apple's formatter rather than inventing a framework.
 

@@ -30,8 +30,8 @@ md-format: ## Format Markdown
 md-check: ## Check Markdown
 	$(MISE) rumdl check .
 
-test: ## Run hermetic core tests
-	$(SWIFT) test
+test: ## Run hermetic core tests with compiler warnings as errors
+	$(SWIFT) test -Xswiftc -warnings-as-errors
 
 check: fmt-check md-check test ## Focused local and CI gate
 

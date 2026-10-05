@@ -1,5 +1,7 @@
 # Native skeleton verification
 
+This is the original skeleton checkpoint, before the later macOS 26 minimum and CI-quality follow-up. Its fingerprints identify that earlier scope; it is not evidence that subsequent workflow/platform changes ran successfully.
+
 Verified 2026-10-05 against [plan section 1](plan.md#1-repository-skeleton). All five scoped criteria passed; the independent reviewer reported no actionable findings. This is acceptance of the disconnected skeleton, not the remote attachment spike.
 
 ## Independent review

@@ -8,7 +8,7 @@ Read [intent](docs/intent.md), [plan](docs/plan.md) and [source research](docs/d
 
 ## Develop
 
-Requires macOS, Xcode 16+ with Swift 6, and mise. No API keys, Herdr runtime or Apple Developer membership is needed for the tests or unsigned Simulator builds.
+Requires macOS 26+, Xcode 26+ with Swift 6.2+, and mise. No API keys, Herdr runtime or Apple Developer membership is needed for the tests or unsigned Simulator builds.
 
 ```sh
 make setup
@@ -34,7 +34,9 @@ xcrun simctl list devices available
 make ui-test DESTINATION="platform=iOS Simulator,id=<simulator-id>"
 ```
 
-`make check` covers Swift style, Markdown and SwiftPM tests. `make validate` also generates and builds the iOS Simulator and macOS apps. `make ui-test` exercises only the disconnected shell and saves screenshot attachments in Xcode's `.build/xcode/Logs/Test/` results; it proves no remote-agent behavior.
+`make check` covers Swift style, Markdown and SwiftPM tests with compiler warnings as errors. `make validate` also generates and builds the iOS Simulator and macOS apps. `make ui-test` exercises only the disconnected shell and saves screenshot attachments in Xcode's `.build/xcode/Logs/Test/` results; it proves no remote-agent behavior.
+
+CI uses action version tags, an explicit macOS 26/Xcode 26.6 environment, and a task-owned iPhone Simulator for the same shell journey. It retains XCTest bundles for seven days and cleans up only its own simulator. See [development and quality](docs/development.md) for framework choices, Mac preparation and behavior/security acceptance still required.
 
 For a task-owned simulator, discover types/runtimes with `xcrun simctl list devicetypes` and `xcrun simctl list runtimes`, create a dedicated device with `xcrun simctl create <name> <type-id> <runtime-id>`, and use its returned UUID. Shut down/delete only that task-created device after preserving evidence; leave owner devices unchanged.
 
