@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check toolchain
+        run: |
+          xcodebuild -version
+          xcrun swift --version
+          sw_vers -productVersion
+      - uses: jdx/mise-action@v5
+        with:
+          version: 2026.10.2
+          persist_github_token: false
+      - run: make validate-apple
+      - name: Create task-owned simulator
+        id: simulator
+        run: |
+          id=$(xcrun simctl create "Cappuccino CI $GITHUB_RUN_ID" \
+            com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro \
+            com.apple.CoreSimulator.SimRuntime.iOS-26-5)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+      - name: Test disconnected iPhone shell
+        id: smoke
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: make ui-test DESTINATION="platform=iOS Simulator,id=$SIMULATOR_ID"
+      - name: Preserve XCTest evidence
+        if: always() && (steps.smoke.outcome == 'success' || steps.smoke.outcome == 'failure')
+        uses: actions/upload-artifact@v7
+        with:
+          name: iphone-shell-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .build/xcode/Logs/Test/*.xcresult
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      - name: Delete task-owned simulator
+        if: always() && steps.simulator.outputs.id != ''
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: xcrun simctl delete "$SIMULATOR_ID"
+
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ANDROID_SERIAL: emulator-5554
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Check Android toolchain
+        run: |
+          java -version
+          apps/android/gradlew --no-daemon --version
+      - run: make validate-android
+      - name: Enable KVM on this disposable CI runner
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test disconnected Android shell
+        id: smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          avd-name: CappuccinoCI${{ github.run_id }}
+          emulator-port: 5554
+          emulator-boot-timeout: 300
+          script: make ui-test-android
+      - name: Preserve Android shell evidence
+        if: always() && (steps.smoke.outcome == 'success' || steps.smoke.outcome == 'failure')
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-shell-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            apps/android/app/build/outputs/androidTest-results/connected/
+            apps/android/app/build/reports/androidTests/connected/
+            .build/android/screens/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

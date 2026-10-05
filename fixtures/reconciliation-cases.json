@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "name": "duplicate-append-is-idempotent",
+      "stream": [
+        { "seq": 4, "kind": "assistant", "text": "first" },
+        { "seq": 4, "kind": "assistant", "text": "first" }
+      ],
+      "expected": [{ "seq": 4, "kind": "assistant", "text": "first" }]
+    },
+    {
+      "name": "gap-is-visible-placeholder",
+      "stream": [
+        { "seq": 7, "kind": "assistant", "text": "later" }
+      ],
+      "expected": [
+        { "seq": null, "kind": "gap", "after": null, "before": 7 },
+        { "seq": 7, "kind": "assistant", "text": "later" }
+      ]
+    },
+    {
+      "name": "replacement-invalidates-pending",
+      "session_replaced": { "old": "s-aurora", "new": "s-aurora-2" },
+      "pending": [
+        { "action_id": "a-1", "state": "unresolved" },
+        { "grant_id": "g-1", "invalidated": true }
+      ],
+      "expected_stream_reset": true
+    }
+  ]
+}

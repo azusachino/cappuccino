@@ -1,0 +1,19 @@
+{
+  "machine_id": "11111111-1111-4111-8111-111111111111",
+  "agents": [
+    {
+      "machine_id": "11111111-1111-4111-8111-111111111111",
+      "session_id": "s-aurora",
+      "label": "pi on harus-mini",
+      "active_branch": "feat/collector-fix",
+      "working": true
+    },
+    {
+      "machine_id": "11111111-1111-4111-8111-111111111111",
+      "session_id": "s-borealis",
+      "label": "pi on harus-mini",
+      "active_branch": "main",
+      "working": false
+    }
+  ]
+}
