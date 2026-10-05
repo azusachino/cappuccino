@@ -1,0 +1,4 @@
+[global]
+disable = ["MD013"]
+respect-gitignore = true
+exclude = [".build/**", ".swiftpm/**", "Cappuccino.xcodeproj/**"]
