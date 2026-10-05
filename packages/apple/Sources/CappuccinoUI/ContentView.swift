@@ -5,6 +5,28 @@ public struct ContentView: View {
   @State private var delivery = MessageDelivery.followUp
   @State private var draft = ""
 
+  /// UI-test hooks: scripted demo daemon or a guaranteed-refused port so the
+  /// journeys are hermetic; production runs talk to the real slice-A daemon.
+  private static func daemonForProcess() -> DaemonServing {
+    let arguments = ProcessInfo.processInfo.arguments
+    if arguments.contains("-cappuccino-demo") {
+      return DemoDaemonClient()
+    }
+    if arguments.contains("-cappuccino-unreachable") {
+      return DaemonClient(host: "127.0.0.1", port: 1, timeout: 2)
+    }
+    return DaemonClient()
+  }
+
+  private static func tokensForProcess() -> TokenStoring {
+    // The scripted UI-test journeys run in an unsigned simulator app where
+    // SecItemAdd is unavailable; production pairs store in the Keychain.
+    if ProcessInfo.processInfo.arguments.contains("-cappuccino-demo") {
+      return InMemoryTokenStore()
+    }
+    return KeychainTokenStore()
+  }
+
   public init() {}
 
   public var body: some View {
@@ -47,14 +69,9 @@ public struct ContentView: View {
       }
       .tabItem { Label("Attention", systemImage: "tray") }
 
-      NavigationStack {
-        ContentUnavailableView(
-          "No machines added",
-          systemImage: "desktopcomputer",
-          description: Text("Private machine pairing is not implemented yet.")
-        )
-        .navigationTitle("Machines")
-      }
+      MachinesView(
+        model: MachinesModel(daemon: Self.daemonForProcess(), tokens: Self.tokensForProcess())
+      )
       .tabItem { Label("Machines", systemImage: "desktopcomputer") }
     }
   }

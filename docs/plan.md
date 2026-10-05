@@ -28,6 +28,8 @@ Use a task-owned Herdr/Pi session, already running before any client attaches. R
 
 The owner selected the companion-daemon architecture on 2026-10-05: a small user-space Mac daemon binds to tailnet/localhost only; phones connect over HTTPS/WSS with a manual one-time pairing token. The daemon consumes the Herdr socket for discovery and streams, and receives a separate outbound WebSocket from a narrowly scoped Pi extension for typed tool gating and grants. There is no public ingress and no cloud relay. The [behavior spec](behavior-spec.md) and its fixtures are the cross-platform contract; the wire format stays provisional.
 
+**Architecture pivot (2026-10-06).** The owner superseded the per-machine resident daemon for the product path: phones reach machines over tailnet SSH and drive the existing `herdr` CLI directly (`agent list --json`, `pane read` polling; approvals later via the Pi extension plus a watched decision file). No per-machine daemon ships. `services/daemon` (merged from slice A, PR #14) is retained as a reference implementation, and its pairing and reconciliation logic migrates into the phone client as the SSH transport lands. Client logic above the transport is unaffected: the iOS client already consumes the daemon through a transport protocol, and the same interface is what the SSH-exec implementation replaces.
+
 The spike runs in read-only-first slices, each independently verifiable against a task-owned disposable session:
 
 - **Slice A (this spike):** manual pairing → list existing agents → stream one active-branch session read-only to a CLI test client. Proves transport, pairing, history ordering and gap handling. No writes.
