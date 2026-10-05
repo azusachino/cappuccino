@@ -1,0 +1,32 @@
+{
+  "delivery": {
+    "action_id": "a-17",
+    "agent_ref": { "machine_id": "11111111-1111-4111-8111-111111111111", "session_id": "s-aurora" },
+    "choice": "nudge",
+    "state": "unresolved",
+    "reason": "ambiguous disconnect"
+  },
+  "approval": {
+    "request_id": "r-42",
+    "agent_ref": { "machine_id": "11111111-1111-4111-8111-111111111111", "session_id": "s-aurora" },
+    "tool": "bash",
+    "args": { "command": "make validate-android" },
+    "cwd": "/Users/azusachino/Projects/project-github/harus-workstation/vendor/cappuccino",
+    "status": "pending"
+  },
+  "grant": {
+    "grant_id": "g-9",
+    "request_id": "r-42",
+    "tool": "bash",
+    "args": { "command": "make validate-android" },
+    "cwd": "/Users/azusachino/Projects/project-github/harus-workstation/vendor/cappuccino",
+    "session_id": "s-aurora",
+    "revoked": false
+  },
+  "decision": {
+    "request_id": "r-42",
+    "decision": "approve",
+    "by": "phone",
+    "superseded_by": null
+  }
+}

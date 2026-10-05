@@ -26,20 +26,21 @@ The owner suggested vphone-cli; [source assessment](discovery.md#optional-debugg
 
 Use a task-owned Herdr/Pi session, already running before any client attaches. Record machine, Herdr version, process identity, native session ID/path and active branch. Never probe an owner's working agent or install a global extension automatically. Read Pi's installed extension/session contracts before implementing this slice.
 
-Prove, in order:
+The owner selected the companion-daemon architecture on 2026-10-05: a small user-space Mac daemon binds to tailnet/localhost only; phones connect over HTTPS/WSS with a manual one-time pairing token. The daemon consumes the Herdr socket for discovery and streams, and receives a separate outbound WebSocket from a narrowly scoped Pi extension for typed tool gating and grants. There is no public ingress and no cloud relay. The [behavior spec](behavior-spec.md) and its fixtures are the cross-platform contract; the wire format stays provisional.
 
-1. Install a narrowly scoped trusted integration for the disposable session and reload at a safe idle boundary. Process and native session identities remain unchanged; context/history is retained.
-2. Read structured active-branch history and stream updates without concatenating abandoned branches or accepting partial trailing JSONL as an entry. Distinguish durable history from in-flight output.
-3. Send one Nudge and one Follow-up to that same process through a typed integration. Delivery receipts identify the action; ambiguous transport failures do not cause blind retries.
-4. Gate one operation with a specific request/session identity and exact arguments. Resolve locally and remotely, reject the losing/stale decision, and prove denied/pending requests do not execute.
-5. Exercise an exact invocation grant, manual revocation and invalidation on reload/branch/session change. A reconnect cannot broaden permission.
-6. Disconnect and reattach. The remote process survives; history/pending state recovers without duplicate sends or approvals. A replacement occupant cannot inherit old pending actions or grants.
+The spike runs in read-only-first slices, each independently verifiable against a task-owned disposable session:
 
-Failure at any prerequisite stops dependent claims. Idle extension reload is supported by inspected Pi source, but a working authenticated companion is not proven yet. Decide the smallest transport and pairing mechanism only with evidence from this spike; do not publish a protocol or bind public ingress as part of scaffolding.
+- **Slice A (this spike):** manual pairing → list existing agents → stream one active-branch session read-only to a CLI test client. Proves transport, pairing, history ordering and gap handling. No writes.
+- **Slice B:** one Nudge and one Follow-up to the same process with correlated receipts; ambiguous disconnect resolves to `unresolved`, no blind retry.
+- **Slice C:** Pi extension gates one real tool call; phone and local decisions race safely; one exact grant is issued, used and revoked.
+
+Failure at any prerequisite stops dependent claims. A working read-only companion is not yet proven; decide nothing about publication or persistence here.
 
 ## 3. Connected iPhone slice
 
-After the spike, connect one paired machine to the iPhone app and prove the actual journey: existing-agent list → active transcript → reply or approval → detach/reconnect. Broaden to multiple machines with machine-scoped identity and per-machine failure states. Keep unsupported actions visibly unavailable.
+The first private usable prototype is the **read-only journey**: pair one machine → list existing agents → open one and watch its active-branch history live, with code and expandable tool details. Delivery, approvals, grants and alerts are later slices (B/C above and section 4), each gated on the previous acceptance.
+
+After the spike, connect one paired machine to the iPhone app and prove that journey end to end. Broaden to multiple machines with machine-scoped identity and per-machine failure states. Keep unsupported actions visibly unavailable.
 
 Telegram is a later, separately configured slice: generic attention only, no code/prompt payload, no remote approval buttons, and no credentials in source/tests. Long-term installation remains a separate decision from free on-device prototyping.
 
