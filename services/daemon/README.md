@@ -7,7 +7,7 @@ provisional v0 and owned by this directory.
 
 ## Layout
 
-```
+```text
 services/daemon/
 ├── Package.swift
 ├── Sources/DaemonCore/        # pure, unit-tested library
@@ -33,7 +33,7 @@ is a configuration change for a later slice). The pairing token must accompany
 every request; a rejected token returns a visible `unauthorized` error and
 closes the connection — never a silent retry.
 
-```
+```text
 client → daemon                                   daemon → client
 {"op":"pair","token":"…"}                         {"event":"paired","machine_id":"…","protocol":1}
 {"op":"list","token":"…"}                         {"event":"agents","machine_id":"…","agents":[…]}
@@ -66,7 +66,7 @@ prefixes surface as explicit `gap` entries (`seq: null` on the wire).
 
 ## Run
 
-```
+```text
 xcrun swift build --package-path services/daemon
 # token: $CAPP_SPIKE_TOKEN or ~/Library/Application Support/cappuccino-spike/pairing-token
 .build/debug/cappuccino-daemon --port 7391
