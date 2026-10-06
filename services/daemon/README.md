@@ -1,4 +1,10 @@
-# Companion daemon (slice A spike)
+# Companion daemon (slice A spike, reference implementation)
+
+> **Pivot note (2026-10-06):** the product path is now SSH-exec — phones reach
+> machines over tailnet SSH and drive the existing `herdr` CLI; no per-machine
+> resident daemon ships. This directory is retained as the reference
+> implementation; its pairing and reconciliation logic migrates into the phone
+> client as the SSH transport lands ([plan §2](../../docs/plan.md)).
 
 A small user-space macOS daemon that lets a paired client pair → list existing
 agents → follow one agent's active-branch transcript read-only. This is the

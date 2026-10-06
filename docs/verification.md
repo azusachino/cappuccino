@@ -68,6 +68,16 @@ Entries are pane lines, not semantic messages; in-memory ring (no restart durabi
 
 Physical devices, background/process-death reconciliation, delivery receipts, approvals/grants and transport hardening remain unproven and belong to slices B/C and later (issues #6–#10).
 
+## iPhone pairing slice checkpoint
+
+Local acceptance verified 2026-10-06 for [issue #6](https://github.com/azusachino/cappuccino/issues/6) at branch `feat/iphone-pair-list` (stacked on the daemon branch; PR #14 base still unmerged). Scope: Machines-tab pairing sheet with device-Keychain token storage, agent list with fixture/live equivalence, visible failure states; delivery/approvals remain disabled. Includes the SSH-exec architecture-pivot documentation.
+
+Writer: `cap-spike-glm` (glm-5.3-flash low, sole checkout writer). Fresh independent verifier `cap-sliceb-verifier` (openai-codex/gpt-6-luna, **medium**): round 1 BLOCKED on one documentation finding — top-level README still claimed "no machine connection" and omitted the pivot; all functional criteria met. Fix `2c67e05` (README current-state + pivot framing, docs-only); round 2 **PASSED** with all round-1 verdicts standing.
+
+Verified HEAD `2c67e05`. Key evidence: `DaemonServing` transport seam with NWConnection reference transport and `DemoDaemonClient` reachable only via `-cappuccino-demo` launch argument; Keychain production store (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) with in-memory test double; `DaemonWireTests` fixture conformance (null branch, unnamed pane) plus live-vs-fixture equivalence; verifier-rerun gates — 17 Swift tests, scoped `make validate` exit 0, `make ui-test` 3/3 on task-owned simulator `140A8D6F-A532-428E-9387-CDEC83CAB619` (iPhone 17 Pro, local iOS 27.0 runtime; CI remains the 26.5 acceptance runtime) with xcresult `.build/xcode/Logs/Test/Test-Cappuccino-2026.10.06_08-30-21-+0900.xcresult`.
+
+Accepted limitations (with follow-ups): UI-test success path uses the scripted demo client because `SecItemAdd` is unavailable to unsigned simulator apps — real Keychain path is unit-covered, and live production pairing is not yet claimed; demo selection is a launch-argument hook available at runtime (build/test-time gating is a follow-up); SSHClient remains a design sketch implementing the seam after #6. Physical-device pairing, SSH transport, transcripts (issue #7), delivery (#8) and approvals (#9) remain unproven.
+
 ## CI-quality and macOS 26 checkpoint
 
 Verified 2026-10-05. The owner selected action version tags rather than SHA pins and a macOS 26 minimum; iOS remains 17+. This checkpoint covers CI, deployment minimums, compiler gates and native-first development guidance, not new application behavior.
