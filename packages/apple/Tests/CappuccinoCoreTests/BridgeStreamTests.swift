@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import CappuccinoCore
 
 // Scripted WebSocket frames: initial entries, a live append, duplicate-id
@@ -48,7 +49,8 @@ struct FakeBridgeConnector: BridgeWebSocketConnecting {
 }
 
 private func entriesJSON(_ entries: [String]) -> String {
-  let body = entries
+  let body =
+    entries
     .map { text in
       #"{"seq":1,"id":"\#(BridgeStreamEntryID.fixtures(tag: text))","kind":"output","text":"\#(text)","complete":true}"#
     }
@@ -71,7 +73,7 @@ enum BridgeStreamEntryID {
       entriesJSON(["line-1", "line-2"]),
       entriesJSON(["line-3"]),
       entriesJSON(["line-1"]),  // duplicate id: must be suppressed
-      nil,                      // clean close
+      nil,  // clean close
     ])
     let client = BridgeClient(
       host: "127.0.0.1", port: 7392,
@@ -108,7 +110,7 @@ enum BridgeStreamEntryID {
 
   @Test func unauthorizedStreamEventThrowsVisibly() async {
     let socket = FakeBridgeWebSocket(frames: [
-      #"{"event":"error","code":"unauthorized","message":"pairing token rejected"}"#,
+      #"{"event":"error","code":"unauthorized","message":"pairing token rejected"}"#
     ])
     let client = BridgeClient(
       host: "127.0.0.1", port: 7392,

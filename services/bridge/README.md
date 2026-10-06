@@ -11,7 +11,7 @@ here is our own.
 
 ## Layout (actual)
 
-```
+```text
 services/bridge/
 ├── herdr-plugin.toml     # plugin manifest: cargo build + idempotent startup hook
 ├── scripts/bridge.sh     # start/stop/status lifecycle (pid file under plugin state dir)
