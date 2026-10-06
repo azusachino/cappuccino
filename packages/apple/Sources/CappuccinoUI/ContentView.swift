@@ -5,6 +5,26 @@ public struct ContentView: View {
   @State private var delivery = MessageDelivery.followUp
   @State private var draft = ""
 
+  /// UI-test hooks: scripted demo daemon or a guaranteed-refused port so the
+  /// journeys are hermetic; production runs talk to the real slice-A daemon.
+  private static func daemonForProcess() -> DaemonServing {
+    let arguments = ProcessInfo.processInfo.arguments
+    if arguments.contains("-cappuccino-demo") {
+      return DemoDaemonClient()
+    }
+    if arguments.contains("-cappuccino-unreachable") {
+      // Ignored base URL: unreachable by construction so the failure-state
+      // journey stays hermetic.
+      return UnreachableClient()
+    }
+    // The bridge plugin is the product transport; the reference daemon (its
+    // slice-A token intact) stays selectable for comparison.
+    if arguments.contains("-cappuccino-reference") {
+      return ReferenceDaemonAdapter(tokens: KeychainTokenStore())
+    }
+    return BridgeClient()
+  }
+
   public init() {}
 
   public var body: some View {
@@ -47,15 +67,8 @@ public struct ContentView: View {
       }
       .tabItem { Label("Attention", systemImage: "tray") }
 
-      NavigationStack {
-        ContentUnavailableView(
-          "No machines added",
-          systemImage: "desktopcomputer",
-          description: Text("Private machine pairing is not implemented yet.")
-        )
-        .navigationTitle("Machines")
-      }
-      .tabItem { Label("Machines", systemImage: "desktopcomputer") }
+      MachinesView(model: MachinesModel(daemon: Self.daemonForProcess()))
+        .tabItem { Label("Machines", systemImage: "desktopcomputer") }
     }
   }
 }

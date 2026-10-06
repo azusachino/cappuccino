@@ -1,6 +1,6 @@
 # Behavior specification (provisional v0)
 
-Shared cross-platform contract for Cappuccino clients (iOS, Android) against the companion daemon. Both platform test suites consume the same [fixtures](../fixtures/); implementations stay native. This file records behavior, not a wire protocol: transport/encoding stays provisional until the [daemon spike](plan.md#2-disposable-session-attachment-spike) proves it. Changes here require updating both platforms' conformance fixtures in the same commit.
+Shared cross-platform contract for Cappuccino clients (iOS, Android). The companion-daemon framing below is frozen history from slice A: the production transport is now the herdr plugin bridge (`services/bridge`), and the reference daemon (`services/daemon`) exists only as a frozen implementation of these same behaviors. Both platform test suites consume the same [fixtures](../fixtures/); implementations stay native. This file records behavior, not a wire protocol: per the 2026-10-06 architecture pivots the production transport is the herdr plugin bridge (`services/bridge`, HTTP/WS loopback API over the herdr socket), which supersedes the SSH-exec direction; the slice-A daemon's wire v0 (`services/daemon/README.md`) remains a reference implementation only. Changes here require updating both platforms' conformance fixtures in the same commit.
 
 Authority: [intent](intent.md). Process/session lifetime belongs to Herdr/Pi; a phone never starts, replaces or terminates an agent.
 

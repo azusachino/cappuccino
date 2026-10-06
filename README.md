@@ -2,9 +2,30 @@
 
 A personal native companion for conversations and attention from agents already running on your Herdr machines. The connected-feature order is bridge feasibility, connected iPhone, Android, then Mac-specific UX.
 
-**Current state:** disconnected native shells and hermetic core tests. No machine connection, prompt delivery, tool approval or notification is implemented. There is no agent launcher or terminal emulator.
+**Current state:** disconnected native shells and hermetic core tests, plus an iPhone Machines add-machine/agent-list flow speaking to the herdr plugin bridge (`services/bridge`, the product transport per the 2026-10-06 plugin pivot) or the reference daemon (`services/daemon/`, frozen) — both behind the client's `DaemonServing` transport seam, selected by launch argument. The bridge ships **no auth** by owner decision: the tailnet/loopback boundary is the security model, the binary refuses non-loopback binds, and `tailscale serve` is the only supported exposure. Nothing here is production remote access yet: no prompt delivery, tool approval or live transcript is implemented. There is no agent launcher or terminal emulator.
 
-Read [intent](docs/intent.md), [plan](docs/plan.md), [Android plan](docs/android-plan.md) and [source research](docs/discovery.md). Existing remote agents keep their process/session lifetime; future clients attach and detach.
+Read [intent](docs/intent.md), [plan](docs/plan.md), [architecture](docs/architecture.md), [Android plan](docs/android-plan.md), [user stories](docs/user-stories.md) and [source research](docs/discovery.md). Existing remote agents keep their process/session lifetime; future clients attach and detach.
+
+## Getting started (MVP)
+
+**Phone (S7).** Build and install from this repo with Xcode: `make setup`,
+open the generated `Cappuccino.xcodeproj`, select the `Cappuccino` iOS scheme
+with your device as destination, and run (free provisioning; re-sign weekly).
+No store, no TestFlight in the MVP.
+
+**Add a machine (S5) and see its agents (S6).** On each Herdr machine, set up
+the bridge plugin once - link it (`herdr plugin link <path-to-services/bridge>`),
+confirm it auto-runs with the `status` action, and expose it to your tailnet
+with `tailscale serve` (full steps in
+[services/bridge/README.md](services/bridge/README.md), stories S1-S3). Then
+in the app: Machines -> paste the machine's bridge base URL
+(`http://127.0.0.1:7392` locally, or the `https://<host>.<tailnet>.ts.net`
+address over the tailnet) -> **Add machine**. The machine's agents appear with
+their working state and active branch (or "No branch"); pull to refresh; an
+unreachable machine shows a visible error without affecting others.
+
+Selecting an agent never starts, stops or replaces it. Prompt delivery and
+approvals are not implemented; the transcripts view is post-MVP (issue #7).
 
 ## Layout
 
