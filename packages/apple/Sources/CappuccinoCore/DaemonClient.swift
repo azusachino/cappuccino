@@ -165,7 +165,9 @@ public final class TCPLineConnection: LineConnection, @unchecked Sendable {
   }
 }
 
-/// Async client for the daemon wire v0 ops used by the pairing + list journey.
+/// Async client for the reference daemon's wire v0. The reference daemon
+/// keeps its slice-A token (frozen history); the production bridge ignores
+/// tokens entirely, which is why the token travels with the request.
 public struct DaemonClient: Sendable {
   public let connector: LineConnecting
   public let host: String

@@ -13,23 +13,16 @@ public struct ContentView: View {
       return DemoDaemonClient()
     }
     if arguments.contains("-cappuccino-unreachable") {
-      return DaemonClient(host: "127.0.0.1", port: 1, timeout: 2)
+      // Ignored base URL: unreachable by construction so the failure-state
+      // journey stays hermetic.
+      return UnreachableClient()
     }
-    // Issue #16: the bridge plugin is the product transport; the reference
-    // daemon client stays selectable until the plugin replaces it everywhere.
-    if arguments.contains("-cappuccino-bridge") {
-      return BridgeClient()
+    // The bridge plugin is the product transport; the reference daemon (its
+    // slice-A token intact) stays selectable for comparison.
+    if arguments.contains("-cappuccino-reference") {
+      return ReferenceDaemonAdapter(tokens: KeychainTokenStore())
     }
-    return DaemonClient()
-  }
-
-  private static func tokensForProcess() -> TokenStoring {
-    // The scripted UI-test journeys run in an unsigned simulator app where
-    // SecItemAdd is unavailable; production pairs store in the Keychain.
-    if ProcessInfo.processInfo.arguments.contains("-cappuccino-demo") {
-      return InMemoryTokenStore()
-    }
-    return KeychainTokenStore()
+    return BridgeClient()
   }
 
   public init() {}
@@ -74,10 +67,8 @@ public struct ContentView: View {
       }
       .tabItem { Label("Attention", systemImage: "tray") }
 
-      MachinesView(
-        model: MachinesModel(daemon: Self.daemonForProcess(), tokens: Self.tokensForProcess())
-      )
-      .tabItem { Label("Machines", systemImage: "desktopcomputer") }
+      MachinesView(model: MachinesModel(daemon: Self.daemonForProcess()))
+        .tabItem { Label("Machines", systemImage: "desktopcomputer") }
     }
   }
 }

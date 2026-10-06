@@ -20,16 +20,16 @@ public struct BridgeClient: DaemonServing {
     self.session = session
   }
 
-  public func pair(token: String) async throws -> PairedMachine {
-    let event = try await get("/api/session", token: token)
+  public func pair(baseURL: URL) async throws -> PairedMachine {
+    let event = try await get(baseURL.appendingPathComponent("/api/session"))
     guard let machineID = event["machine_id"] as? String, !machineID.isEmpty else {
       throw DaemonClientError.protocolError("paired event missing machine_id")
     }
     return PairedMachine(machineID: machineID)
   }
 
-  public func listAgents(token: String) async throws -> [AgentRow] {
-    let event = try await get("/api/agents", token: token)
+  public func listAgents(baseURL: URL) async throws -> [AgentRow] {
+    let event = try await get(baseURL.appendingPathComponent("/api/agents"))
     guard let rawAgents = event["agents"] as? [[String: Any]] else {
       throw DaemonClientError.protocolError("agents event missing agents array")
     }
@@ -44,10 +44,9 @@ public struct BridgeClient: DaemonServing {
     }
   }
 
-  private func get(_ path: String, token: String) async throws -> [String: Any] {
-    var request = URLRequest(url: baseURL.appendingPathComponent(path))
+  private func get(_ url: URL) async throws -> [String: Any] {
+    var request = URLRequest(url: url)
     request.timeoutInterval = timeout
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     let (data, response): (Data, URLResponse)
     do {
       (data, response) = try await session.data(for: request)

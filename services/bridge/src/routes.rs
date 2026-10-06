@@ -2,34 +2,23 @@
 //! `pane.read` and emits wire-v0-shaped events with the slice-A
 //! reconciliation semantics.
 
-use crate::{agents, auth, herdr, reconcile, transcript};
+use crate::{agents, herdr, reconcile, transcript};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct BridgeState {
-    pub token: String,
     pub machine_id: String,
 }
 
 impl BridgeState {
-    pub fn new(token: String, machine_id: String) -> Self {
-        BridgeState { token, machine_id }
+    pub fn new(machine_id: String) -> Self {
+        BridgeState { machine_id }
     }
-}
-
-pub fn unauthorized() -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        [(header::CONTENT_TYPE, "application/json")],
-        json!({"event": "error", "code": "unauthorized", "message": "pairing token rejected"})
-            .to_string(),
-    )
-        .into_response()
 }
 
 pub fn error_response(status: StatusCode, code: &str, message: &str) -> Response {
@@ -41,36 +30,7 @@ pub fn error_response(status: StatusCode, code: &str, message: &str) -> Response
         .into_response()
 }
 
-/// Extracts the bearer token; also accepts `?token=` for WebSocket clients
-/// that cannot set headers (browser APIs allow headers, Swift does too, but
-/// the query form keeps the WS handshake testable from curl).
-fn presented_token(headers: &HeaderMap, query_token: Option<&str>) -> Option<String> {
-    if let Some(bearer) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-    {
-        if let Some(token) = bearer.strip_prefix("Bearer ") {
-            return Some(token.trim().to_string());
-        }
-    }
-    query_token.map(|token| token.to_string())
-}
-
-fn gate(state: &BridgeState, headers: &HeaderMap, query_token: Option<&str>) -> Option<Response> {
-    match presented_token(headers, query_token) {
-        Some(token) if auth::token_matches(&token, &state.token) => None,
-        _ => Some(unauthorized()),
-    }
-}
-
-pub async fn session(
-    State(state): State<Arc<BridgeState>>,
-    headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
-) -> Response {
-    if let Some(response) = gate(&state, &headers, query.get("token").map(String::as_str)) {
-        return response;
-    }
+pub async fn session(State(state): State<Arc<BridgeState>>) -> Response {
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/json")],
@@ -85,14 +45,7 @@ pub async fn session(
         .into_response()
 }
 
-pub async fn agents(
-    State(state): State<Arc<BridgeState>>,
-    headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
-) -> Response {
-    if let Some(response) = gate(&state, &headers, query.get("token").map(String::as_str)) {
-        return response;
-    }
+pub async fn agents(State(state): State<Arc<BridgeState>>) -> Response {
     match herdr::agent_list().await {
         Ok(result) => match agents::map_agents(&result, &state.machine_id) {
             Ok(rows) => (
@@ -117,13 +70,9 @@ pub async fn agents(
 }
 
 pub async fn transcript(
-    State(state): State<Arc<BridgeState>>,
-    headers: HeaderMap,
+    State(_state): State<Arc<BridgeState>>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
-    if let Some(response) = gate(&state, &headers, query.get("token").map(String::as_str)) {
-        return response;
-    }
     let Some(session) = query.get("session").filter(|session| !session.is_empty()) else {
         return error_response(
             StatusCode::BAD_REQUEST,
@@ -145,13 +94,9 @@ pub async fn transcript(
 /// GET /api/stream?session=<locator>&token=…
 pub async fn stream(
     State(state): State<Arc<BridgeState>>,
-    headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    if let Some(response) = gate(&state, &headers, query.get("token").map(String::as_str)) {
-        return response;
-    }
     let Some(session) = query.get("session").cloned() else {
         return error_response(
             StatusCode::BAD_REQUEST,

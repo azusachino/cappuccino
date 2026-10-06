@@ -6,9 +6,9 @@
 # port is left alone), `stop` takes it down, `status` reports. State lives
 # under HERDR_PLUGIN_STATE_DIR when herdr provides it, ~/.local/state/ otherwise.
 #
-# Token: CAPP_BRIDGE_TOKEN (env) or CAPP_BRIDGE_TOKEN_FILE — never passed on a
-# command line, never printed. Socket: HERDR_SOCKET_PATH (what herdr injects),
-# then HERDR_SOCKET, then the default user path.
+# No auth by owner decision: tailnet/loopback is the boundary. Socket:
+# HERDR_SOCKET_PATH (what herdr injects), then HERDR_SOCKET, then the default
+# user path.
 
 set -u
 
@@ -27,8 +27,7 @@ is_running() {
 
 answers() {
   command -v curl >/dev/null 2>&1 || return 1
-  curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/api/session?token=$CAPP_BRIDGE_TOKEN" 2>/dev/null \
-    || curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/api/session" 2>/dev/null
+  curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/api/session" 2>/dev/null
 }
 
 start() {
@@ -46,6 +45,7 @@ start() {
   sleep 1
   if is_running; then
     echo "cappuccino-bridge: started (pid $(cat "$PID_FILE"), port $PORT)"
+    status
     return 0
   fi
   echo "cappuccino-bridge: failed to start — see $LOG_FILE" >&2
@@ -63,9 +63,34 @@ stop() {
   fi
 }
 
+# S3: tailnet exposure is automatic when the tailscale CLI is available.
+# Idempotent — re-applying the same serve entry is fine. Never requires sudo
+# (one-time prerequisite, documented in the README: tailscale set --operator=$USER).
+ensure_serve() {
+  if ! command -v tailscale >/dev/null 2>&1; then
+    echo "tailscale CLI not found; expose manually:"
+    echo "  tailscale serve --bg --https=443 http://127.0.0.1:$PORT"
+    return 0
+  fi
+  if tailscale serve status 2>/dev/null | grep -q "127.0.0.1:$PORT"; then
+    echo "tailscale serve already exposes port $PORT"
+  else
+    tailscale serve --bg --https=443 "http://127.0.0.1:$PORT" \
+      || echo "tailscale serve failed; expose manually:"
+    echo "  tailscale serve --bg --https=443 http://127.0.0.1:$PORT"
+    return 0
+  fi
+  local serve_url
+  serve_url="$(tailscale serve status 2>/dev/null | grep -o 'https://[^ ]*' | head -1)"
+  if [ -n "$serve_url" ]; then
+    echo "tailnet URL: ${serve_url%/}/api/session"
+  fi
+}
+
 status() {
   if is_running; then
     echo "cappuccino-bridge: running (pid $(cat "$PID_FILE"), port $PORT)"
+    ensure_serve
   else
     echo "cappuccino-bridge: not running"
     return 1

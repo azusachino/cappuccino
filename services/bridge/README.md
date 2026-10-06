@@ -34,17 +34,81 @@ services/bridge/
 | `GET /api/transcript?session=…` | resolves `agent_session` via `agent.get`, validates the path is inside the canonical pi sessions store; fail-closed `{"available":false}` when absent |
 | `WS /api/stream?session=…` | pane-line appends (`stream_open`, `entries`, `stream_reset` events) with the reconciliation contract: churn never fabricates entries, appends are exactly-once, gaps are visible placeholders |
 
-Auth: `Authorization: Bearer <token>` (or `?token=` for the WS handshake).
-Token source: `CAPP_BRIDGE_TOKEN` env or `CAPP_BRIDGE_TOKEN_FILE` (0600),
-compared constant-time. Bind: loopback only by design — tailnet exposure is
-`tailscale serve`'s job (run `tailscale serve --bg http://127.0.0.1:7392` if
-the owner wants phone reachability; this binary refuses any other bind).
+## Design for extension
 
-## Run
+- **Config layer** (`src/config.rs`): tailnet-only MVP defaults
+  (`127.0.0.1:7392`), an optional JSON config file
+  (`CAPP_BRIDGE_CONFIG` or `~/.config/cappuccino-bridge/config.json`), then
+  `CAPP_BRIDGE_HOST`/`CAPP_BRIDGE_PORT`/`CAPP_BRIDGE_DATA_DIR` env overrides.
+  The `auth` section is **reserved**: unset (or `enabled: false`) is the
+  no-auth MVP; `enabled: true` is rejected until an authenticator exists.
+- **Middleware hook**: `auth_middleware` in `main.rs` is the single slot where
+  an authenticator layers in — endpoint handlers never change.
+- **Composable modules** (`src/modules/`): agents/transcript/stream each
+  contribute a router; approvals (#9) and push (#11) bolt on as new modules
+  plus new manifest actions.
+
+**No auth, by owner decision:** the tailnet/loopback boundary is the security
+model. The binary refuses any non-loopback bind; `tailscale serve --bg
+http://127.0.0.1:7392` is the only supported exposure path. Public-internet
+exposure and transport authentication are explicit non-goals — do not add a
+token, do not widen the bind.
+
+## Run (quick)
 
 ```text
 cargo build --release
-CAPP_BRIDGE_TOKEN=… ./target/release/cappuccino-bridge   # binds 127.0.0.1:7392
+./target/release/cappuccino-bridge  # binds 127.0.0.1:7392, no auth
 sh scripts/bridge.sh status
 cargo test
 ```
+
+## Server setup (stories S1-S4)
+
+Once per herdr machine: herdr 0.9+, Tailscale running, a Rust toolchain.
+
+**S1 Install.** Link the plugin from this checkout (development), or install a
+release bundle later:
+
+```text
+herdr plugin link /path/to/cappuccino/services/bridge
+herdr plugin list        # azusachino.cappuccino-bridge appears
+```
+
+herdr runs the manifest `[[build]]` (`cargo build --release`) and keeps the
+plugin registered across restarts.
+
+**S2 Auto-run.** The manifest `[[startup]]` hook is idempotent: on every herdr
+start it launches the built binary if it is not already answering on the
+configured port (default 7392) and records the pid under the plugin state dir.
+Nothing else to run. Check it:
+
+```text
+herdr plugin action azusachino.cappuccino-bridge status    # running + port
+herdr plugin action azusachino.cappuccino-bridge logs      # recent log tail
+herdr plugin log                                           # herdr's own plugin log
+```
+
+Configuration (optional): `CAPP_BRIDGE_CONFIG` or
+`~/.config/cappuccino-bridge/config.json` — `{"port": 7392, "bind":
+"127.0.0.1", "data_dir": "..."}` — then `CAPP_BRIDGE_HOST`/`CAPP_BRIDGE_PORT`/
+`CAPP_BRIDGE_DATA_DIR` env overrides. The `auth` section is reserved (unset =
+no-auth MVP).
+
+**S3 Expose to tailnet.** The bridge refuses non-loopback binds; Tailscale is
+the supported exposure. Once per machine (the port matches your config):
+
+```text
+tailscale serve --bg --https=443 http://127.0.0.1:7392
+```
+
+Verify from another tailnet device:
+
+```text
+curl -fsS https://<host>.<tailnet>.ts.net/api/session
+# {"event":"paired","machine_id":"...","protocol":1,"plugin":"azusachino.cappuccino-bridge"}
+```
+
+**S4 Second machine.** Repeat S1-S3 verbatim; nothing is shared between
+machines. The phone adds each machine's URL separately (see the top-level
+README "Getting started").

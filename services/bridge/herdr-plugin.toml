@@ -41,3 +41,10 @@ title = "Cappuccino bridge status"
 contexts = ["workspace"]
 command = ["sh", "scripts/bridge.sh", "status"]
 platforms = ["macos", "linux"]
+
+[[actions]]
+id = "logs"
+title = "Cappuccino bridge log tail"
+contexts = ["workspace"]
+command = ["sh", "-c", "tail -n 80 \"$HOME/.local/state/cappuccino-bridge/bridge.log\""]
+platforms = ["macos", "linux"]

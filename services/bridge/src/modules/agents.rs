@@ -1,0 +1,10 @@
+//! Agents module: herdr agent.list parity over HTTP.
+
+use crate::routes;
+use axum::routing::get;
+use axum::Router;
+use std::sync::Arc;
+
+pub fn router() -> Router<Arc<routes::BridgeState>> {
+    Router::new().route("/api/agents", get(routes::agents))
+}

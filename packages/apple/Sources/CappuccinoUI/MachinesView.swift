@@ -2,43 +2,57 @@ import CappuccinoCore
 import Foundation
 import SwiftUI
 
-/// State machine for the Machines tab: unpaired → pairing → paired (listing)
-/// with explicit failure states, per behavior-spec "no silent retries".
+/// State machine for the Machines tab. No credentials anywhere: a machine is
+/// just a base URL (stored in UserDefaults, editable), the bridge has no auth,
+/// and the tailnet/loopback boundary is the security model. Failures surface
+/// visibly per machine — never a silent retry.
 @MainActor
 public final class MachinesModel: ObservableObject {
   public enum Phase: Equatable {
-    case unpaired
-    case pairing
-    case paired(machineID: String)
+    case noMachine
+    case connecting(url: String)
+    case connected(url: String)
   }
 
-  @Published public private(set) var phase: Phase = .unpaired
+  static let baseURLKey = "machine.baseURL"
+
+  @Published public private(set) var phase: Phase = .noMachine
   @Published public private(set) var agents: [AgentRow] = []
   @Published public private(set) var errorText: String?
-  @Published public var tokenInput = ""
+  @Published public var machineURLInput = ""
 
   let daemon: DaemonServing
-  let tokens: TokenStoring
+  let defaults: UserDefaults
 
-  public init(daemon: DaemonServing, tokens: TokenStoring) {
+  public init(daemon: DaemonServing, defaults: UserDefaults = .standard) {
     self.daemon = daemon
-    self.tokens = tokens
-    if let saved = tokens.loadToken(), !saved.isEmpty {
-      phase = .paired(machineID: "")
+    self.defaults = defaults
+    let fresh = ProcessInfo.processInfo.arguments.contains("-cappuccino-fresh")
+    if !fresh, let saved = defaults.string(forKey: Self.baseURLKey), !saved.isEmpty {
+      phase = .connected(url: saved)
+    } else if let prefilled = ProcessInfo.processInfo.environment["CAPP_DEMO_MACHINE_URL"] {
+      // UI-test/preview hook: pre-fill the sheet without keyboard typing.
+      machineURLInput = prefilled
     }
   }
 
-  /// Restores a paired session by re-listing with the saved token. Failures
-  /// surface visibly (they may mean the daemon is simply unreachable).
+  var machineURL: URL? {
+    if case .connected(let url) = phase, let url = URL(string: url) {
+      return url
+    }
+    return nil
+  }
+
+  /// Re-lists agents for the stored machine. Failures are visible and keep
+  /// the machine selected (the daemon may simply be down).
   public func refresh() async {
-    guard let token = tokens.loadToken(), !token.isEmpty else {
-      phase = .unpaired
+    guard let url = machineURL else {
+      phase = .noMachine
       return
     }
     do {
-      agents = try await daemon.listAgents(token: token)
+      agents = try await daemon.listAgents(baseURL: url)
       errorText = nil
-      if case .unpaired = phase { phase = .paired(machineID: "") }
     } catch let error as DaemonClientError {
       errorText = error.message
     } catch {
@@ -46,41 +60,42 @@ public final class MachinesModel: ObservableObject {
     }
   }
 
-  public func pair() async {
-    let token = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !token.isEmpty else {
-      errorText = "Paste the one-time pairing token shown by the daemon."
+  public func addMachine() async {
+    let text = machineURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let url = URL(string: text), let scheme = url.scheme?.lowercased(),
+      scheme == "http" || scheme == "https", url.host != nil
+    else {
+      errorText = "Enter the machine's base URL, e.g. http://127.0.0.1:7392"
       return
     }
-    phase = .pairing
+    phase = .connecting(url: text)
     errorText = nil
     do {
-      let machine = try await daemon.pair(token: token)
-      try tokens.saveToken(token)
-      phase = .paired(machineID: machine.machineID)
-      tokenInput = ""
+      let machine = try await daemon.pair(baseURL: url)
+      defaults.set(text, forKey: Self.baseURLKey)
+      phase = .connected(url: text)
+      machineURLInput = ""
+      _ = machine
       await refresh()
     } catch let error as DaemonClientError {
-      // A rejected token is dropped so a retry never resubmits a stale secret.
-      tokenInput = ""
-      phase = tokens.loadToken()?.isEmpty == false ? phase : .unpaired
+      phase = defaults.string(forKey: Self.baseURLKey).map(Phase.connected) ?? .noMachine
       errorText = error.message
     } catch {
-      tokenInput = ""
-      phase = .unpaired
-      errorText = "Pairing failed: \(String(describing: error))"
+      phase = defaults.string(forKey: Self.baseURLKey).map(Phase.connected) ?? .noMachine
+      errorText = error.localizedDescription
     }
   }
 
-  public func unpair() {
-    tokens.deleteToken()
-    phase = .unpaired
+  public func removeMachine() {
+    defaults.removeObject(forKey: Self.baseURLKey)
+    phase = .noMachine
     agents = []
     errorText = nil
   }
 }
 
-/// Machines tab: pairing sheet, per-machine failure banner and the agent list.
+/// Machines tab: add-machine sheet, per-machine failure banner and the agent
+/// list. No token field anywhere — the bridge has no auth by design.
 public struct MachinesView: View {
   @StateObject private var model: MachinesModel
 
@@ -92,41 +107,40 @@ public struct MachinesView: View {
     NavigationStack {
       Group {
         switch model.phase {
-        case .unpaired:
-          unpaired
-        case .pairing:
-          ProgressView("Pairing…")
-        case .paired(let machineID):
-          paired(machineID: machineID)
+        case .noMachine:
+          noMachine
+        case .connecting:
+          ProgressView("Connecting…")
+        case .connected(let url):
+          connected(url: url)
         }
       }
       .navigationTitle("Machines")
     }
   }
 
-  private var unpaired: some View {
+  private var noMachine: some View {
     VStack(spacing: 16) {
       ContentUnavailableView(
         "No machines added",
         systemImage: "desktopcomputer",
         description: Text(
-          "Pair this phone with the companion daemon on your Mac over tailnet or localhost. The one-time token stays in the Keychain."
+          "Add the machine running the Cappuccino bridge (loopback or tailnet address). The bridge has no login: your tailnet is the boundary."
         )
       )
-      PairingSheet(model: model)
+      MachineSheet(model: model)
     }
   }
 
-  private func paired(machineID: String) -> some View {
+  private func connected(url: String) -> some View {
     List {
       if let error = model.errorText {
         Text(error)
           .foregroundStyle(.red)
           .accessibilityIdentifier("machine-error")
       }
-      if !machineID.isEmpty {
-        LabeledContent("Machine", value: machineID)
-      }
+      LabeledContent("Machine", value: url)
+        .accessibilityIdentifier("machine-url")
       Section("Agents") {
         ForEach(model.agents) { agent in
           VStack(alignment: .leading, spacing: 4) {
@@ -163,7 +177,7 @@ public struct MachinesView: View {
         }
       }
       Section {
-        Button("Unpair machine", role: .destructive) { model.unpair() }
+        Button("Remove machine", role: .destructive) { model.removeMachine() }
           .accessibilityIdentifier("unpair")
       } footer: {
         Text(
@@ -175,24 +189,25 @@ public struct MachinesView: View {
   }
 }
 
-struct PairingSheet: View {
+struct MachineSheet: View {
   let model: MachinesModel
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text("Paste the one-time pairing token")
+      Text("Machine base URL")
         .font(.subheadline.weight(.medium))
-      SecureField(
-        "Pairing token", text: Binding(get: { model.tokenInput }, set: { model.tokenInput = $0 })
+      TextField(
+        "http://127.0.0.1:7392",
+        text: Binding(get: { model.machineURLInput }, set: { model.machineURLInput = $0 })
       )
       .textFieldStyle(.roundedBorder)
       .autocorrectionDisabled()
-      .accessibilityIdentifier("pairing-token")
-      Button("Pair machine") {
-        Task { await model.pair() }
+      .accessibilityIdentifier("machine-url-input")
+      Button("Add machine") {
+        Task { await model.addMachine() }
       }
       .buttonStyle(.borderedProminent)
-      .accessibilityIdentifier("pair-button")
+      .accessibilityIdentifier("add-machine")
       if let error = model.errorText {
         Text(error)
           .font(.footnote)

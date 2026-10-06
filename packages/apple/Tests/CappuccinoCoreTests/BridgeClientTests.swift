@@ -47,18 +47,18 @@ final class StubURLProtocol: URLProtocol {
     return BridgeClient(port: 7392, session: URLSession(configuration: configuration))
   }
 
-  @Test func pairReturnsMachineAndSendsBearer() async throws {
+  @Test func pairReturnsMachineFromSessionEndpoint() async throws {
     StubURLProtocol.handler = { request in
-      let authorization = request.value(forHTTPHeaderField: "Authorization")
-      #expect(authorization == "Bearer bridge-token")
+      #expect(request.url?.path == "/api/session")
+      #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
       return (
         200,
         #"{"event":"paired","machine_id":"bridge-m-1","protocol":1,"plugin":"azusachino.cappuccino-bridge"}"#
           .data(using: .utf8)!
       )
     }
-    let client = stubbedClient()
-    let machine = try await client.pair(token: "bridge-token")
+    let machine = try await stubbedClient().pair(
+      baseURL: URL(string: "http://127.0.0.1:7392")!)
     #expect(machine.machineID == "bridge-m-1")
   }
 
@@ -71,7 +71,7 @@ final class StubURLProtocol: URLProtocol {
       )
     }
     do {
-      _ = try await stubbedClient().pair(token: "wrong")
+      _ = try await stubbedClient().pair(baseURL: URL(string: "http://127.0.0.1:7392")!)
       Issue.record("pairing must fail visibly")
     } catch let error as DaemonClientError {
       #expect(error == .unauthorized)
@@ -98,7 +98,7 @@ final class StubURLProtocol: URLProtocol {
         Data(agentsEventJSON.utf8)
       )
     }
-    let rows = try await stubbedClient().listAgents(token: "t")
+    let rows = try await stubbedClient().listAgents(baseURL: URL(string: "http://127.0.0.1:7392")!)
     #expect(rows == fixtureRows, "bridge and daemon transports render the fixture identically")
   }
 
@@ -111,7 +111,7 @@ final class StubURLProtocol: URLProtocol {
       )
     }
     do {
-      _ = try await stubbedClient().listAgents(token: "t")
+      _ = try await stubbedClient().listAgents(baseURL: URL(string: "http://127.0.0.1:7392")!)
       Issue.record("expected an error")
     } catch let error as DaemonClientError {
       #expect(error.message.contains("cannot connect"))
