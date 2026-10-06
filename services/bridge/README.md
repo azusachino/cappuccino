@@ -11,7 +11,8 @@ services/bridge/
 ├── herdr-plugin.toml    # direct Rust executable commands
 └── src/
     ├── main.rs          # foreground server and CLI dispatch
-    ├── lifecycle.rs     # start/stop/status/logs and process identity
+    ├── lifecycle.rs     # start/stop/status/logs and private Unix control
+    ├── state.rs         # owner-only, no-follow lifecycle files/directories
     ├── config.rs        # defaults, JSON file, environment overrides
     ├── herdr.rs         # short-lived NDJSON calls over the local Herdr socket
     ├── agents.rs        # agent.list mapping, including unnamed panes
@@ -47,7 +48,7 @@ herdr plugin link /path/to/cappuccino/services/bridge
 herdr plugin list
 ```
 
-Herdr's `[[build]]` action compiles `target/release/cappuccino-bridge`. The one-shot `[[startup]]` command invokes that binary's `start` subcommand. It creates a separate server process with redirected logs, records its PID/executable/start marker under `HERDR_PLUGIN_STATE_DIR` (or `~/.local/state/cappuccino-bridge`), and avoids starting a second copy when that exact process is healthy. It is not supervised after startup, and no automatic Herdr-shutdown hook is configured. Use the plugin actions to inspect, stop and view logs:
+Herdr's `[[build]]` action compiles `target/release/cappuccino-bridge`. The one-shot `[[startup]]` command invokes that binary's `start` subcommand. It creates a separate server process with redirected logs and an owner-only state directory under `HERDR_PLUGIN_STATE_DIR` (or `~/.local/state/cappuccino-bridge`). The private `bridge.control` record contains a random per-instance token; `bridge.sock` is a mode-0600 Unix-domain control socket. The socket validates that token for status and graceful shutdown. No PID from a state file is signaled. The process is not supervised after startup, and no automatic Herdr-shutdown hook is configured. Use the plugin actions to inspect, stop and view logs:
 
 ```text
 herdr plugin action azusachino.cappuccino-bridge status
@@ -56,23 +57,25 @@ herdr plugin action azusachino.cappuccino-bridge logs
 herdr plugin log
 ```
 
-`stop` verifies the recorded executable and per-start marker before sending SIGTERM to that PID; it does not use process-name matching. State and log files belong to the plugin state directory. `logs` prints the last 80 lines.
+`stop` sends a token-authenticated shutdown request over the private Unix socket and waits for both the control endpoint and HTTP listener to close. A stale/malformed record, unsafe path, socket mismatch or stop timeout fails closed and preserves uncertain state for manual inspection; it never guesses at a PID or deletes an unrelated file. A legacy `bridge.pid` from the former lifecycle also blocks start/status/stop until an operator verifies any old process and removes that file manually. Earlier versions may have created a permissive state directory: verify the path, owner, contents and any old bridge process before manually securing or cleaning it. This binary refuses unsafe directories and never chmods an existing custom directory. State directories must be current-user-owned mode 0700; lock, control record and log files must be regular owner-owned mode 0600 files. Symlinked, nonregular, multiply-linked, foreign-owned or permissive paths are rejected. `logs` prints the last 80 lines.
 
 ## Safe local verification
 
-Use a task-owned loopback port and state directory, with auto-apply disabled. This starts a fresh isolated bridge process; it does not restart a retained bridge or touch Tailscale:
+Use a task-owned loopback port and private state directory, with auto-apply disabled. This starts a fresh isolated bridge process; it does not restart a retained bridge or touch Tailscale:
 
-```text
+```sh
 cd services/bridge
 cargo build --release
+TMP_STATE="$(mktemp -d)"
+export HERDR_PLUGIN_STATE_DIR="$(cd "$TMP_STATE" && pwd -P)"
 export CAPP_BRIDGE_SERVE_AUTO_APPLY=0
 export CAPP_BRIDGE_PORT=17392
-export HERDR_PLUGIN_STATE_DIR="$(mktemp -d)"
 target/release/cappuccino-bridge start
 target/release/cappuccino-bridge status
 curl -fsS http://127.0.0.1:17392/api/session
 target/release/cappuccino-bridge logs
 target/release/cappuccino-bridge stop
+# Remove $TMP_STATE only after stop succeeded and the port is closed.
 ```
 
 The `start` and `status` output must say auto-apply is disabled. Do not run this recipe against an owner's retained state directory or without the explicit no-Tailscale setting.
@@ -88,4 +91,4 @@ cargo fmt --check
 cargo test
 ```
 
-The manifest uses argv arrays and invokes the Rust binary directly; there are no bridge shell launchers. Rust dependencies include Tokio, axum, serde/serde_json, and libc for targeted Unix process signaling. Herdr calls use its local socket protocol (fixture pinned to installed Herdr 0.9.3 / protocol 22); optional Serve integration calls the `tailscale` CLI without a shell. `ps` is used to verify the exact recorded process command before signaling. The release binary is not claimed to be statically linked.
+The manifest uses argv arrays and invokes the Rust binary directly; there are no bridge shell launchers. Rust dependencies include Tokio, axum, serde/serde_json, and libc for Unix file-descriptor operations and lifecycle locking; stop never signals a PID. Herdr calls use its local socket protocol (fixture pinned to installed Herdr 0.9.3 / protocol 22); optional Serve integration calls the `tailscale` CLI without a shell. Lifecycle checks were run on macOS only; Linux runtime behavior is not certified by this report. The release binary is not claimed to be statically linked.

@@ -15,7 +15,7 @@ command = ["cargo", "build", "--release"]
 platforms = ["macos", "linux"]
 
 # Startup hooks are one-shot, not supervised; the binary owns its detached
-# server process and uses a PID record bound to the executable and start nonce.
+# server process through a private token-authenticated Unix control socket.
 [[startup]]
 command = ["target/release/cappuccino-bridge", "start"]
 platforms = ["macos", "linux"]

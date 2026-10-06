@@ -30,7 +30,7 @@ Pi's installed RPC documentation separately describes queue-specific `steer` and
 
 ## Configuration and lifecycle
 
-The manifest invokes `target/release/cappuccino-bridge` directly for `start`, `stop`, `status` and `logs`; the binary owns PID/log files under `HERDR_PLUGIN_STATE_DIR` (or `~/.local/state/cappuccino-bridge`). It verifies the recorded executable and per-start marker before signaling a process. The `serve.auto_apply` setting defaults to true for the existing product workflow; `false` or `CAPP_BRIDGE_SERVE_AUTO_APPLY=0` prevents Tailscale commands and only prints the manual exposure command. Invalid values fail closed.
+The manifest invokes `target/release/cappuccino-bridge` directly for `start`, `stop`, `status` and `logs`. Lifecycle state lives under `HERDR_PLUGIN_STATE_DIR` (or `~/.local/state/cappuccino-bridge`) in a current-user-owned mode-0700 directory; state/log files and the private Unix-domain control socket are verified owner-only, no-follow paths. A random per-instance token authenticates control requests. Stop asks the running bridge to shut itself down gracefully; it never signals a PID read from state. Malformed, legacy, stale or unsafe paths fail closed without replacement or cleanup. The `serve.auto_apply` setting defaults to true for the existing product workflow; `false` or `CAPP_BRIDGE_SERVE_AUTO_APPLY=0` returns before any Tailscale command and only prints the manual exposure command. Invalid values fail closed.
 
 Config precedence is defaults, optional JSON (`CAPP_BRIDGE_CONFIG` or `~/.config/cappuccino-bridge/config.json`), then supported environment overrides. Bind addresses must remain loopback. See [bridge setup and commands](../services/bridge/README.md).
 

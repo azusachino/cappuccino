@@ -198,15 +198,17 @@ Limits: UI evidence uses scripted transcripts, not a canonical live Pi transcrip
 
 The owner-selected issue #8 receipt acceptance is `confirmed` only after Pi accepts the requested queue operation; ambiguous outcome is final `unresolved` and that action is not replayed. This remains intended acceptance, not a capability observed through Herdr. Herdr 0.9.3 `agent.prompt` acknowledges PTY submission and optional lifecycle wait; the API does not select Pi `steer`/`follow_up` or provide a correlated Pi queue receipt. The bridge remains a standalone phone-transport facade, not an agent runtime. No delivery route or Pi extension was added. Full source/runtime limits and the recovered task-owned synthetic probe evidence are recorded in the workstation scratch report.
 
-The Herdr manifest now invokes the Rust executable directly for start/stop/status/logs. Both bridge shell scripts were removed; Rust tests cover the strict environment knob and lifecycle process-record checks. An isolated new loopback bridge process used unique state and port `49915` with `CAPP_BRIDGE_SERVE_AUTO_APPLY=0`: start succeeded (PID 53311), a second start was idempotent, status reported running, `GET /api/session` returned HTTP 200, logs showed the local listener, and stop removed the PID record. The endpoint then refused connections and status reported not running. The test state directory was removed. Tailscale was not invoked or changed; no retained bridge was restarted.
+The Herdr manifest invokes the Rust executable directly for start/stop/status/logs; both bridge shell scripts remain deleted. The lifecycle now stores only a random control token in a verified owner-only `bridge.control` record and uses an owner-only Unix-domain `bridge.sock` for token-checked status and graceful shutdown. The record PID path is no longer signaled; legacy `bridge.pid`, malformed records and unsafe filesystem paths fail closed without cleanup. State directories/files are verified against owner, type and exact modes; file opens use directory-relative `O_NOFOLLOW` operations. The managed server sets a restrictive umask before Tokio starts and verifies the resulting socket mode.
+
+New lifecycle coverage includes concurrent start serialization, malformed and stale/legacy records with an unrelated child process kept alive, unsafe custom directories and symlink/nonregular state paths, startup bind failure leaving an unrelated TCP listener available, an owned-child readiness timeout, stop timeout preserving state/listeners, private ownership/mode assertions, and a `tailscale` sentinel executable proving disabled auto-apply never invokes it. The integration suite exercises the actual CLI on macOS; Linux runtime is not claimed.
 
 Local gates for this change:
 
 - `cargo fmt --check` in `services/bridge`: exit 0.
-- `cargo test` in `services/bridge`: exit 0, 27 unit tests and 7 schema-conformance tests.
+- `cargo test` in `services/bridge`: exit 0, 27 unit tests, 6 lifecycle integration tests and 7 schema-conformance tests.
 - `cargo build --release` in `services/bridge`: exit 0.
 - Scoped `ANDROID_HOME=/opt/homebrew/share/android-commandlinetools DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make validate`: exit 0. Swift Testing reports 39 passed; Apple build targets succeeded; Android formatting/unit/lint checks and debug app/instrumentation APK assembly succeeded.
 - `make md-check` after the final acceptance wording: exit 0, 15 files.
 - `git diff --check`: exit 0. Static TOML parsing confirmed every manifest startup/action command calls the binary directly, with no shell launcher.
 
-Native UI files were unchanged, so no simulator journey was rerun. This is writer/gate evidence, not an independent-verification verdict; the fresh verifier remains pending.
+Native UI files were unchanged, so no simulator journey was rerun. This is writer/gate evidence, not an independent-verification verdict; a fresh verifier recheck of the safety findings remains pending.
