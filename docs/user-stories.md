@@ -10,12 +10,17 @@ toolchain for building from source.
   `herdr plugin install <release>` (later). `herdr plugin list` shows it.
 - **S2 Auto-run:** "The bridge starts and stops with herdr — nothing else to
   run." → plugin `[[startup]]` builds/launches the binary; the plugin
-  `status` action reports running + port; `herdr plugin log` shows output.
+  `status` action reports running + port, applies the tailscale serve entry
+  automatically (idempotent) and prints the tailnet URL; `herdr plugin log`
+  shows output.
 - **S3 Expose to tailnet:** "I reach the bridge from my phone over Tailscale."
-  → run the printed `tailscale serve --bg --https=443 http://127.0.0.1:7392`
-  once per machine; `https://<host>.<tailnet>.ts.net/api/session` answers
-  JSON. The bridge status output names this exact command for the configured
-  port.
+  → automatic with `serve.auto_apply` at its default: the status/startup
+  lifecycle applies `tailscale serve --bg --https=443
+  http://127.0.0.1:7392` and prints the tailnet URL
+  (`https://<host>.<tailnet>.ts.net/api/session` answers JSON). One-time
+  prerequisite: `tailscale set --operator=$USER` (never sudo). Set
+  `serve.auto_apply=false` (config or `CAPP_BRIDGE_SERVE_AUTO_APPLY=0`) for
+  verification/no-mutation mode — then run the printed manual command.
 - **S4 Two machines, same steps:** identical install on both; no cross-machine
   config; the phone simply adds both URLs.
 

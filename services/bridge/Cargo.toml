@@ -2,7 +2,7 @@
 name = "cappuccino-bridge"
 version = "0.1.0"
 edition = "2021"
-description = "Cappuccino herdr plugin bridge: token-authed loopback API over the herdr socket"
+description = "Cappuccino herdr plugin bridge: loopback API over the herdr socket (no auth; tailnet/loopback is the boundary)"
 
 [[bin]]
 name = "cappuccino-bridge"

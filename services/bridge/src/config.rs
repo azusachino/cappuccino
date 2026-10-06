@@ -13,6 +13,9 @@ pub struct BridgeConfig {
     pub port: u16,
     pub data_dir: PathBuf,
     pub auth: AuthConfig,
+    /// Status/startup apply the `tailscale serve` entry automatically when
+    /// true (default); false never touches Tailscale (safe verification).
+    pub serve_auto_apply: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -28,11 +31,22 @@ pub struct AuthConfig {
 }
 
 #[derive(Debug, Default, Deserialize)]
+pub struct ServeConfig {
+    #[serde(default = "default_true")]
+    pub auto_apply: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct ConfigFile {
     bind: Option<String>,
     port: Option<u16>,
     data_dir: Option<PathBuf>,
     auth: Option<AuthConfig>,
+    serve: Option<ServeConfig>,
 }
 
 impl BridgeConfig {
@@ -46,6 +60,7 @@ impl BridgeConfig {
                 home_dir()
             )),
             auth: AuthConfig::default(),
+            serve_auto_apply: true,
         }
     }
 
@@ -88,6 +103,9 @@ impl BridgeConfig {
                 if let Some(auth) = file.auth {
                     config.auth = auth;
                 }
+                if let Some(serve) = file.serve {
+                    config.serve_auto_apply = serve.auto_apply;
+                }
             }
         }
         if let Some(bind) = host_override {
@@ -100,6 +118,15 @@ impl BridgeConfig {
         }
         if let Some(data_dir) = data_dir_override {
             config.data_dir = PathBuf::from(data_dir);
+        }
+        if let Ok(auto) = std::env::var("CAPP_BRIDGE_SERVE_AUTO_APPLY") {
+            let disabled = matches!(
+                auto.trim().to_lowercase().as_str(),
+                "0" | "false" | "no" | "off"
+            );
+            if disabled {
+                config.serve_auto_apply = false;
+            }
         }
         if config.auth.enabled {
             return Err(

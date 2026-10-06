@@ -4,7 +4,7 @@ One sentence: native phone clients read live agent state from a tiny Rust bridge
 
 ## Deployed view
 
-- Two herdr machines (macOS + Ubuntu), identical setup: `herdr plugin link` installs the bridge; plugin [[startup]] builds/launches the binary per herdr start; status action applies `tailscale serve --bg --https=443 http://127.0.0.1:<port>` automatically (idempotent, manual fallback printed only if Tailscale CLI unavailable; one-time `tailscale set --operator=$USER` prerequisite documented).
+- Two herdr machines (macOS + Ubuntu), identical setup: `herdr plugin link` installs the bridge; plugin [[startup]] builds/launches the binary per herdr start; status action applies `tailscale serve --bg --https=443 http://127.0.0.1:<port>` automatically (idempotent, manual fallback printed only if Tailscale CLI unavailable or `serve.auto_apply=false`; one-time `tailscale set --operator=$USER` prerequisite documented).
 - Phone: native SwiftUI app; Machines = per-machine bridge URLs (defaults-stored, editable); device Tailscale membership is the only auth; app contains zero auth code; VPN-off renders existing visible unreachable states.
 
 ### Bridge (single Rust binary; tokio + axum + serde; herdr RPC over HERDR_SOCKET UnixStream)

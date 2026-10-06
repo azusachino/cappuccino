@@ -2,7 +2,7 @@ id = "azusachino.cappuccino-bridge"
 name = "Cappuccino bridge"
 version = "0.1.0"
 min_herdr_version = "0.9.0"
-description = "Token-authed loopback bridge for the Cappuccino phone client: agent list, pi transcripts, pane-line stream"
+description = "Loopback bridge plugin for the Cappuccino phone client: agent list, pi transcripts, pane-line stream (no auth; tailnet/loopback is the boundary)"
 platforms = ["macos", "linux"]
 
 # Rust on purpose (owner language decision 2026-10-06): the plugin ships as a

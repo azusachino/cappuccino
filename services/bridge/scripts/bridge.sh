@@ -63,10 +63,36 @@ stop() {
   fi
 }
 
-# S3: tailnet exposure is automatic when the tailscale CLI is available.
+# S3: tailnet exposure is automatic when the tailscale CLI is available and
+# serve.auto_apply is not disabled (config file or CAPP_BRIDGE_SERVE_AUTO_APPLY=0).
 # Idempotent — re-applying the same serve entry is fine. Never requires sudo
 # (one-time prerequisite, documented in the README: tailscale set --operator=$USER).
+serve_auto_apply() {
+  # Env wins over the config file.
+  if [ "${CAPP_BRIDGE_SERVE_AUTO_APPLY:-}" = "0" ] \
+    || [ "${CAPP_BRIDGE_SERVE_AUTO_APPLY:-}" = "false" ]; then
+    return 1
+  fi
+  local config_file="${CAPP_BRIDGE_CONFIG:-$HOME/.config/cappuccino-bridge/config.json}"
+  if [ -f "$config_file" ] && command -v python3 >/dev/null 2>&1; then
+    if python3 -c "
+import json,sys
+config=json.load(open('$config_file'))
+sys.exit(0 if config.get('serve',{}).get('auto_apply',True) else 1)
+" 2>/dev/null; then
+      return 0
+    fi
+    return 1
+  fi
+  return 0
+}
+
 ensure_serve() {
+  if ! serve_auto_apply; then
+    echo "tailscale serve auto-apply is disabled; expose manually if needed:"
+    echo "  tailscale serve --bg --https=443 http://127.0.0.1:$PORT"
+    return 0
+  fi
   if ! command -v tailscale >/dev/null 2>&1; then
     echo "tailscale CLI not found; expose manually:"
     echo "  tailscale serve --bg --https=443 http://127.0.0.1:$PORT"
