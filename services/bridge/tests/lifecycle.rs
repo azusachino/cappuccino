@@ -15,6 +15,7 @@ use std::{
 };
 
 const BIN: &str = env!("CARGO_BIN_EXE_cappuccino-bridge");
+const PLUGIN_STATE_SUBDIR: &str = "state";
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 struct TestRoot {
@@ -47,6 +48,10 @@ impl TestRoot {
         self.path.join("state")
     }
 
+    fn bridge_state(&self) -> PathBuf {
+        self.state().join(PLUGIN_STATE_SUBDIR)
+    }
+
     fn track_bridge(&mut self, state: &Path, port: u16) {
         self.active_bridge = Some((state.to_owned(), port));
     }
@@ -74,9 +79,10 @@ impl Drop for TestRoot {
                 .command("stop", &state, port)
                 .output()
                 .is_ok_and(|output| output.status.success());
+            let bridge_state = state.join(PLUGIN_STATE_SUBDIR);
             let no_state = ["bridge.control", "bridge.sock", "bridge.pid"]
                 .iter()
-                .all(|name| !state.join(name).exists());
+                .all(|name| !bridge_state.join(name).exists());
             if !stopped || http_ok(port) || !no_state {
                 eprintln!(
                     "preserving lifecycle test state for manual recovery: {}",
@@ -232,9 +238,10 @@ fn create_private_dir(path: &Path) {
 #[test]
 fn concurrent_start_is_serialized_private_and_never_invokes_tailscale_when_disabled() {
     let mut root = TestRoot::new();
-    let state = root.state();
+    let plugin_state = root.state();
+    let state = root.bridge_state();
     let port = port();
-    root.track_bridge(&state, port);
+    root.track_bridge(&plugin_state, port);
     let tool_dir = root.path.join("tools");
     let cwd = root.path.join("cwd");
     create_private_dir(&tool_dir);
@@ -250,7 +257,7 @@ fn concurrent_start_is_serialized_private_and_never_invokes_tailscale_when_disab
     let workers: Vec<_> = (0..2)
         .map(|_| {
             let root_path = root.path.clone();
-            let state = state.clone();
+            let state = plugin_state.clone();
             let tool_dir = tool_dir.clone();
             let cwd = cwd.clone();
             let barrier = Arc::clone(&barrier);
@@ -305,16 +312,20 @@ fn concurrent_start_is_serialized_private_and_never_invokes_tailscale_when_disab
     assert_eq!(record.len(), 65);
     assert!(record.ends_with('\n'));
 
-    assert_ok(root.command("status", &state, port).output().unwrap());
-    assert_ok(root.command("logs", &state, port).output().unwrap());
-    assert_ok(root.command("stop", &state, port).output().unwrap());
+    assert_ok(
+        root.command("status", &plugin_state, port)
+            .output()
+            .unwrap(),
+    );
+    assert_ok(root.command("logs", &plugin_state, port).output().unwrap());
+    assert_ok(root.command("stop", &plugin_state, port).output().unwrap());
     assert!(!state.join("bridge.control").exists());
     assert!(!state.join("bridge.sock").exists());
     assert!(!http_ok(port));
 
-    let restarted = root.command("start", &state, port).output().unwrap();
+    let restarted = root.command("start", &plugin_state, port).output().unwrap();
     assert_ok(restarted);
-    assert_ok(root.command("stop", &state, port).output().unwrap());
+    assert_ok(root.command("stop", &plugin_state, port).output().unwrap());
     assert!(!state.join("bridge.control").exists());
     assert!(!state.join("bridge.sock").exists());
     assert!(!http_ok(port));
@@ -385,10 +396,15 @@ fn malformed_and_stale_records_fail_closed_without_signaling_an_unrelated_proces
 fn unsafe_custom_state_directories_are_rejected_without_chmod_or_following_symlinks() {
     let root = TestRoot::new();
     let port = port();
-    let unsafe_dir = root.path.join("unsafe-state");
-    fs::create_dir(&unsafe_dir).unwrap();
+    let unsafe_plugin_dir = root.path.join("unsafe-state");
+    create_private_dir(&unsafe_plugin_dir);
+    let unsafe_dir = unsafe_plugin_dir.join(PLUGIN_STATE_SUBDIR);
+    create_private_dir(&unsafe_dir);
     fs::set_permissions(&unsafe_dir, fs::Permissions::from_mode(0o755)).unwrap();
-    let output = root.command("status", &unsafe_dir, port).output().unwrap();
+    let output = root
+        .command("status", &unsafe_plugin_dir, port)
+        .output()
+        .unwrap();
     assert!(!output.status.success());
     assert_eq!(fs::metadata(&unsafe_dir).unwrap().mode() & 0o7777, 0o755);
     assert!(fs::read_dir(&unsafe_dir).unwrap().next().is_none());
@@ -447,10 +463,11 @@ fn symlink_and_nonregular_state_files_fail_closed_without_touching_targets() {
 #[test]
 fn startup_bind_failure_keeps_an_unrelated_listener_available() {
     let root = TestRoot::new();
-    let state = root.state();
+    let plugin_state = root.state();
+    let state = root.bridge_state();
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
-    let output = root.command("start", &state, port).output().unwrap();
+    let output = root.command("start", &plugin_state, port).output().unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("exited during startup"));
 

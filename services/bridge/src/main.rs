@@ -88,7 +88,7 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
     );
 
     if let Some(token) = managed_token {
-        let state = state::StateDir::open(&lifecycle::state_path())?;
+        let state = state::StateDir::open(&lifecycle::state_path()?)?;
         let control = lifecycle::ControlServer::bind(&state, &token)?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let stopping = Arc::new(AtomicBool::new(false));

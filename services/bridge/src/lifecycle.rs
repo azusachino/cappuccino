@@ -6,13 +6,13 @@ use crate::{
 };
 use std::{
     collections::VecDeque,
-    fs::File,
+    fs::{self, File},
     io::{self, BufRead, BufReader, Read, Write},
     os::{
         fd::AsRawFd,
         unix::net::{UnixListener, UnixStream},
     },
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -32,6 +32,7 @@ const LEGACY_PID_FILE: &str = "bridge.pid";
 const LOCK_FILE: &str = "bridge.lock";
 const LOG_FILE: &str = "bridge.log";
 const CONTROL_SOCKET: &str = "bridge.sock";
+const PLUGIN_STATE_SUBDIR: &str = "state";
 
 pub fn execute(command: &str) -> Result<(), String> {
     match command {
@@ -43,21 +44,43 @@ pub fn execute(command: &str) -> Result<(), String> {
     }
 }
 
-pub fn state_path() -> PathBuf {
-    std::env::var_os("HERDR_PLUGIN_STATE_DIR")
+pub fn state_path() -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("HERDR_PLUGIN_STATE_DIR") {
+        return plugin_state_path(&PathBuf::from(path));
+    }
+    let home = std::env::var_os("HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/tmp"));
-            home.join(".local/state/cappuccino-bridge")
-        })
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    Ok(home.join(".local/state/cappuccino-bridge"))
+}
+
+fn plugin_state_path(plugin_dir: &Path) -> Result<PathBuf, String> {
+    for name in [
+        LOCK_FILE,
+        LOG_FILE,
+        CONTROL_SOCKET,
+        RECORD_FILE,
+        LEGACY_PID_FILE,
+    ] {
+        let path = plugin_dir.join(name);
+        match fs::symlink_metadata(&path) {
+            Ok(_) => return Ok(plugin_dir.to_owned()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "inspect legacy bridge state {}: {error}",
+                    path.display()
+                ))
+            }
+        }
+    }
+    Ok(plugin_dir.join(PLUGIN_STATE_SUBDIR))
 }
 
 fn start() -> Result<(), String> {
     let config = BridgeConfig::load()?;
     validate_bind(&config)?;
-    let state = StateDir::open(&state_path())?;
+    let state = StateDir::open(&state_path()?)?;
     let _lock = lifecycle_lock(&state)?;
     reject_legacy_pid_record(&state)?;
 
@@ -123,7 +146,7 @@ fn start() -> Result<(), String> {
 fn stop() -> Result<(), String> {
     let config = BridgeConfig::load()?;
     validate_bind(&config)?;
-    let state = StateDir::open(&state_path())?;
+    let state = StateDir::open(&state_path()?)?;
     let _lock = lifecycle_lock(&state)?;
     reject_legacy_pid_record(&state)?;
     let Some(token) = read_record(&state)? else {
@@ -152,7 +175,7 @@ fn stop() -> Result<(), String> {
 fn status() -> Result<(), String> {
     let config = BridgeConfig::load()?;
     validate_bind(&config)?;
-    let state = StateDir::open(&state_path())?;
+    let state = StateDir::open(&state_path()?)?;
     let _lock = lifecycle_lock(&state)?;
     reject_legacy_pid_record(&state)?;
     let Some(token) = read_record(&state)? else {
@@ -172,7 +195,7 @@ fn status() -> Result<(), String> {
 }
 
 fn logs() -> Result<(), String> {
-    let state = StateDir::open(&state_path())?;
+    let state = StateDir::open(&state_path()?)?;
     let file = state
         .open_existing(LOG_FILE)?
         .ok_or_else(|| "bridge log does not exist".to_string())?;
@@ -578,6 +601,24 @@ mod tests {
                 let _ = self.0.wait();
             }
         }
+    }
+
+    #[test]
+    fn plugin_state_uses_private_child_and_preserves_legacy_layout() {
+        let token = random_token().unwrap();
+        let plugin_dir = PathBuf::from("/tmp").join(format!(
+            "cappuccino-state-path-{}-{}",
+            std::process::id(),
+            &token[..16]
+        ));
+        fs::create_dir(&plugin_dir).unwrap();
+        assert_eq!(
+            plugin_state_path(&plugin_dir).unwrap(),
+            plugin_dir.join(PLUGIN_STATE_SUBDIR)
+        );
+        fs::write(plugin_dir.join(LEGACY_PID_FILE), b"legacy\n").unwrap();
+        assert_eq!(plugin_state_path(&plugin_dir).unwrap(), plugin_dir);
+        fs::remove_dir_all(plugin_dir).unwrap();
     }
 
     #[test]

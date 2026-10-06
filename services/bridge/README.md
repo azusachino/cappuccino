@@ -52,7 +52,7 @@ From the repository root:
 cargo install --path services/bridge --locked
 herdr plugin link "$PWD/services/bridge"
 herdr plugin list
-herdr plugin action azusachino.cappuccino-bridge status
+herdr plugin action invoke status --plugin azusachino.cappuccino-bridge
 ```
 
 Or, from `services/bridge`, use `cargo install --path . --locked`. Cargo places
@@ -60,8 +60,8 @@ Or, from `services/bridge`, use `cargo install --path . --locked`. Cargo places
 that directory must be on the `PATH` inherited by Herdr. Herdr runs plugin
 commands with the plugin root as their working directory, but does not add the
 Cargo install directory to `PATH`. Check `command -v cappuccino-bridge` and
-`herdr plugin action azusachino.cappuccino-bridge status` in the same
-launch environment. If command lookup fails, install the binary and restart
+`herdr plugin action invoke status --plugin azusachino.cappuccino-bridge` in
+that launch environment. If command lookup fails, install the binary and restart
 Herdr from an environment whose `PATH` includes Cargo's bin directory; linking
 or the plugin startup hook does not install/build it. The manifest uses the
 installed command name (`cappuccino-bridge`), never a checkout's
@@ -69,8 +69,11 @@ installed command name (`cappuccino-bridge`), never a checkout's
 
 The one-shot `[[startup]]` command invokes the installed binary's `start`
 subcommand. It creates a separate server process with redirected logs and an
-owner-only state directory under `HERDR_PLUGIN_STATE_DIR` (or
-`~/.local/state/cappuccino-bridge`). The private `bridge.control` record
+owner-only state directory at `HERDR_PLUGIN_STATE_DIR/state`
+(or `~/.local/state/cappuccino-bridge`). If the plugin state root already
+contains legacy bridge lifecycle files, the binary keeps using that location
+rather than silently abandoning them; the same strict permission checks still
+apply. The private `bridge.control` record
 contains a random per-instance token; `bridge.sock` is a mode-0600 Unix-domain
 control socket. The socket validates that token for status and graceful
 shutdown. No PID from a state file is signaled. The process is not supervised
@@ -78,10 +81,10 @@ after startup, and no automatic Herdr-shutdown hook is configured. Use the
 plugin actions to inspect, stop and view logs:
 
 ```text
-herdr plugin action azusachino.cappuccino-bridge status
-herdr plugin action azusachino.cappuccino-bridge stop
-herdr plugin action azusachino.cappuccino-bridge logs
-herdr plugin log
+herdr plugin action invoke status --plugin azusachino.cappuccino-bridge
+herdr plugin action invoke stop --plugin azusachino.cappuccino-bridge
+herdr plugin action invoke logs --plugin azusachino.cappuccino-bridge
+herdr plugin log list --plugin azusachino.cappuccino-bridge --limit 10
 ```
 
 `stop` sends a token-authenticated shutdown request over the private Unix socket and waits for both the control endpoint and HTTP listener to close. A stale/malformed record, unsafe path, socket mismatch or stop timeout fails closed and preserves uncertain state for manual inspection; it never guesses at a PID or deletes an unrelated file. A legacy `bridge.pid` from the former lifecycle also blocks start/status/stop until an operator verifies any old process and removes that file manually. Earlier versions may have created a permissive state directory: verify the path, owner, contents and any old bridge process before manually securing or cleaning it. This binary refuses unsafe directories and never chmods an existing custom directory. State directories must be current-user-owned mode 0700; lock, control record and log files must be regular owner-owned mode 0600 files. Symlinked, nonregular, multiply-linked, foreign-owned or permissive paths are rejected. `logs` prints the last 80 lines.

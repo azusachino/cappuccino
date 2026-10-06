@@ -5,16 +5,22 @@ toolchain for building from source.
 
 ## Server stories
 
-- **S1 Install:** "On each Herdr machine, I link the bridge's plugin
-  manifest." → `herdr plugin link <path-to-services/bridge>` (dev) or
-  `herdr plugin install <release>` (later). `herdr plugin list` shows it.
-  Herdr invokes the manifest commands; the Rust bridge server is a separate
+- **S1 Install:** "On each Herdr machine, I install and link the bridge's
+  plugin manifest." → install `cappuccino-bridge` first with
+  `cargo install --path services/bridge --locked`, ensure Cargo's install
+  `bin` directory is inherited in Herdr's `PATH`, then run
+  `herdr plugin link <path-to-services/bridge>`. `herdr plugin list` shows
+  the registration. Linking does not build or install the binary. Herdr
+  invokes the manifest commands; the Rust bridge server is a separate
   process, not loaded into Herdr.
 - **S2 Startup and control:** "The bridge starts when Herdr starts and I can
-  inspect or stop it." → linking builds the binary; the plugin `[[startup]]`
-  invokes its idempotent `start` command. The plugin `status`, `stop` and
-  `logs` actions call the binary directly. The server is not supervised by
-  Herdr and no automatic shutdown hook is configured.
+  inspect or stop it." → the plugin `[[startup]]` invokes its idempotent
+  `start` command using the installed binary. The plugin `status`, `stop` and
+  `logs` actions invoke that same binary through Herdr. The server is not
+  supervised by Herdr and no automatic shutdown hook is configured.
+  The isolated macOS and Linux/arm64 journeys passed; evidence and limits are
+  recorded in [verification](verification.md#s1s2-installed-herdr-plugin-journey).
+  No physical-device claim is made.
 - **S3 Expose to tailnet:** "I reach the bridge from my phone over Tailscale."
   → automatic with `serve.auto_apply` at its default: the status/startup
   lifecycle applies `tailscale serve --bg --https=443
