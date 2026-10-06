@@ -15,6 +15,11 @@ public struct ContentView: View {
     if arguments.contains("-cappuccino-unreachable") {
       return DaemonClient(host: "127.0.0.1", port: 1, timeout: 2)
     }
+    // Issue #16: the bridge plugin is the product transport; the reference
+    // daemon client stays selectable until the plugin replaces it everywhere.
+    if arguments.contains("-cappuccino-bridge") {
+      return BridgeClient()
+    }
     return DaemonClient()
   }
 

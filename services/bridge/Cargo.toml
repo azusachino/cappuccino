@@ -1,0 +1,17 @@
+[package]
+name = "cappuccino-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Cappuccino herdr plugin bridge: token-authed loopback API over the herdr socket"
+
+[[bin]]
+name = "cappuccino-bridge"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+futures-util = "0.3"

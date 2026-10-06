@@ -1,0 +1,12 @@
+/Users/azusachino/Projects/project-github/harus-workstation/vendor/cappuccino/services/bridge/target/debug/deps/serde-6600d7b0dae7f88d.d: /Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /Users/azusachino/Projects/project-github/harus-workstation/vendor/cappuccino/services/bridge/target/debug/build/serde-614cdae90589608a/out/private.rs
+
+/Users/azusachino/Projects/project-github/harus-workstation/vendor/cappuccino/services/bridge/target/debug/deps/libserde-6600d7b0dae7f88d.rmeta: /Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /Users/azusachino/Projects/project-github/harus-workstation/vendor/cappuccino/services/bridge/target/debug/build/serde-614cdae90589608a/out/private.rs
+
+/Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs:
+/Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs:
+/Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs:
+/Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs:
+/Users/azusachino/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs:
+/Users/azusachino/Projects/project-github/harus-workstation/vendor/cappuccino/services/bridge/target/debug/build/serde-614cdae90589608a/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/azusachino/Projects/project-github/harus-workstation/vendor/cappuccino/services/bridge/target/debug/build/serde-614cdae90589608a/out
