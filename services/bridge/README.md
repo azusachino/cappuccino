@@ -122,6 +122,44 @@ cargo test
 cargo build --release
 ```
 
+From the repository root, `make check-bridge` runs the full Rust gate (fmt,
+hermetic tests including the client contract suite, release build of the
+companion). `make resource-bridge-client` runs the bounded leak/lifecycle soak
+(`tests/resource_soak.rs`, `#[ignore]`-gated). `make bench-bridge-client
+BASE_URL=http://127.0.0.1:7392` runs the reproducible benchmark against a
+running bridge. Rust diagnostics are treated as errors by review; no warning
+suppression or skipped tests.
+
+## Test companion (`test-client` example)
+
+`examples/test-client/` is a checked-in headless, read-only companion. It is
+an example target on purpose: `cargo run` and `cargo install` defaults of the
+bridge crate stay unchanged.
+
+- `check` mode: `GET /api/session`, `GET /api/agents`, a fail-closed transcript
+  probe, and an optional WS stream probe (`--session NAME`), each with bounded
+  deadlines. Any shape mismatch, malformed frame, timeout or disconnect exits
+  nonzero. HTTP legs prefer HTTP/2 prior knowledge (h2c) and always report the
+  observed protocol; `--require-h2` makes an HTTP/1 downgrade an error.
+- `bench` mode: bounded cold/warm HTTP requests and stream connection churn;
+  reports p50/p95, throughput and getrusage CPU/peak RSS with the observed
+  protocol. It establishes a baseline; it asserts no performance thresholds.
+- Protocol reality (implemented, tested): HTTP routes negotiate real HTTP/2
+  over h2c prior knowledge against this bridge (axum `http2` feature is
+  enabled) and fall back to HTTP/1.1 otherwise, reported per leg. The WS leg
+  uses the classic HTTP/1.1 Upgrade handshake — the bridge's only implemented
+  WS transport; WebSocket-over-HTTP/2 (RFC 8441 extended CONNECT) is not
+  implemented and never advertised. Tailscale Serve's ALPN behavior in front
+  of the bridge is untested by these hermetic suites and is not asserted.
+- Hermetic tests spawn the real bridge binary against a mock Herdr NDJSON
+  socket in temp dirs on loopback ephemeral ports. They use no owner sessions,
+  credentials or Tailscale (`CAPP_BRIDGE_SERVE_AUTO_APPLY=0`). These are
+  synthetic fixtures; they do not prove canonical live-transcript behavior.
+- Leak acceptance is baseline-relative: the soak records FD/RSS/child/temp
+  baselines, runs bounded success, error and child-churn cycles, and asserts
+  teardown recovery within documented tolerance. Short samples never prove
+  absolute zero-leak.
+
 The manifest uses argv arrays and invokes the installed Rust binary directly;
 there are no bridge shell launchers. The bridge uses `libc` narrowly for Unix
 operations not exposed as an equivalent stable safe standard-library API here:
