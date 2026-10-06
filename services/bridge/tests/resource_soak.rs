@@ -551,6 +551,18 @@ async fn attributed_resource_recovery() {
     );
 }
 
+/// Classification of a joined task outcome at a cancellation point. The
+/// decision used by the soak's cancellation cycles; the negative regression
+/// `cancel_detector_rejects_panic` proves a panic is not mistaken for
+/// cancellation.
+fn classify_join(joined: Result<(), tokio::task::JoinError>) -> Result<(), String> {
+    match joined {
+        Ok(_) => Err("task completed; mid-flight cancellation expected".into()),
+        Err(join_error) if join_error.is_cancelled() => Ok(()),
+        Err(join_error) => Err(format!("task panicked instead of cancelling: {join_error}")),
+    }
+}
+
 /// Refusal, mid-flight cancellation and disconnect scenario classes against
 /// throwaway servers, each phase-matched and FD-attributed.
 #[tokio::test]
@@ -608,11 +620,14 @@ async fn scenario_recovery_error_cancel_disconnect() {
         accepted.notified().await; // a request is provably in flight
         let start = std::time::Instant::now();
         task.abort();
-        let joined = task.await;
-        assert!(
-            joined.is_err(),
-            "cancel cycle must abort mid-flight, not complete"
-        );
+        // Bounded join; only a genuine tokio cancellation is accepted — a
+        // panicked task is classified as a failure, never as cancellation.
+        let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
+        let joined = match tokio::time::timeout_at(deadline, task).await {
+            Err(_) => panic!("cancel cycle task did not join before the deadline"),
+            Ok(joined) => joined,
+        };
+        classify_join(joined.map(|_| ())).expect("cancel cycle must be a real cancellation");
         worst = worst.max(start.elapsed());
     }
     println!("soak[cancel]: {CYCLES} observed in-flight aborts joined, worst {worst:?}");
@@ -748,4 +763,58 @@ fn held_fd_is_counted_and_attributed() {
         clean_sample,
         "at least one clean sample must attribute both held fds: {last_detail}"
     );
+}
+
+/// Negative regression for the cancellation detector: a task that PANICS
+/// after the in-flight barrier must be classified as a panic — never as an
+/// expected cancellation — and the bounded join must surface it.
+#[tokio::test]
+#[ignore]
+async fn cancel_detector_rejects_panic() {
+    let stall = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let stall_port = stall.local_addr().unwrap().port();
+    let held: Arc<Mutex<Vec<tokio::net::TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
+    let accepted = Arc::new(tokio::sync::Notify::new());
+    let held_holder = Arc::clone(&held);
+    let accepted_holder = Arc::clone(&accepted);
+    let holder = tokio::spawn(async move {
+        loop {
+            if let Ok((stream, _)) = stall.accept().await {
+                held_holder.lock().unwrap().push(stream);
+                accepted_holder.notify_one();
+            }
+        }
+    });
+    let accepted_task = Arc::clone(&accepted);
+
+    // The task panics once its request is provably in flight.
+    let task: tokio::task::JoinHandle<()> = tokio::spawn(async move {
+        let mut options = probe::ProbeOptions::new(format!("http://127.0.0.1:{stall_port}"));
+        options.timeout = Duration::from_secs(10);
+        options.session_deadline = Duration::from_secs(15);
+        let checks = tokio::spawn(async move { probe::run_checks(&options).await });
+        drop(checks);
+        // Signal that the panic is the very next statement, so the test's
+        // abort can never preempt the panic into a mere cancellation.
+        accepted_task.notify_one();
+        panic!("injected probe panic at the cancellation barrier");
+    });
+    accepted.notified().await; // holder accepted the request
+    accepted.notified().await; // task is at the pre-panic point
+    tokio::task::yield_now().await;
+    task.abort();
+    let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
+    let joined = match tokio::time::timeout_at(deadline, task).await {
+        Err(_) => panic!("panicking task did not join before the deadline"),
+        Ok(joined) => joined,
+    };
+    let verdict = classify_join(joined);
+    assert!(
+        matches!(&verdict, Err(message) if message.contains("panicked")),
+        "a panicked task must be classified as a panic, not cancellation: {verdict:?}"
+    );
+
+    holder.abort();
+    join_tracked(holder, "cancel-detector stall holder").await;
+    held.lock().unwrap().clear();
 }

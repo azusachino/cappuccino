@@ -564,13 +564,15 @@ async fn session_requires_nonempty_machine_id() {
     // HTTP/1 origin returning a machine_id-less paired body.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let mut tracker = TaskTracker::default();
+    let tracker = Arc::new(TaskTracker::default());
+    let server_tracker = Arc::clone(&tracker);
     tracker.spawn(async move {
         loop {
             let Ok((mut stream, _)) = listener.accept().await else {
                 return;
             };
-            tokio::spawn(async move {
+            // Per-connection work is owned by the tracker, not detached.
+            server_tracker.spawn(async move {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut buf = [0u8; 1024];
                 let _ = stream.read(&mut buf).await;
@@ -781,14 +783,16 @@ async fn require_h2_fails_on_http1_downgrade() {
     // HTTP/1-only origin: raw canned responses on a TCP listener.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let mut tracker = TaskTracker::default();
+    let tracker = Arc::new(TaskTracker::default());
+    let server_tracker = Arc::clone(&tracker);
     tracker.spawn(async move {
         loop {
             let (mut stream, _) = match listener.accept().await {
                 Ok(accepted) => accepted,
                 Err(_) => return,
             };
-            tokio::spawn(async move {
+            // Per-connection work is owned by the tracker, not detached.
+            server_tracker.spawn(async move {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut buf = [0u8; 1024];
                 let _ = stream.read(&mut buf).await;
@@ -834,7 +838,7 @@ async fn stalled_server_times_out() {
     // Accepts connections, never answers.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let mut tracker = TaskTracker::default();
+    let tracker = TaskTracker::default();
     tracker.spawn(async move {
         loop {
             if let Ok((stream, _)) = listener.accept().await {
@@ -865,7 +869,8 @@ async fn cancellation_joins_promptly_midflight() {
     let accepted = Arc::new(tokio::sync::Notify::new());
     let held_holder = Arc::clone(&held);
     let accepted_holder = Arc::clone(&accepted);
-    let holder = tokio::spawn(async move {
+    let holder = TaskTracker::default();
+    holder.spawn(async move {
         loop {
             if let Ok((stream, _)) = listener.accept().await {
                 held_holder.lock().unwrap().push(stream);
@@ -884,18 +889,14 @@ async fn cancellation_joins_promptly_midflight() {
     // connection, so the abort is provably mid-flight (no fixed sleep).
     accepted.notified().await;
     let start = std::time::Instant::now();
-    task.abort();
-    let joined = task.await;
-    assert!(
-        joined.is_err(),
-        "mid-flight task must be cancelled, not completed"
-    );
+    require_midflight_cancelled(task, "mid-flight probe").await;
     assert!(
         start.elapsed() < Duration::from_secs(2),
         "abort must not hang"
     );
 
-    join_tracked(holder, "stall holder").await;
+    holder.stop().await;
+    held.lock().unwrap().clear();
 }
 
 #[tokio::test]
@@ -1005,17 +1006,66 @@ async fn bench_runs_and_reports_protocol() {
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
-struct TaskTracker(Vec<tokio::task::JoinHandle<()>>);
+struct TaskTracker(Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>);
+
+/// Classification of a joined task outcome at a cancellation point.
+enum CancelOutcome {
+    Cancelled,
+    Completed,
+    Panicked(String),
+}
+
+/// Pure decision used by every mid-flight cancellation assertion: only a
+/// tokio cancellation is accepted; completion and panics are distinct
+/// failures (this is the detector the negative regression attacks).
+fn classify_join(joined: Result<(), tokio::task::JoinError>) -> CancelOutcome {
+    match joined {
+        Ok(()) => CancelOutcome::Completed,
+        Err(join_error) => {
+            if join_error.is_cancelled() {
+                CancelOutcome::Cancelled
+            } else {
+                CancelOutcome::Panicked(join_error.to_string())
+            }
+        }
+    }
+}
+
+/// Aborts a probe task and joins it under the teardown deadline, requiring
+/// the outcome to be a genuine mid-flight cancellation.
+async fn require_midflight_cancelled<T>(task: tokio::task::JoinHandle<T>, label: &str)
+where
+    T: Send + 'static,
+{
+    task.abort();
+    let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
+    let outcome = match tokio::time::timeout_at(deadline, task).await {
+        Err(_) => panic!("{label}: probe task did not join before the deadline"),
+        Ok(Ok(_value)) => CancelOutcome::Completed,
+        Ok(Err(join_error)) => classify_join(Err::<(), _>(join_error)),
+    };
+    match outcome {
+        CancelOutcome::Cancelled => {}
+        CancelOutcome::Completed => {
+            panic!("{label}: probe task completed; mid-flight cancellation expected")
+        }
+        CancelOutcome::Panicked(cause) => {
+            panic!("{label}: probe task panicked instead of cancelling: {cause}")
+        }
+    }
+}
 
 impl TaskTracker {
-    fn spawn(&mut self, task: impl std::future::Future<Output = ()> + Send + 'static) {
-        self.0.push(tokio::spawn(task));
+    /// `&self` so per-connection handlers inside a running listener closure
+    /// can register their tasks on the same tracker.
+    fn spawn(&self, task: impl std::future::Future<Output = ()> + Send + 'static) {
+        self.0.lock().unwrap().push(tokio::spawn(task));
     }
 
     /// Abort and join every tracked task within the teardown deadline. A
     /// panicked task is an error; expected cancellation is not.
-    async fn stop(&mut self) {
-        let tasks = std::mem::take(&mut self.0);
+    async fn stop(&self) {
+        let tasks: Vec<_> = self.0.lock().unwrap().drain(..).collect();
         let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
         for task in tasks {
             task.abort();
@@ -1069,7 +1119,7 @@ async fn spawn_frame_server(frames: Vec<Value>) -> (String, TaskTracker) {
             move |upgrade: WebSocketUpgrade| async move { stream_frames(upgrade, frames).await },
         ),
     );
-    let mut tracker = TaskTracker::default();
+    let tracker = TaskTracker::default();
     tracker.spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
@@ -1088,7 +1138,7 @@ async fn stream_reset_generation_regression_is_rejected() {
         json!({"event": "stream_open", "generation": 5}),
         json!({"event": "stream_reset", "generation": 3}),
     ];
-    let (base, mut tracker) = spawn_frame_server(frames).await;
+    let (base, tracker) = spawn_frame_server(frames).await;
     let error = probe::ws_stream_probe(
         &stream_options(&base),
         "s-probe",
@@ -1108,7 +1158,7 @@ async fn invalid_gap_shape_is_rejected() {
             "seq": 9, "id": "wrong-id", "kind": "gap",
             "text": "gap: missing entries 2-8", "branch": null, "complete": true }]}),
     ];
-    let (base, mut tracker) = spawn_frame_server(frames).await;
+    let (base, tracker) = spawn_frame_server(frames).await;
     let error = probe::ws_stream_probe(
         &stream_options(&base),
         "s-probe",
@@ -1140,7 +1190,7 @@ async fn binary_data_frame_is_rejected() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = Router::new().route("/api/stream", get_route(binary_ws));
-    let mut tracker = TaskTracker::default();
+    let tracker = TaskTracker::default();
     tracker.spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
@@ -1158,7 +1208,7 @@ async fn empty_entries_do_not_count_as_consumption() {
         json!({"event": "stream_open", "generation": 0}),
         json!({"event": "entries", "entries": []}),
     ];
-    let (base, mut tracker) = spawn_frame_server(frames).await;
+    let (base, tracker) = spawn_frame_server(frames).await;
     let probe = ws_probe(
         &stream_options(&base),
         "s-probe",
@@ -1192,7 +1242,7 @@ fn tracked_cleanup_panics_on_injected_panic() {
             .build()
             .unwrap();
         runtime.block_on(async {
-            let mut tracker = TaskTracker::default();
+            let tracker = TaskTracker::default();
             tracker.spawn(async {
                 panic!("injected fixture panic");
             });
@@ -1224,7 +1274,7 @@ fn tracked_cleanup_accepts_expected_cancellation() {
         .build()
         .unwrap();
     runtime.block_on(async {
-        let mut tracker = TaskTracker::default();
+        let tracker = TaskTracker::default();
         tracker.spawn(async {
             // Runs until aborted: expected cancellation, not a panic.
             futures_util::future::pending::<()>().await;
@@ -1273,7 +1323,7 @@ async fn clean_close_frame_is_observed_as_closed() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = Router::new().route("/api/stream", get_route(clean_close_ws));
-    let mut tracker = TaskTracker::default();
+    let tracker = TaskTracker::default();
     tracker.spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
@@ -1303,7 +1353,7 @@ async fn repeated_stream_open_is_rejected_any_generation() {
             json!({"event": "stream_open", "generation": 5}),
             json!({"event": "stream_open", "generation": generation}),
         ];
-        let (base, mut tracker) = spawn_frame_server(frames).await;
+        let (base, tracker) = spawn_frame_server(frames).await;
         let error = probe::ws_stream_probe(
             &stream_options(&base),
             "s-probe",
@@ -1376,7 +1426,7 @@ async fn ping_then_abrupt_peer_close_is_propagated() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = Router::new().route("/api/stream", get_route(ping_drop_ws));
-    let mut tracker = TaskTracker::default();
+    let tracker = TaskTracker::default();
     tracker.spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
