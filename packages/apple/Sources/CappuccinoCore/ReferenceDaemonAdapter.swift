@@ -36,3 +36,11 @@ extension DaemonClient {
     self.init(host: host, port: port, timeout: timeout)
   }
 }
+
+extension ReferenceDaemonAdapter: TranscriptStreaming {
+  public func transcriptStream(
+    baseURL: URL, session: String, branch: String?
+  ) -> AsyncThrowingStream<TranscriptStreamEvent, Error> {
+    DemoDaemonClient().transcriptStream(baseURL: baseURL, session: session, branch: branch)
+  }
+}

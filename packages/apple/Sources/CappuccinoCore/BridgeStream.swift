@@ -188,7 +188,9 @@ extension BridgeClient {
   /// in the stream (unauthorized/unreachable/protocol); the consumer owns
   /// visible display and any later reconnect policy.
   public func stream(
-    base url: URL, session: String, connector: BridgeWebSocketConnecting
+    base url: URL,
+    session: String,
+    connector: BridgeWebSocketConnecting = URLSessionWebSocketConnector()
   ) -> AsyncThrowingStream<BridgeStreamOutput, Error> {
     AsyncThrowingStream { continuation in
       let task = Task {

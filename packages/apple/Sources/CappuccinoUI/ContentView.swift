@@ -25,6 +25,17 @@ public struct ContentView: View {
     return BridgeClient()
   }
 
+  private static func transcriptForProcess() -> TranscriptStreaming {
+    let arguments = ProcessInfo.processInfo.arguments
+    if arguments.contains("-cappuccino-demo") {
+      return DemoDaemonClient()
+    }
+    if arguments.contains("-cappuccino-reference") {
+      return ReferenceDaemonAdapter(tokens: KeychainTokenStore())
+    }
+    return BridgeClient()
+  }
+
   public init() {}
 
   public var body: some View {
@@ -67,8 +78,11 @@ public struct ContentView: View {
       }
       .tabItem { Label("Attention", systemImage: "tray") }
 
-      MachinesView(model: MachinesModel(daemon: Self.daemonForProcess()))
-        .tabItem { Label("Machines", systemImage: "desktopcomputer") }
+      MachinesView(
+        model: MachinesModel(
+          daemon: Self.daemonForProcess(), transcriptStreaming: Self.transcriptForProcess())
+      )
+      .tabItem { Label("Machines", systemImage: "desktopcomputer") }
     }
   }
 }
