@@ -66,6 +66,23 @@ private func fixtureURL(_ name: String) -> URL {
     #expect(reassembler.entries[gapIndex + 1].text == "later")
   }
 
+  @Test func outOfOrderArrivalBackfillsAndDeduplicates() {
+    var reassembler = TranscriptHistoryReassembler()
+    func entry(_ seq: Int, id: String) -> TranscriptEntry {
+      TranscriptEntry(
+        seq: seq, id: id, kind: "assistant", text: "e\(seq)", branch: nil,
+        complete: true, tool: nil)
+    }
+
+    _ = reassembler.merge([entry(1, id: "e1"), entry(3, id: "e3")])
+    #expect(reassembler.entries.map(\.seq) == [1, nil, 3])
+    #expect(reassembler.entries[1].isGap, "a sequence jump is visibly marked")
+    _ = reassembler.merge([entry(2, id: "e2"), entry(3, id: "e3")])
+    #expect(reassembler.entries.compactMap(\.seq) == [1, 2, 3])
+    #expect(reassembler.entries.filter(\.isGap).count == 1)
+    #expect(reassembler.entries.filter { $0.id == "e3" }.count == 1)
+  }
+
   @Test func distinctIdsSameTextAreNotSuppressed() {
     var reassembler = TranscriptHistoryReassembler()
     let first = TranscriptEntry(
@@ -80,14 +97,16 @@ private func fixtureURL(_ name: String) -> URL {
 
 @Suite struct TranscriptModelTests {
   @MainActor
-  private func makeModel(stream: AsyncThrowingStream<TranscriptStreamEvent, Error>)
-    -> TranscriptModel
-  {
+  private func makeModel(
+    stream: AsyncThrowingStream<TranscriptStreamEvent, Error>,
+    durableReload: (@Sendable (URL, String) async throws -> Void)? = nil
+  ) -> TranscriptModel {
     TranscriptModel(
       session: "s-aurora",
       machineURL: URL(string: "http://127.0.0.1:7392")!,
       streaming: ScriptedTranscriptStreamer(stream: stream),
-      branch: "feat/collector-fix")
+      branch: "feat/collector-fix",
+      durableReload: durableReload)
   }
 
   @MainActor
@@ -133,6 +152,45 @@ private func fixtureURL(_ name: String) -> URL {
   }
 
   @MainActor
+  @Test func failedResetReloadRestoresHistoryAndShowsBanner() async throws {
+    let (stream, continuation) = AsyncThrowingStream<TranscriptStreamEvent, Error>.makeStream()
+    let model = makeModel(
+      stream: stream,
+      durableReload: { _, _ in
+        throw DaemonClientError.unreachable("offline")
+      })
+    model.start()
+    let original = TranscriptEntry(
+      seq: 1, id: "original", kind: "assistant", text: "keep me", branch: nil,
+      complete: true, tool: nil)
+    continuation.yield(.entries([original]))
+    try await Task.sleep(nanoseconds: 20_000_000)
+    continuation.yield(.reset(generation: 1))
+    try await Task.sleep(nanoseconds: 20_000_000)
+    #expect(model.entries == [original])
+    #expect(model.phase == .failed(message: "Durable transcript reload failed; history kept."))
+    model.stop()
+  }
+
+  @MainActor
+  @Test func stopDuringPendingResetReloadDoesNotRestartStream() async throws {
+    let (stream, continuation) = AsyncThrowingStream<TranscriptStreamEvent, Error>.makeStream()
+    let gate = ReloadGate()
+    let streamer = CountingTranscriptStreamer(stream: stream)
+    let model = TranscriptModel(
+      session: "s-aurora", machineURL: URL(string: "http://127.0.0.1:7392")!,
+      streaming: streamer, branch: "feat/collector-fix",
+      durableReload: { _, _ in await gate.wait() })
+    model.start()
+    continuation.yield(.reset(generation: 1))
+    await gate.waitUntilStarted()
+    model.stop()
+    await gate.resume()
+    try await Task.sleep(nanoseconds: 20_000_000)
+    #expect(streamer.callCount == 1, "a stopped reset must not open a replacement stream")
+  }
+
+  @MainActor
   @Test func stopTearsDownWithoutLeakedStream() async throws {
     let (stream, continuation) = AsyncThrowingStream<TranscriptStreamEvent, Error>.makeStream()
     let model = makeModel(stream: stream)
@@ -149,6 +207,54 @@ private func fixtureURL(_ name: String) -> URL {
   }
 }
 
+private actor ReloadGate {
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var startedContinuation: CheckedContinuation<Void, Never>?
+  private var started = false
+
+  func wait() async {
+    started = true
+    startedContinuation?.resume()
+    startedContinuation = nil
+    await withCheckedContinuation { continuation = $0 }
+  }
+
+  func waitUntilStarted() async {
+    if started { return }
+    await withCheckedContinuation { startedContinuation = $0 }
+  }
+
+  func resume() {
+    continuation?.resume()
+    continuation = nil
+  }
+}
+
+private final class CountingTranscriptStreamer: TranscriptStreaming, @unchecked Sendable {
+  private let lock = NSLock()
+  private let stream: AsyncThrowingStream<TranscriptStreamEvent, Error>
+  private var calls = 0
+
+  var callCount: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return calls
+  }
+
+  init(stream: AsyncThrowingStream<TranscriptStreamEvent, Error>) {
+    self.stream = stream
+  }
+
+  func transcriptStream(baseURL: URL, session: String, branch: String?)
+    -> AsyncThrowingStream<TranscriptStreamEvent, Error>
+  {
+    lock.lock()
+    calls += 1
+    lock.unlock()
+    return stream
+  }
+}
+
 /// Adapter for scripted streams in model tests.
 struct ScriptedTranscriptStreamer: TranscriptStreaming {
   let stream: AsyncThrowingStream<TranscriptStreamEvent, Error>
@@ -162,17 +268,19 @@ struct ScriptedTranscriptStreamer: TranscriptStreaming {
 
 @Suite struct TranscriptScaleTests {
   @Test func thousandEntryMergeIsLinearAndDeduplicates() {
-    var reassembler = TranscriptHistoryReassembler()
     func measure(_ count: Int) -> Double {
+      var reassembler = TranscriptHistoryReassembler()
       let clock = ContinuousClock()
       let start = clock.now
       for index in 1...count {
         let entry = TranscriptEntry(
-          seq: index, id: "e\(index)", kind: index.isMultiple(of: 2) ? "assistant" : "user",
+          seq: index, id: "n\(count)-e\(index)",
+          kind: index.isMultiple(of: 2) ? "assistant" : "user",
           text: "entry \(index)", branch: nil, complete: true, tool: nil)
         _ = reassembler.merge([entry])
       }
       #expect(reassembler.entries.count == count)
+      #expect(Set(reassembler.entries.compactMap(\.seq)).count == count)
       let elapsed = clock.now - start
       return Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
     }

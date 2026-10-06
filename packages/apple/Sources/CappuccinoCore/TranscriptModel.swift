@@ -27,6 +27,7 @@ public final class TranscriptModel: ObservableObject {
   private var streamTask: Task<Void, Never>?
   private var generation = 0
   private var stopped = false
+  private var resetTask: Task<Void, Never>?
 
   public init(
     session: String, machineURL: URL, streaming: TranscriptStreaming, branch: String?,
@@ -55,6 +56,8 @@ public final class TranscriptModel: ObservableObject {
     stopped = true
     streamTask?.cancel()
     streamTask = nil
+    resetTask?.cancel()
+    resetTask = nil
   }
 
   /// App lifecycle: foreground-only streaming per the architecture.
@@ -87,7 +90,6 @@ public final class TranscriptModel: ObservableObject {
   }
 
   private func apply(_ event: TranscriptStreamEvent) {
-    print("DBG-MODEL apply:", event)
     switch event {
     case .open:
       phase = .streaming
@@ -98,28 +100,38 @@ public final class TranscriptModel: ObservableObject {
     case .reset(let newGeneration):
       guard newGeneration != generation else { return }
       generation = newGeneration
+      let previousEntries = entries
+      let previousReassembler = reassembler
       entries = []
       reassembler.reset()
-      // Durable reload then a fresh stream: failed reload keeps history and
-      // the banner (runStream is restarted by the caller below).
-      Task { [weak self] in
-        await self?.durableReloadThenRestart()
+      streamTask?.cancel()
+      streamTask = nil
+      resetTask?.cancel()
+      resetTask = Task { [weak self] in
+        await self?.durableReloadThenRestart(
+          generation: newGeneration, entries: previousEntries,
+          reassembler: previousReassembler)
       }
     }
   }
 
-  private func durableReloadThenRestart() async {
-    let previous = entries
+  private func durableReloadThenRestart(
+    generation resetGeneration: Int, entries previousEntries: [TranscriptEntry],
+    reassembler previousReassembler: TranscriptHistoryReassembler
+  ) async {
     do {
       if let durableReload {
         try await durableReload(machineURL, session)
       }
-      stop()
+      guard !Task.isCancelled, !stopped, generation == resetGeneration else { return }
+      resetTask = nil
       start()
     } catch {
-      // Failed durable reload: keep the history, show the banner.
-      entries = previous
+      guard !Task.isCancelled, !stopped, generation == resetGeneration else { return }
+      entries = previousEntries
+      reassembler = previousReassembler
       phase = .failed(message: "Durable transcript reload failed; history kept.")
+      resetTask = nil
     }
   }
 }

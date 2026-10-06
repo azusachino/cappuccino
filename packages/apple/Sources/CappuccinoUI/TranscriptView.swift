@@ -19,10 +19,6 @@ public struct TranscriptView: View {
 
   public var body: some View {
     Group {
-      // TEMP DEBUG (slice verification) — remove before merge.
-      Text("DBG entries=\(model.entries.count)")
-        .font(.caption2)
-        .accessibilityIdentifier("dbg-entries")
       switch model.phase {
       case .loading:
         ProgressView("Connecting to stream…")

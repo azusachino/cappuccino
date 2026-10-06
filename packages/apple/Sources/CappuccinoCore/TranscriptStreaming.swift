@@ -69,9 +69,9 @@ extension BridgeClient: TranscriptStreaming {
 /// backfill by seq), seq jumps become a visible gap placeholder (never
 /// silent), and a reset clears the stream.
 ///
-/// Amortized cost: in-order appends are O(1); out-of-order backfills insert
-/// by binary search (O(log n) search + O(n) shift, rare by construction).
-/// No full-history copy occurs per append.
+/// In-order appends are O(1) at the reassembler level; publishing `entries`
+/// through the model may trigger Swift Array copy-on-write. Backfills scan and
+/// shift O(n) entries and are expected to be rare.
 public struct TranscriptHistoryReassembler: Sendable {
   private(set) public var entries: [TranscriptEntry] = []
   private(set) public var lastSeq: Int?
