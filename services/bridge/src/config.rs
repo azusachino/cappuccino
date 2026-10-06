@@ -4,7 +4,8 @@
 //! `enabled: true` is rejected until an authenticator exists, so the config
 //! format never has to change when one lands.
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use serde_json::Value;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -30,10 +31,46 @@ pub struct AuthConfig {
     pub options: serde_json::Map<String, serde_json::Value>,
 }
 
+/// Strict knob: accepted values are true/false (JSON booleans) or the
+/// strings "0"/"false"/"no"/"off"/"true" (case-insensitive). Anything else is
+/// a parse error — never a silent default.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StrictBool(pub bool);
+
+impl<'de> Deserialize<'de> for StrictBool {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        match value {
+            Value::Bool(flag) => Ok(StrictBool(flag)),
+            Value::String(text) => match text.trim().to_lowercase().as_str() {
+                "true" => Ok(StrictBool(true)),
+                "0" | "false" | "no" | "off" => Ok(StrictBool(false)),
+                other => Err(serde::de::Error::custom(format!(
+                    "invalid serve.auto_apply value '{other}' — accepted: true, 0, false, no, off (case-insensitive)"
+                ))),
+            },
+            other => Err(serde::de::Error::custom(format!(
+                "invalid serve.auto_apply value {other} — accepted: true, 0, false, no, off (case-insensitive)"
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct ServeConfig {
-    #[serde(default = "default_true")]
-    pub auto_apply: bool,
+    #[serde(default, deserialize_with = "deserialize_default_true")]
+    pub auto_apply: StrictBool,
+}
+
+fn deserialize_default_true<'de, D>(deserializer: D) -> Result<StrictBool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let option = Option::<StrictBool>::deserialize(deserializer)?;
+    Ok(option.unwrap_or(StrictBool(true)))
 }
 
 fn default_true() -> bool {
@@ -104,7 +141,7 @@ impl BridgeConfig {
                     config.auth = auth;
                 }
                 if let Some(serve) = file.serve {
-                    config.serve_auto_apply = serve.auto_apply;
+                    config.serve_auto_apply = serve.auto_apply.0;
                 }
             }
         }
@@ -184,5 +221,55 @@ mod tests {
         let error =
             BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None).unwrap_err();
         assert!(error.contains("reserved"));
+    }
+}
+
+#[cfg(test)]
+mod knob_tests {
+    use super::*;
+
+    fn config_file(content: &str) -> String {
+        // Unique per call: these tests run in parallel within one process.
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "cap-knob-{}-{unique}-{}",
+            std::process::id(),
+            content.len()
+        ));
+        std::fs::write(&path, content).unwrap();
+        path.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn accepted_disable_values_parse_false_case_insensitively() {
+        for text in ["0", "false", "no", "off", "FALSE", "No", "OFF"] {
+            let path = config_file(&format!(r#"{{"serve": {{"auto_apply": "{text}"}}}}"#));
+            let config = BridgeConfig::load_from(Some(&path), None, None, None).unwrap();
+            assert!(!config.serve_auto_apply, "string '{text}' must disable auto-apply");
+        }
+    }
+
+    #[test]
+    fn true_and_bool_true_parse_enabled() {
+        let a = config_file(r#"{"serve": {"auto_apply": true}}"#);
+        let b = config_file(r#"{"serve": {"auto_apply": "true"}}"#);
+        assert!(BridgeConfig::load_from(Some(&a), None, None, None).unwrap().serve_auto_apply);
+        assert!(BridgeConfig::load_from(Some(&b), None, None, None).unwrap().serve_auto_apply);
+    }
+
+    #[test]
+    fn invalid_string_is_a_parse_error_not_a_silent_default() {
+        let path = config_file(r#"{"serve": {"auto_apply": "maybe"}}"#);
+        let error = BridgeConfig::load_from(Some(&path), None, None, None).unwrap_err();
+        assert!(error.contains("invalid serve.auto_apply value 'maybe'"), "{error}");
+        assert!(error.contains("0, false, no, off"));
+    }
+
+    #[test]
+    fn invalid_type_is_a_parse_error() {
+        let path = config_file(r#"{"serve": {"auto_apply": 3}}"#);
+        let error = BridgeConfig::load_from(Some(&path), None, None, None).unwrap_err();
+        assert!(error.contains("invalid serve.auto_apply"));
     }
 }

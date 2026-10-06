@@ -103,16 +103,41 @@ public struct URLSessionWebSocketConnector: BridgeWebSocketConnecting {
   public init() {}
 
   public func connect(url: URL) async throws -> BridgeWebSocket {
-    guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-      throw DaemonClientError.protocolError("stream URL is malformed")
-    }
-    components.scheme = "ws"
-    guard let wsURL = components.url else {
-      throw DaemonClientError.protocolError("stream URL is malformed")
-    }
+    let wsURL = try BridgeStream.endpointURL(from: url, session: nil)
     let task = URLSession.shared.webSocketTask(with: wsURL)
     task.resume()
     return URLSessionWebSocketConnection(task: task)
+  }
+}
+
+public enum BridgeStream {
+  /// Maps the machine's HTTP(S) base URL + session to the stream endpoint,
+  /// deriving the WebSocket scheme from the transport security: http→ws,
+  /// https→wss. Any other (or missing) scheme is a configuration mistake and
+  /// throws — a TLS tailnet endpoint must never be silently downgraded.
+  public static func endpointURL(from machineURL: URL, session: String?) throws -> URL {
+    guard var components = URLComponents(url: machineURL, resolvingAgainstBaseURL: false),
+      let scheme = components.scheme?.lowercased()
+    else {
+      throw DaemonClientError.protocolError("stream URL is malformed")
+    }
+    switch scheme {
+    case "http":
+      components.scheme = "ws"
+    case "https":
+      components.scheme = "wss"
+    default:
+      throw DaemonClientError.protocolError(
+        "stream URL scheme must be http or https, got '\(scheme)'")
+    }
+    components.path = "/api/stream"
+    if let session {
+      components.queryItems = [URLQueryItem(name: "session", value: session)]
+    }
+    guard let endpoint = components.url else {
+      throw DaemonClientError.protocolError("stream URL is malformed")
+    }
+    return endpoint
   }
 }
 
@@ -158,10 +183,8 @@ extension BridgeClient {
       let task = Task {
         var reassembler = TranscriptReassembler()
         do {
-          var wsURL = url
-          wsURL.append(path: "/api/stream")
-          wsURL.append(queryItems: [URLQueryItem(name: "session", value: session)])
-          let socket = try await connector.connect(url: wsURL)
+          let endpoint = try BridgeStream.endpointURL(from: url, session: session)
+          let socket = try await connector.connect(url: endpoint)
           defer { Task { await socket.close() } }
           while true {
             guard let text = try await socket.receiveText() else {

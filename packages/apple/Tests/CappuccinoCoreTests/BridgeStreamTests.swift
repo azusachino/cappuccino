@@ -40,12 +40,79 @@ final class FakeBridgeWebSocket: BridgeWebSocket, @unchecked Sendable {
 
 struct FakeBridgeConnector: BridgeWebSocketConnecting {
   let socket: FakeBridgeWebSocket
+  var recordedURL: URL?
 
   func connect(url: URL) async throws -> BridgeWebSocket {
     #expect(url.path.hasSuffix("/api/stream"))
     #expect(url.query?.contains("session=cap-spike-agent") == true)
     return socket
   }
+}
+
+@Suite struct WebSocketSchemeTests {
+  @Test func httpMapsToWS() throws {
+    let endpoint = try BridgeStream.endpointURL(
+      from: URL(string: "http://127.0.0.1:7392")!, session: "s")
+    #expect(endpoint.scheme == "ws")
+    #expect(endpoint.host == "127.0.0.1")
+    #expect(endpoint.port == 7392)
+    #expect(endpoint.path == "/api/stream")
+    #expect(endpoint.query?.contains("session=s") == true)
+  }
+
+  @Test func httpsMapsToWSS() throws {
+    let endpoint = try BridgeStream.endpointURL(
+      from: URL(string: "https://host.tailnet.ts.net")!, session: "cap-spike-agent")
+    #expect(endpoint.scheme == "wss")
+    #expect(endpoint.host == "host.tailnet.ts.net")
+    #expect(endpoint.path == "/api/stream")
+    #expect(endpoint.query?.contains("session=cap-spike-agent") == true)
+  }
+
+  @Test func unsupportedOrMissingSchemeThrowsProtocolError() {
+    #expect(
+      throws: DaemonClientError.protocolError(
+        "stream URL scheme must be http or https, got 'ftp'")
+    ) {
+      try BridgeStream.endpointURL(from: URL(string: "ftp://127.0.0.1:7392")!, session: nil)
+    }
+    #expect(throws: DaemonClientError.protocolError("stream URL is malformed")) {
+      try BridgeStream.endpointURL(from: URL(string: "no-scheme")!, session: nil)
+    }
+  }
+}
+
+final class URLBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var url: URL?
+
+  func set(_ value: URL) {
+    lock.lock()
+    defer { lock.unlock() }
+    url = value
+  }
+
+  var value: URL? {
+    lock.lock()
+    defer { lock.unlock() }
+    return url
+  }
+}
+
+final class RecordURLConnector: BridgeWebSocketConnecting {
+  let box = URLBox()
+
+  var recordedURL: URL? { box.value }
+
+  func connect(url: URL) async throws -> BridgeWebSocket {
+    box.set(url)
+    return NoFramesSocket()
+  }
+}
+
+struct NoFramesSocket: BridgeWebSocket {
+  func receiveText() async throws -> String? { nil }
+  func close() async {}
 }
 
 private func entriesJSON(_ entries: [String]) -> String {
