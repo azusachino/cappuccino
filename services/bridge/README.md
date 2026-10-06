@@ -122,6 +122,31 @@ sh scripts/bridge.sh stop
 With `CAPP_BRIDGE_SERVE_AUTO_APPLY=0` the lifecycle never invokes `tailscale
 serve`; it prints the manual command only.
 
+## Design for extension
+
+- **Config layer** (`src/config.rs`): tailnet-only MVP defaults
+  (`127.0.0.1:7392`), optional JSON config file
+  (`CAPP_BRIDGE_CONFIG` or `~/.config/cappuccino-bridge/config.json`), then
+  env overrides. The `auth` section is reserved (unset = no-auth MVP;
+  `enabled: true` is rejected at startup).
+- **Middleware hook**: `auth_middleware` in `main.rs` is the single slot where
+  an authenticator layers in — endpoint handlers never change.
+- **Composable modules** (`src/modules/`): agents/transcript/stream each
+  contribute a router; approvals (#9) and push (#11) bolt on as new modules
+  plus new manifest actions.
+
+## Dependencies
+
+Deliberately none beyond the Rust toolchain: there is no herdr client crate
+(herdr is reached over its socket protocol — the request/response shapes are
+pinned by the committed `fixtures/herdr-api.schema.json`, captured from the
+installed herdr 0.9.3 with `herdr api schema --json`) and no tailscale crate
+(exposure is the `tailscale` CLI's serve/status subcommands only, driven from
+`scripts/bridge.sh`). Revisit only if upstream publishes a maintained client
+crate or the bridge needs Tailscale state beyond serve apply/status. Bridge
+tests validate our request shapes against that committed schema, so a herdr
+protocol bump surfaces in `cargo test`, not on a live machine.
+
 ## Run (quick)
 
 ```text
