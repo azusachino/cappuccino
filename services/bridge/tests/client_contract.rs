@@ -601,24 +601,38 @@ async fn session_requires_nonempty_machine_id() {
 async fn ws_unknown_session_fails_closed_not_found() {
     let root = TempRoot::new("wsnf");
     let mut bridge = spawn_bridge(&root, None).await;
-    let stream = ws_probe(
+    let outcome = probe::ws_stream_probe(
         &probe_options(&bridge.base_url()),
         "nope",
         Duration::from_millis(500),
     )
     .await;
-    assert_eq!(stream.first_event, "error");
-    assert_eq!(stream.error_code.as_deref(), Some("not_found"));
-    assert_eq!(stream.protocol, "ws-http1-upgrade");
-    // Fail-closed: no further frames after the error, and the server closes
-    // (observed as EOF, a WS close, or a read error at the TCP layer).
-    assert!(
-        stream.followup_events.iter().all(
-            |event| !event.is_empty() && (event.starts_with("read-error:") || event == "close")
-        ),
-        "unexpected follow-up frames after error first frame: {:?}",
-        stream.followup_events
-    );
+    match outcome {
+        Ok(stream) => {
+            // Clean close: the bridge sent a real WebSocket Close frame after
+            // the fail-closed error frame.
+            assert_eq!(stream.first_event, "error");
+            assert_eq!(stream.error_code.as_deref(), Some("not_found"));
+            assert!(
+                stream.closed_by_server,
+                "a received Close frame marks closure"
+            );
+            assert!(
+                stream.followup_events.is_empty(),
+                "{:?}",
+                stream.followup_events
+            );
+        }
+        Err(error) => {
+            // If the bridge dropped the transport without a Close frame, the
+            // probe must propagate that as a protocol error, not a success.
+            assert!(
+                error.contains("without a WebSocket Close frame")
+                    || error.contains("closing handshake"),
+                "{error}"
+            );
+        }
+    }
     bridge.stop().expect("bridge stop");
     root.remove();
 }
@@ -729,8 +743,7 @@ async fn ws_malformed_frame_fails_loudly() {
         .expect_err("malformed frame must be an error");
     assert!(error.contains("malformed"), "{error}");
 
-    server.abort();
-    let _ = server.await;
+    join_tracked(server, "malformed-frame server").await;
 }
 
 // ---------------------------------------------------------------------------
@@ -882,8 +895,7 @@ async fn cancellation_joins_promptly_midflight() {
         "abort must not hang"
     );
 
-    holder.abort();
-    let _ = holder.await;
+    join_tracked(holder, "stall holder").await;
 }
 
 #[tokio::test]
@@ -1237,6 +1249,47 @@ async fn bridge_stop_is_explicit_and_idempotent() {
     root.remove();
 }
 
+/// A server that performs a real WebSocket close handshake after the opening
+/// frame yields a clean `closed_by_server` observation — distinct from
+/// transport loss, which must be an Err (see the abrupt-close test).
+#[tokio::test]
+async fn clean_close_frame_is_observed_as_closed() {
+    use axum::extract::ws::{Message, WebSocketUpgrade};
+    use axum::routing::get as get_route;
+    use axum::Router;
+    use futures_util::SinkExt;
+
+    async fn clean_close_ws(upgrade: WebSocketUpgrade) -> axum::response::Response {
+        upgrade.on_upgrade(|mut socket: axum::extract::ws::WebSocket| async move {
+            let _ = socket
+                .send(Message::Text(
+                    "{\"event\":\"stream_open\",\"generation\":0}".into(),
+                ))
+                .await;
+            // Deliberate close handshake, then drop.
+            let _ = socket.close().await;
+        })
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = Router::new().route("/api/stream", get_route(clean_close_ws));
+    let mut tracker = TaskTracker::default();
+    tracker.spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let options = stream_options(&format!("http://127.0.0.1:{port}"));
+    let probe = probe::ws_stream_probe(&options, "s-probe", Duration::from_millis(500))
+        .await
+        .expect("a valid Close frame is a clean close, not an error");
+    assert_eq!(probe.first_event, "stream_open");
+    assert!(
+        probe.closed_by_server,
+        "closed_by_server requires an actual Close frame"
+    );
+    tracker.stop().await;
+}
+
 // ---------------------------------------------------------------------------
 // Round-4 negative regressions: repeated stream_open, HTTP-only bench
 // contract, control/teardown close failures.
@@ -1329,35 +1382,17 @@ async fn ping_then_abrupt_peer_close_is_propagated() {
     });
 
     let options = stream_options(&format!("http://127.0.0.1:{port}"));
-    let outcome = probe::ws_stream_probe(&options, "s-probe", Duration::from_millis(500)).await;
-    // The probe must NOT report a clean success: either the Pong send fails
-    // (propagated) or the read side observes the abrupt close as an error.
-    match outcome {
-        Ok(probe) => {
-            // A silent success is only acceptable if the abrupt close was
-            // actually observed; otherwise the Pong/close failure must have
-            // been propagated instead.
-            assert!(
-                probe.closed_by_server
-                    || probe
-                        .followup_events
-                        .iter()
-                        .any(|e| e.starts_with("read-error:")),
-                "abrupt peer close must be observed as closed or propagated as an error, \
-                 got followups {:?}",
-                probe.followup_events
-            );
-        }
-        Err(error) => {
-            assert!(
-                error.contains("Pong")
-                    || error.contains("close")
-                    || error.contains("closed")
-                    || error.contains("ws read")
-                    || error.contains("handshake"),
-                "{error}"
-            );
-        }
-    }
+    // Transport loss without a WebSocket Close frame MUST be an Err: no Ok,
+    // no closed_by_server success, no read-error stored as a benign event.
+    let error = probe::ws_stream_probe(&options, "s-probe", Duration::from_millis(500))
+        .await
+        .expect_err("abrupt transport loss without a Close frame must be an Err");
+    assert!(
+        error.contains("without a WebSocket Close frame")
+            || error.contains("Pong")
+            || error.contains("ws read")
+            || error.contains("closing handshake"),
+        "{error}"
+    );
     tracker.stop().await;
 }

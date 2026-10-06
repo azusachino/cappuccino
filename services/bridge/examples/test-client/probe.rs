@@ -474,8 +474,12 @@ pub async fn ws_stream_probe(
             match tokio::time::timeout(remaining, read.next()).await {
                 Err(_) => break, // budget exhausted: bounded stop, not an error
                 Ok(None) => {
-                    probe.closed_by_server = true;
-                    break;
+                    // EOF without a received WebSocket Close frame is a
+                    // transport loss, never a clean close.
+                    let _ = SinkExt::close(&mut write).await;
+                    return Err(
+                        "server closed the transport without a WebSocket Close frame".into(),
+                    );
                 }
                 Ok(Some(Ok(Message::Text(text)))) => {
                     if probe.first_event != "stream_open" {
@@ -550,10 +554,10 @@ pub async fn ws_stream_probe(
                     return Err("unexpected raw frame".into());
                 }
                 Ok(Some(Err(error))) => {
-                    // Server loss mid-stream: recorded, the first-frame
-                    // contract was already satisfied.
-                    probe.followup_events.push(format!("read-error: {error}"));
-                    break;
+                    // Server loss mid-stream: propagated, not stored as a
+                    // benign follow-up event.
+                    let _ = SinkExt::close(&mut write).await;
+                    return Err(format!("ws read error mid-stream: {error}"));
                 }
             }
         }

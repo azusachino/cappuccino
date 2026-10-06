@@ -87,6 +87,23 @@ fn open_fd_targets() -> Vec<String> {
     out
 }
 
+/// Abort and join one tracked task under the teardown deadline. A panicked
+/// task is surfaced; expected cancellation (`is_cancelled`) is accepted. No
+/// join error is swallowed.
+async fn join_tracked(task: tokio::task::JoinHandle<()>, label: &str) {
+    task.abort();
+    let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
+    match tokio::time::timeout_at(deadline, task).await {
+        Err(_) => panic!("{label} task did not join before the teardown deadline"),
+        Ok(Err(join_error)) => {
+            if !join_error.is_cancelled() {
+                panic!("{label} task panicked: {join_error}");
+            }
+        }
+        Ok(Ok(())) => {}
+    }
+}
+
 /// Count of open file descriptors for this process (macOS /dev/fd,
 /// Linux /proc/self/fd).
 fn open_fd_count() -> Option<usize> {
@@ -603,8 +620,7 @@ async fn scenario_recovery_error_cancel_disconnect() {
         worst < Duration::from_secs(2),
         "cancellation join must be prompt"
     );
-    holder.abort();
-    let _ = holder.await;
+    join_tracked(holder, "scenario holder").await;
     held.lock().unwrap().clear();
     assert_exact_recovery("cancel", baseline, open_fd_count().expect("fds"));
 
@@ -626,8 +642,7 @@ async fn scenario_recovery_error_cancel_disconnect() {
             "disconnect must fail loudly"
         );
     }
-    holder.abort();
-    let _ = holder.await;
+    join_tracked(holder, "scenario holder").await;
     assert_exact_recovery("disconnect", baseline, open_fd_count().expect("fds"));
 }
 
