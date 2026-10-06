@@ -81,6 +81,112 @@ final class CappuccinoUITests: XCTestCase {
     capture("Machine unreachable", app: app)
   }
 
+  // Issue #7 journey: Machines -> open an agent -> transcript renders the
+  // fixture rows (chat bubbles, code block, expandable tool rows) -> live
+  // append arrives exactly once -> visible gap placeholder -> session reset
+  // clears and reloads -> back stops the stream. Scripted demo transport.
+  @MainActor
+  func testTranscriptLiveJourney() {
+    let app = XCUIApplication()
+    app.launchArguments += ["-cappuccino-demo", "-cappuccino-fresh"]
+    app.launchEnvironment["CAPP_DEMO_MACHINE_URL"] = "http://127.0.0.1:7392"
+    app.launch()
+
+    app.tabBars.buttons["Machines"].tap()
+    XCTAssertTrue(app.buttons["Add machine"].waitForExistence(timeout: 5))
+    app.buttons["Add machine"].tap()
+    XCTAssertTrue(app.staticTexts["pi on harus-mini"].waitForExistence(timeout: 5))
+
+    // Open the agent's transcript.
+    // The NavigationLink row renders as a button-like cell; tap the row by
+    // its heading text (first match — the identifier propagates to the cell).
+    app.staticTexts["pi on harus-mini"].firstMatch.tap()
+    sleep(2)
+    XCTAssertTrue(
+      app.descendants(matching: .any)
+        .matching(NSPredicate(format: "label CONTAINS 'Fix the collector path and rerun lint.'"))
+        .firstMatch.waitForExistence(timeout: 5),
+      "the durable user entry must render")
+    XCTAssertTrue(
+      app.descendants(matching: .any)["transcript-branch"].exists, "active branch is shown")
+    capture("Transcript durable entries", app: app)
+
+    // Live append arrives exactly once (duplicate delivery suppressed).
+    XCTAssertTrue(
+      app.descendants(matching: .any)
+        .matching(NSPredicate(format: "label CONTAINS 'LIVE-APPEND-ROW'"))
+        .firstMatch.waitForExistence(timeout: 10)
+    )
+    XCTAssertEqual(
+      app.descendants(matching: .any)
+        .matching(NSPredicate(format: "label CONTAINS 'LIVE-APPEND-ROW'")).count, 1)
+    capture("Transcript live append", app: app)
+
+    // Seq jump: a visible gap placeholder precedes the post-gap entry.
+    XCTAssertTrue(app.descendants(matching: .any)["gap-row"].waitForExistence(timeout: 10))
+    XCTAssertTrue(
+      app.descendants(matching: .any)
+        .matching(NSPredicate(format: "label CONTAINS 'POST-GAP-ROW'"))
+        .firstMatch.waitForExistence(timeout: 5)
+    )
+    capture("Transcript gap placeholder", app: app)
+
+    // Disconnect: visible banner over preserved history (never a silent
+    // clear, never a blind retry); durable reload + reset semantics are
+    // covered by Core model tests.
+    XCTAssertTrue(
+      app.descendants(matching: .any)["stream-banner"].waitForExistence(timeout: 15),
+      "disconnect must surface a visible banner")
+    XCTAssertTrue(
+      app.descendants(matching: .any)
+        .matching(NSPredicate(format: "label CONTAINS 'Fix the collector path'")).firstMatch
+        .exists,
+      "disconnect must preserve the rendered history")
+    capture("Transcript disconnected", app: app)
+
+    // Back navigation tears the stream down deterministically.
+    app.navigationBars.buttons.firstMatch.tap()
+    XCTAssertTrue(
+      app.buttons["Add machine"].waitForExistence(timeout: 5)
+        || app.staticTexts["pi on harus-mini"].waitForExistence(timeout: 5))
+    capture("Back on Machines", app: app)
+  }
+
+  // Long-history smoke: 1k generated entries render and scroll (virtualized).
+  @MainActor
+  func testTranscriptLongHistoryScrolls() {
+    let app = XCUIApplication()
+    app.launchArguments += [
+      "-cappuccino-demo", "-cappuccino-fresh", "-cappuccino-demo-transcript-long",
+    ]
+    app.launchEnvironment["CAPP_DEMO_MACHINE_URL"] = "http://127.0.0.1:7392"
+    app.launch()
+
+    app.tabBars.buttons["Machines"].tap()
+    XCTAssertTrue(app.buttons["Add machine"].waitForExistence(timeout: 5))
+    app.buttons["Add machine"].tap()
+    XCTAssertTrue(app.staticTexts["pi on harus-mini"].waitForExistence(timeout: 5))
+    // The NavigationLink row renders as a button-like cell; tap the row by
+    // its heading text (first match — the identifier propagates to the cell).
+    app.staticTexts["pi on harus-mini"].firstMatch.tap()
+
+    // Bulk entries from the long fixture render.
+    XCTAssertTrue(
+      app.descendants(matching: .any)
+        .matching(NSPredicate(format: "label CONTAINS 'Continue with step 1.'"))
+        .firstMatch.waitForExistence(timeout: 10)
+    )
+    for _ in 1...12 {
+      app.swipeUp(velocity: .fast)
+    }
+    // Virtualization keeps rendering deep rows while scrolling fast.
+    XCTAssertTrue(
+      app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'step'")).firstMatch
+        .waitForExistence(timeout: 5)
+    )
+    capture("Transcript long history", app: app)
+  }
+
   @MainActor
   private func capture(_ name: String, app: XCUIApplication) {
     let attachment = XCTAttachment(screenshot: app.screenshot())

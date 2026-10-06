@@ -44,6 +44,15 @@ public struct BridgeClient: DaemonServing {
     }
   }
 
+  /// Durable reload probe for session resets: transport/HTTP failures throw
+  /// (the caller keeps history and shows the banner); a clean
+  /// `available: false` answer is a normal no-op (this machine has no
+  /// canonical pi transcript to reload from).
+  public func fetchDurableReload(base url: URL, session: String) async throws {
+    let endpoint = url.appendingPathComponent("/api/transcript?session=\(session)")
+    _ = try await get(endpoint)
+  }
+
   private func get(_ url: URL) async throws -> [String: Any] {
     var request = URLRequest(url: url)
     request.timeoutInterval = timeout

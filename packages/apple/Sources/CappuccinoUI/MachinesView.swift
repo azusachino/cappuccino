@@ -22,10 +22,18 @@ public final class MachinesModel: ObservableObject {
   @Published public var machineURLInput = ""
 
   let daemon: DaemonServing
+  let transcriptStreaming: TranscriptStreaming
+  let durableReload: (@Sendable (URL, String) async throws -> Void)?
   let defaults: UserDefaults
 
-  public init(daemon: DaemonServing, defaults: UserDefaults = .standard) {
+  public init(
+    daemon: DaemonServing, transcriptStreaming: TranscriptStreaming,
+    durableReload: (@Sendable (URL, String) async throws -> Void)? = nil,
+    defaults: UserDefaults = .standard
+  ) {
     self.daemon = daemon
+    self.transcriptStreaming = transcriptStreaming
+    self.durableReload = durableReload
     self.defaults = defaults
     let fresh = ProcessInfo.processInfo.arguments.contains("-cappuccino-fresh")
     if !fresh, let saved = defaults.string(forKey: Self.baseURLKey), !saved.isEmpty {
@@ -41,6 +49,15 @@ public final class MachinesModel: ObservableObject {
       return url
     }
     return nil
+  }
+
+  /// The URL of the connected machine, for opening transcripts.
+  public var connectedURL: URL? { machineURL }
+
+  /// Whether a machine is connected (transcripts open only then).
+  public var isConnected: Bool {
+    if case .connected = phase { return true }
+    return false
   }
 
   /// Re-lists agents for the stored machine. Failures are visible and keep
@@ -143,33 +160,25 @@ public struct MachinesView: View {
         .accessibilityIdentifier("machine-url")
       Section("Agents") {
         ForEach(model.agents) { agent in
-          VStack(alignment: .leading, spacing: 4) {
-            HStack {
-              Text(agent.label)
-                .font(.headline)
-                .accessibilityIdentifier("agent-label-\(agent.sessionID)")
-              Spacer()
-              if agent.working {
-                Image(systemName: "circle.dotted")
-                  .foregroundStyle(.orange)
-                  .accessibilityLabel("Working")
-              }
-            }
-            Text(agent.sessionID)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            if let branch = agent.branch {
-              Label(branch, systemImage: "arrow.triangle.branch")
-                .font(.caption)
-                .accessibilityIdentifier("agent-branch-\(agent.sessionID)")
+          NavigationLink {
+            if let machineURL = model.machineURL {
+              TranscriptView(
+                model: TranscriptModel(
+                  session: agent.sessionID,
+                  machineURL: machineURL,
+                  streaming: model.transcriptStreaming,
+                  branch: agent.branch,
+                  durableReload: model.durableReload)
+              )
             } else {
-              Label("No branch", systemImage: "questionmark.folder")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("agent-branch-\(agent.sessionID)")
+              ContentUnavailableView(
+                "No machine connected",
+                systemImage: "desktopcomputer")
             }
+          } label: {
+            agentRow(agent)
           }
-          .padding(.vertical, 2)
+          .accessibilityIdentifier("open-agent-\(agent.sessionID)")
         }
         if model.agents.isEmpty {
           Text("No agents running on this machine.")
@@ -186,6 +195,36 @@ public struct MachinesView: View {
       }
     }
     .refreshable { await model.refresh() }
+  }
+
+  private func agentRow(_ agent: AgentRow) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack {
+        Text(agent.label)
+          .font(.headline)
+          .accessibilityIdentifier("agent-label-\(agent.sessionID)")
+        Spacer()
+        if agent.working {
+          Image(systemName: "circle.dotted")
+            .foregroundStyle(.orange)
+            .accessibilityLabel("Working")
+        }
+      }
+      Text(agent.sessionID)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      if let branch = agent.branch {
+        Label(branch, systemImage: "arrow.triangle.branch")
+          .font(.caption)
+          .accessibilityIdentifier("agent-branch-\(agent.sessionID)")
+      } else {
+        Label("No branch", systemImage: "questionmark.folder")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .accessibilityIdentifier("agent-branch-\(agent.sessionID)")
+      }
+    }
+    .padding(.vertical, 2)
   }
 }
 
