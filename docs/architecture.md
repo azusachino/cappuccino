@@ -1,24 +1,46 @@
-# Cappuccino MVP design statement (2026-10-06 — implementation contract for this issue)
+# Cappuccino architecture and implementation boundary
 
-One sentence: native phone clients read live agent state from a tiny Rust bridge that runs inside each machine's existing herdr server as a plugin; Tailscale is the only network and the only auth.
+Native phone clients reach selected machine-local Herdr APIs through a separate Rust HTTP/WebSocket transport facade. Herdr and Pi, not Cappuccino, own agent and session lifetime.
 
-## Deployed view
+## Runtime pieces
 
-- Two herdr machines (macOS + Ubuntu), identical setup: `herdr plugin link` installs the bridge; plugin [[startup]] builds/launches the binary per herdr start; status action applies `tailscale serve --bg --https=443 http://127.0.0.1:<port>` automatically (idempotent, manual fallback printed only if Tailscale CLI unavailable or `serve.auto_apply=false`; one-time `tailscale set --operator=$USER` prerequisite documented).
-- Phone: native SwiftUI app; Machines = per-machine bridge URLs (defaults-stored, editable); device Tailscale membership is the only auth; app contains zero auth code; VPN-off renders existing visible unreachable states.
+- **Herdr (0.9.3 in the verified environment):** owns panes, agent processes, sessions and its local socket API. Its plugin manifest runs commands; the bridge is not loaded into Herdr's process or into an agent.
+- **Cappuccino bridge (`services/bridge`):** a standalone Rust binary linked as a Herdr plugin. Herdr's one-shot startup hook and actions invoke the binary directly. It starts and manages a separate loopback HTTP/WebSocket server, which calls the local Herdr socket and exposes the routes below to the native clients. It is a phone-reachable facade, not an agent runtime or a replacement for Herdr's APIs.
+- **Phone:** native SwiftUI/Compose clients call the bridge over the private tailnet. The bridge binds to loopback, has no auth by the owner's decision, and may be exposed using Tailscale Serve. Public ingress is out of scope.
+- **Reference daemon:** `services/daemon` remains frozen historical/reference work; it is not the current product runtime.
 
-### Bridge (single Rust binary; tokio + axum + serde; herdr RPC over HERDR_SOCKET UnixStream)
+## Bridge routes currently implemented
 
-- Config layer: file + env overrides — port, bind (default 127.0.0.1), data dir, reserved `auth` section (unset by default = no-auth MVP).
-- Middleware chain position reserved for a future authenticator; MVP chain is empty.
-- Router with composable modules: `GET /api/session`, `GET /api/agents` (herdr agent.list RPC; exact parity incl. unnamed panes via pane_id fallback), `GET /api/transcript` (issue #7: pi `agent_session` → canonical store containment validation), `WS /api/stream` (pane-line appends; content-diff reconciliation; idempotent entry ids; no duplicates on reconnect).
-- Plugin manifest: declarative; [[build]] cargo build --release; [[startup]] runs binary with HERDR_SOCKET; actions: start/stop/status; status prints tailnet URL and applies serve when needed.
-- Non-goals (MVP): auth/token, public/beyond-tailnet exposure, approvals, delivery, push. The transcripts UI is NOT a non-goal: it is assigned to issue #7 and consumes the `/api/transcript` + `/api/stream` endpoints.
+- `GET /api/session`: bridge reachability and machine identity.
+- `GET /api/agents`: maps Herdr `agent.list` metadata, including unnamed panes.
+- `GET /api/transcript`: resolves the Herdr-reported Pi session path and fails closed unless it is inside the canonical Pi session store.
+- `WS /api/stream`: exposes the read-only pane-line reconciliation stream.
 
-### Slice mapping
+The bridge currently has **no prompt-delivery route**. These read paths do not control agent lifetime, invoke Pi queue APIs, or prove that a phone transcript matches a live canonical session.
 
-## 7 transcript UI consumes /api/transcript + stream; #8 delivery adds pane-input module; #9 approvals adds typed-card relay; #12 Android consumes same API
+## Herdr input API and delivery boundary
 
-### Frozen history
+The installed Herdr 0.9.3 API includes `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys`:
 
-services/daemon = reference only; SSH-exec pivot superseded; herdr-web-ui = design prior art (refs clone 4964293; study, never import).
+- `agent.prompt` writes text and Enter to the recognized agent's PTY. Herdr reports successful submission after the PTY write; its optional `wait` observes lifecycle state, not a correlated Pi queue receipt. When the target is already working, completion of that active turn can satisfy the wait.
+- `agent.read` returns terminal output; `agent.get` returns agent metadata/lifecycle state; `agent.wait` waits for lifecycle states. `agent.send-keys` validates and writes logical terminal keys. None takes an explicit Nudge/Follow-up delivery kind or supplies a Pi-queue acceptance receipt.
+- A task-owned disposable Pi runtime received one idle synthetic prompt and one synthetic prompt while its shell command was running. The observed responses were `CAP-HERDR-IDLE-ACK`, `CAP-HERDR-WORKING-MARKER`, then `CAP-HERDR-SECOND-MARKER`; this proves those harmless submissions produced visible responses in that session, not durable queue acceptance, a delivery kind, or a receipt contract.
+
+Pi's installed RPC documentation separately describes queue-specific `steer` and `follow_up` methods. Herdr's `agent.prompt` schema does not select between them. Owner acceptance defines `confirmed` as Pi acceptance of the requested queue operation and an ambiguous outcome as final `unresolved` with no replay. Those semantics are accepted contract, not behavior Herdr currently exposes: do not label PTY submission as Nudge, Follow-up, `sent`, or `confirmed`. The distinction and Pi acceptance remain unproven through Herdr. See [behavior spec](behavior-spec.md#delivery-nudge--follow-up) and the task report for source/runtime limits.
+
+## Configuration and lifecycle
+
+The manifest invokes `target/release/cappuccino-bridge` directly for `start`, `stop`, `status` and `logs`; the binary owns PID/log files under `HERDR_PLUGIN_STATE_DIR` (or `~/.local/state/cappuccino-bridge`). It verifies the recorded executable and per-start marker before signaling a process. The `serve.auto_apply` setting defaults to true for the existing product workflow; `false` or `CAPP_BRIDGE_SERVE_AUTO_APPLY=0` prevents Tailscale commands and only prints the manual exposure command. Invalid values fail closed.
+
+Config precedence is defaults, optional JSON (`CAPP_BRIDGE_CONFIG` or `~/.config/cappuccino-bridge/config.json`), then supported environment overrides. Bind addresses must remain loopback. See [bridge setup and commands](../services/bridge/README.md).
+
+## Delivery acceptance remains open
+
+The behavior spec records the owner-accepted Nudge/Follow-up and receipt contract, not shipped behavior. Herdr's terminal input acknowledgement alone does not establish which Pi queue accepted text, whether it survives restart, or whether a target session occupant remained unchanged. These capabilities remain unimplemented pending a supported integration and verified acceptance evidence; do not revive the superseded daemon/pairing design or add a Pi extension without approval.
+
+## Slice map
+
+- #7: transcript UI and read-only stream presentation; canonical live runtime proof remains outstanding.
+- #8: explicit Nudge/Follow-up delivery and receipts; not implemented.
+- #9: typed approvals and grants; not implemented.
+- #12: Android consumes the selected bridge transport.

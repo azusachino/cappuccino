@@ -2,7 +2,7 @@
 
 A personal native companion for conversations and attention from agents already running on your Herdr machines. The connected-feature order is bridge feasibility, connected iPhone, Android, then Mac-specific UX.
 
-**Current state:** disconnected native shells and hermetic core tests, plus an iPhone Machines add-machine/agent-list flow speaking to the herdr plugin bridge (`services/bridge`, the product transport per the 2026-10-06 plugin pivot) or the reference daemon (`services/daemon/`, frozen) — both behind the client's `DaemonServing` transport seam, selected by launch argument. The bridge ships **no auth** by owner decision: the tailnet/loopback boundary is the security model, the binary refuses non-loopback binds, and `tailscale serve` is the only supported exposure. Nothing here is production remote access yet: no prompt delivery, tool approval or live transcript is implemented. There is no agent launcher or terminal emulator.
+**Current state:** native clients and hermetic core tests, plus iPhone machine/agent and transcript UI slices speaking HTTP/WebSocket to the Herdr plugin bridge (`services/bridge`) or the frozen reference daemon (`services/daemon`) through `DaemonServing`. The bridge is a standalone Rust phone-transport facade launched by Herdr's plugin commands; it is not loaded into Herdr and does not own agent runtime. It reads selected Herdr APIs over the local socket. It ships **no auth** by owner decision: the tailnet/loopback boundary is the security model, the binary refuses non-loopback binds, and `tailscale serve` is the supported exposure. Prompt delivery and tool approval are not implemented, and canonical live Pi transcript/stream behavior remains unverified. There is no agent launcher or terminal emulator.
 
 Read [intent](docs/intent.md), [plan](docs/plan.md), [architecture](docs/architecture.md), [Android plan](docs/android-plan.md), [user stories](docs/user-stories.md) and [source research](docs/discovery.md). Existing remote agents keep their process/session lifetime; future clients attach and detach.
 
@@ -25,7 +25,8 @@ their working state and active branch (or "No branch"); pull to refresh; an
 unreachable machine shows a visible error without affecting others.
 
 Selecting an agent never starts, stops or replaces it. Prompt delivery and
-approvals are not implemented; the transcripts view is post-MVP (issue #7).
+approvals are not implemented. The issue #7 transcript UI slice is present,
+but canonical live Pi transcript/stream behavior has not been verified.
 
 ## Layout
 

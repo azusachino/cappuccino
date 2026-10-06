@@ -1,14 +1,12 @@
-//! Cappuccino bridge: a herdr plugin binary serving the loopback API native
-//! clients consume. No auth by owner decision — the tailnet/loopback boundary
-//! is the security model, and a middleware hook position is reserved for a
-//! future authenticator. Transport choice per the 2026-10-06 plugin pivot
-//! (issue #16); reconciliation semantics follow the slice-A reference
-//! contract. Loopback only — tailnet exposure is tailscale-serve's job, not
-//! this process's.
+//! Cappuccino bridge: a Herdr plugin transport facade for native clients.
+//! Herdr owns agent lifetime; this subprocess exposes selected local Herdr
+//! APIs over a loopback HTTP/WebSocket API. No auth by owner decision — the
+//! tailnet/loopback boundary is the security model.
 
 mod agents;
 mod config;
 mod herdr;
+mod lifecycle;
 mod modules;
 mod reconcile;
 mod routes;
@@ -20,6 +18,37 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        None => run_server().await,
+        Some("__serve") if args.get(1).is_some_and(|value| valid_nonce(value)) => {
+            run_server().await
+        }
+        Some("start" | "stop" | "status" | "logs") => {
+            if let Err(error) = lifecycle::execute(args[0].as_str()) {
+                eprintln!("cappuccino-bridge: {error}");
+                std::process::exit(1);
+            }
+        }
+        Some("__serve") => {
+            eprintln!("cappuccino-bridge: invalid managed server marker");
+            std::process::exit(2);
+        }
+        Some(_) => {
+            eprintln!("usage: cappuccino-bridge [start|stop|status|logs]");
+            std::process::exit(2);
+        }
+    }
+}
+
+fn valid_nonce(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'-')
+}
+
+async fn run_server() {
     let config = match config::BridgeConfig::load() {
         Ok(config) => config,
         Err(reason) => {
@@ -46,8 +75,7 @@ async fn main() {
         app = app.merge((module.router)());
     }
     // Middleware/hook position: an authenticator slots in here as another
-    // layer without touching any endpoint handler. The MVP ships auth-free
-    // (the reserved config section errors instead of pretending).
+    // layer without touching any endpoint handler. The MVP ships auth-free.
     let app = app
         .layer(axum::middleware::from_fn(auth_middleware))
         .with_state(state);
@@ -67,10 +95,6 @@ async fn main() {
         .expect("bridge server failed");
 }
 
-/// Reserved middleware position for a future authenticator. The MVP is
-/// auth-free by owner decision: the tailnet/loopback boundary is the security
-/// model, so this pass-through is the whole implementation until an
-/// authenticator replaces it — endpoint handlers never change.
 async fn auth_middleware(
     request: axum::extract::Request,
     next: axum::middleware::Next,

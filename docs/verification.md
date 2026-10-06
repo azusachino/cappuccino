@@ -70,7 +70,7 @@ Physical devices, background/process-death reconciliation, delivery receipts, ap
 
 ## iPhone pairing slice checkpoint
 
-Local acceptance verified 2026-10-06 for [issue #6](https://github.com/azusachino/cappuccino/issues/6) at branch `feat/iphone-pair-list` (stacked on the daemon branch; PR #14 base still unmerged). Scope: Machines-tab pairing sheet with device-Keychain token storage, agent list with fixture/live equivalence, visible failure states; delivery/approvals remain disabled. Includes the SSH-exec architecture-pivot documentation.
+Local acceptance verified 2026-10-06 for [issue #6](https://github.com/azusachino/cappuccino/issues/6) at branch `feat/iphone-pair-list` (stacked on the daemon branch; PR #14 base still unmerged). Scope: Machines-tab pairing sheet with device-Keychain token storage, agent list with fixture/live equivalence, visible failure states; delivery/approvals remain disabled. This is a historical pre-plugin checkpoint: its pairing token and SSH-exec notes are superseded by the owner's later plugin/no-auth-tailnet decision and are not current bridge instructions.
 
 Writer: `cap-spike-glm` (glm-5.3-flash low, sole checkout writer). Fresh independent verifier `cap-sliceb-verifier` (openai-codex/gpt-6-luna, **medium**): round 1 BLOCKED on one documentation finding — top-level README still claimed "no machine connection" and omitted the pivot; all functional criteria met. Fix `2c67e05` (README current-state + pivot framing, docs-only); round 2 **PASSED** with all round-1 verdicts standing.
 
@@ -86,7 +86,7 @@ Architecture context (owner decisions, 2026-10-06): Cappuccino ships **its own h
 
 Writer: `cap-spike-glm` (glm-5.3-flash low). Independent verifier: `cap-bridge-verifier` (openai-codex/gpt-6-luna, medium) — round 1 BLOCKED (stale token/auth docs + invented layout; missing WS stream client; live journey unverifiable without a safe route), round 2 BLOCKED (two pinpoint defects: WS scheme downgrade to insecure `ws://`; knob-contract mismatch across shell/Rust), round 3 **PASSED** at `cc31de3`.
 
-Round-3 evidence: scheme mapping http→ws / https→wss with typed rejection (`WebSocketSchemeTests`); unified knob contract (StrictBool + `bridge.sh` accept exactly `0/false/no/off` case-insensitive, invalid → loud refusal exit 2; `knob_contract.sh` covers all spellings); schema conformance against committed `fixtures/herdr-api.schema.json` (herdr 0.9.3, protocol 22); gates rerun — cargo 31 (24+7), Swift 27, scoped `make validate` 0, `md-check` 0, knob contract 0. Round-2 live route (executed exactly: `CAPP_BRIDGE_SERVE_AUTO_APPLY=0 CAPP_BRIDGE_PORT=7991`, zero Tailscale mutation, exact pane-set parity, fail-closed transcript) remains valid evidence for unchanged runtime paths.
+Round-3 evidence at historical HEAD `cc31de3`: scheme mapping http→ws / https→wss with typed rejection (`WebSocketSchemeTests`); unified knob contract (`StrictBool` plus the then-present `bridge.sh`; `knob_contract.sh` covered accepted spellings); schema conformance against committed `fixtures/herdr-api.schema.json` (Herdr 0.9.3, protocol 22); gates rerun — cargo 31 (24+7), Swift 27, scoped `make validate` 0, `md-check` 0, knob contract 0. Round-2 live route (executed exactly: `CAPP_BRIDGE_SERVE_AUTO_APPLY=0 CAPP_BRIDGE_PORT=7991`, zero Tailscale mutation, exact pane-set parity, fail-closed transcript) remains evidence only for the runtime paths unchanged since then. The shell lifecycle described by this checkpoint is historical and is not evidence for the replacement Rust lifecycle below.
 
 Accepted limitations/follow-ups: live WebSocket reconnect journey not yet exercised (scripted frames cover initial→append→duplicate→disconnect; reconnect policy is a later slice); two non-fatal Rust warnings in `config.rs` (cleanup + a warnings-as-errors decision for the bridge are follow-ups); branch history contains since-deleted `target/` artifacts from the first skeleton commit (HEAD tree is clean); physical devices, delivery (#8), approvals (#9), transcripts UI (#7) remain unproven. No owner agent was prompted; `cap-spike-agent`'s externally closed pane is recorded rather than hidden.
 
@@ -193,3 +193,20 @@ Independent commands at the reviewed source revision:
 Earlier blockers: reset captured history after clearing it; live tool payloads were dropped; prose/code order was flattened; ordering/scaling coverage was insufficient; debug artifacts remained. These were fixed rather than suppressing tests. Round-1 gate failures used unscoped CommandLineTools; subsequent independent gates used the scoped Xcode toolchain.
 
 Limits: UI evidence uses scripted transcripts, not a canonical live Pi transcript. Read-only bridge probes returned HTTP 200 and honestly unavailable canonical history; no live WebSocket transcript journey or Herdr parity comparison was performed in this verification. Accessibility was source/journey checked, not exercised with VoiceOver or Dynamic Type stress. Reassembler append is amortized O(1), but published Swift Array snapshots may incur copy-on-write; backfill is O(n). The unchanged timing-ratio test is a coarse regression signal, not a complexity proof. A separate newer-generation stale-result test remains follow-up; stop-during-reload is covered. Hosted acceptance for this source is pending; local PASS is not hosted proof.
+
+## Herdr API boundary and Rust lifecycle — local checkpoint
+
+The owner-selected issue #8 receipt acceptance is `confirmed` only after Pi accepts the requested queue operation; ambiguous outcome is final `unresolved` and that action is not replayed. This remains intended acceptance, not a capability observed through Herdr. Herdr 0.9.3 `agent.prompt` acknowledges PTY submission and optional lifecycle wait; the API does not select Pi `steer`/`follow_up` or provide a correlated Pi queue receipt. The bridge remains a standalone phone-transport facade, not an agent runtime. No delivery route or Pi extension was added. Full source/runtime limits and the recovered task-owned synthetic probe evidence are recorded in the workstation scratch report.
+
+The Herdr manifest now invokes the Rust executable directly for start/stop/status/logs. Both bridge shell scripts were removed; Rust tests cover the strict environment knob and lifecycle process-record checks. An isolated new loopback bridge process used unique state and port `49915` with `CAPP_BRIDGE_SERVE_AUTO_APPLY=0`: start succeeded (PID 53311), a second start was idempotent, status reported running, `GET /api/session` returned HTTP 200, logs showed the local listener, and stop removed the PID record. The endpoint then refused connections and status reported not running. The test state directory was removed. Tailscale was not invoked or changed; no retained bridge was restarted.
+
+Local gates for this change:
+
+- `cargo fmt --check` in `services/bridge`: exit 0.
+- `cargo test` in `services/bridge`: exit 0, 27 unit tests and 7 schema-conformance tests.
+- `cargo build --release` in `services/bridge`: exit 0.
+- Scoped `ANDROID_HOME=/opt/homebrew/share/android-commandlinetools DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make validate`: exit 0. Swift Testing reports 39 passed; Apple build targets succeeded; Android formatting/unit/lint checks and debug app/instrumentation APK assembly succeeded.
+- `make md-check` after the final acceptance wording: exit 0, 15 files.
+- `git diff --check`: exit 0. Static TOML parsing confirmed every manifest startup/action command calls the binary directly, with no shell launcher.
+
+Native UI files were unchanged, so no simulator journey was rerun. This is writer/gate evidence, not an independent-verification verdict; the fresh verifier remains pending.

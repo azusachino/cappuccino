@@ -5,14 +5,16 @@ toolchain for building from source.
 
 ## Server stories
 
-- **S1 Install:** "On each herdr machine, I install the bridge so it lives
-  inside herdr." → `herdr plugin link <path-to-services/bridge>` (dev) or
+- **S1 Install:** "On each Herdr machine, I link the bridge's plugin
+  manifest." → `herdr plugin link <path-to-services/bridge>` (dev) or
   `herdr plugin install <release>` (later). `herdr plugin list` shows it.
-- **S2 Auto-run:** "The bridge starts and stops with herdr — nothing else to
-  run." → plugin `[[startup]]` builds/launches the binary; the plugin
-  `status` action reports running + port, applies the tailscale serve entry
-  automatically (idempotent) and prints the tailnet URL; `herdr plugin log`
-  shows output.
+  Herdr invokes the manifest commands; the Rust bridge server is a separate
+  process, not loaded into Herdr.
+- **S2 Startup and control:** "The bridge starts when Herdr starts and I can
+  inspect or stop it." → linking builds the binary; the plugin `[[startup]]`
+  invokes its idempotent `start` command. The plugin `status`, `stop` and
+  `logs` actions call the binary directly. The server is not supervised by
+  Herdr and no automatic shutdown hook is configured.
 - **S3 Expose to tailnet:** "I reach the bridge from my phone over Tailscale."
   → automatic with `serve.auto_apply` at its default: the status/startup
   lifecycle applies `tailscale serve --bg --https=443

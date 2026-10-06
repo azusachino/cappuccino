@@ -66,14 +66,14 @@ fn params_match(schema: &Value, definition: &Value, params: &Value) -> Result<()
     }
     // Enum-valued properties must use an allowed variant (e.g. ReadSource).
     for (name, property) in properties {
-        let Some(value) = object.get(name) else { continue };
-        let enum_values = property["enum"]
-            .as_array()
-            .or_else(|| {
-                // $ref into the same request $defs table (e.g. ReadSource).
-                let reference = property["$ref"].as_str()?;
-                resolve_def(schema, reference).and_then(|definition| definition["enum"].as_array())
-            });
+        let Some(value) = object.get(name) else {
+            continue;
+        };
+        let enum_values = property["enum"].as_array().or_else(|| {
+            // $ref into the same request $defs table (e.g. ReadSource).
+            let reference = property["$ref"].as_str()?;
+            resolve_def(schema, reference).and_then(|definition| definition["enum"].as_array())
+        });
         if let Some(enum_values) = enum_values {
             let text = value.as_str().unwrap_or_default();
             if !enum_values.contains(value) {
@@ -89,7 +89,10 @@ fn params_match(schema: &Value, definition: &Value, params: &Value) -> Result<()
 #[test]
 fn fixture_pins_protocol_22() {
     let schema = schema();
-    assert_eq!(schema["protocol"], 22, "schema fixture must be the 0.9.3 contract");
+    assert_eq!(
+        schema["protocol"], 22,
+        "schema fixture must be the 0.9.3 contract"
+    );
 }
 
 #[test]
@@ -164,7 +167,14 @@ fn success_envelope_carries_id_and_result() {
 fn agent_info_schema_has_the_fields_we_map() {
     let schema = schema();
     let properties = &schema["schemas"]["success_response"]["$defs"]["AgentInfo"]["properties"];
-    for field in ["agent", "agent_status", "cwd", "name", "pane_id", "terminal_title_stripped"] {
+    for field in [
+        "agent",
+        "agent_status",
+        "cwd",
+        "name",
+        "pane_id",
+        "terminal_title_stripped",
+    ] {
         assert!(
             properties.get(field).is_some(),
             "AgentInfo must expose '{field}' for catalog mapping"
