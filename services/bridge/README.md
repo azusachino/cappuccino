@@ -22,14 +22,18 @@ services/bridge/
     └── routes.rs        # HTTP and WebSocket handlers
 ```
 
-## Read-only API
+## API
 
-| Route | Behavior |
-| --- | --- |
-| `GET /api/session` | reachability and machine identity |
-| `GET /api/agents` | Herdr `agent.list` mapping; names/pane IDs are locators, not proven native Pi session IDs |
-| `GET /api/transcript?session=…` | resolves Herdr-reported `agent_session`; fails closed when missing or outside Pi's canonical session store |
-| `WS /api/stream?session=…` | read-only pane-line append/reset events with visible gaps |
+All native-client routes share the `/api` prefix. HTTP requests and the
+WebSocket upgrade are served by the same loopback listener; clients use the
+same base URL for both transports.
+
+| Method / route | Transport | Behavior |
+| --- | --- | --- |
+| `GET /api/session` | HTTP | reachability and machine identity |
+| `GET /api/agents` | HTTP | Herdr `agent.list` mapping; names/pane IDs are locators, not proven native Pi session IDs |
+| `GET /api/transcript?session=…` | HTTP | resolves Herdr-reported `agent_session`; fails closed when missing or outside Pi's canonical session store |
+| `/api/stream?session=…` | WebSocket | read-only pane-line append/reset events with visible gaps |
 
 The current bridge has no send route. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
 
@@ -41,14 +45,37 @@ Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, op
 
 ## Install and lifecycle
 
-On each Herdr machine, link this checkout (or install a later release):
+Install the executable before linking the plugin or invoking its startup/actions.
+From the repository root:
 
-```text
-herdr plugin link /path/to/cappuccino/services/bridge
+```sh
+cargo install --path services/bridge --locked
+herdr plugin link "$PWD/services/bridge"
 herdr plugin list
+herdr plugin action azusachino.cappuccino-bridge status
 ```
 
-Herdr's `[[build]]` action compiles `target/release/cappuccino-bridge`. The one-shot `[[startup]]` command invokes that binary's `start` subcommand. It creates a separate server process with redirected logs and an owner-only state directory under `HERDR_PLUGIN_STATE_DIR` (or `~/.local/state/cappuccino-bridge`). The private `bridge.control` record contains a random per-instance token; `bridge.sock` is a mode-0600 Unix-domain control socket. The socket validates that token for status and graceful shutdown. No PID from a state file is signaled. The process is not supervised after startup, and no automatic Herdr-shutdown hook is configured. Use the plugin actions to inspect, stop and view logs:
+Or, from `services/bridge`, use `cargo install --path . --locked`. Cargo places
+`cappuccino-bridge` in its install `bin` directory (normally `~/.cargo/bin`);
+that directory must be on the `PATH` inherited by Herdr. Herdr runs plugin
+commands with the plugin root as their working directory, but does not add the
+Cargo install directory to `PATH`. Check `command -v cappuccino-bridge` and
+`herdr plugin action azusachino.cappuccino-bridge status` in the same
+launch environment. If command lookup fails, install the binary and restart
+Herdr from an environment whose `PATH` includes Cargo's bin directory; linking
+or the plugin startup hook does not install/build it. The manifest uses the
+installed command name (`cappuccino-bridge`), never a checkout's
+`target/release` artifact.
+
+The one-shot `[[startup]]` command invokes the installed binary's `start`
+subcommand. It creates a separate server process with redirected logs and an
+owner-only state directory under `HERDR_PLUGIN_STATE_DIR` (or
+`~/.local/state/cappuccino-bridge`). The private `bridge.control` record
+contains a random per-instance token; `bridge.sock` is a mode-0600 Unix-domain
+control socket. The socket validates that token for status and graceful
+shutdown. No PID from a state file is signaled. The process is not supervised
+after startup, and no automatic Herdr-shutdown hook is configured. Use the
+plugin actions to inspect, stop and view logs:
 
 ```text
 herdr plugin action azusachino.cappuccino-bridge status
@@ -82,13 +109,24 @@ The `start` and `status` output must say auto-apply is disabled. Do not run this
 
 For foreground debugging, run `target/release/cappuccino-bridge` without a subcommand; it binds the configured loopback address until stopped. Do not use foreground mode as a Herdr startup command.
 
-## Checks and dependencies
+## Development and verification
 
 From this directory:
 
-```text
+```sh
 cargo fmt --check
 cargo test
+cargo build --release
 ```
 
-The manifest uses argv arrays and invokes the Rust binary directly; there are no bridge shell launchers. Rust dependencies include Tokio, axum, serde/serde_json, and libc for Unix file-descriptor operations and lifecycle locking; stop never signals a PID. Herdr calls use its local socket protocol (fixture pinned to installed Herdr 0.9.3 / protocol 22); optional Serve integration calls the `tailscale` CLI without a shell. Lifecycle checks were run on macOS only; Linux runtime behavior is not certified by this report. The release binary is not claimed to be statically linked.
+The manifest uses argv arrays and invokes the installed Rust binary directly;
+there are no bridge shell launchers. The bridge uses `libc` narrowly for Unix
+operations not exposed as an equivalent stable safe standard-library API here:
+`flock` lifecycle locking, descriptor-relative `openat`/`mkdirat`/`fstatat`
+with no-follow flags and ownership/type/mode checks, and setting `umask` before
+creating the private control socket. These calls are isolated to lifecycle
+state and require careful review; they do not imply a glibc dependency or a
+universally static executable. Herdr calls use its local socket protocol
+(fixture pinned to Herdr 0.9.3 / protocol 22); optional Serve integration calls
+the `tailscale` CLI without a shell. The release binary is not claimed to be
+statically linked.

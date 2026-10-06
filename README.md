@@ -13,16 +13,18 @@ open the generated `Cappuccino.xcodeproj`, select the `Cappuccino` iOS scheme
 with your device as destination, and run (free provisioning; re-sign weekly).
 No store, no TestFlight in the MVP.
 
-**Add a machine (S5) and see its agents (S6).** On each Herdr machine, set up
-the bridge plugin once - link it (`herdr plugin link <path-to-services/bridge>`),
-confirm it auto-runs with the `status` action, and expose it to your tailnet
-with `tailscale serve` (full steps in
-[services/bridge/README.md](services/bridge/README.md), stories S1-S3). Then
-in the app: Machines -> paste the machine's bridge base URL
-(`http://127.0.0.1:7392` locally, or the `https://<host>.<tailnet>.ts.net`
-address over the tailnet) -> **Add machine**. The machine's agents appear with
-their working state and active branch (or "No branch"); pull to refresh; an
-unreachable machine shows a visible error without affecting others.
+**Add a machine and browse agents.** On each Herdr machine, install the bridge
+binary before linking the plugin. From this repository's root, run
+`cargo install --path services/bridge --locked`; ensure Cargo's install `bin`
+directory is on Herdr's `PATH`, then run
+`herdr plugin link <path-to-services/bridge>` and verify the plugin's `status`
+action. The plugin does not build or install the binary. Follow the
+[bridge setup guide](services/bridge/README.md) to expose its loopback listener
+over a private tailnet using `tailscale serve`. The bridge has no authentication:
+do not expose it to public ingress. In the app, open Machines and add the
+machine's base URL (`http://127.0.0.1:7392` locally or your private tailnet
+HTTPS address). Agent listing and read-only transcript streaming are available;
+prompt delivery and approvals are not implemented.
 
 Selecting an agent never starts, stops or replaces it. Prompt delivery and
 approvals are not implemented. The issue #7 transcript UI slice is present,
@@ -86,12 +88,12 @@ These aggregate commands require both toolchains. Use `fmt-apple`/`check-apple`/
 
 CI defines separate Apple and Android jobs using released action tags and read-only contents permissions. It preserves narrow synthetic UI evidence for seven days and uses only task-owned simulators/emulators. Delivered-head hosted runs succeeded for both platforms (run 37325757158); the hosted Android capture shows an unrelated system launcher ANR dialog from emulator load, recorded in [verification](docs/verification.md#delivered-head-hosted-checkpoint). See [development and quality](docs/development.md) for toolchain details and [verification](docs/verification.md) for actual accepted runs and limits.
 
-## Optional vphone debugging
+## Limitations
 
-[vphone-cli assessment](docs/discovery.md#optional-debugging-vphone-cli) covers the owner-suggested virtual iPhone tool. It is a read-only research reference, not a dependency or replacement for XCTest/Simulator. Running it needs a separately approved physical Mac host and security/storage setup, plus an iPhoneOS build. No VM was installed or started.
-
-## Prototype constraints
-
-Private LAN/tailnet machines, manual pairing, Pi-first integration, active-branch history and typed approvals are planned, not implemented. Generic Telegram alerts replace native APNs/FCM for now. Free Personal Team builds on a physical iPhone need periodic reprovisioning; long-term distribution and actual-device acceptance remain open.
+The bridge currently supports machine reachability, agent listing and read-only
+transcript/stream routes. Prompt delivery and approvals are not implemented.
+The bridge is intentionally unauthenticated and must remain on loopback/private
+tailnet ingress. See [verification](docs/verification.md) for tested behavior
+and known limits, and [the plan](docs/plan.md) for future work.
 
 See [CONTRIBUTING](CONTRIBUTING.md) and [AGENTS](AGENTS.md) for style, gates and ownership. The existing [GPL-3.0 license](LICENSE) remains unchanged.

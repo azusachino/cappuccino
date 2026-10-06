@@ -10,40 +10,36 @@ platforms = ["macos", "linux"]
 # separate loopback transport process; it is not loaded into Herdr or an agent.
 # herdr-web-ui was studied as a design reference; this implementation is our own.
 
-[[build]]
-command = ["cargo", "build", "--release"]
-platforms = ["macos", "linux"]
-
 # Startup hooks are one-shot, not supervised; the binary owns its detached
 # server process through a private token-authenticated Unix control socket.
 [[startup]]
-command = ["target/release/cappuccino-bridge", "start"]
+command = ["cappuccino-bridge", "start"]
 platforms = ["macos", "linux"]
 
 [[actions]]
 id = "start"
 title = "Start Cappuccino bridge"
 contexts = ["workspace"]
-command = ["target/release/cappuccino-bridge", "start"]
+command = ["cappuccino-bridge", "start"]
 platforms = ["macos", "linux"]
 
 [[actions]]
 id = "stop"
 title = "Stop Cappuccino bridge"
 contexts = ["workspace"]
-command = ["target/release/cappuccino-bridge", "stop"]
+command = ["cappuccino-bridge", "stop"]
 platforms = ["macos", "linux"]
 
 [[actions]]
 id = "status"
 title = "Cappuccino bridge status"
 contexts = ["workspace"]
-command = ["target/release/cappuccino-bridge", "status"]
+command = ["cappuccino-bridge", "status"]
 platforms = ["macos", "linux"]
 
 [[actions]]
 id = "logs"
 title = "Cappuccino bridge log tail"
 contexts = ["workspace"]
-command = ["target/release/cappuccino-bridge", "logs"]
+command = ["cappuccino-bridge", "logs"]
 platforms = ["macos", "linux"]
