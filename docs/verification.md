@@ -211,4 +211,8 @@ Local gates for this change:
 - `make md-check` after the final acceptance wording: exit 0, 15 files.
 - `git diff --check`: exit 0. Static TOML parsing confirmed every manifest startup/action command calls the binary directly, with no shell launcher.
 
-Native UI files were unchanged, so no simulator journey was rerun. This is writer/gate evidence, not an independent-verification verdict; a fresh verifier recheck of the safety findings remains pending.
+Native UI files were unchanged, so no simulator journey was rerun.
+
+Independent Luna-medium re-verification passed at `f1abb933b41e728c08bb11fe16fc592691639316`. The verifier independently reran all gates above and resolved the prior blockers: persisted PID signaling was replaced by a private per-instance Unix control endpoint; owner/private modes and descriptor-relative no-follow state handling were checked; failure-path integration tests preserved unrelated processes/listeners. A fresh isolated release lifecycle on macOS verified start/status/logs/HTTP readiness/stop, directory mode `0700`, file/socket modes `0600`, endpoint closure, and a PATH sentinel proving disabled Serve invoked no Tailscale command. All task-owned process/state artifacts were cleaned up; no retained bridge or Tailscale configuration was changed.
+
+The initial manual `/tmp` path was rejected because it is a macOS symlink; the canonical `/private/tmp` run passed. One cleanup attempt found an empty task-owned HOME directory, which was inspected and removed. Linux runtime remains unverified; this PASS does not certify Linux lifecycle behavior, native queue-kind selection, Pi-confirmed delivery, or a live transcript journey. Hosted checks for this branch remain separate from these local independent results.
