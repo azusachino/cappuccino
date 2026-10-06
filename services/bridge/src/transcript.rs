@@ -79,23 +79,47 @@ pub fn transcript_json(session_id: &str, path: Option<&Path>) -> Value {
 mod tests {
     use super::*;
 
-    fn unique_temp(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("cap-bridge-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    /// RAII temp store: created per test, removed on drop; cleanup errors are
+    /// surfaced (panic on the normal path, surfaced log during unwinding).
+    struct TempStore {
+        path: PathBuf,
+    }
+
+    impl TempStore {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("cap-bridge-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Self { path: dir }
+        }
+    }
+
+    impl Drop for TempStore {
+        fn drop(&mut self) {
+            if let Err(error) = std::fs::remove_dir_all(&self.path) {
+                if std::thread::panicking() {
+                    eprintln!("temp store cleanup {}: {error}", self.path.display());
+                } else {
+                    panic!("temp store cleanup {}: {error}", self.path.display());
+                }
+            }
+        }
+    }
+
+    fn unique_temp(tag: &str) -> TempStore {
+        TempStore::new(tag)
     }
 
     #[test]
     fn file_inside_store_is_accepted() {
         let store = unique_temp("inside");
-        let transcript = store.join("session-abc.jsonl");
+        let transcript = store.path.join("session-abc.jsonl");
         std::fs::write(&transcript, "{}\n").unwrap();
         // The function returns the canonical (symlink-resolved) path, which on
         // macOS may differ textually from the /tmp-aliased input.
         let expected = std::fs::canonicalize(&transcript).unwrap();
         assert_eq!(
-            transcript_in_store(&transcript, &store).as_deref(),
+            transcript_in_store(&transcript, &store.path).as_deref(),
             Some(expected.as_path())
         );
     }
@@ -104,22 +128,22 @@ mod tests {
     fn path_outside_store_is_refused() {
         let store = unique_temp("outside");
         let elsewhere = unique_temp("elsewhere-store");
-        let transcript = elsewhere.join("escape.jsonl");
+        let transcript = elsewhere.path.join("escape.jsonl");
         std::fs::write(&transcript, "{}\n").unwrap();
-        assert_eq!(transcript_in_store(&transcript, &store), None);
+        assert_eq!(transcript_in_store(&transcript, &store.path), None);
     }
 
     #[test]
     fn symlink_escape_is_refused() {
         let store = unique_temp("symlink");
         let elsewhere = unique_temp("symlink-elsewhere");
-        std::fs::create_dir_all(&store).unwrap();
-        let real = elsewhere.join("real.jsonl");
+        std::fs::create_dir_all(&store.path).unwrap();
+        let real = elsewhere.path.join("real.jsonl");
         std::fs::write(&real, "{}\n").unwrap();
-        let link = store.join("link.jsonl");
+        let link = store.path.join("link.jsonl");
         std::os::unix::fs::symlink(&real, &link).unwrap();
         assert_eq!(
-            transcript_in_store(&link, &store),
+            transcript_in_store(&link, &store.path),
             None,
             "a link out of the store is no evidence"
         );
@@ -128,12 +152,12 @@ mod tests {
     #[test]
     fn non_jsonl_and_directories_are_refused() {
         let store = unique_temp("shapes");
-        let text = store.join("notes.txt");
+        let text = store.path.join("notes.txt");
         std::fs::write(&text, "hello").unwrap();
-        let directory = store.join("fake.jsonl");
+        let directory = store.path.join("fake.jsonl");
         std::fs::create_dir_all(&directory).unwrap();
-        assert_eq!(transcript_in_store(&text, &store), None);
-        assert_eq!(transcript_in_store(&directory, &store), None);
+        assert_eq!(transcript_in_store(&text, &store.path), None);
+        assert_eq!(transcript_in_store(&directory, &store.path), None);
     }
 
     #[test]

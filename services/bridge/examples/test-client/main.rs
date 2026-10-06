@@ -35,6 +35,7 @@ struct Args {
     timeout: Duration,
     iterations: usize,
     stream_cycles: usize,
+    allow_error_streams: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -51,6 +52,7 @@ fn parse_args() -> Result<Args, String> {
         timeout: Duration::from_secs(10),
         iterations: 200,
         stream_cycles: 50,
+        allow_error_streams: false,
     };
     if !matches!(args.mode.as_str(), "check" | "bench" | "help") {
         return Err(usage());
@@ -78,6 +80,7 @@ fn parse_args() -> Result<Args, String> {
             "--stream-cycles" => {
                 args.stream_cycles = value(&mut i)?.parse().map_err(|_| "bad stream-cycles")?
             }
+            "--error-streams" => args.allow_error_streams = true,
             other => return Err(format!("unknown option {other}\n{}", usage())),
         }
         i += 1;
@@ -134,17 +137,35 @@ fn main() {
                     }
                 );
             }),
-            "bench" => probe::run_bench(
-                &options(&args),
-                &BenchConfig {
-                    iterations: args.iterations,
-                    warmup: 20,
-                    stream_cycles: args.stream_cycles,
-                    session: args.session.clone(),
-                },
-            )
-            .await
-            .map(|report| println!("{report}")),
+            "bench" => {
+                // Count caps: clear invalid-count errors before any work.
+                if args.iterations == 0 || args.iterations > probe::MAX_BENCH_ITERATIONS {
+                    return Err(format!(
+                        "iterations must be 1..={}, got {}",
+                        probe::MAX_BENCH_ITERATIONS,
+                        args.iterations
+                    ));
+                }
+                if args.stream_cycles > probe::MAX_BENCH_STREAM_CYCLES {
+                    return Err(format!(
+                        "stream-cycles must be <= {}, got {}",
+                        probe::MAX_BENCH_STREAM_CYCLES,
+                        args.stream_cycles
+                    ));
+                }
+                probe::run_bench(
+                    &options(&args),
+                    &BenchConfig {
+                        iterations: args.iterations,
+                        warmup: 20,
+                        stream_cycles: args.stream_cycles,
+                        session: args.session.clone(),
+                        allow_error_streams: args.allow_error_streams,
+                    },
+                )
+                .await
+                .map(|report| println!("{report}"))
+            }
             _ => Err(usage()),
         }
     });

@@ -130,7 +130,7 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
         .and_then(|info| info["agent"]["cwd"].as_str().map(str::to_string))
         .and_then(|cwd| agents::own_branch(&cwd).branch);
     let mut ring = reconcile::StreamRing::new(initial_branch);
-    let generation = ring.generation;
+    let mut generation = ring.generation;
     if socket
         .send(Message::Text(
             json!({"event": "stream_open", "session_id": session, "generation": generation})
@@ -181,6 +181,9 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
             {
                 return;
             }
+            // Acknowledge the observed reset so a stable generation does not
+            // re-emit stream_reset on every subsequent poll.
+            generation = ring.generation;
         }
         if !new_entries.is_empty() {
             let event = json!({"event": "entries", "entries": new_entries});

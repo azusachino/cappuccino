@@ -146,12 +146,18 @@ bridge crate stay unchanged.
   follow-up frames (entries/reset) under an explicit budget. HTTP legs prefer
   HTTP/2 prior knowledge (h2c) and always report the observed protocol;
   `--require-h2` makes an HTTP/1 downgrade an error.
-- `bench` mode: bounded cold/warm HTTP requests with **consumed bodies** and
-  stream connection churn with **consumed, validated entries**; reports
-  p50/p95 (microseconds), throughput, a before/after CPU delta, peak RSS and
-  a sampled client RSS trend with the observed protocol. It establishes a
-  baseline; it asserts no performance thresholds. Metric failures (e.g.
-  getrusage errors) fail the run, never zero-fill.
+- `bench` mode: bounded cold/warm HTTP requests with **consumed, validated
+  bodies** and stream connection churn where a successful cycle requires a
+  `stream_open` first frame **and at least one validated entry**; a known
+  error-first session fails the run unless the explicit `--error-streams`
+  mode is selected (reported separately as `stream_error_*`, never counted as
+  success). Reports separate stream phase timings — handshake, first frame,
+  first entry, full cycle — in microseconds, plus throughput, a before/after
+  CPU delta, peak RSS (`ru_maxrss`) and a sampled **current** RSS trend
+  (`/proc/self/statm` on Linux, `proc_pid_rusage` on macOS). Requested
+  iteration/cycle counts are capped; invalid counts are rejected up front.
+  It establishes a baseline; it asserts no performance thresholds. Metric
+  failures (e.g. getrusage errors) fail the run, never zero-fill.
 - Protocol reality (implemented, tested): HTTP routes negotiate real HTTP/2
   over h2c prior knowledge against this bridge (axum `http2` feature is
   enabled) and fall back to HTTP/1.1 otherwise, reported per leg. The WS leg
@@ -165,8 +171,27 @@ bridge crate stay unchanged.
   synthetic fixtures; they do not prove canonical live-transcript behavior.
 - Bounds are explicit, not assumed: HTTP response bodies are capped (1 MiB,
   oversized bodies fail), WS frames/messages are capped client-side on the
-  connection (1 MiB / 64 KiB), every operation has a deadline, and a whole
-  session budget bounds a full check or benchmark run.
+  connection (1 MiB / 64 KiB), every operation — including the WS handshake —
+  has a deadline, and a whole session budget bounds a full check or benchmark
+  run.
+- Stream validation follows the implemented bridge wire semantics: `entries`
+  entries need a u64 `seq` (or the documented gap placeholder: null seq,
+  `...gap...` id, null branch, complete, a well-formed `gap: missing entries
+  X-Y` range with X ≤ Y); `stream_reset` must strictly increase the observed
+  generation; unknown events, unknown error codes, non-text (binary) data
+  frames and missing fields all fail loudly; Ping is answered with Pong and
+  never counted as data.
+- Leak acceptance is baseline-relative and per scenario class (success,
+  refusal, mid-flight cancellation, server disconnect, child churn), with a
+  warm-up pass before baselines and phase-matched comparisons (services-up
+  vs services-down). FD growth over a phase baseline fails with the full FD
+  target list attached for attribution; a deficit is reported as runtime
+  event-fd teardown, not accepted as proof. Current RSS is sampled per
+  steady-state batch and must plateau; the allocator is pressure-relieved
+  before teardown sampling so cache retention is distinguished from true
+  retention. Soak tests run serially so baselines are not contaminated.
+  Short samples never prove absolute zero-leak. The soak runs as part of the
+  aggregate `check-bridge` gate, not only as an explicit target.
 - Leak acceptance is baseline-relative and per scenario class (success,
   refusal, mid-flight cancellation, server disconnect, child churn): FD counts
   may drop (async runtime teardown) but must not grow beyond a documented

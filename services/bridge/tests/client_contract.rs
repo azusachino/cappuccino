@@ -130,7 +130,12 @@ impl MockHerdr {
                 let cwd = Arc::clone(&cwd_task);
                 let agent_session = Arc::clone(&session_task);
                 let task = tokio::spawn(handle_mock_connection(stream, cwd, agent_session));
-                tasks_task.lock().unwrap().push(task);
+                let mut guard = tasks_task.lock().unwrap();
+                // Completed tasks are pruned: a retained JoinHandle keeps the
+                // finished task's whole allocation alive, which accumulates
+                // across the bridge's 400 ms polls and reads as an RSS leak.
+                guard.retain(|task| !task.is_finished());
+                guard.push(task);
             }
         });
         Self {
@@ -500,7 +505,8 @@ async fn session_requires_nonempty_machine_id() {
     // HTTP/1 origin returning a machine_id-less paired body.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    tokio::spawn(async move {
+    let mut tracker = TaskTracker::default();
+    tracker.spawn(async move {
         loop {
             let Ok((mut stream, _)) = listener.accept().await else {
                 return;
@@ -525,6 +531,7 @@ async fn session_requires_nonempty_machine_id() {
         .await
         .expect_err("missing machine_id must fail");
     assert!(error.contains("machine_id"), "{error}");
+    tracker.stop().await;
 }
 
 // ---------------------------------------------------------------------------
@@ -702,7 +709,8 @@ async fn require_h2_fails_on_http1_downgrade() {
     // HTTP/1-only origin: raw canned responses on a TCP listener.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    tokio::spawn(async move {
+    let mut tracker = TaskTracker::default();
+    tracker.spawn(async move {
         loop {
             let (mut stream, _) = match listener.accept().await {
                 Ok(accepted) => accepted,
@@ -730,6 +738,7 @@ async fn require_h2_fails_on_http1_downgrade() {
         .await
         .expect_err("require-h2 must fail against an HTTP/1-only origin");
     assert!(error.contains("require-h2"), "{error}");
+    tracker.stop().await;
 }
 
 // ---------------------------------------------------------------------------
@@ -753,7 +762,8 @@ async fn stalled_server_times_out() {
     // Accepts connections, never answers.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    tokio::spawn(async move {
+    let mut tracker = TaskTracker::default();
+    tracker.spawn(async move {
         loop {
             if let Ok((stream, _)) = listener.accept().await {
                 tokio::spawn(async move {
@@ -770,6 +780,7 @@ async fn stalled_server_times_out() {
         .await
         .expect_err("stalled server must time out");
     assert!(!error.is_empty());
+    tracker.stop().await;
 }
 
 /// Deterministic mid-flight cancellation: the server stalls, so the probe is
@@ -778,13 +789,15 @@ async fn stalled_server_times_out() {
 async fn cancellation_joins_promptly_midflight() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
+    let held: Arc<Mutex<Vec<tokio::net::TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
+    let accepted = Arc::new(tokio::sync::Notify::new());
+    let held_holder = Arc::clone(&held);
+    let accepted_holder = Arc::clone(&accepted);
     let holder = tokio::spawn(async move {
         loop {
             if let Ok((stream, _)) = listener.accept().await {
-                tokio::spawn(async move {
-                    let _held = stream;
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                });
+                held_holder.lock().unwrap().push(stream);
+                accepted_holder.notify_one();
             }
         }
     });
@@ -795,7 +808,9 @@ async fn cancellation_joins_promptly_midflight() {
         options.timeout = Duration::from_secs(10);
         probe::run_checks(&options).await
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Deterministic barrier: the holder signals after it has accepted the
+    // connection, so the abort is provably mid-flight (no fixed sleep).
+    accepted.notified().await;
     let start = std::time::Instant::now();
     task.abort();
     let joined = task.await;
@@ -878,6 +893,7 @@ async fn bench_runs_and_reports_protocol() {
             warmup: 5,
             stream_cycles: 3,
             session: Some("s-probe".into()),
+            allow_error_streams: false,
         },
     )
     .await
@@ -909,4 +925,176 @@ async fn bench_runs_and_reports_protocol() {
     bridge.stop();
     herdr.stop().await;
     root.remove();
+}
+
+// ---------------------------------------------------------------------------
+// Tracked fixture tasks: every spawned fixture server is aborted and joined
+// under a deadline; a panicked task is surfaced, never counted as expected
+// cancellation.
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct TaskTracker(Vec<tokio::task::JoinHandle<()>>);
+
+impl TaskTracker {
+    fn spawn(&mut self, task: impl std::future::Future<Output = ()> + Send + 'static) {
+        self.0.push(tokio::spawn(task));
+    }
+
+    /// Abort and join every tracked task within the teardown deadline. A
+    /// panicked task is an error; expected cancellation is not.
+    async fn stop(&mut self) {
+        let tasks = std::mem::take(&mut self.0);
+        let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
+        for task in tasks {
+            task.abort();
+            match tokio::time::timeout_at(deadline, task).await {
+                Err(_) => panic!("fixture task did not join before the teardown deadline"),
+                Ok(Err(join_error)) => {
+                    if !join_error.is_cancelled() {
+                        panic!("fixture task panicked: {join_error}");
+                    }
+                }
+                Ok(Ok(())) => {}
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Negative stream-validation fixtures: synthetic axum WS servers exercising
+// the client's protocol guards (generation regression, invalid gap shape,
+// binary data, empty-entries-as-consumption).
+// ---------------------------------------------------------------------------
+
+/// Spawns a tracked axum WS server that streams the given frames as JSON
+/// texts after an opening `stream_open` frame, then keeps the connection.
+async fn spawn_frame_server(frames: Vec<Value>) -> (String, TaskTracker) {
+    use axum::extract::ws::{Message, WebSocketUpgrade};
+    use axum::routing::get as get_route;
+    use axum::Router;
+
+    async fn stream_frames(
+        upgrade: WebSocketUpgrade,
+        frames: Vec<Value>,
+    ) -> axum::response::Response {
+        upgrade.on_upgrade(move |mut socket: axum::extract::ws::WebSocket| async move {
+            for frame in frames {
+                let text = serde_json::to_string(&frame).unwrap();
+                if socket.send(Message::Text(text.into())).await.is_err() {
+                    return;
+                }
+            }
+            // Hold the connection open so the probe consumes within budget.
+            while socket.recv().await.is_some() {}
+        })
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = Router::new().route(
+        "/api/stream",
+        get_route(
+            move |upgrade: WebSocketUpgrade| async move { stream_frames(upgrade, frames).await },
+        ),
+    );
+    let mut tracker = TaskTracker::default();
+    tracker.spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://127.0.0.1:{port}"), tracker)
+}
+
+fn stream_options(base: &str) -> ProbeOptions {
+    let mut options = probe_options(base);
+    options.session = Some("s-probe".into());
+    options
+}
+
+#[tokio::test]
+async fn stream_reset_generation_regression_is_rejected() {
+    let frames = vec![
+        json!({"event": "stream_open", "generation": 5}),
+        json!({"event": "stream_reset", "generation": 3}),
+    ];
+    let (base, mut tracker) = spawn_frame_server(frames).await;
+    let error = probe::ws_stream_probe(
+        &stream_options(&base),
+        "s-probe",
+        Duration::from_millis(300),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("regression"), "{error}");
+    tracker.stop().await;
+}
+
+#[tokio::test]
+async fn invalid_gap_shape_is_rejected() {
+    let frames = vec![
+        json!({"event": "stream_open", "generation": 0}),
+        json!({"event": "entries", "entries": [{
+            "seq": 9, "id": "wrong-id", "kind": "gap",
+            "text": "gap: missing entries 2-8", "branch": null, "complete": true }]}),
+    ];
+    let (base, mut tracker) = spawn_frame_server(frames).await;
+    let error = probe::ws_stream_probe(
+        &stream_options(&base),
+        "s-probe",
+        Duration::from_millis(300),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("gap entry must have null seq"), "{error}");
+    tracker.stop().await;
+}
+
+#[tokio::test]
+async fn binary_data_frame_is_rejected() {
+    use axum::extract::ws::{Message, WebSocketUpgrade};
+    use axum::routing::get as get_route;
+    use axum::Router;
+
+    async fn binary_ws(upgrade: WebSocketUpgrade) -> axum::response::Response {
+        upgrade.on_upgrade(|mut socket: axum::extract::ws::WebSocket| async move {
+            let _ = socket
+                .send(Message::Text(
+                    "{\"event\":\"stream_open\",\"generation\":0}".into(),
+                ))
+                .await;
+            let _ = socket.send(Message::Binary(vec![0xde, 0xad].into())).await;
+            while socket.recv().await.is_some() {}
+        })
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = Router::new().route("/api/stream", get_route(binary_ws));
+    let mut tracker = TaskTracker::default();
+    tracker.spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let options = stream_options(&format!("http://127.0.0.1:{port}"));
+    let error = probe::ws_stream_probe(&options, "s-probe", Duration::from_millis(300))
+        .await
+        .unwrap_err();
+    assert!(error.contains("binary"), "{error}");
+    tracker.stop().await;
+}
+
+#[tokio::test]
+async fn empty_entries_do_not_count_as_consumption() {
+    let frames = vec![
+        json!({"event": "stream_open", "generation": 0}),
+        json!({"event": "entries", "entries": []}),
+    ];
+    let (base, mut tracker) = spawn_frame_server(frames).await;
+    let probe = ws_probe(
+        &stream_options(&base),
+        "s-probe",
+        Duration::from_millis(300),
+    )
+    .await;
+    assert_eq!(probe.first_event, "stream_open");
+    assert_eq!(probe.entries_consumed, 0, "empty entries must not count");
+    tracker.stop().await;
 }
