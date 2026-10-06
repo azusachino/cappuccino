@@ -136,14 +136,22 @@ suppression or skipped tests.
 an example target on purpose: `cargo run` and `cargo install` defaults of the
 bridge crate stay unchanged.
 
-- `check` mode: `GET /api/session`, `GET /api/agents`, a fail-closed transcript
-  probe, and an optional WS stream probe (`--session NAME`), each with bounded
-  deadlines. Any shape mismatch, malformed frame, timeout or disconnect exits
-  nonzero. HTTP legs prefer HTTP/2 prior knowledge (h2c) and always report the
-  observed protocol; `--require-h2` makes an HTTP/1 downgrade an error.
-- `bench` mode: bounded cold/warm HTTP requests and stream connection churn;
-  reports p50/p95, throughput and getrusage CPU/peak RSS with the observed
-  protocol. It establishes a baseline; it asserts no performance thresholds.
+- `check` mode: `GET /api/session` (paired/protocol 1/plugin/nonempty
+  machine_id), `GET /api/agents` (verified shapes against actual post-S1/S2
+  source: `event`, arrays, 502 `herdr_unreachable` envelope), a fail-closed
+  transcript probe (502 error envelope, or a coherent 200: `available:true`
+  requires a nonempty `transcript_path`, `available:false` a null path), and
+  an optional WS stream probe (`--session NAME`) that validates the first
+  frame (generation on `stream_open`, known error codes) and consumes
+  follow-up frames (entries/reset) under an explicit budget. HTTP legs prefer
+  HTTP/2 prior knowledge (h2c) and always report the observed protocol;
+  `--require-h2` makes an HTTP/1 downgrade an error.
+- `bench` mode: bounded cold/warm HTTP requests with **consumed bodies** and
+  stream connection churn with **consumed, validated entries**; reports
+  p50/p95 (microseconds), throughput, a before/after CPU delta, peak RSS and
+  a sampled client RSS trend with the observed protocol. It establishes a
+  baseline; it asserts no performance thresholds. Metric failures (e.g.
+  getrusage errors) fail the run, never zero-fill.
 - Protocol reality (implemented, tested): HTTP routes negotiate real HTTP/2
   over h2c prior knowledge against this bridge (axum `http2` feature is
   enabled) and fall back to HTTP/1.1 otherwise, reported per leg. The WS leg
@@ -155,10 +163,18 @@ bridge crate stay unchanged.
   socket in temp dirs on loopback ephemeral ports. They use no owner sessions,
   credentials or Tailscale (`CAPP_BRIDGE_SERVE_AUTO_APPLY=0`). These are
   synthetic fixtures; they do not prove canonical live-transcript behavior.
-- Leak acceptance is baseline-relative: the soak records FD/RSS/child/temp
-  baselines, runs bounded success, error and child-churn cycles, and asserts
-  teardown recovery within documented tolerance. Short samples never prove
-  absolute zero-leak.
+- Bounds are explicit, not assumed: HTTP response bodies are capped (1 MiB,
+  oversized bodies fail), WS frames/messages are capped client-side on the
+  connection (1 MiB / 64 KiB), every operation has a deadline, and a whole
+  session budget bounds a full check or benchmark run.
+- Leak acceptance is baseline-relative and per scenario class (success,
+  refusal, mid-flight cancellation, server disconnect, child churn): FD counts
+  may drop (async runtime teardown) but must not grow beyond a documented
+  tolerance after each class; children are reaped (asserted via try_wait);
+  mock tasks join under a deadline; temp state is removed. RSS evidence
+  combines sampled client RSS growth with peak; short samples never prove
+  absolute zero-leak. The soak runs as part of the aggregate `check-bridge`
+  gate, not only as an explicit target.
 
 The manifest uses argv arrays and invokes the installed Rust binary directly;
 there are no bridge shell launchers. The bridge uses `libc` narrowly for Unix

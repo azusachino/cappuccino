@@ -25,4 +25,3 @@ hyper = { version = "1", features = ["client", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "http2", "tokio"] }
 tokio = { version = "1", features = ["io-util", "process"] }
 tokio-tungstenite = { version = "0.29", default-features = false }
-

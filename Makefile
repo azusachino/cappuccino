@@ -57,13 +57,20 @@ test-android: ## Run pure Kotlin logic tests
 lint-android: ## Run Android lint with warnings as errors
 	$(ANDROID) :app:lintDebug
 
-check-bridge: ## Bridge Rust gate: fmt, hermetic tests (incl. client contract), release example
+check-bridge: ## Bridge Rust gate: fmt, all hermetic tests, mandatory resource soak, release example
 	$(CARGO) fmt --manifest-path $(BRIDGE_MANIFEST) -- --check
 	$(CARGO) test --locked --manifest-path $(BRIDGE_MANIFEST)
+	$(CARGO) test --locked --manifest-path $(BRIDGE_MANIFEST) --test resource_soak -- --ignored
 	$(CARGO) build --locked --release --manifest-path $(BRIDGE_MANIFEST) --example test-client
 
-bench-bridge-client: ## Reproducible bridge benchmark against a running bridge (BASE_URL, default loopback)
-	$(CARGO) run --locked --release --manifest-path $(BRIDGE_MANIFEST) --example test-client -- bench --base-url $(or $(BASE_URL),http://127.0.0.1:7392) --iterations 300
+# Stream scenarios are part of the normal benchmark: SESSION names the WS
+# target (bridge returns a fail-closed not_found frame for unknown sessions,
+# which the bench still consumes and validates); STREAM_CYCLES must be > 0.
+SESSION ?= s-probe
+STREAM_CYCLES ?= 20
+
+bench-bridge-client: ## Reproducible bridge benchmark (BASE_URL, SESSION, STREAM_CYCLES; consumes bodies + stream entries)
+	$(CARGO) run --locked --release --manifest-path $(BRIDGE_MANIFEST) --example test-client -- bench --base-url $(or $(BASE_URL),http://127.0.0.1:7392) --session $(SESSION) --stream-cycles $(STREAM_CYCLES) --iterations 300
 
 resource-bridge-client: ## Leak/lifecycle soak (bounded); asserts FD/RSS/child/temp recovery
 	$(CARGO) test --locked --manifest-path $(BRIDGE_MANIFEST) --test resource_soak -- --ignored --nocapture
