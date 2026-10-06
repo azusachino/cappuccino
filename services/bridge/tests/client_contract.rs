@@ -161,15 +161,39 @@ impl MockHerdr {
 
     /// Aborts and joins every tracked connection task within the teardown
     /// deadline, then removes the socket. Errors are surfaced, not ignored.
+    /// Full teardown: abort ALL owned handles (listener + every connection)
+    /// first, join each under the shared deadline, collect every error, and
+    /// only then report — an early failure can never drop the remaining
+    /// unjoined handles.
     async fn stop(self) {
-        join_tracked(self.listener_task, "mock herdr listener").await;
-        let tasks: Vec<_> = self.tasks.lock().unwrap().drain(..).collect();
-        for task in tasks {
-            join_tracked(task, "mock herdr connection").await;
+        let mut handles = vec![self.listener_task];
+        handles.extend(self.tasks.lock().unwrap().drain(..));
+        let mut errors = Vec::new();
+        for handle in handles.iter() {
+            handle.abort();
+        }
+        let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
+        for (index, handle) in handles.iter_mut().enumerate() {
+            match tokio::time::timeout_at(deadline, &mut *handle).await {
+                Err(_) => {
+                    handle.abort();
+                    errors.push(format!(
+                        "mock herdr task [{index}]: did not join before the deadline; re-aborted"
+                    ));
+                }
+                Ok(Err(join_error)) if !join_error.is_cancelled() => {
+                    errors.push(format!("mock herdr task [{index}] panicked: {join_error}"));
+                }
+                Ok(_) => {}
+            }
         }
         if let Err(error) = std::fs::remove_file(&self.socket_path) {
-            panic!("mock herdr socket cleanup: {error}");
+            errors.push(format!("mock herdr socket cleanup: {error}"));
         }
+        assert!(
+            errors.is_empty(),
+            "mock herdr cleanup failures after full teardown: {errors:?}"
+        );
     }
 }
 
@@ -394,7 +418,7 @@ impl Drop for Bridge {
 /// Abort and join one tracked task under the teardown deadline. A panicked
 /// task is surfaced; expected cancellation (`is_cancelled`) is accepted.
 /// No join error is swallowed.
-async fn join_tracked(task: tokio::task::JoinHandle<()>, label: &str) {
+async fn join_tracked(task: &mut tokio::task::JoinHandle<()>, label: &str) {
     task.abort();
     let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
     match tokio::time::timeout_at(deadline, task).await {
@@ -566,13 +590,15 @@ async fn session_requires_nonempty_machine_id() {
     let port = listener.local_addr().unwrap().port();
     let tracker = Arc::new(TaskTracker::default());
     let server_tracker = Arc::clone(&tracker);
-    tracker.spawn(async move {
+    if let Err(rejected) = tracker.spawn(async move {
         loop {
             let Ok((mut stream, _)) = listener.accept().await else {
                 return;
             };
-            // Per-connection work is owned by the tracker, not detached.
-            server_tracker.spawn(async move {
+            // Per-connection work is owned by the tracker, not detached; a
+            // spawn after closure is rejected and the future dropped without
+            // starting (the accepted socket is dropped with it).
+            if server_tracker.spawn(async move {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut buf = [0u8; 1024];
                 let _ = stream.read(&mut buf).await;
@@ -582,9 +608,19 @@ async fn session_requires_nonempty_machine_id() {
                     body.len()
                 );
                 let _ = stream.write_all(response.as_bytes()).await;
-            });
+            })
+            .is_err()
+            {
+                // Spawn after closure: the future was dropped unstarted and
+                // the accepted socket closed with it.
+                eprintln!("connection after tracker closure: rejected, not started");
+            }
         }
-    });
+    }) {
+        // A producer rejected after closure is the expected shutdown race:
+        // the listener future was dropped without starting.
+        eprintln!("producer after tracker closure: rejected, not started: {rejected}");
+    }
     let mut options = probe_options(&format!("http://127.0.0.1:{port}"));
     options.timeout = Duration::from_secs(5);
     options.session_deadline = Duration::from_secs(10);
@@ -592,7 +628,7 @@ async fn session_requires_nonempty_machine_id() {
         .await
         .expect_err("missing machine_id must fail");
     assert!(error.contains("machine_id"), "{error}");
-    tracker.stop().await;
+    tracker.stop().await.expect_clean();
 }
 
 // ---------------------------------------------------------------------------
@@ -735,7 +771,7 @@ async fn ws_malformed_frame_fails_loudly() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = Router::new().route("/api/stream", get_route(bad_ws));
-    let server = tokio::spawn(async move {
+    let mut server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
 
@@ -745,7 +781,7 @@ async fn ws_malformed_frame_fails_loudly() {
         .expect_err("malformed frame must be an error");
     assert!(error.contains("malformed"), "{error}");
 
-    join_tracked(server, "malformed-frame server").await;
+    join_tracked(&mut server, "malformed-frame server").await;
 }
 
 // ---------------------------------------------------------------------------
@@ -785,14 +821,16 @@ async fn require_h2_fails_on_http1_downgrade() {
     let port = listener.local_addr().unwrap().port();
     let tracker = Arc::new(TaskTracker::default());
     let server_tracker = Arc::clone(&tracker);
-    tracker.spawn(async move {
+    if let Err(rejected) = tracker.spawn(async move {
         loop {
             let (mut stream, _) = match listener.accept().await {
                 Ok(accepted) => accepted,
                 Err(_) => return,
             };
-            // Per-connection work is owned by the tracker, not detached.
-            server_tracker.spawn(async move {
+            // Per-connection work is owned by the tracker, not detached; a
+            // spawn after closure is rejected and the future dropped without
+            // starting (the accepted socket is dropped with it).
+            if server_tracker.spawn(async move {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut buf = [0u8; 1024];
                 let _ = stream.read(&mut buf).await;
@@ -803,9 +841,19 @@ async fn require_h2_fails_on_http1_downgrade() {
                 );
                 let _ = stream.write_all(response.as_bytes()).await;
                 let _ = stream.flush().await;
-            });
+            })
+            .is_err()
+            {
+                // Spawn after closure: the future was dropped unstarted and
+                // the accepted socket closed with it.
+                eprintln!("connection after tracker closure: rejected, not started");
+            }
         }
-    });
+    }) {
+        // A producer rejected after closure is the expected shutdown race:
+        // the listener future was dropped without starting.
+        eprintln!("producer after tracker closure: rejected, not started: {rejected}");
+    }
 
     let mut options = probe_options(&format!("http://127.0.0.1:{port}"));
     options.preference = HttpPreference::RequireH2;
@@ -814,7 +862,7 @@ async fn require_h2_fails_on_http1_downgrade() {
         .await
         .expect_err("require-h2 must fail against an HTTP/1-only origin");
     assert!(error.contains("require-h2"), "{error}");
-    tracker.stop().await;
+    tracker.stop().await.expect_clean();
 }
 
 // ---------------------------------------------------------------------------
@@ -838,17 +886,26 @@ async fn stalled_server_times_out() {
     // Accepts connections, never answers.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let tracker = TaskTracker::default();
-    tracker.spawn(async move {
+    let tracker = Arc::new(TaskTracker::default());
+    let server_tracker = Arc::clone(&tracker);
+    if let Err(rejected) = tracker.spawn(async move {
         loop {
             if let Ok((stream, _)) = listener.accept().await {
-                tokio::spawn(async move {
-                    let _held = stream; // hold it open, never respond
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                });
+                // Per-connection hold tasks are owned by the tracker too.
+                if server_tracker
+                    .spawn(async move {
+                        let _held = stream; // hold it open, never respond
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    })
+                    .is_err()
+                {
+                    eprintln!("hold task after closure: rejected, socket dropped");
+                }
             }
         }
-    });
+    }) {
+        eprintln!("stall producer after closure: rejected, not started: {rejected}");
+    }
     let mut options = probe::ProbeOptions::new(format!("http://127.0.0.1:{port}"));
     options.timeout = Duration::from_secs(2);
     options.session_deadline = Duration::from_secs(3);
@@ -856,7 +913,7 @@ async fn stalled_server_times_out() {
         .await
         .expect_err("stalled server must time out");
     assert!(!error.is_empty());
-    tracker.stop().await;
+    tracker.stop().await.expect_clean();
 }
 
 /// Deterministic mid-flight cancellation: the server stalls, so the probe is
@@ -870,17 +927,19 @@ async fn cancellation_joins_promptly_midflight() {
     let held_holder = Arc::clone(&held);
     let accepted_holder = Arc::clone(&accepted);
     let holder = TaskTracker::default();
-    holder.spawn(async move {
+    if let Err(rejected) = holder.spawn(async move {
         loop {
             if let Ok((stream, _)) = listener.accept().await {
                 held_holder.lock().unwrap().push(stream);
                 accepted_holder.notify_one();
             }
         }
-    });
+    }) {
+        eprintln!("holder producer after closure: rejected, not started: {rejected}");
+    }
 
     let options = probe::ProbeOptions::new(format!("http://127.0.0.1:{port}"));
-    let task = tokio::spawn(async move {
+    let mut task = tokio::spawn(async move {
         let mut options = options;
         options.timeout = Duration::from_secs(10);
         probe::run_checks(&options).await
@@ -889,13 +948,13 @@ async fn cancellation_joins_promptly_midflight() {
     // connection, so the abort is provably mid-flight (no fixed sleep).
     accepted.notified().await;
     let start = std::time::Instant::now();
-    require_midflight_cancelled(task, "mid-flight probe").await;
+    require_midflight_cancelled(&mut task, "mid-flight probe").await;
     assert!(
         start.elapsed() < Duration::from_secs(2),
         "abort must not hang"
     );
 
-    holder.stop().await;
+    holder.stop().await.expect_clean();
     held.lock().unwrap().clear();
 }
 
@@ -1005,8 +1064,111 @@ async fn bench_runs_and_reports_protocol() {
 // cancellation.
 // ---------------------------------------------------------------------------
 
+/// Shared tracker state: registration is closed atomically under the same
+/// lock that owns the handle list, so `stop` cannot miss a racing spawn.
 #[derive(Default)]
-struct TaskTracker(Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>);
+struct TaskState {
+    handles: Vec<tokio::task::JoinHandle<()>>,
+    closed: bool,
+}
+
+#[derive(Default)]
+struct TaskTracker {
+    inner: Arc<Mutex<TaskState>>,
+}
+
+/// Outcome of a full tracker teardown: collected AFTER every owned handle
+/// had abort+join attempted. The full handle list is retained here (joined
+/// handles are inert; any that missed the shared deadline stay re-aborted
+/// and are re-aborted again on drop) so no task is silently detached before
+/// the outcome is reported.
+struct TrackerStop {
+    errors: Vec<String>,
+    retained: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for TrackerStop {
+    /// A deadline-missed handle is already re-aborted; on drop it is aborted
+    /// again and any still-running task is logged, never silently detached.
+    fn drop(&mut self) {
+        for handle in self.retained.iter() {
+            handle.abort();
+        }
+        for handle in self.retained.iter() {
+            if !handle.is_finished() {
+                eprintln!("tracker stop retained a still-running aborted task");
+            }
+        }
+    }
+}
+
+impl TrackerStop {
+    fn expect_clean(self) {
+        assert!(
+            self.errors.is_empty(),
+            "tracker cleanup errors: {:?}",
+            self.errors
+        );
+    }
+}
+
+impl Drop for TaskTracker {
+    /// Panic-path backstop: re-abort anything that missed the deadline and
+    /// log it; never silently detach a running task.
+    fn drop(&mut self) {
+        let mut state = self.inner.lock().unwrap();
+        state.closed = true;
+        for handle in state.handles.iter() {
+            handle.abort();
+        }
+        for handle in std::mem::take(&mut state.handles) {
+            if !handle.is_finished() {
+                eprintln!("task tracker dropped with a still-running aborted task");
+            }
+        }
+    }
+}
+
+/// Abort every handle first, then join each under one shared deadline.
+/// Errors are collected and returned only after all handles had cleanup
+/// attempted; a timed-out handle keeps its ownership via the `&mut` join and
+/// is re-aborted and retained in the returned stop record.
+async fn join_all_tracked(
+    handles: &mut Vec<tokio::task::JoinHandle<()>>,
+    label: &str,
+) -> TrackerStop {
+    for handle in handles.iter() {
+        handle.abort();
+    }
+    let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
+    let results = futures_util::future::join_all(
+        handles
+            .iter_mut()
+            .map(|h| tokio::time::timeout_at(deadline, h)),
+    )
+    .await;
+    let mut errors = Vec::new();
+    for (index, result) in results.into_iter().enumerate() {
+        match result {
+            Err(_) => {
+                // Deadline miss: keep ownership (the handle stays in the
+                // retained list) and re-abort so the task cannot run on.
+                handles[index].abort();
+                errors.push(format!(
+                    "{label}[{index}]: did not join before the teardown deadline; re-aborted"
+                ));
+            }
+            Ok(Err(join_error)) if !join_error.is_cancelled() => {
+                errors.push(format!("{label}[{index}] panicked: {join_error}"));
+            }
+            Ok(_) => {}
+        }
+    }
+    TrackerStop {
+        errors,
+        retained: std::mem::take(handles),
+    }
+}
 
 /// Classification of a joined task outcome at a cancellation point.
 enum CancelOutcome {
@@ -1033,7 +1195,7 @@ fn classify_join(joined: Result<(), tokio::task::JoinError>) -> CancelOutcome {
 
 /// Aborts a probe task and joins it under the teardown deadline, requiring
 /// the outcome to be a genuine mid-flight cancellation.
-async fn require_midflight_cancelled<T>(task: tokio::task::JoinHandle<T>, label: &str)
+async fn require_midflight_cancelled<T>(task: &mut tokio::task::JoinHandle<T>, label: &str)
 where
     T: Send + 'static,
 {
@@ -1056,29 +1218,33 @@ where
 }
 
 impl TaskTracker {
-    /// `&self` so per-connection handlers inside a running listener closure
-    /// can register their tasks on the same tracker.
-    fn spawn(&self, task: impl std::future::Future<Output = ()> + Send + 'static) {
-        self.0.lock().unwrap().push(tokio::spawn(task));
+    /// Registers a task atomically under the state lock. Registration is
+    /// rejected (the future is dropped WITHOUT spawning, so no task starts)
+    /// once `stop` has closed the tracker; callers handle the rejection.
+    fn spawn(
+        &self,
+        task: impl std::future::Future<Output = ()> + Send + 'static,
+    ) -> Result<(), String> {
+        let mut state = self.inner.lock().unwrap();
+        if state.closed {
+            return Err("task tracker is closed; new task not started".into());
+        }
+        state.handles.push(tokio::spawn(task));
+        Ok(())
     }
 
-    /// Abort and join every tracked task within the teardown deadline. A
-    /// panicked task is an error; expected cancellation is not.
-    async fn stop(&self) {
-        let tasks: Vec<_> = self.0.lock().unwrap().drain(..).collect();
-        let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
-        for task in tasks {
-            task.abort();
-            match tokio::time::timeout_at(deadline, task).await {
-                Err(_) => panic!("fixture task did not join before the teardown deadline"),
-                Ok(Err(join_error)) => {
-                    if !join_error.is_cancelled() {
-                        panic!("fixture task panicked: {join_error}");
-                    }
-                }
-                Ok(Ok(())) => {}
-            }
-        }
+    /// Full teardown: registration closes atomically under the state lock
+    /// BEFORE draining, so a producer racing with shutdown either registers
+    /// into the drained set or is rejected. Then every owned handle is
+    /// aborted first and joined under one shared deadline; all errors are
+    /// collected and returned only after cleanup was attempted for all.
+    async fn stop(&self) -> TrackerStop {
+        let mut handles = {
+            let mut state = self.inner.lock().unwrap();
+            state.closed = true;
+            std::mem::take(&mut state.handles)
+        };
+        join_all_tracked(&mut handles, "tracked task").await
     }
 }
 
@@ -1120,9 +1286,11 @@ async fn spawn_frame_server(frames: Vec<Value>) -> (String, TaskTracker) {
         ),
     );
     let tracker = TaskTracker::default();
-    tracker.spawn(async move {
-        let _ = axum::serve(listener, app).await;
-    });
+    tracker
+        .spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        })
+        .expect("fixture server spawns before any closure");
     (format!("http://127.0.0.1:{port}"), tracker)
 }
 
@@ -1147,7 +1315,7 @@ async fn stream_reset_generation_regression_is_rejected() {
     .await
     .unwrap_err();
     assert!(error.contains("regression"), "{error}");
-    tracker.stop().await;
+    tracker.stop().await.expect_clean();
 }
 
 #[tokio::test]
@@ -1167,7 +1335,7 @@ async fn invalid_gap_shape_is_rejected() {
     .await
     .unwrap_err();
     assert!(error.contains("gap entry must have null seq"), "{error}");
-    tracker.stop().await;
+    tracker.stop().await.expect_clean();
 }
 
 #[tokio::test]
@@ -1191,15 +1359,17 @@ async fn binary_data_frame_is_rejected() {
     let port = listener.local_addr().unwrap().port();
     let app = Router::new().route("/api/stream", get_route(binary_ws));
     let tracker = TaskTracker::default();
-    tracker.spawn(async move {
-        let _ = axum::serve(listener, app).await;
-    });
+    tracker
+        .spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        })
+        .expect("fixture server spawns before any closure");
     let options = stream_options(&format!("http://127.0.0.1:{port}"));
     let error = probe::ws_stream_probe(&options, "s-probe", Duration::from_millis(300))
         .await
         .unwrap_err();
     assert!(error.contains("binary"), "{error}");
-    tracker.stop().await;
+    tracker.stop().await.expect_clean();
 }
 
 #[tokio::test]
@@ -1217,7 +1387,7 @@ async fn empty_entries_do_not_count_as_consumption() {
     .await;
     assert_eq!(probe.first_event, "stream_open");
     assert_eq!(probe.entries_consumed, 0, "empty entries must not count");
-    tracker.stop().await;
+    tracker.stop().await.expect_clean();
 }
 
 // ---------------------------------------------------------------------------
@@ -1243,14 +1413,16 @@ fn tracked_cleanup_panics_on_injected_panic() {
             .unwrap();
         runtime.block_on(async {
             let tracker = TaskTracker::default();
-            tracker.spawn(async {
-                panic!("injected fixture panic");
-            });
+            tracker
+                .spawn(async {
+                    panic!("injected fixture panic");
+                })
+                .expect("task spawns before any closure");
             // Let the spawned task actually run so its panic (not a preemptive
             // abort) is what the tracker must surface.
             tokio::task::yield_now().await;
             tokio::task::yield_now().await;
-            tracker.stop().await;
+            tracker.stop().await.expect_clean();
         });
     }));
     std::panic::set_hook(previous_hook);
@@ -1275,11 +1447,13 @@ fn tracked_cleanup_accepts_expected_cancellation() {
         .unwrap();
     runtime.block_on(async {
         let tracker = TaskTracker::default();
-        tracker.spawn(async {
-            // Runs until aborted: expected cancellation, not a panic.
-            futures_util::future::pending::<()>().await;
-        });
-        tracker.stop().await; // must not panic
+        tracker
+            .spawn(async {
+                // Runs until aborted: expected cancellation, not a panic.
+                futures_util::future::pending::<()>().await;
+            })
+            .expect("task spawns before any closure");
+        tracker.stop().await.expect_clean(); // must not panic
     });
 }
 
@@ -1324,9 +1498,11 @@ async fn clean_close_frame_is_observed_as_closed() {
     let port = listener.local_addr().unwrap().port();
     let app = Router::new().route("/api/stream", get_route(clean_close_ws));
     let tracker = TaskTracker::default();
-    tracker.spawn(async move {
-        let _ = axum::serve(listener, app).await;
-    });
+    tracker
+        .spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        })
+        .expect("fixture server spawns before any closure");
 
     let options = stream_options(&format!("http://127.0.0.1:{port}"));
     let probe = probe::ws_stream_probe(&options, "s-probe", Duration::from_millis(500))
@@ -1337,7 +1513,7 @@ async fn clean_close_frame_is_observed_as_closed() {
         probe.closed_by_server,
         "closed_by_server requires an actual Close frame"
     );
-    tracker.stop().await;
+    tracker.stop().await.expect_clean();
 }
 
 // ---------------------------------------------------------------------------
@@ -1365,7 +1541,7 @@ async fn repeated_stream_open_is_rejected_any_generation() {
             error.contains("repeated stream_open"),
             "generation {generation}: {error}"
         );
-        tracker.stop().await;
+        tracker.stop().await.expect_clean();
     }
 }
 
@@ -1427,9 +1603,11 @@ async fn ping_then_abrupt_peer_close_is_propagated() {
     let port = listener.local_addr().unwrap().port();
     let app = Router::new().route("/api/stream", get_route(ping_drop_ws));
     let tracker = TaskTracker::default();
-    tracker.spawn(async move {
-        let _ = axum::serve(listener, app).await;
-    });
+    tracker
+        .spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        })
+        .expect("fixture server spawns before any closure");
 
     let options = stream_options(&format!("http://127.0.0.1:{port}"));
     // Transport loss without a WebSocket Close frame MUST be an Err: no Ok,
@@ -1444,5 +1622,118 @@ async fn ping_then_abrupt_peer_close_is_propagated() {
             || error.contains("closing handshake"),
         "{error}"
     );
-    tracker.stop().await;
+    tracker.stop().await.expect_clean();
+}
+
+// ---------------------------------------------------------------------------
+// Round-7 regressions: atomic registration closure and deterministic race.
+// ---------------------------------------------------------------------------
+
+/// After `stop`, registration is permanently closed: the spawn is rejected
+/// and the dropped future is never polled (the task never starts).
+#[tokio::test]
+async fn spawn_after_stop_is_rejected_without_task_start() {
+    let tracker = Arc::new(TaskTracker::default());
+    tracker.stop().await.expect_clean();
+    let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let started_flag = Arc::clone(&started);
+    let error = tracker
+        .spawn(async move {
+            started_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        })
+        .expect_err("spawn after stop must be rejected");
+    assert!(error.contains("closed"), "{error}");
+    assert!(
+        !started.load(std::sync::atomic::Ordering::SeqCst),
+        "the rejected future must never be polled into a task"
+    );
+    // The tracker remains cleanly stopped.
+    tracker.stop().await.expect_clean();
+}
+
+/// Deterministic registration race: a producer spawning children while
+/// `stop` runs cannot let a child escape cleanup. Every child that started
+/// before closure is registered (abort+joined by stop) and every spawn after
+/// closure is rejected; after stop no child is running and none can start.
+#[tokio::test]
+async fn registration_race_cannot_escape_cleanup() {
+    let tracker = Arc::new(TaskTracker::default());
+    let running = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let rejected = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    // Producer: hammers spawn until the tracker closes it out.
+    let producer_running = Arc::clone(&running);
+    let producer_started = Arc::clone(&started);
+    let producer_rejected = Arc::clone(&rejected);
+    let producer_tracker = Arc::clone(&tracker);
+    let producer = tokio::spawn(async move {
+        loop {
+            let child_running = Arc::clone(&producer_running);
+            let child_started = Arc::clone(&producer_started);
+            if producer_tracker
+                .spawn(async move {
+                    // The guard lives inside the child: constructed when the
+                    // task runs, dropped when it is joined after abort.
+                    let guard = RunningGuard(child_running);
+                    guard.arm();
+                    child_started.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    // Hold until aborted by the tracker teardown.
+                    futures_util::future::pending::<()>().await;
+                    drop(guard);
+                })
+                .is_err()
+            {
+                producer_rejected.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    });
+
+    // Let the producer start some children, then close registration.
+    for _ in 0..4 {
+        tokio::task::yield_now().await;
+    }
+    let stop = tracker.stop().await;
+    let _ = producer.await; // producer outcome observed after full cleanup
+
+    assert!(
+        started.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "the race must have started at least one child"
+    );
+    assert!(
+        rejected.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "spawns racing closure must be rejected, not silently registered"
+    );
+    assert!(
+        running.load(std::sync::atomic::Ordering::SeqCst) == 0,
+        "no child may still be running after stop: started={}, running={}",
+        started.load(std::sync::atomic::Ordering::SeqCst),
+        running.load(std::sync::atomic::Ordering::SeqCst)
+    );
+    stop.expect_clean();
+
+    // Post-stop spawns stay rejected with no task start.
+    let error = tracker
+        .spawn(async {})
+        .expect_err("tracker stays closed after stop");
+    assert!(error.contains("closed"), "{error}");
+}
+
+/// Guard paired with the running counter: constructed only once a child is
+/// about to run; Drop decrements, so a joined (aborted/dropped) child always
+/// releases its slot.
+struct RunningGuard(Arc<std::sync::atomic::AtomicUsize>);
+
+impl RunningGuard {
+    fn arm(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }

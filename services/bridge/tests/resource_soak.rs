@@ -90,11 +90,14 @@ fn open_fd_targets() -> Vec<String> {
 /// Abort and join one tracked task under the teardown deadline. A panicked
 /// task is surfaced; expected cancellation (`is_cancelled`) is accepted. No
 /// join error is swallowed.
-async fn join_tracked(task: tokio::task::JoinHandle<()>, label: &str) {
+async fn join_tracked(task: &mut tokio::task::JoinHandle<()>, label: &str) {
     task.abort();
     let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
-    match tokio::time::timeout_at(deadline, task).await {
-        Err(_) => panic!("{label} task did not join before the teardown deadline"),
+    match tokio::time::timeout_at(deadline, &mut *task).await {
+        Err(_) => {
+            task.abort();
+            panic!("{label} task did not join before the teardown deadline")
+        }
         Ok(Err(join_error)) => {
             if !join_error.is_cancelled() {
                 panic!("{label} task panicked: {join_error}");
@@ -206,35 +209,39 @@ impl MockHerdr {
         }
     }
 
-    /// Aborts and joins every tracked connection task within the teardown
-    /// deadline. A panicked task is surfaced (not treated as expected
-    /// cancellation); the socket removal error is surfaced too.
+    /// Full teardown: abort ALL owned handles (listener + every connection)
+    /// first, join each under the shared deadline, collect every error, and
+    /// only then report — an early failure can never drop the remaining
+    /// unjoined handles.
     async fn stop(self) {
-        self.listener_task.abort();
-        if let Err(join_error) = self.listener_task.await {
-            if !join_error.is_cancelled() {
-                panic!("mock herdr listener task panicked: {join_error}");
-            }
+        let mut handles = vec![self.listener_task];
+        handles.extend(self.tasks.lock().unwrap().drain(..));
+        let mut errors = Vec::new();
+        for handle in handles.iter() {
+            handle.abort();
         }
-        let tasks: Vec<_> = self.tasks.lock().unwrap().drain(..).collect();
         let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
-        for task in tasks {
-            task.abort();
-            match tokio::time::timeout_at(deadline, task).await {
+        for (index, handle) in handles.iter_mut().enumerate() {
+            match tokio::time::timeout_at(deadline, &mut *handle).await {
                 Err(_) => {
-                    panic!("mock herdr connection task did not join before teardown deadline")
+                    handle.abort();
+                    errors.push(format!(
+                        "mock herdr task [{index}]: did not join before the deadline; re-aborted"
+                    ));
                 }
-                Ok(Err(join_error)) => {
-                    if !join_error.is_cancelled() {
-                        panic!("mock herdr connection task panicked: {join_error}");
-                    }
+                Ok(Err(join_error)) if !join_error.is_cancelled() => {
+                    errors.push(format!("mock herdr task [{index}] panicked: {join_error}"));
                 }
-                Ok(Ok(())) => {}
+                Ok(_) => {}
             }
         }
         if let Err(error) = std::fs::remove_file(&self.socket_path) {
-            panic!("mock herdr socket cleanup: {error}");
+            errors.push(format!("mock herdr socket cleanup: {error}"));
         }
+        assert!(
+            errors.is_empty(),
+            "mock herdr cleanup failures after full teardown: {errors:?}"
+        );
     }
 }
 
@@ -603,7 +610,7 @@ async fn scenario_recovery_error_cancel_disconnect() {
     let accepted = Arc::new(tokio::sync::Notify::new());
     let held_holder = Arc::clone(&held);
     let accepted_holder = Arc::clone(&accepted);
-    let holder = tokio::spawn(async move {
+    let mut holder = tokio::spawn(async move {
         loop {
             if let Ok((stream, _)) = stall.accept().await {
                 held_holder.lock().unwrap().push(stream);
@@ -635,14 +642,14 @@ async fn scenario_recovery_error_cancel_disconnect() {
         worst < Duration::from_secs(2),
         "cancellation join must be prompt"
     );
-    join_tracked(holder, "scenario holder").await;
+    join_tracked(&mut holder, "scenario holder").await;
     held.lock().unwrap().clear();
     assert_exact_recovery("cancel", baseline, open_fd_count().expect("fds"));
 
     // Server disconnect: accept-and-close; every probe must fail loudly.
     let closer = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let closer_port = closer.local_addr().unwrap().port();
-    let holder = tokio::spawn(async move {
+    let mut holder = tokio::spawn(async move {
         loop {
             if let Ok((stream, _)) = closer.accept().await {
                 drop(stream); // immediate disconnect
@@ -657,7 +664,7 @@ async fn scenario_recovery_error_cancel_disconnect() {
             "disconnect must fail loudly"
         );
     }
-    join_tracked(holder, "scenario holder").await;
+    join_tracked(&mut holder, "scenario holder").await;
     assert_exact_recovery("disconnect", baseline, open_fd_count().expect("fds"));
 }
 
@@ -766,55 +773,27 @@ fn held_fd_is_counted_and_attributed() {
 }
 
 /// Negative regression for the cancellation detector: a task that PANICS
-/// after the in-flight barrier must be classified as a panic — never as an
-/// expected cancellation — and the bounded join must surface it.
+/// after the started barrier must be classified as a panic — never as an
+/// expected cancellation. Pure fixture: no live probe, sockets, or child
+/// tasks, so nothing can outlive the joined task.
 #[tokio::test]
 #[ignore]
 async fn cancel_detector_rejects_panic() {
-    let stall = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let stall_port = stall.local_addr().unwrap().port();
-    let held: Arc<Mutex<Vec<tokio::net::TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
-    let accepted = Arc::new(tokio::sync::Notify::new());
-    let held_holder = Arc::clone(&held);
-    let accepted_holder = Arc::clone(&accepted);
-    let holder = tokio::spawn(async move {
-        loop {
-            if let Ok((stream, _)) = stall.accept().await {
-                held_holder.lock().unwrap().push(stream);
-                accepted_holder.notify_one();
-            }
-        }
-    });
-    let accepted_task = Arc::clone(&accepted);
-
-    // The task panics once its request is provably in flight.
+    let started = Arc::new(tokio::sync::Notify::new());
+    let started_task = Arc::clone(&started);
     let task: tokio::task::JoinHandle<()> = tokio::spawn(async move {
-        let mut options = probe::ProbeOptions::new(format!("http://127.0.0.1:{stall_port}"));
-        options.timeout = Duration::from_secs(10);
-        options.session_deadline = Duration::from_secs(15);
-        let checks = tokio::spawn(async move { probe::run_checks(&options).await });
-        drop(checks);
-        // Signal that the panic is the very next statement, so the test's
-        // abort can never preempt the panic into a mere cancellation.
-        accepted_task.notify_one();
+        started_task.notify_one();
         panic!("injected probe panic at the cancellation barrier");
     });
-    accepted.notified().await; // holder accepted the request
-    accepted.notified().await; // task is at the pre-panic point
-    tokio::task::yield_now().await;
-    task.abort();
-    let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
-    let joined = match tokio::time::timeout_at(deadline, task).await {
-        Err(_) => panic!("panicking task did not join before the deadline"),
-        Ok(joined) => joined,
-    };
-    let verdict = classify_join(joined);
+    started.notified().await;
+    // Deterministic: the task panics in the same poll that observed the
+    // notify, so it is finished before the abort.
+    while !task.is_finished() {
+        tokio::task::yield_now().await;
+    }
+    let verdict = classify_join(task.await);
     assert!(
         matches!(&verdict, Err(message) if message.contains("panicked")),
         "a panicked task must be classified as a panic, not cancellation: {verdict:?}"
     );
-
-    holder.abort();
-    join_tracked(holder, "cancel-detector stall holder").await;
-    held.lock().unwrap().clear();
 }
