@@ -92,7 +92,12 @@ public struct TranscriptReassembler: Sendable {
 public protocol BridgeWebSocket: Sendable {
   /// Next text frame from the bridge (nil = the socket closed cleanly).
   func receiveText() async throws -> String?
+  /// Graceful async close.
   func close() async
+  /// Deterministic synchronous close for error/cleanup paths: the closed
+  /// state must be observable the moment this returns, before an error
+  /// propagates to the consumer (defer-ordered, never a detached Task).
+  func closeImmediately()
 }
 
 public protocol BridgeWebSocketConnecting: Sendable {
@@ -168,6 +173,12 @@ public final class URLSessionWebSocketConnection: BridgeWebSocket, @unchecked Se
   }
 
   public func close() async {
+    closeImmediately()
+  }
+
+  /// URLSession task cancellation is synchronous: after cancel returns, the
+  /// task is torn down and receive loops observe the failure.
+  public func closeImmediately() {
     task.cancel(with: .goingAway, reason: nil)
   }
 }
@@ -185,7 +196,10 @@ extension BridgeClient {
         do {
           let endpoint = try BridgeStream.endpointURL(from: url, session: session)
           let socket = try await connector.connect(url: endpoint)
-          defer { Task { await socket.close() } }
+          // Deterministic resource hygiene: closed before any error reaches
+          // the consumer, on every path out of the receive loop (nil frame,
+          // error event, receive failure, cancellation).
+          defer { socket.closeImmediately() }
           while true {
             guard let text = try await socket.receiveText() else {
               throw DaemonClientError.unreachable("daemon closed the stream")

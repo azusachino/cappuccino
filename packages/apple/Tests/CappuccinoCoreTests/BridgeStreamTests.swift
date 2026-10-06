@@ -24,6 +24,10 @@ final class FakeBridgeWebSocket: BridgeWebSocket, @unchecked Sendable {
     markClosed()
   }
 
+  func closeImmediately() {
+    markClosed()
+  }
+
   private func popFrame() -> String? {
     lock.lock()
     defer { lock.unlock() }
@@ -113,6 +117,7 @@ final class RecordURLConnector: BridgeWebSocketConnecting {
 struct NoFramesSocket: BridgeWebSocket {
   func receiveText() async throws -> String? { nil }
   func close() async {}
+  func closeImmediately() {}
 }
 
 private func entriesJSON(_ entries: [String]) -> String {
