@@ -258,10 +258,21 @@ fn urlencode(value: &str) -> String {
 /// `last_generation` tracks reset monotonicity across the session: a
 /// `stream_reset` must carry a strictly larger generation. Gap entries must
 /// match the producer's documented placeholder shape exactly.
-fn validate_stream_frame(frame: &Value, last_generation: &mut Option<u64>) -> Result<(), String> {
+fn validate_stream_frame(
+    frame: &Value,
+    last_generation: &mut Option<u64>,
+    seen_open: &mut bool,
+) -> Result<(), String> {
     let event = frame["event"].as_str().ok_or("frame has no event field")?;
     match event {
         "stream_open" => {
+            // Exactly one initial stream_open is allowed. A repeated open —
+            // with any generation (lower, equal or higher) — is a protocol
+            // violation, not a reset.
+            if *seen_open {
+                return Err("repeated stream_open frame; resets use stream_reset".into());
+            }
+            *seen_open = true;
             let generation = frame["generation"]
                 .as_u64()
                 .ok_or("stream_open missing u64 generation")?;
@@ -440,7 +451,8 @@ pub async fn ws_stream_probe(
     };
     let value: Value =
         serde_json::from_str(&first).map_err(|error| format!("malformed frame: {error}"))?;
-    validate_stream_frame(&value, &mut last_generation)?;
+    let mut seen_open = false; // the first frame is the (only) open
+    validate_stream_frame(&value, &mut last_generation, &mut seen_open)?;
     probe.first_event = value["event"].as_str().unwrap_or("").to_string();
     probe.generation = value["generation"].as_u64();
     probe.error_code = value["code"].as_str().map(str::to_string);
@@ -479,7 +491,9 @@ pub async fn ws_stream_probe(
                             return Err(format!("malformed frame: {error}"));
                         }
                     };
-                    if let Err(error) = validate_stream_frame(&value, &mut last_generation) {
+                    if let Err(error) =
+                        validate_stream_frame(&value, &mut last_generation, &mut seen_open)
+                    {
                         let _ = SinkExt::close(&mut write).await;
                         return Err(error);
                     }
@@ -501,13 +515,25 @@ pub async fn ws_stream_probe(
                     break;
                 }
                 Ok(Some(Ok(Message::Ping(payload)))) => {
-                    // Answer the control frame explicitly and keep reading.
+                    // Answer the control frame explicitly; a failed or timed
+                    // out Pong is a protocol error, never discarded.
                     probe.followup_events.push("ping".into());
-                    let _ = tokio::time::timeout(
+                    let pong = tokio::time::timeout(
                         Duration::from_millis(250),
                         SinkExt::send(&mut write, Message::Pong(payload)),
                     )
                     .await;
+                    match pong {
+                        Err(_) => {
+                            let _ = SinkExt::close(&mut write).await;
+                            return Err("control frame failed: Pong send timed out".into());
+                        }
+                        Ok(Err(error)) => {
+                            let _ = SinkExt::close(&mut write).await;
+                            return Err(format!("control frame failed: Pong send: {error}"));
+                        }
+                        Ok(Ok(())) => {}
+                    }
                 }
                 Ok(Some(Ok(Message::Pong(_)))) => {
                     probe.followup_events.push("pong".into());
@@ -532,7 +558,20 @@ pub async fn ws_stream_probe(
             }
         }
     }
-    let _ = SinkExt::close(&mut write).await;
+    // Protocol close is deliberate: an explicit close send that fails while
+    // the server has not already closed is propagated, never treated as
+    // success. A server that already sent Close (or EOF) is a clean close.
+    let close_result =
+        tokio::time::timeout(Duration::from_secs(2), SinkExt::close(&mut write)).await;
+    match close_result {
+        Err(_) if !probe.closed_by_server => {
+            return Err("ws close send timed out".into());
+        }
+        Ok(Err(error)) if !probe.closed_by_server => {
+            return Err(format!("ws close send failed: {error}"));
+        }
+        _ => {}
+    }
     Ok(probe)
 }
 
@@ -896,6 +935,13 @@ async fn run_bench_inner(
             "bench: stream-cycles must be <= {MAX_BENCH_STREAM_CYCLES}, got {}",
             config.stream_cycles
         ));
+    }
+    if config.stream_cycles > 0 && config.session.is_none() {
+        return Err(
+            "bench: a stream workload was requested (--stream-cycles > 0) but no session              was given; pass --session <name>, or use --stream-cycles 0 for an explicitly \
+             HTTP-only benchmark"
+                .into(),
+        );
     }
 
     // Choose the transport once, honestly: prefer h2, report the fallback.

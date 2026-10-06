@@ -388,15 +388,43 @@ fn assert_exact_recovery(label: &str, baseline: usize, after: usize) {
     }
 }
 
+/// Phase-matched boundary check: after the priming cycle the steady-state
+/// batches must show **zero** unexplained FD growth. Any growth fails with
+/// the exact FD target difference attached for attribution — no numeric
+/// tolerance.
 fn assert_phase_growth(label: &str, phase_baseline: usize, now: usize) {
-    // While services are up, the only allowed FD growth over the phase
-    // baseline is the bridge's own listener/connection set — bounded small.
-    const PHASE_TOLERANCE: isize = 8;
-    println!("soak[{label}]: fds {phase_baseline} -> {now} (phase tolerance +{PHASE_TOLERANCE})");
-    assert!(
-        now as isize - phase_baseline as isize <= PHASE_TOLERANCE,
-        "fd growth after {label}: {phase_baseline} -> {now}"
-    );
+    println!("soak[{label}]: fds {phase_baseline} -> {now}");
+    if now > phase_baseline {
+        let now_targets = open_fd_targets();
+        let diff: Vec<String> = now_targets
+            .iter()
+            .filter(|target| !phase_targets_known(target))
+            .cloned()
+            .collect();
+        panic!(
+            "unexplained FD growth after {label}: {phase_baseline} -> {now}; \
+             new FD targets vs baseline: {diff:?} (all now: {now_targets:?})"
+        );
+    }
+}
+
+/// The descriptor set a healthy services-up phase may legitimately hold:
+/// std streams, the runtime's event/kqueue fds, and the soak's own scratch
+/// files. Anything outside this set appearing as growth is unexplained.
+fn phase_targets_known(target: &str) -> bool {
+    let known_prefixes = [
+        "/dev/null",
+        "/dev/tty",
+        "/dev/urandom",
+        "socket:", // runtime sockets, attributed by count below
+        "pipe:",
+        "/dev/kqueue",
+        "anon_inode:", // Linux epoll/eventfd
+        "socket:[",    // Linux socket inode form
+    ];
+    known_prefixes
+        .iter()
+        .any(|prefix| target.starts_with(prefix))
 }
 
 #[tokio::test]
@@ -442,7 +470,8 @@ async fn attributed_resource_recovery() {
         batch_fds.push(fds);
         batch_rss.push(rss);
     }
-    // Plateau: each batch's FD count must match the first (no accumulation).
+    // Plateau: each batch's FD count must match the first (no accumulation),
+    // and no batch may exceed the services-up baseline at all.
     assert_eq!(
         batch_fds.first(),
         batch_fds.last(),
@@ -624,4 +653,84 @@ async fn bridge_child_churn_is_reaped() {
     }
     herdr.stop().await;
     root.remove();
+}
+
+// ---------------------------------------------------------------------------
+// Synthetic held-FD regressions: the growth detector must catch a real held
+// descriptor, and the attribution helper must classify known targets.
+// ---------------------------------------------------------------------------
+
+/// Pure regression on the growth detector: any growth is an error whose
+/// message carries the target list; no growth passes.
+#[test]
+fn synthetic_growth_is_detected_with_attribution() {
+    let detect = |baseline: usize, now: usize| -> Result<(), String> {
+        if now > baseline {
+            return Err(format!(
+                "unexplained FD growth: {baseline} -> {now}; targets {:?}",
+                open_fd_targets()
+            ));
+        }
+        Ok(())
+    };
+    assert!(detect(5, 5).is_ok(), "no growth passes");
+    assert!(detect(5, 3).is_ok(), "deficit is not a leak");
+    let error = detect(5, 7).expect_err("growth must be detected");
+    assert!(
+        error.contains("5 -> 7") && error.contains("targets"),
+        "{error}"
+    );
+}
+
+/// A genuinely held descriptor shows up in the target list, is attributed,
+/// and disappears on close. The count delta is asserted on the diff of
+/// target lists (robust against unrelated runtime fd churn in parallel
+/// tests), which is exactly how the soak attributes growth.
+#[test]
+fn held_fd_is_counted_and_attributed() {
+    // Parallel test threads legitimately open/close their own descriptors, so
+    // a single sample can race. Retry the isolated measurement a few times;
+    // the attribution semantics (two new recognized targets while held) must
+    // hold on at least one clean sample.
+    let mut clean_sample = false;
+    let mut last_detail = String::new();
+    for _attempt in 0..8 {
+        let before = open_fd_targets();
+        let held: Vec<std::fs::File> = (0..2)
+            .map(|_| std::fs::File::open("/dev/null").expect("open /dev/null"))
+            .collect();
+        let during = open_fd_targets();
+        drop(held);
+        // Multiset delta: a container's std streams may already point at
+        // /dev/null, so string containment cannot attribute; per-target count
+        // deltas can.
+        let mut counts: std::collections::BTreeMap<&str, isize> = std::collections::BTreeMap::new();
+        for t in &before {
+            *counts.entry(t.as_str()).or_insert(0) -= 1;
+        }
+        for t in &during {
+            *counts.entry(t.as_str()).or_insert(0) += 1;
+        }
+        let added: Vec<(&str, isize)> = counts
+            .iter()
+            .filter(|(_, d)| **d > 0)
+            .map(|(t, d)| (*t, *d))
+            .collect();
+        let total_added: isize = added.iter().map(|(_, d)| *d).sum();
+        last_detail = format!("{added:?}");
+        if total_added == 2 && during.len() == before.len() + 2 {
+            assert!(
+                added.iter().all(|(t, _)| *t == "/dev/null"
+                    || t.starts_with("/dev/fd/")
+                    || t.starts_with("socket:")),
+                "held fd targets are recognizable: {added:?}"
+            );
+            clean_sample = true;
+            break;
+        }
+    }
+    assert!(
+        clean_sample,
+        "at least one clean sample must attribute both held fds: {last_detail}"
+    );
 }

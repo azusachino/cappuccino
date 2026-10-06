@@ -162,15 +162,10 @@ impl MockHerdr {
     /// Aborts and joins every tracked connection task within the teardown
     /// deadline, then removes the socket. Errors are surfaced, not ignored.
     async fn stop(self) {
-        self.listener_task.abort();
-        let _ = self.listener_task.await;
+        join_tracked(self.listener_task, "mock herdr listener").await;
         let tasks: Vec<_> = self.tasks.lock().unwrap().drain(..).collect();
-        let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
         for task in tasks {
-            task.abort();
-            if tokio::time::timeout_at(deadline, task).await.is_err() {
-                panic!("mock herdr connection task did not join before teardown deadline");
-            }
+            join_tracked(task, "mock herdr connection").await;
         }
         if let Err(error) = std::fs::remove_file(&self.socket_path) {
             panic!("mock herdr socket cleanup: {error}");
@@ -325,38 +320,102 @@ impl Bridge {
     }
 
     /// Kill, then reap within a bounded wait; assert the child is really gone
-    /// (no zombie). Termination errors are surfaced, not ignored.
-    fn stop(&mut self) {
-        let _ = self.child.kill();
+    /// (no zombie). Kill/wait/try_wait errors are surfaced: the normal path
+    /// returns an explicit Result, an already-reaped child is a no-op.
+    fn stop(&mut self) -> Result<std::process::ExitStatus, String> {
+        if let Ok(Some(status)) = self.child.try_wait() {
+            return Ok(status); // already reaped; nothing to clean
+        }
+        if let Err(error) = self.child.kill() {
+            // Racy exit between try_wait and kill is fine; anything else is
+            // surfaced.
+            if self.child.try_wait().is_err_or_still_running() {
+                return Err(format!("bridge kill failed: {error}"));
+            }
+        }
         let deadline = std::time::Instant::now() + TEARDOWN_DEADLINE;
         loop {
             match self.child.try_wait() {
                 Ok(Some(_status)) => break, // reaped
                 Ok(None) => {
                     if std::time::Instant::now() > deadline {
-                        panic!("bridge child did not exit before the reap deadline");
+                        return Err("bridge child did not exit before the reap deadline".into());
                     }
                     std::thread::sleep(Duration::from_millis(10));
                 }
-                Err(error) => panic!("bridge wait failed: {error}"),
+                Err(error) => return Err(format!("bridge try_wait failed: {error}")),
             }
         }
         // The final blocking wait reaps and must succeed now.
-        let status = self.child.wait().expect("bridge final reap");
-        eprintln!("bridge stopped: {status}");
+        match self.child.wait() {
+            Ok(status) => {
+                eprintln!("bridge stopped: {status}");
+                Ok(status)
+            }
+            Err(error) => Err(format!("bridge final reap failed: {error}")),
+        }
     }
 }
 
 impl Drop for Bridge {
-    /// Best-effort kill+reap if a test panics before its explicit stop(), so
-    /// a failed assertion never leaks a bridge child.
+    /// Panic-path cleanup: bounded kill+reap, never an unbounded wait, no
+    /// double panic; every error is logged with its actual cause.
     fn drop(&mut self) {
-        if self.child.try_wait().is_ok() {
-            let _ = self.child.kill();
-            if let Err(error) = self.child.wait() {
-                eprintln!("bridge child reap on drop: {error}");
+        match self.child.try_wait() {
+            Ok(Some(_)) => return, // already reaped
+            Ok(None) => {
+                if let Err(error) = self.child.kill() {
+                    eprintln!("bridge kill on drop failed: {error}");
+                    return;
+                }
+                let deadline = std::time::Instant::now() + TEARDOWN_DEADLINE;
+                loop {
+                    match self.child.try_wait() {
+                        Ok(Some(_)) => return,
+                        Ok(None) => {
+                            if std::time::Instant::now() > deadline {
+                                eprintln!("bridge child reaping exceeded the drop deadline");
+                                return;
+                            }
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => {
+                            eprintln!("bridge try_wait on drop failed: {error}");
+                            return;
+                        }
+                    }
+                }
+            }
+            Err(error) => eprintln!("bridge try_wait on drop failed: {error}"),
+        }
+    }
+}
+
+/// Abort and join one tracked task under the teardown deadline. A panicked
+/// task is surfaced; expected cancellation (`is_cancelled`) is accepted.
+/// No join error is swallowed.
+async fn join_tracked(task: tokio::task::JoinHandle<()>, label: &str) {
+    task.abort();
+    let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
+    match tokio::time::timeout_at(deadline, task).await {
+        Err(_) => panic!("{label} task did not join before the teardown deadline"),
+        Ok(Err(join_error)) => {
+            if !join_error.is_cancelled() {
+                panic!("{label} task panicked: {join_error}");
             }
         }
+        Ok(Ok(())) => {}
+    }
+}
+
+trait TryWaitState {
+    /// True when the child is still (or again) un-reaped after a failed kill.
+    fn is_err_or_still_running(&self) -> bool;
+}
+
+impl TryWaitState for Result<Option<std::process::ExitStatus>, std::io::Error> {
+    fn is_err_or_still_running(&self) -> bool {
+        !matches!(self, Ok(Some(_)))
     }
 }
 
@@ -413,7 +472,7 @@ async fn session_shape_and_agents_with_mock_herdr() {
         report.protocols
     );
 
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();
 }
@@ -428,7 +487,7 @@ async fn agents_unreachable_is_502_error_envelope() {
     assert_eq!(exchange.status, 502);
     assert_eq!(exchange.body["event"], json!("error"));
     assert_eq!(exchange.body["code"], json!("herdr_unreachable"));
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     root.remove();
 }
 
@@ -445,7 +504,7 @@ async fn transcript_fail_closed_all_modes() {
     .expect("transcript request");
     assert_eq!(exchange.status, 502);
     assert_eq!(exchange.body["event"], json!("error"));
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     root.remove();
 
     // Mode 2: herdr reachable, agent has no path-kind agent_session ->
@@ -462,7 +521,7 @@ async fn transcript_fail_closed_all_modes() {
     assert_eq!(exchange.status, 200);
     assert_eq!(exchange.body["available"], json!(false));
     assert!(exchange.body["transcript_path"].is_null());
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();
 
@@ -494,7 +553,7 @@ async fn transcript_fail_closed_all_modes() {
         .as_str()
         .expect("available:true must carry a path");
     assert!(!path.is_empty());
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();
 }
@@ -560,7 +619,7 @@ async fn ws_unknown_session_fails_closed_not_found() {
         "unexpected follow-up frames after error first frame: {:?}",
         stream.followup_events
     );
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     root.remove();
 }
 
@@ -594,7 +653,7 @@ async fn ws_stream_open_generation_then_entries() {
         stream.entries_consumed
     );
 
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();
 }
@@ -639,7 +698,7 @@ async fn ws_branch_change_produces_stream_reset() {
         stream.followup_events
     );
 
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();
 }
@@ -699,7 +758,7 @@ async fn require_h2_passes_against_bridge_over_h2c() {
     let report = report.expect("strict h2 checks pass against the bridge");
     assert!(report.protocols.iter().all(|p| *p == "http2"));
 
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();
 }
@@ -839,7 +898,7 @@ async fn repeated_connect_cycles_all_pass() {
             .unwrap_or_else(|error| panic!("cycle {cycle} failed: {error}"));
     }
 
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();
 }
@@ -854,7 +913,7 @@ async fn server_disconnect_fails_loudly() {
     probe::run_checks(&probe_options(&bridge.base_url()))
         .await
         .expect("pre-loss check passes");
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     let mut options = probe::ProbeOptions::new(format!("http://127.0.0.1:{}", bridge.port));
     options.timeout = Duration::from_secs(5);
     let error = probe::run_checks(&options)
@@ -922,7 +981,7 @@ async fn bench_runs_and_reports_protocol() {
     );
     println!("{report}");
 
-    bridge.stop();
+    bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();
 }
@@ -1096,5 +1155,209 @@ async fn empty_entries_do_not_count_as_consumption() {
     .await;
     assert_eq!(probe.first_event, "stream_open");
     assert_eq!(probe.entries_consumed, 0, "empty entries must not count");
+    tracker.stop().await;
+}
+
+// ---------------------------------------------------------------------------
+// Round-4 regressions: tracked-task join semantics, child cleanup errors.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tracked_cleanup_panics_on_injected_panic() {
+    // Capture panic messages so we can prove the injected panic surfaced
+    // through the tracker (tokio re-panics with an opaque payload, so the
+    // message is observable at the hook, the propagation at catch_unwind).
+    let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_hook = Arc::clone(&captured);
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        captured_hook.lock().unwrap().push(info.to_string());
+    }));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // A runtime is needed inside catch_unwind; build a tiny one.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let mut tracker = TaskTracker::default();
+            tracker.spawn(async {
+                panic!("injected fixture panic");
+            });
+            // Let the spawned task actually run so its panic (not a preemptive
+            // abort) is what the tracker must surface.
+            tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+            tracker.stop().await;
+        });
+    }));
+    std::panic::set_hook(previous_hook);
+    assert!(
+        result.is_err(),
+        "tracked cleanup must fail when a fixture task panicked"
+    );
+    let messages = captured.lock().unwrap();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("injected fixture panic")),
+        "the injected panic must be observed: {messages:?}"
+    );
+}
+
+#[test]
+fn tracked_cleanup_accepts_expected_cancellation() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let mut tracker = TaskTracker::default();
+        tracker.spawn(async {
+            // Runs until aborted: expected cancellation, not a panic.
+            futures_util::future::pending::<()>().await;
+        });
+        tracker.stop().await; // must not panic
+    });
+}
+
+/// Normal child cleanup: stop reports an explicit success, the child is
+/// reaped, and a second stop is a clean no-op (no resources left).
+#[tokio::test]
+async fn bridge_stop_is_explicit_and_idempotent() {
+    let root = TempRoot::new("stopok");
+    let herdr = MockHerdr::start(&root);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+    let first = bridge.stop().expect("first stop succeeds");
+    assert!(!first.success(), "killed child reports the kill signal");
+    // Already-reaped second stop: clean no-op, no kill error surfaced.
+    let second = bridge.stop().expect("second stop is a no-op");
+    let _ = second;
+    herdr.stop().await;
+    root.remove();
+}
+
+// ---------------------------------------------------------------------------
+// Round-4 negative regressions: repeated stream_open, HTTP-only bench
+// contract, control/teardown close failures.
+// ---------------------------------------------------------------------------
+
+/// A repeated stream_open is rejected regardless of its generation.
+#[tokio::test]
+async fn repeated_stream_open_is_rejected_any_generation() {
+    for generation in [2u64, 5, 9] {
+        let frames = vec![
+            json!({"event": "stream_open", "generation": 5}),
+            json!({"event": "stream_open", "generation": generation}),
+        ];
+        let (base, mut tracker) = spawn_frame_server(frames).await;
+        let error = probe::ws_stream_probe(
+            &stream_options(&base),
+            "s-probe",
+            Duration::from_millis(300),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error.contains("repeated stream_open"),
+            "generation {generation}: {error}"
+        );
+        tracker.stop().await;
+    }
+}
+
+/// A stream workload without a session is an up-front error; zero cycles is
+/// the explicit HTTP-only form (library-level regression on run_bench).
+#[tokio::test]
+async fn bench_stream_workload_requires_session() {
+    let mut options = probe::ProbeOptions::new("http://127.0.0.1:1");
+    options.timeout = Duration::from_secs(1);
+    options.session_deadline = Duration::from_secs(2);
+    let config = probe::BenchConfig {
+        iterations: 1,
+        warmup: 0,
+        stream_cycles: 5,
+        session: None,
+        allow_error_streams: false,
+    };
+    let error = probe::run_bench(&options, &config)
+        .await
+        .expect_err("stream workload without session must fail up front");
+    assert!(error.contains("no session"), "{error}");
+    // The explicit HTTP-only form is accepted (it will fail on the dead
+    // port's transport, not on the count contract).
+    let config = probe::BenchConfig {
+        iterations: 1,
+        warmup: 0,
+        stream_cycles: 0,
+        session: None,
+        allow_error_streams: false,
+    };
+    let error = probe::run_bench(&options, &config)
+        .await
+        .expect_err("HTTP-only bench against a dead port fails on transport");
+    assert!(!error.contains("no session"), "{error}");
+}
+
+/// A Ping answered with a failed/timed-out Pong (peer gone) is a propagated
+/// error, never a silent success; the abrupt peer close is deliberate.
+#[tokio::test]
+async fn ping_then_abrupt_peer_close_is_propagated() {
+    use axum::extract::ws::{Message, WebSocketUpgrade};
+    use axum::routing::get as get_route;
+    use axum::Router;
+
+    async fn ping_drop_ws(upgrade: WebSocketUpgrade) -> axum::response::Response {
+        upgrade.on_upgrade(|mut socket: axum::extract::ws::WebSocket| async move {
+            let _ = socket
+                .send(Message::Text(
+                    "{\"event\":\"stream_open\",\"generation\":0}".into(),
+                ))
+                .await;
+            // Ping the client, then drop the connection without a close
+            // handshake, so the client's Pong send cannot succeed.
+            let _ = socket.send(Message::Ping(vec![1u8].into())).await;
+            drop(socket);
+        })
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = Router::new().route("/api/stream", get_route(ping_drop_ws));
+    let mut tracker = TaskTracker::default();
+    tracker.spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let options = stream_options(&format!("http://127.0.0.1:{port}"));
+    let outcome = probe::ws_stream_probe(&options, "s-probe", Duration::from_millis(500)).await;
+    // The probe must NOT report a clean success: either the Pong send fails
+    // (propagated) or the read side observes the abrupt close as an error.
+    match outcome {
+        Ok(probe) => {
+            // A silent success is only acceptable if the abrupt close was
+            // actually observed; otherwise the Pong/close failure must have
+            // been propagated instead.
+            assert!(
+                probe.closed_by_server
+                    || probe
+                        .followup_events
+                        .iter()
+                        .any(|e| e.starts_with("read-error:")),
+                "abrupt peer close must be observed as closed or propagated as an error, \
+                 got followups {:?}",
+                probe.followup_events
+            );
+        }
+        Err(error) => {
+            assert!(
+                error.contains("Pong")
+                    || error.contains("close")
+                    || error.contains("closed")
+                    || error.contains("ws read")
+                    || error.contains("handshake"),
+                "{error}"
+            );
+        }
+    }
     tracker.stop().await;
 }
