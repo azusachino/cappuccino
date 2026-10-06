@@ -25,6 +25,21 @@ public struct ContentView: View {
     return BridgeClient()
   }
 
+  private static func durableReloadForProcess()
+    -> (@Sendable (URL, String) async throws -> Void)?
+  {
+    // Session resets re-fetch /api/transcript (durable reload) before the
+    // fresh stream; demo/failure transports skip the probe.
+    if ProcessInfo.processInfo.arguments.contains("-cappuccino-demo")
+      || ProcessInfo.processInfo.arguments.contains("-cappuccino-unreachable")
+    {
+      return nil
+    }
+    return { url, session in
+      try await BridgeClient().fetchDurableReload(base: url, session: session)
+    }
+  }
+
   private static func transcriptForProcess() -> TranscriptStreaming {
     let arguments = ProcessInfo.processInfo.arguments
     if arguments.contains("-cappuccino-demo") {
@@ -80,7 +95,8 @@ public struct ContentView: View {
 
       MachinesView(
         model: MachinesModel(
-          daemon: Self.daemonForProcess(), transcriptStreaming: Self.transcriptForProcess())
+          daemon: Self.daemonForProcess(), transcriptStreaming: Self.transcriptForProcess(),
+          durableReload: Self.durableReloadForProcess())
       )
       .tabItem { Label("Machines", systemImage: "desktopcomputer") }
     }

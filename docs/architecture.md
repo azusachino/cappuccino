@@ -13,7 +13,7 @@ One sentence: native phone clients read live agent state from a tiny Rust bridge
 - Middleware chain position reserved for a future authenticator; MVP chain is empty.
 - Router with composable modules: `GET /api/session`, `GET /api/agents` (herdr agent.list RPC; exact parity incl. unnamed panes via pane_id fallback), `GET /api/transcript` (issue #7: pi `agent_session` → canonical store containment validation), `WS /api/stream` (pane-line appends; content-diff reconciliation; idempotent entry ids; no duplicates on reconnect).
 - Plugin manifest: declarative; [[build]] cargo build --release; [[startup]] runs binary with HERDR_SOCKET; actions: start/stop/status; status prints tailnet URL and applies serve when needed.
-- Non-goals (MVP): auth/token, public/beyond-tailnet exposure, approvals, delivery, transcripts UI (bridge endpoint exists for #7), push.
+- Non-goals (MVP): auth/token, public/beyond-tailnet exposure, approvals, delivery, push. The transcripts UI is NOT a non-goal: it is assigned to issue #7 and consumes the `/api/transcript` + `/api/stream` endpoints.
 
 ### Slice mapping
 

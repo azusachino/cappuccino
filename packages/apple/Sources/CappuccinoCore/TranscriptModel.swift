@@ -19,15 +19,24 @@ public final class TranscriptModel: ObservableObject {
   public let machineURL: URL
   public let streaming: TranscriptStreaming
   private var reassembler = TranscriptHistoryReassembler()
+  /// Durable reload probe run on session reset (bridge /api/transcript).
+  /// When it throws, the reset keeps the previous history and surfaces the
+  /// banner — never a silent clear.
+  public let durableReload: (@Sendable (URL, String) async throws -> Void)?
+
   private var streamTask: Task<Void, Never>?
   private var generation = 0
   private var stopped = false
 
-  public init(session: String, machineURL: URL, streaming: TranscriptStreaming, branch: String?) {
+  public init(
+    session: String, machineURL: URL, streaming: TranscriptStreaming, branch: String?,
+    durableReload: (@Sendable (URL, String) async throws -> Void)? = nil
+  ) {
     self.session = session
     self.machineURL = machineURL
     self.streaming = streaming
     self.branch = branch
+    self.durableReload = durableReload
     self.sessionID = session
   }
 
@@ -78,18 +87,39 @@ public final class TranscriptModel: ObservableObject {
   }
 
   private func apply(_ event: TranscriptStreamEvent) {
+    print("DBG-MODEL apply:", event)
     switch event {
     case .open:
       phase = .streaming
     case .entries(let incoming):
-      // O(new) appends: the merge touches only delivered entries, never the
-      // whole history.
-      entries = reassembler.merge(incoming, into: entries)
+      // O(new) amortized appends; the merge never copies the whole history.
+      reassembler.merge(incoming)
+      entries = reassembler.entries
     case .reset(let newGeneration):
       guard newGeneration != generation else { return }
       generation = newGeneration
       entries = []
       reassembler.reset()
+      // Durable reload then a fresh stream: failed reload keeps history and
+      // the banner (runStream is restarted by the caller below).
+      Task { [weak self] in
+        await self?.durableReloadThenRestart()
+      }
+    }
+  }
+
+  private func durableReloadThenRestart() async {
+    let previous = entries
+    do {
+      if let durableReload {
+        try await durableReload(machineURL, session)
+      }
+      stop()
+      start()
+    } catch {
+      // Failed durable reload: keep the history, show the banner.
+      entries = previous
+      phase = .failed(message: "Durable transcript reload failed; history kept.")
     }
   }
 }

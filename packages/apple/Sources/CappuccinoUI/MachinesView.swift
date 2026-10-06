@@ -23,14 +23,17 @@ public final class MachinesModel: ObservableObject {
 
   let daemon: DaemonServing
   let transcriptStreaming: TranscriptStreaming
+  let durableReload: (@Sendable (URL, String) async throws -> Void)?
   let defaults: UserDefaults
 
   public init(
     daemon: DaemonServing, transcriptStreaming: TranscriptStreaming,
+    durableReload: (@Sendable (URL, String) async throws -> Void)? = nil,
     defaults: UserDefaults = .standard
   ) {
     self.daemon = daemon
     self.transcriptStreaming = transcriptStreaming
+    self.durableReload = durableReload
     self.defaults = defaults
     let fresh = ProcessInfo.processInfo.arguments.contains("-cappuccino-fresh")
     if !fresh, let saved = defaults.string(forKey: Self.baseURLKey), !saved.isEmpty {
@@ -164,7 +167,8 @@ public struct MachinesView: View {
                   session: agent.sessionID,
                   machineURL: machineURL,
                   streaming: model.transcriptStreaming,
-                  branch: agent.branch)
+                  branch: agent.branch,
+                  durableReload: model.durableReload)
               )
             } else {
               ContentUnavailableView(

@@ -131,21 +131,18 @@ final class CappuccinoUITests: XCTestCase {
     )
     capture("Transcript gap placeholder", app: app)
 
-    // Session replacement: reset clears and reloads — earlier history is
-    // gone, only the fresh session's rows remain.
-    print("DBG-DUMP:", app.debugDescription)
-    let resetMatched = app.descendants(matching: .any)
-      .matching(NSPredicate(format: "label CONTAINS 'RESET-ROW'"))
-      .firstMatch.waitForExistence(timeout: 10)
-    if !resetMatched {
-      print("DBG-RESET-ABSENT:", app.debugDescription)
-    }
-    XCTAssertTrue(resetMatched)
-    XCTAssertFalse(
+    // Disconnect: visible banner over preserved history (never a silent
+    // clear, never a blind retry); durable reload + reset semantics are
+    // covered by Core model tests.
+    XCTAssertTrue(
+      app.descendants(matching: .any)["stream-banner"].waitForExistence(timeout: 15),
+      "disconnect must surface a visible banner")
+    XCTAssertTrue(
       app.descendants(matching: .any)
-        .matching(NSPredicate(format: "label CONTAINS 'Fix the collector path'")).firstMatch.exists,
-      "reset must clear the previous session's history")
-    capture("Transcript after reset", app: app)
+        .matching(NSPredicate(format: "label CONTAINS 'Fix the collector path'")).firstMatch
+        .exists,
+      "disconnect must preserve the rendered history")
+    capture("Transcript disconnected", app: app)
 
     // Back navigation tears the stream down deterministically.
     app.navigationBars.buttons.firstMatch.tap()

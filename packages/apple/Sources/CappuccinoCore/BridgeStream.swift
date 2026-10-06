@@ -5,19 +5,36 @@ import Foundation
 // reconciliation contract client-side: entry ids are idempotent, so a
 // duplicate delivery is suppressed rather than rendered twice.
 
+public struct BridgeTranscriptTool: Equatable, Sendable, Decodable {
+  public let name: String
+  public let args: [String: String]?
+  public let detail: String?
+
+  public init(name: String, args: [String: String]?, detail: String?) {
+    self.name = name
+    self.args = args
+    self.detail = detail
+  }
+}
+
 public struct BridgeTranscriptEntry: Equatable, Sendable, Decodable {
   public let seq: Int?
   public let id: String
   public let kind: String
   public let text: String
   public let complete: Bool
+  public let tool: BridgeTranscriptTool?
 
-  public init(seq: Int?, id: String, kind: String, text: String, complete: Bool) {
+  public init(
+    seq: Int?, id: String, kind: String, text: String, complete: Bool,
+    tool: BridgeTranscriptTool? = nil
+  ) {
     self.seq = seq
     self.id = id
     self.kind = kind
     self.text = text
     self.complete = complete
+    self.tool = tool
   }
 }
 
@@ -46,12 +63,21 @@ enum BridgeStreamEvent: Equatable {
     case "entries":
       let raw = object["entries"] as? [[String: Any]] ?? []
       let parsed = raw.map { entry -> BridgeTranscriptEntry in
-        BridgeTranscriptEntry(
+        var tool: BridgeTranscriptTool?
+        if let rawTool = entry["tool"] as? [String: Any],
+          let name = rawTool["name"] as? String
+        {
+          let args = rawTool["args"] as? [String: String]
+          tool = BridgeTranscriptTool(
+            name: name, args: args, detail: rawTool["detail"] as? String)
+        }
+        return BridgeTranscriptEntry(
           seq: entry["seq"] as? Int,
           id: entry["id"] as? String ?? "",
           kind: entry["kind"] as? String ?? "output",
           text: entry["text"] as? String ?? "",
-          complete: entry["complete"] as? Bool ?? true
+          complete: entry["complete"] as? Bool ?? true,
+          tool: tool
         )
       }
       return .entries(parsed)

@@ -132,6 +132,7 @@ extension DemoDaemonClient: TranscriptStreaming {
             ]),
             sleepNanos: 700_000_000)
           // Post-gap entry: seq jumps, so a visible placeholder precedes it.
+          // The 6s hold gives the UI journey a wide observable window.
           await emit(
             .entries([
               TranscriptEntry(
@@ -139,17 +140,11 @@ extension DemoDaemonClient: TranscriptStreaming {
                 text: "POST-GAP-ROW: resumed after lost entries.", branch: nil, complete: true,
                 tool: nil)
             ]),
-            sleepNanos: 700_000_000)
-          // Session replacement: reset, then a fresh stream. The pre-reset
-          // stage stays visible ~3s so the journey can assert mid-flight.
-          await emit(.reset(generation: 1), sleepNanos: 3_000_000_000)
-          await emit(
-            .entries([
-              TranscriptEntry(
-                seq: 1, id: "assistant-reset-1", kind: "assistant",
-                text: "RESET-ROW: new session after reset.", branch: nil, complete: true, tool: nil)
-            ]),
-            sleepNanos: 700_000_000)
+            sleepNanos: 6_000_000_000)
+          // Disconnect journey: hold the post-gap state, then close. Reset
+          // semantics (durable reload, restart) are covered by Core model
+          // tests — a scripted stream cannot represent them honestly.
+          try? await Task.sleep(nanoseconds: 2_000_000_000)
           continuation.finish()
         } catch {
           continuation.finish(throwing: error)

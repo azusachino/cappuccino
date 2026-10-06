@@ -210,3 +210,37 @@ enum BridgeStreamEntryID {
     #expect(reassembler.newEntries(from: [fresh]).count == 1)
   }
 }
+
+@Suite struct BridgeToolPayloadTests {
+  // Live-shape check: wire entries that carry a tool payload map through to
+  // the transcript domain model (issue #7: expandable args/details must work
+  // against the real bridge, not only the demo fixture).
+  @Test func wireToolPayloadMapsToTranscriptToolCall() throws {
+    let frame = """
+      {"event":"entries","entries":[
+        {"seq":2,"id":"w-1","kind":"assistant","text":"Checked Makefile.","complete":true,
+         "tool":{"name":"edit","args":{"path":"Makefile"},"detail":"+ANDROID_TEST_OUTPUT"}}
+      ]}
+      """.data(using: .utf8)!
+    guard case .entries(let entries) = try BridgeStreamEvent.parse(frame) else {
+      Issue.record("expected entries event")
+      return
+    }
+    #expect(entries.count == 1)
+    let tool = try #require(entries[0].tool)
+    #expect(tool.name == "edit")
+    #expect(tool.args?["path"] == "Makefile")
+    #expect(tool.detail == "+ANDROID_TEST_OUTPUT")
+  }
+
+  @Test func wireEntriesWithoutToolStayNil() throws {
+    let frame = """
+      {"event":"entries","entries":[{"seq":1,"id":"w-2","kind":"user","text":"hi","complete":true}]}
+      """.data(using: .utf8)!
+    guard case .entries(let entries) = try BridgeStreamEvent.parse(frame) else {
+      Issue.record("expected entries event")
+      return
+    }
+    #expect(entries[0].tool == nil)
+  }
+}

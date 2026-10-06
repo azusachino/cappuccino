@@ -19,6 +19,10 @@ public struct TranscriptView: View {
 
   public var body: some View {
     Group {
+      // TEMP DEBUG (slice verification) — remove before merge.
+      Text("DBG entries=\(model.entries.count)")
+        .font(.caption2)
+        .accessibilityIdentifier("dbg-entries")
       switch model.phase {
       case .loading:
         ProgressView("Connecting to stream…")
@@ -68,25 +72,36 @@ public struct TranscriptView: View {
   }
 
   private var transcript: some View {
-    ScrollView {
-      LazyVStack(alignment: .leading, spacing: 12) {
-        if let branch = model.branch {
-          Label(branch, systemImage: "arrow.triangle.branch")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .accessibilityIdentifier("transcript-branch")
+    ScrollViewReader { proxy in
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 12) {
+          if let branch = model.branch {
+            Label(branch, systemImage: "arrow.triangle.branch")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .accessibilityIdentifier("transcript-branch")
+          }
+          ForEach(model.entries) { entry in
+            if entry.isGap {
+              TranscriptGapRow(entry: entry)
+                .id(entry.id)
+            } else if let tool = entry.tool {
+              TranscriptToolRow(entry: entry, tool: tool)
+                .id(entry.id)
+            } else {
+              TranscriptBubbleRow(entry: entry)
+                .id(entry.id)
+            }
+          }
         }
-        ForEach(model.entries) { entry in
-          if entry.isGap {
-            TranscriptGapRow(entry: entry)
-          } else if let tool = entry.tool {
-            TranscriptToolRow(entry: entry, tool: tool)
-          } else {
-            TranscriptBubbleRow(entry: entry)
+        .padding()
+        // Live tail: keep the newest entry on screen (chat behavior).
+        .onChange(of: model.entries.count) { _, _ in
+          if let last = model.entries.last {
+            proxy.scrollTo(last.id, anchor: .bottom)
           }
         }
       }
-      .padding()
     }
   }
 }
@@ -98,9 +113,9 @@ struct TranscriptBubbleRow: View {
     HStack {
       if entry.isUser { Spacer(minLength: 48) }
       VStack(alignment: .leading, spacing: 4) {
-        ForEach(Array(EntryContent.paragraphs(of: entry.text).enumerated()), id: \.offset) {
-          _, paragraph in
-          paragraph
+        ForEach(Array(EntryContent.segments(of: entry.text).enumerated()), id: \.offset) {
+          _, segment in
+          EntryContent.SegmentView(segment: segment)
         }
       }
       .padding(10)
@@ -116,56 +131,54 @@ struct TranscriptBubbleRow: View {
   }
 }
 
-/// Splits fenced code blocks (```-fenced lines render monospaced) from prose.
+/// Splits an entry into typed segments preserving original order: prose and
+/// ```-fenced code interleave exactly as authored.
 enum EntryContent {
-  struct Paragraph: View {
-    let text: String
-    let isCode: Bool
+  enum Segment: Equatable {
+    case text(String)
+    case code(String)
+  }
+
+  static func segments(of text: String) -> [Segment] {
+    var result: [Segment] = []
+    var buffer: [String] = []
+    var inCode = false
+    func flush() {
+      guard !buffer.isEmpty else { return }
+      let joined = buffer.joined(separator: "\n")
+      result.append(inCode ? .code(joined) : .text(joined))
+      buffer = []
+    }
+    for line in text.components(separatedBy: "\n") {
+      if line.hasPrefix("```") {
+        flush()
+        inCode.toggle()
+        continue
+      }
+      buffer.append(line)
+    }
+    flush()
+    return result
+  }
+
+  struct SegmentView: View {
+    let segment: Segment
 
     var body: some View {
-      if isCode {
-        Text(text)
+      switch segment {
+      case .code(let code):
+        Text(code)
           .font(.system(.footnote, design: .monospaced))
           .padding(8)
           .frame(maxWidth: .infinity, alignment: .leading)
           .background(Color.gray.opacity(0.07))
           .clipShape(RoundedRectangle(cornerRadius: 8))
-          .accessibilityLabel("Code: \(text)")
-      } else {
+          .accessibilityLabel("Code: \(code)")
+      case .text(let text):
         Text(text)
           .font(.body)
       }
     }
-  }
-
-  static func paragraphs(of text: String) -> [Paragraph] {
-    var result: [Paragraph] = []
-    var prose: [String] = []
-    var code: [String] = []
-    var inCode = false
-    func flushProse() {
-      if !prose.isEmpty {
-        result.append(Paragraph(text: prose.joined(separator: "\n"), isCode: false))
-        prose = []
-      }
-    }
-    for line in text.components(separatedBy: "\n") {
-      if line.hasPrefix("```") {
-        flushProse()
-        inCode.toggle()
-        continue
-      }
-      if inCode {
-        code.append(line)
-      } else {
-        prose.append(line)
-      }
-    }
-    flushProse()
-    if !code.isEmpty {
-      result.append(Paragraph(text: code.joined(separator: "\n"), isCode: true))
-    }
-    return result
   }
 }
 

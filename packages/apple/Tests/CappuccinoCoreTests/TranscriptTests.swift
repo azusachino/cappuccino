@@ -40,30 +40,30 @@ private func fixtureURL(_ name: String) -> URL {
       seq: 4, id: nil, kind: "assistant", text: "first", branch: nil, complete: true, tool: nil)
     let sameContentAgain = TranscriptEntry(
       seq: 4, id: nil, kind: "assistant", text: "first", branch: nil, complete: true, tool: nil)
-    var history = reassembler.merge([duplicate], into: [])
-    history = reassembler.merge([sameContentAgain], into: history)
+    _ = reassembler.merge([duplicate])
+    _ = reassembler.merge([sameContentAgain])
     // Identical text at identical seq synthesizes the identical id, so the
     // duplicate is suppressed and exactly one entry renders.
-    #expect(history.count == 1)
-    #expect(history[0].text == "first")
+    #expect(reassembler.entries.count == 1)
+    #expect(reassembler.entries[0].text == "first")
 
     // gap-is-visible-placeholder: a mid-stream seq jump inserts a visible
     // gap row (joining mid-stream at the first entry renders no placeholder —
     // the bridge emits its own gap markers for lost prefixes).
-    let later = TranscriptEntry(
-      seq: 7, id: nil, kind: "assistant", text: "later", branch: nil, complete: true, tool: nil)
-    // Mid-stream loss: entries delivered up to seq 4, then a jump to seq 9.
     let seeded: [TranscriptEntry] = (1...4).map { seq in
       let text = "e\(seq)"
       return TranscriptEntry(
         seq: seq, id: nil, kind: "assistant", text: text, branch: nil, complete: true, tool: nil)
     }
-    let withGap = reassembler.merge([later], into: history + seeded)
-    // history(1) + seeded(4) + gap + later
-    #expect(withGap.count == 7)
-    let gapIndex = try #require(withGap.firstIndex { $0.isGap })
-    #expect(withGap[gapIndex].text.contains("gap"))
-    #expect(withGap[gapIndex + 1].text == "later")
+    _ = reassembler.merge(seeded)
+    let later = TranscriptEntry(
+      seq: 9, id: nil, kind: "assistant", text: "later", branch: nil, complete: true, tool: nil)
+    _ = reassembler.merge([later])
+    // duplicate(1) + seeded(4) + gap + later
+    #expect(reassembler.entries.count == 7)
+    let gapIndex = try #require(reassembler.entries.firstIndex { $0.isGap })
+    #expect(reassembler.entries[gapIndex].text.contains("gap"))
+    #expect(reassembler.entries[gapIndex + 1].text == "later")
   }
 
   @Test func distinctIdsSameTextAreNotSuppressed() {
@@ -72,8 +72,9 @@ private func fixtureURL(_ name: String) -> URL {
       seq: 1, id: "a", kind: "assistant", text: "same", branch: nil, complete: true, tool: nil)
     let second = TranscriptEntry(
       seq: 2, id: "b", kind: "assistant", text: "same", branch: nil, complete: true, tool: nil)
-    let history = reassembler.merge([first, second], into: [])
-    #expect(history.count == 2, "distinct real ids are distinct deliveries")
+    let added = reassembler.merge([first, second])
+    #expect(added.count == 2, "distinct real ids are distinct deliveries")
+    #expect(reassembler.entries.count == 2)
   }
 }
 
@@ -162,16 +163,27 @@ struct ScriptedTranscriptStreamer: TranscriptStreaming {
 @Suite struct TranscriptScaleTests {
   @Test func thousandEntryMergeIsLinearAndDeduplicates() {
     var reassembler = TranscriptHistoryReassembler()
-    var history: [TranscriptEntry] = []
-    for index in 1...1000 {
-      let entry = TranscriptEntry(
-        seq: index, id: "e\(index)", kind: index.isMultiple(of: 2) ? "assistant" : "user",
-        text: "entry \(index)", branch: nil, complete: true, tool: nil)
-      history = reassembler.merge([entry], into: history)
-      #expect(history.count == index)
+    func measure(_ count: Int) -> Double {
+      let clock = ContinuousClock()
+      let start = clock.now
+      for index in 1...count {
+        let entry = TranscriptEntry(
+          seq: index, id: "e\(index)", kind: index.isMultiple(of: 2) ? "assistant" : "user",
+          text: "entry \(index)", branch: nil, complete: true, tool: nil)
+        _ = reassembler.merge([entry])
+      }
+      #expect(reassembler.entries.count == count)
+      let elapsed = clock.now - start
+      return Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
     }
-    #expect(history.count == 1000)
-    #expect(history[999].seq == 1000)
+    let small = measure(1000)
+    let large = measure(4000)
+    // Amortized O(1): 4x the entries must stay within a bounded multiple
+    // (generous floor keeps CI machines deterministic).
+    let floor: Double = 0.01
+    #expect(
+      large / max(small, floor) < 8,
+      "merge must be amortized linear: 1k=\(small)s 4k=\(large)s")
   }
 
   @Test func longFixtureParsesAllThousandEntries() throws {
