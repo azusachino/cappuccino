@@ -115,6 +115,15 @@ class MachinesJourneyTest {
 
     override fun selectProfile(id: String) = Unit
 
+    override fun disconnectProfile() {
+      state.value =
+        state.value.copy(
+          activeProfileId = null,
+          selectedAgent = null,
+          connection = ConnectionState.Disconnected,
+        )
+    }
+
     override fun refresh() = Unit
 
     override fun selectAgent(agent: AgentRow?) = Unit
@@ -130,6 +139,10 @@ class MachinesJourneyTest {
 
     override fun retry() {
       retryCalls++
+    }
+
+    override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
+      state.value = state.value.copy(themeMode = mode)
     }
   }
 }

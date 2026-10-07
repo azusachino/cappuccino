@@ -12,6 +12,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
+enum class ThemeMode {
+  SYSTEM,
+  LIGHT,
+  DARK,
+}
+
 val HerdrAmber = Color(0xFFF0A830)
 val HerdrAmberHover = Color(0xFFF6BB55)
 val HerdrBgDark = Color(0xFF12100E)
@@ -59,9 +65,17 @@ val HerdrLightColorScheme =
     surfaceVariant = Color(0xFFF2EEE6),
     onSurfaceVariant = Color(0xFF685E52),
     outline = Color(0xFFDCD4C6),
+    outlineVariant = Color(0xFFC5BAA8),
     error = Color(0xFFA82323),
     onError = Color.White,
   )
+
+fun resolveIsDark(themeMode: ThemeMode, systemDark: Boolean): Boolean =
+  when (themeMode) {
+    ThemeMode.SYSTEM -> systemDark
+    ThemeMode.LIGHT -> false
+    ThemeMode.DARK -> true
+  }
 
 fun selectColorScheme(
   apiLevel: Int,
@@ -70,18 +84,23 @@ fun selectColorScheme(
   dynamicDark: ColorScheme,
   fallbackLight: ColorScheme,
   fallbackDark: ColorScheme,
+  useDynamic: Boolean = false,
 ): ColorScheme =
   when {
-    apiLevel >= Build.VERSION_CODES.S && dark -> dynamicDark
-    apiLevel >= Build.VERSION_CODES.S -> dynamicLight
+    useDynamic && apiLevel >= Build.VERSION_CODES.S && dark -> dynamicDark
+    useDynamic && apiLevel >= Build.VERSION_CODES.S -> dynamicLight
     dark -> fallbackDark
     else -> fallbackLight
   }
 
 @Composable
-fun CappuccinoTheme(content: @Composable () -> Unit) {
+fun CappuccinoTheme(
+  themeMode: ThemeMode = ThemeMode.SYSTEM,
+  useDynamicColor: Boolean = false,
+  content: @Composable () -> Unit,
+) {
   val context = LocalContext.current
-  val dark = isSystemInDarkTheme()
+  val isDark = resolveIsDark(themeMode, isSystemInDarkTheme())
   val lightFallback = HerdrLightColorScheme
   val darkFallback = HerdrDarkColorScheme
   val dynamicLight =
@@ -94,11 +113,12 @@ fun CappuccinoTheme(content: @Composable () -> Unit) {
     colorScheme =
       selectColorScheme(
         Build.VERSION.SDK_INT,
-        dark,
+        isDark,
         dynamicLight,
         dynamicDark,
         lightFallback,
         darkFallback,
+        useDynamic = useDynamicColor,
       ),
     content = content,
   )

@@ -37,12 +37,16 @@ data class ConnectedUiState(
   val stream: StreamState = StreamState(),
   val connection: ConnectionState = ConnectionState.Disconnected,
   val busy: Boolean = false,
+  val themeMode: com.azusachino.cappuccino.ui.ThemeMode =
+    com.azusachino.cappuccino.ui.ThemeMode.SYSTEM,
 )
 
 interface ConnectedActions {
   fun addMachine(label: String, url: String)
 
   fun selectProfile(id: String)
+
+  fun disconnectProfile()
 
   fun refresh()
 
@@ -51,6 +55,8 @@ interface ConnectedActions {
   fun removeProfile(id: String)
 
   fun retry()
+
+  fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode)
 }
 
 class ConnectedViewModel
@@ -60,7 +66,13 @@ internal constructor(
   private val retryPause: suspend (Long) -> Unit,
   private val savedStateHandle: SavedStateHandle,
 ) : ViewModel(), ConnectedActions {
-  private val mutableState = MutableStateFlow(ConnectedUiState(profiles = store.read()))
+  private val mutableState =
+    MutableStateFlow(
+      ConnectedUiState(
+        profiles = store.read(),
+        themeMode = store.readThemeMode(),
+      )
+    )
   val state: StateFlow<ConnectedUiState> = mutableState.asStateFlow()
   private var operation: Job? = null
   private var streamJob: Job? = null
@@ -119,6 +131,25 @@ internal constructor(
         busy = true,
       )
     operation = viewModelScope.launch { refresh(profile) }
+  }
+
+  override fun disconnectProfile() {
+    cancelOwnedWork()
+    clearSavedSelection()
+    mutableState.value =
+      mutableState.value.copy(
+        activeProfileId = null,
+        selectedAgent = null,
+        agents = emptyList(),
+        stream = StreamState(),
+        connection = ConnectionState.Disconnected,
+        busy = false,
+      )
+  }
+
+  override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
+    store.saveThemeMode(mode)
+    mutableState.value = mutableState.value.copy(themeMode = mode)
   }
 
   override fun refresh() {

@@ -144,6 +144,8 @@ class CappuccinoShellTest {
 
     override fun selectProfile(id: String) = Unit
 
+    override fun disconnectProfile() = Unit
+
     override fun refresh() = Unit
 
     override fun selectAgent(agent: AgentRow?) {
@@ -153,6 +155,10 @@ class CappuccinoShellTest {
     override fun removeProfile(id: String) = Unit
 
     override fun retry() = Unit
+
+    override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
+      state.value = state.value.copy(themeMode = mode)
+    }
   }
 
   private fun capture(name: String) {

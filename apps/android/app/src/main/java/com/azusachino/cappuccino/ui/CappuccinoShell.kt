@@ -27,6 +27,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -63,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.azusachino.cappuccino.core.AgentRow
+import com.azusachino.cappuccino.core.OutputRow
 import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
@@ -78,6 +81,10 @@ private enum class Destination(val title: Int, val icon: Int) {
   MACHINES(
     com.azusachino.cappuccino.R.string.machines,
     com.azusachino.cappuccino.R.drawable.ic_machine,
+  ),
+  SETTINGS(
+    com.azusachino.cappuccino.R.string.settings,
+    com.azusachino.cappuccino.R.drawable.ic_settings,
   ),
 }
 
@@ -214,6 +221,22 @@ fun CappuccinoScreen(
             }
           }
         },
+        actions = {
+          if (selected == null && state.activeProfileId != null) {
+            IconButton(onClick = actions::refresh, enabled = !state.busy) {
+              Icon(
+                painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_refresh),
+                contentDescription = "Refresh",
+              )
+            }
+            IconButton(onClick = actions::disconnectProfile, enabled = !state.busy) {
+              Icon(
+                painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_close),
+                contentDescription = "Disconnect",
+              )
+            }
+          }
+        },
         colors =
           TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.surface,
@@ -313,49 +336,15 @@ fun CappuccinoScreen(
               }
             }
           SelectionContainer(Modifier.weight(1f).fillMaxWidth()) {
+            val rows = state.stream.rows()
+            val collapsedRows = remember(rows) { collapseOutputRows(rows) }
             LazyColumn(
               state = outputListState,
               modifier =
                 Modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("recentOutputList"),
-              verticalArrangement = Arrangement.spacedBy(4.dp),
+              verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-              items(state.stream.rows(), key = { it.key }) { row ->
-                if (row.gap) {
-                  Box(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    contentAlignment = Alignment.Center,
-                  ) {
-                    Surface(
-                      shape = RoundedCornerShape(12.dp),
-                      color = MaterialTheme.colorScheme.surfaceVariant,
-                      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                    ) {
-                      Text(
-                        row.text,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelSmall,
-                      )
-                    }
-                  }
-                } else {
-                  Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    border =
-                      BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
-                  ) {
-                    Text(
-                      row.text,
-                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                      color = MaterialTheme.colorScheme.onSurface,
-                      fontFamily = FontFamily.Monospace,
-                      style = MaterialTheme.typography.bodySmall,
-                    )
-                  }
-                }
-              }
+              items(collapsedRows, key = { it.key }) { row -> OutputItemRow(row) }
             }
           }
           if (state.stream.entries.isEmpty())
@@ -448,6 +437,12 @@ fun CappuccinoScreen(
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
           }
+        destination == Destination.SETTINGS -> {
+          SettingsScreen(
+            themeMode = state.themeMode,
+            onSelectTheme = actions::setThemeMode,
+          )
+        }
         else -> {
           if (state.profiles.isEmpty()) {
             Text(
@@ -565,6 +560,230 @@ fun CappuccinoScreen(
         }
       },
     )
+  }
+}
+
+@Composable
+private fun SettingsScreen(
+  themeMode: ThemeMode,
+  onSelectTheme: (ThemeMode) -> Unit,
+) {
+  Column(
+    modifier = Modifier.fillMaxWidth().padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+  ) {
+    Text(
+      "Appearance",
+      style = MaterialTheme.typography.titleMedium,
+      fontWeight = FontWeight.Bold,
+      color = MaterialTheme.colorScheme.primary,
+    )
+    Surface(
+      modifier = Modifier.fillMaxWidth(),
+      shape = RoundedCornerShape(10.dp),
+      color = MaterialTheme.colorScheme.surfaceVariant,
+      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+    ) {
+      Column(
+        modifier = Modifier.padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        Text(
+          "Theme Mode",
+          style = MaterialTheme.typography.bodyMedium,
+          fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+          "Choose between Herdr lamp-lit dark mode, clean light mode, or match system settings.",
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          ThemeMode.entries.forEach { mode ->
+            FilterChip(
+              selected = themeMode == mode,
+              onClick = { onSelectTheme(mode) },
+              label = {
+                Text(
+                  when (mode) {
+                    ThemeMode.SYSTEM -> "System"
+                    ThemeMode.LIGHT -> "Light"
+                    ThemeMode.DARK -> "Dark"
+                  }
+                )
+              },
+              colors =
+                FilterChipDefaults.filterChipColors(
+                  selectedContainerColor = MaterialTheme.colorScheme.primary,
+                  selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                ),
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+private fun collapseOutputRows(rows: List<OutputRow>): List<OutputRow> {
+  if (rows.isEmpty()) return emptyList()
+  val result = mutableListOf<OutputRow>()
+  for (row in rows) {
+    if (row.gap) {
+      result += row
+      continue
+    }
+    val last = result.lastOrNull()
+    if (last != null && !last.gap && shouldCollapseStreamTails(last.text, row.text)) {
+      result[result.lastIndex] = row
+    } else {
+      result += row
+    }
+  }
+  return result
+}
+
+private fun shouldCollapseStreamTails(prevText: String, currentText: String): Boolean {
+  if (prevText == currentText) return true
+  val p = prevText.trim()
+  val c = currentText.trim()
+  if (p.isEmpty() || c.isEmpty()) return false
+  if (c.startsWith(p) || p.startsWith(c)) return true
+  val pParsed = TranscriptParser.parseLine(p)
+  val cParsed = TranscriptParser.parseLine(c)
+  if (pParsed.role == TranscriptRole.STATUS && cParsed.role == TranscriptRole.STATUS) return true
+  if (pParsed.role == TranscriptRole.TOOL && cParsed.role == TranscriptRole.TOOL) {
+    if (pParsed.toolName == cParsed.toolName && pParsed.toolName != null) return true
+  }
+  return false
+}
+
+@Composable
+private fun OutputItemRow(row: OutputRow) {
+  if (row.gap) {
+    Box(
+      modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+      contentAlignment = Alignment.Center,
+    ) {
+      Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+      ) {
+        Text(
+          row.text,
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+          color = MaterialTheme.colorScheme.primary,
+          style = MaterialTheme.typography.labelSmall,
+        )
+      }
+    }
+    return
+  }
+
+  val parsed = remember(row.text) { TranscriptParser.parseLine(row.text) }
+
+  when (parsed.role) {
+    TranscriptRole.USER -> {
+      Box(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        contentAlignment = Alignment.CenterEnd,
+      ) {
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = MaterialTheme.colorScheme.surfaceVariant,
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            Text(
+              "❯",
+              color = MaterialTheme.colorScheme.primary,
+              fontWeight = FontWeight.Bold,
+              style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+              parsed.text,
+              color = MaterialTheme.colorScheme.onSurface,
+              fontWeight = FontWeight.Medium,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+        }
+      }
+    }
+    TranscriptRole.TOOL -> {
+      Surface(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Text(
+            parsed.toolGlyph ?: "●",
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.labelSmall,
+          )
+          Text(
+            parsed.toolName ?: "tool",
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+          )
+          parsed.toolArg?.let { arg ->
+            Text(
+              "($arg)",
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              fontFamily = FontFamily.Monospace,
+              style = MaterialTheme.typography.bodySmall,
+              maxLines = 1,
+            )
+          }
+        }
+      }
+    }
+    TranscriptRole.STATUS -> {
+      if (parsed.text.isNotBlank()) {
+        Text(
+          parsed.text,
+          modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+          color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+          fontFamily = FontFamily.Monospace,
+          style = MaterialTheme.typography.labelSmall,
+        )
+      }
+    }
+    TranscriptRole.AGENT -> {
+      if (parsed.text.isNotBlank()) {
+        Surface(
+          modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+          shape = RoundedCornerShape(6.dp),
+          color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+          border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+        ) {
+          Text(
+            parsed.text,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            color = MaterialTheme.colorScheme.onSurface,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        }
+      }
+    }
   }
 }
 

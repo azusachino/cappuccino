@@ -607,6 +607,14 @@ class ConnectedViewModelTest {
     override fun remove(id: String) {
       profiles.removeAll { it.id == id }
     }
+
+    private var themeMode = com.azusachino.cappuccino.ui.ThemeMode.SYSTEM
+
+    override fun readThemeMode() = themeMode
+
+    override fun saveThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
+      themeMode = mode
+    }
   }
 
   private fun List<Long>.repeatTwice() = this + this

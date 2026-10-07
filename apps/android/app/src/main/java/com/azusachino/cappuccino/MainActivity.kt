@@ -7,9 +7,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -68,7 +70,8 @@ class MainActivity : ComponentActivity() {
         vm.setForeground(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
         onDispose { owner.lifecycle.removeObserver(observer) }
       }
-      CappuccinoTheme {
+      val state by vm.state.collectAsStateWithLifecycle()
+      CappuccinoTheme(themeMode = state.themeMode) {
         CappuccinoShell(vm) { label, url ->
           if (
             Build.VERSION.SDK_INT >= 37 &&
