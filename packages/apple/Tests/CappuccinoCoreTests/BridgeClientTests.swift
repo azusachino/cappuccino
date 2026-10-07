@@ -119,4 +119,45 @@ final class StubURLProtocol: URLProtocol {
       Issue.record("unexpected error \(error)")
     }
   }
+
+  @Test func fetchConversationReturnsTurns() async throws {
+    StubURLProtocol.handler = { request in
+      #expect(request.url?.path == "/api/agents/s-aurora/conversation")
+      return (
+        200,
+        #"{"session_id":"s-aurora","source":"canonical_log","turns":[{"id":"t1","role":"user","text":"hello"}]}"#
+          .data(using: .utf8)!
+      )
+    }
+    let result = try await stubbedClient().fetchConversation(
+      base: URL(string: "http://127.0.0.1:7392")!, session: "s-aurora")
+    #expect(result["session_id"] as? String == "s-aurora")
+    #expect((result["turns"] as? [[String: Any]])?.count == 1)
+  }
+
+  @Test func submitPromptSendsJsonBody() async throws {
+    StubURLProtocol.handler = { request in
+      #expect(request.url?.path == "/api/agents/s-aurora/prompt")
+      #expect(request.httpMethod == "POST")
+      return (200, #"{"status":"delivered"}"#.data(using: .utf8)!)
+    }
+    try await stubbedClient().submitPrompt(
+      base: URL(string: "http://127.0.0.1:7392")!, session: "s-aurora", text: "test input")
+  }
+
+  @Test func answerPromptSendsSelection() async throws {
+    StubURLProtocol.handler = { request in
+      #expect(request.url?.path == "/api/agents/s-aurora/prompt")
+      #expect(request.httpMethod == "POST")
+      return (200, #"{"status":"delivered"}"#.data(using: .utf8)!)
+    }
+    try await stubbedClient().answerPrompt(
+      base: URL(string: "http://127.0.0.1:7392")!,
+      session: "s-aurora",
+      promptID: "p123",
+      optionIndex: 0,
+      optionID: "opt-1",
+      action: "select_option"
+    )
+  }
 }

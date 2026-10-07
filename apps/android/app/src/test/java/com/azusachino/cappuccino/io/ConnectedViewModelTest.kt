@@ -588,6 +588,20 @@ class ConnectedViewModelTest {
           override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
 
           override fun stream(sessionId: String): Flow<StreamEvent> = streamFactory(sessionId)
+
+          override suspend fun conversation(
+            sessionId: String
+          ): List<com.azusachino.cappuccino.core.ConversationTurn> = emptyList()
+
+          override suspend fun submitPrompt(sessionId: String, text: String) {}
+
+          override suspend fun answerPrompt(
+            sessionId: String,
+            promptId: String,
+            optionIndex: Int?,
+            optionId: String?,
+            action: String?,
+          ) {}
         }
       },
       pause,
@@ -606,6 +620,14 @@ class ConnectedViewModelTest {
 
     override fun remove(id: String) {
       profiles.removeAll { it.id == id }
+    }
+
+    private var themeMode = com.azusachino.cappuccino.ui.ThemeMode.SYSTEM
+
+    override fun readThemeMode() = themeMode
+
+    override fun saveThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
+      themeMode = mode
     }
   }
 

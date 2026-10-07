@@ -12,8 +12,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -30,6 +32,18 @@ interface BridgeTransport {
   suspend fun agents(machine: UUID): List<AgentRow>
 
   fun stream(sessionId: String): Flow<StreamEvent>
+
+  suspend fun conversation(sessionId: String): List<ConversationTurn> = emptyList()
+
+  suspend fun submitPrompt(sessionId: String, text: String) {}
+
+  suspend fun answerPrompt(
+    sessionId: String,
+    promptId: String,
+    optionIndex: Int?,
+    optionId: String?,
+    action: String?,
+  ) {}
 }
 
 class BridgeClient(
@@ -47,6 +61,37 @@ class BridgeClient(
 
   override suspend fun agents(machine: UUID): List<AgentRow> =
     withContext(Dispatchers.IO) { parseAgents(parseJsonObject(get("api/agents")), machine) }
+
+  override suspend fun conversation(sessionId: String): List<ConversationTurn> =
+    withContext(Dispatchers.IO) {
+      val json = get("api/agents/$sessionId/conversation")
+      parseConversationResponse(parseJsonObject(json))
+    }
+
+  override suspend fun submitPrompt(sessionId: String, text: String): Unit =
+    withContext(Dispatchers.IO) {
+      val escapedText = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+      val body = """{"type":"prompt","text":"$escapedText"}"""
+      post("api/agents/$sessionId/prompt", body)
+    }
+
+  override suspend fun answerPrompt(
+    sessionId: String,
+    promptId: String,
+    optionIndex: Int?,
+    optionId: String?,
+    action: String?,
+  ): Unit =
+    withContext(Dispatchers.IO) {
+      val parts = mutableListOf<String>()
+      parts.add(""""type":"answer_prompt"""")
+      parts.add(""""prompt_id":"$promptId"""")
+      if (optionIndex != null) parts.add(""""option_index":$optionIndex""")
+      if (optionId != null) parts.add(""""option_id":"$optionId"""")
+      if (action != null) parts.add(""""action":"$action"""")
+      val body = "{" + parts.joinToString(",") + "}"
+      post("api/agents/$sessionId/prompt", body)
+    }
 
   override fun stream(sessionId: String): Flow<StreamEvent> = callbackFlow {
     val request = Request.Builder().url(endpoint.stream(sessionId).toString()).build()
@@ -106,6 +151,33 @@ class BridgeClient(
       }
     )
   }
+
+  private suspend fun post(path: String, jsonBody: String): String =
+    suspendCancellableCoroutine { continuation ->
+      val body = jsonBody.toRequestBody("application/json".toMediaType())
+      val request = Request.Builder().url(endpoint.route(path).toString()).post(body).build()
+      val call = client.newCall(request)
+      continuation.invokeOnCancellation { call.cancel() }
+      call.enqueue(
+        object : okhttp3.Callback {
+          override fun onFailure(call: okhttp3.Call, e: IOException) {
+            if (continuation.isActive) continuation.resumeWithException(e)
+          }
+
+          override fun onResponse(call: okhttp3.Call, response: Response) {
+            response.use {
+              try {
+                if (!it.isSuccessful) throw IOException("Bridge returned HTTP ${it.code}")
+                val text = readBounded(it.body.source(), MAX_HTTP_BODY_BYTES)
+                if (continuation.isActive) continuation.resume(text)
+              } catch (error: Exception) {
+                if (continuation.isActive) continuation.resumeWithException(error)
+              }
+            }
+          }
+        }
+      )
+    }
 
   companion object {
     fun defaultClient(): OkHttpClient =

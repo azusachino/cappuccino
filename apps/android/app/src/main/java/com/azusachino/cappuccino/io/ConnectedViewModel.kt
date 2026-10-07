@@ -35,14 +35,19 @@ data class ConnectedUiState(
   val agents: List<AgentRow> = emptyList(),
   val selectedAgent: AgentRow? = null,
   val stream: StreamState = StreamState(),
+  val conversationTurns: List<ConversationTurn> = emptyList(),
   val connection: ConnectionState = ConnectionState.Disconnected,
   val busy: Boolean = false,
+  val themeMode: com.azusachino.cappuccino.ui.ThemeMode =
+    com.azusachino.cappuccino.ui.ThemeMode.SYSTEM,
 )
 
 interface ConnectedActions {
   fun addMachine(label: String, url: String)
 
   fun selectProfile(id: String)
+
+  fun disconnectProfile()
 
   fun refresh()
 
@@ -51,6 +56,14 @@ interface ConnectedActions {
   fun removeProfile(id: String)
 
   fun retry()
+
+  fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode)
+
+  fun submitPrompt(text: String)
+
+  fun answerPrompt(promptId: String, optionIndex: Int?, optionId: String?, action: String?)
+
+  fun loadConversation()
 }
 
 class ConnectedViewModel
@@ -60,7 +73,13 @@ internal constructor(
   private val retryPause: suspend (Long) -> Unit,
   private val savedStateHandle: SavedStateHandle,
 ) : ViewModel(), ConnectedActions {
-  private val mutableState = MutableStateFlow(ConnectedUiState(profiles = store.read()))
+  private val mutableState =
+    MutableStateFlow(
+      ConnectedUiState(
+        profiles = store.read(),
+        themeMode = store.readThemeMode(),
+      )
+    )
   val state: StateFlow<ConnectedUiState> = mutableState.asStateFlow()
   private var operation: Job? = null
   private var streamJob: Job? = null
@@ -121,6 +140,25 @@ internal constructor(
     operation = viewModelScope.launch { refresh(profile) }
   }
 
+  override fun disconnectProfile() {
+    cancelOwnedWork()
+    clearSavedSelection()
+    mutableState.value =
+      mutableState.value.copy(
+        activeProfileId = null,
+        selectedAgent = null,
+        agents = emptyList(),
+        stream = StreamState(),
+        connection = ConnectionState.Disconnected,
+        busy = false,
+      )
+  }
+
+  override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
+    store.saveThemeMode(mode)
+    mutableState.value = mutableState.value.copy(themeMode = mode)
+  }
+
   override fun refresh() {
     val profile = activeProfile() ?: return
     cancelOwnedWork()
@@ -166,11 +204,17 @@ internal constructor(
         mutableState.value.copy(
           selectedAgent = null,
           stream = StreamState(),
+          conversationTurns = emptyList(),
           connection = ConnectionState.Error("Agent belongs to a different machine"),
         )
       return
     }
-    mutableState.value = mutableState.value.copy(selectedAgent = agent, stream = StreamState())
+    mutableState.value =
+      mutableState.value.copy(
+        selectedAgent = agent,
+        stream = StreamState(),
+        conversationTurns = emptyList(),
+      )
     if (agent == null) clearSavedSelection()
     else {
       savedStateHandle[SELECTED_PROFILE] = profile?.id
@@ -178,7 +222,63 @@ internal constructor(
       savedStateHandle[SELECTED_LOCATOR] = agent.sessionId
       pendingRestore = true
     }
-    if (foreground && agent != null && profile != null) openStream(profile, agent)
+    if (foreground && agent != null && profile != null) {
+      loadConversation()
+      openStream(profile, agent)
+    }
+  }
+
+  override fun loadConversation() {
+    val profile = activeProfile() ?: return
+    val agent = mutableState.value.selectedAgent ?: return
+    val client = bridgeFor(profile.endpoint)
+    viewModelScope.launch {
+      try {
+        val turns = client.conversation(agent.sessionId)
+        if (mutableState.value.selectedAgent?.sessionId == agent.sessionId) {
+          mutableState.value = mutableState.value.copy(conversationTurns = turns)
+        }
+      } catch (_: Exception) {
+        // Conversation fallback to scrollback or empty turns is transparent
+      }
+    }
+  }
+
+  override fun submitPrompt(text: String) {
+    val profile = activeProfile() ?: return
+    val agent = mutableState.value.selectedAgent ?: return
+    val client = bridgeFor(profile.endpoint)
+    viewModelScope.launch {
+      try {
+        client.submitPrompt(agent.sessionId, text)
+      } catch (error: Exception) {
+        mutableState.value =
+          mutableState.value.copy(
+            connection = ConnectionState.Error(error.message ?: "Failed to submit prompt")
+          )
+      }
+    }
+  }
+
+  override fun answerPrompt(
+    promptId: String,
+    optionIndex: Int?,
+    optionId: String?,
+    action: String?,
+  ) {
+    val profile = activeProfile() ?: return
+    val agent = mutableState.value.selectedAgent ?: return
+    val client = bridgeFor(profile.endpoint)
+    viewModelScope.launch {
+      try {
+        client.answerPrompt(agent.sessionId, promptId, optionIndex, optionId, action)
+      } catch (error: Exception) {
+        mutableState.value =
+          mutableState.value.copy(
+            connection = ConnectionState.Error(error.message ?: "Failed to answer prompt")
+          )
+      }
+    }
   }
 
   fun setForeground(value: Boolean) {

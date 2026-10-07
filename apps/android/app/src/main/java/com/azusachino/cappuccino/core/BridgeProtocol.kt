@@ -93,6 +93,46 @@ sealed interface StreamEvent {
   data class Reset(val generation: Long) : StreamEvent
 
   data class Error(val code: String, val message: String) : StreamEvent
+
+  data class AgentStatus(val sessionId: String, val state: String, val detail: String?) :
+    StreamEvent
+
+  data class PromptRequest(val sessionId: String, val prompt: PromptCard) : StreamEvent
+
+  data class PromptResolved(val sessionId: String, val promptId: String) : StreamEvent
+}
+
+data class PromptOption(
+  val id: String,
+  val label: String,
+  val description: String?,
+)
+
+data class PromptCard(
+  val promptId: String,
+  val type: String,
+  val title: String,
+  val message: String?,
+  val toolName: String?,
+  val command: String?,
+  val options: List<PromptOption>,
+  val selectedIndex: Int,
+)
+
+data class ConversationTurn(
+  val id: String,
+  val role: String,
+  val timestamp: String?,
+  val text: String?,
+  val parts: List<ConversationPart>,
+)
+
+sealed interface ConversationPart {
+  data class Text(val text: String) : ConversationPart
+
+  data class Thinking(val text: String) : ConversationPart
+
+  data class ToolCall(val name: String, val input: String, val output: String?) : ConversationPart
 }
 
 data class OutputRow(val key: String, val text: String, val gap: Boolean = false)
@@ -103,6 +143,9 @@ data class StreamState(
   val entries: List<StreamEntry> = emptyList(),
   val markers: List<OutputRow> = emptyList(),
   val error: String? = null,
+  val agentStatus: String? = null,
+  val agentStatusDetail: String? = null,
+  val pendingPrompt: PromptCard? = null,
 ) {
   fun rows(): List<OutputRow> {
     val result = mutableListOf<OutputRow>()
@@ -167,6 +210,72 @@ fun parseAgents(json: JsonObject, expectedMachine: UUID): List<AgentRow> {
   }
 }
 
+fun parsePromptCard(json: JsonObject): PromptCard {
+  val promptId = json.string("prompt_id")
+  val type = json.string("type")
+  val title = json.string("title")
+  val message = json.optionalString("message")
+  val toolName = json.optionalString("tool_name")
+  val command = json.optionalString("command")
+  val options =
+    json.array("options").map { opt ->
+      PromptOption(
+        id = opt.string("id"),
+        label = opt.string("label"),
+        description = opt.optionalString("description"),
+      )
+    }
+  val selectedIndex = json.long("selected_index").toInt()
+  return PromptCard(
+    promptId = promptId,
+    type = type,
+    title = title,
+    message = message,
+    toolName = toolName,
+    command = command,
+    options = options,
+    selectedIndex = selectedIndex,
+  )
+}
+
+fun parseConversationResponse(json: JsonObject): List<ConversationTurn> {
+  val turnsJson = json.array("turns")
+  return turnsJson.map { turnObj ->
+    val id = turnObj.string("id")
+    val role = turnObj.string("role")
+    val timestamp = turnObj.optionalString("timestamp")
+    val text = turnObj.optionalString("text")
+    val parts =
+      try {
+        turnObj.array("parts").mapNotNull { partObj ->
+          when (partObj.string("type")) {
+            "text" -> ConversationPart.Text(partObj.string("text"))
+            "thinking" -> ConversationPart.Thinking(partObj.string("text"))
+            "tool_call" -> {
+              val name = partObj.string("name")
+              val inputStr =
+                (partObj.fields["input"] as? JsonValue.StringValue)?.value
+                  ?: (partObj.fields["input"] as? JsonValue.Object)?.value?.let { "..." }
+                  ?: ""
+              val outputStr = partObj.optionalString("output")
+              ConversationPart.ToolCall(name, inputStr, outputStr)
+            }
+            else -> null
+          }
+        }
+      } catch (_: Exception) {
+        emptyList()
+      }
+    ConversationTurn(
+      id = id,
+      role = role,
+      timestamp = timestamp,
+      text = text,
+      parts = parts,
+    )
+  }
+}
+
 fun parseStreamEvent(json: JsonObject): StreamEvent =
   when (json.string("event")) {
     "stream_open" -> {
@@ -193,6 +302,23 @@ fun parseStreamEvent(json: JsonObject): StreamEvent =
       )
     "stream_reset" -> StreamEvent.Reset(nonNegative(json.long("generation"), "generation"))
     "error" -> StreamEvent.Error(json.string("code"), json.string("message"))
+    "agent_status" -> {
+      val session = json.string("session_id")
+      val state = json.string("state")
+      val detail = json.optionalString("detail")
+      StreamEvent.AgentStatus(session, state, detail)
+    }
+    "prompt_request" -> {
+      val session = json.string("session_id")
+      val promptObj =
+        json.optionalObject("prompt") ?: throw ProtocolException("Missing prompt object")
+      StreamEvent.PromptRequest(session, parsePromptCard(promptObj))
+    }
+    "prompt_resolved" -> {
+      val session = json.string("session_id")
+      val promptId = json.string("prompt_id")
+      StreamEvent.PromptResolved(session, promptId)
+    }
     else -> throw ProtocolException("Unknown stream event")
   }
 
@@ -265,6 +391,18 @@ fun reduce(state: StreamState, event: StreamEvent, selectedSession: String): Str
       }
     }
     is StreamEvent.Error -> state.copy(error = "${event.code}: ${event.message}")
+    is StreamEvent.AgentStatus -> {
+      if (event.sessionId != selectedSession) state
+      else state.copy(agentStatus = event.state, agentStatusDetail = event.detail)
+    }
+    is StreamEvent.PromptRequest -> {
+      if (event.sessionId != selectedSession) state else state.copy(pendingPrompt = event.prompt)
+    }
+    is StreamEvent.PromptResolved -> {
+      if (event.sessionId != selectedSession || state.pendingPrompt?.promptId != event.promptId)
+        state
+      else state.copy(pendingPrompt = null)
+    }
   }
 
 private fun uuid(value: String): UUID =

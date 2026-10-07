@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.core.content.edit
 import com.azusachino.cappuccino.BuildConfig
 import com.azusachino.cappuccino.core.Endpoint
+import com.azusachino.cappuccino.ui.ThemeMode
 import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
@@ -26,6 +27,10 @@ interface MachineProfileStore {
   fun save(profile: MachineProfile)
 
   fun remove(id: String)
+
+  fun readThemeMode(): ThemeMode
+
+  fun saveThemeMode(mode: ThemeMode)
 }
 
 class ProfileStore(context: Context) : MachineProfileStore {
@@ -87,7 +92,18 @@ class ProfileStore(context: Context) : MachineProfileStore {
     }
   }
 
+  override fun readThemeMode(): ThemeMode = runCatching {
+    val name = preferences.getString(KEY_THEME_MODE, ThemeMode.SYSTEM.name)
+    ThemeMode.valueOf(name ?: ThemeMode.SYSTEM.name)
+  }
+    .getOrDefault(ThemeMode.SYSTEM)
+
+  override fun saveThemeMode(mode: ThemeMode) {
+    preferences.edit(commit = true) { putString(KEY_THEME_MODE, mode.name) }
+  }
+
   companion object {
     private const val KEY = "profiles"
+    private const val KEY_THEME_MODE = "theme_mode"
   }
 }

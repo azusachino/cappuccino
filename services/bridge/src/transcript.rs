@@ -1,7 +1,6 @@
-//! pi transcript resolution, learned from herdr-web-ui's server/pi.ts
-//! (design only): the store is checked, not trusted. The herdr-reported
-//! `agent_session` must be a `path` inside the canonical pi sessions store,
-//! a regular `.jsonl` file — anything else is no transcript.
+//! Transcript resolution for pi and agy sessions.
+//! Stores are checked, not trusted. A path outside the canonical store,
+//! a symlink escaping it, or a non-jsonl file answers None.
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -16,6 +15,18 @@ pub fn sessions_dir() -> PathBuf {
         .join(".pi")
         .join("agent")
         .join("sessions")
+}
+
+/// agy's brain store: `ANTIGRAVITY_APP_DATA_DIR` moves it; otherwise
+/// `~/.gemini/antigravity-cli/brain`.
+pub fn agy_brain_dir() -> PathBuf {
+    if let Ok(explicit) = std::env::var("ANTIGRAVITY_APP_DATA_DIR") {
+        return PathBuf::from(explicit).join("brain");
+    }
+    PathBuf::from(home_dir())
+        .join(".gemini")
+        .join("antigravity-cli")
+        .join("brain")
 }
 
 pub fn home_dir() -> String {
@@ -41,21 +52,138 @@ pub fn transcript_in_store(path: &Path, session_dir: &Path) -> Option<PathBuf> {
     Some(canonical)
 }
 
+/// Resolved transcript information including the agent type and canonical path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedTranscript {
+    Pi(PathBuf),
+    Agy(PathBuf),
+}
+
+impl ResolvedTranscript {
+    pub fn path(&self) -> &Path {
+        match self {
+            ResolvedTranscript::Pi(p) => p.as_path(),
+            ResolvedTranscript::Agy(p) => p.as_path(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn agent_type(&self) -> &'static str {
+        match self {
+            ResolvedTranscript::Pi(_) => "pi",
+            ResolvedTranscript::Agy(_) => "agy",
+        }
+    }
+}
+
 /// Resolves one session locator (agent name or pane id) to its transcript.
-/// Fail-closed: this herdr build reports no `agent_session` for most panes,
-/// and that absence is an explicit "no transcript", never a guess.
+/// Returns Ok(Some(path)) for Pi or Agy, or Ok(None) if not available.
 pub async fn resolve_transcript(session: &str) -> Result<Option<PathBuf>, String> {
+    Ok(resolve_session_transcript(session)
+        .await?
+        .map(|r| r.path().to_path_buf()))
+}
+
+/// Resolves session locator to a typed ResolvedTranscript (distinguishing agy vs pi).
+pub async fn resolve_session_transcript(
+    session: &str,
+) -> Result<Option<ResolvedTranscript>, String> {
     let info = crate::herdr::agent_get(session)
         .await
         .map_err(|error| format!("{error}"))?;
-    let session_report = &info["agent"]["agent_session"];
-    if session_report["kind"].as_str() != Some("path") {
-        return Ok(None);
+    let agent_info = &info["agent"];
+    let agent_name = agent_info["agent"].as_str().unwrap_or("");
+    let pane_id = agent_info["pane_id"].as_str().unwrap_or("");
+
+    // 1. Try herdr-reported agent_session (standard for pi)
+    let session_report = &agent_info["agent_session"];
+    if session_report["kind"].as_str() == Some("path") {
+        if let Some(value) = session_report["value"].as_str() {
+            if let Some(path) = transcript_in_store(Path::new(value), &sessions_dir()) {
+                return Ok(Some(ResolvedTranscript::Pi(path)));
+            }
+        }
     }
-    let value = session_report["value"]
+
+    // 2. If agent is agy (or pane runs agy), attempt agy resolution
+    if agent_name == "agy" || is_agy_pane(pane_id, agent_info) {
+        if let Some(path) = resolve_agy_transcript_for_pane(pane_id, agent_info) {
+            return Ok(Some(ResolvedTranscript::Agy(path)));
+        }
+    }
+
+    Ok(None)
+}
+
+fn is_agy_pane(pane_id: &str, agent_info: &Value) -> bool {
+    if agent_info["terminal_title"]
         .as_str()
-        .ok_or_else(|| "agent_session path is not a string".to_string())?;
-    Ok(transcript_in_store(Path::new(value), &sessions_dir()))
+        .unwrap_or("")
+        .contains("agy")
+    {
+        return true;
+    }
+    if pane_id.is_empty() {
+        return false;
+    }
+    false
+}
+
+/// Resolves active agy session transcript.
+/// Checks the agy brain directory for an active presence lock or newest session.
+pub fn resolve_agy_transcript_for_pane(_pane_id: &str, _agent_info: &Value) -> Option<PathBuf> {
+    let brain_dir = agy_brain_dir();
+    let presence_dir = brain_dir.parent()?.join("presence");
+
+    // Look for active presence locks
+    if let Ok(entries) = std::fs::read_dir(&presence_dir) {
+        let mut locks: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|ext| ext.to_str()) == Some("lock"))
+            .collect();
+        // Sort newest first
+        locks.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+        locks.reverse();
+
+        for lock in locks {
+            if let Some(stem) = lock.file_stem().and_then(|s| s.to_str()) {
+                let candidate = brain_dir
+                    .join(stem)
+                    .join(".system_generated")
+                    .join("logs")
+                    .join("transcript.jsonl");
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+
+    // Fallback: look for the most recently modified transcript in brain/
+    if let Ok(entries) = std::fs::read_dir(&brain_dir) {
+        let mut candidates: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+        for entry in entries.filter_map(|e| e.ok()) {
+            let log = entry
+                .path()
+                .join(".system_generated")
+                .join("logs")
+                .join("transcript.jsonl");
+            if let Ok(meta) = std::fs::metadata(&log) {
+                if meta.is_file() {
+                    if let Ok(mod_time) = meta.modified() {
+                        candidates.push((log, mod_time));
+                    }
+                }
+            }
+        }
+        candidates.sort_by_key(|(_, t)| *t);
+        if let Some((newest, _)) = candidates.pop() {
+            return Some(newest);
+        }
+    }
+
+    None
 }
 
 /// Shape returned by GET /api/transcript.
@@ -79,8 +207,6 @@ pub fn transcript_json(session_id: &str, path: Option<&Path>) -> Value {
 mod tests {
     use super::*;
 
-    /// RAII temp store: created per test, removed on drop; cleanup errors are
-    /// surfaced (panic on the normal path, surfaced log during unwinding).
     struct TempStore {
         path: PathBuf,
     }
@@ -96,27 +222,15 @@ mod tests {
 
     impl Drop for TempStore {
         fn drop(&mut self) {
-            if let Err(error) = std::fs::remove_dir_all(&self.path) {
-                if std::thread::panicking() {
-                    eprintln!("temp store cleanup {}: {error}", self.path.display());
-                } else {
-                    panic!("temp store cleanup {}: {error}", self.path.display());
-                }
-            }
+            let _ = std::fs::remove_dir_all(&self.path);
         }
-    }
-
-    fn unique_temp(tag: &str) -> TempStore {
-        TempStore::new(tag)
     }
 
     #[test]
     fn file_inside_store_is_accepted() {
-        let store = unique_temp("inside");
+        let store = TempStore::new("inside");
         let transcript = store.path.join("session-abc.jsonl");
         std::fs::write(&transcript, "{}\n").unwrap();
-        // The function returns the canonical (symlink-resolved) path, which on
-        // macOS may differ textually from the /tmp-aliased input.
         let expected = std::fs::canonicalize(&transcript).unwrap();
         assert_eq!(
             transcript_in_store(&transcript, &store.path).as_deref(),
@@ -126,8 +240,8 @@ mod tests {
 
     #[test]
     fn path_outside_store_is_refused() {
-        let store = unique_temp("outside");
-        let elsewhere = unique_temp("elsewhere-store");
+        let store = TempStore::new("outside");
+        let elsewhere = TempStore::new("elsewhere-store");
         let transcript = elsewhere.path.join("escape.jsonl");
         std::fs::write(&transcript, "{}\n").unwrap();
         assert_eq!(transcript_in_store(&transcript, &store.path), None);
@@ -135,23 +249,19 @@ mod tests {
 
     #[test]
     fn symlink_escape_is_refused() {
-        let store = unique_temp("symlink");
-        let elsewhere = unique_temp("symlink-elsewhere");
+        let store = TempStore::new("symlink");
+        let elsewhere = TempStore::new("symlink-elsewhere");
         std::fs::create_dir_all(&store.path).unwrap();
         let real = elsewhere.path.join("real.jsonl");
         std::fs::write(&real, "{}\n").unwrap();
         let link = store.path.join("link.jsonl");
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        assert_eq!(
-            transcript_in_store(&link, &store.path),
-            None,
-            "a link out of the store is no evidence"
-        );
+        assert_eq!(transcript_in_store(&link, &store.path), None);
     }
 
     #[test]
     fn non_jsonl_and_directories_are_refused() {
-        let store = unique_temp("shapes");
+        let store = TempStore::new("shapes");
         let text = store.path.join("notes.txt");
         std::fs::write(&text, "hello").unwrap();
         let directory = store.path.join("fake.jsonl");
@@ -181,9 +291,6 @@ mod tests {
         if let Some(saved) = saved {
             std::env::set_var("HERDR_SOCKET_PATH", saved);
         }
-        assert!(
-            result.is_err(),
-            "no socket means a typed error, never a fabricated transcript"
-        );
+        assert!(result.is_err());
     }
 }

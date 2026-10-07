@@ -473,6 +473,101 @@ async fn transcript_fail_closed_all_modes() {
 }
 
 #[tokio::test]
+async fn agent_conversation_returns_structured_turns() {
+    let root = TempRoot::new("conv-test");
+    let sessions = root.path.join("sessions");
+    std::fs::create_dir(&sessions).unwrap();
+    let transcript = sessions.join("s-probe.jsonl");
+
+    let jsonl = r#"{"type":"message","timestamp":"2026-10-07T12:00:00Z","message":{"role":"user","content":"Run tests"}}
+{"type":"message","timestamp":"2026-10-07T12:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"cargo_test","arguments":{"target":"all"}}]}}
+{"type":"message","timestamp":"2026-10-07T12:00:05Z","message":{"role":"toolResult","content":"test result: ok"}}
+{"type":"message","timestamp":"2026-10-07T12:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests passed successfully"}]}}
+"#;
+    std::fs::write(&transcript, jsonl.as_bytes()).unwrap();
+
+    let herdr = MockHerdr::start(&root);
+    herdr.set_agent_session(Some(&transcript.to_string_lossy()));
+    let mut bridge = spawn_bridge_with(
+        &root,
+        Some(&herdr.socket_path),
+        &[("PI_CODING_AGENT_SESSION_DIR", sessions.to_str().unwrap())],
+    )
+    .await;
+
+    let exchange = probe::get(
+        &probe_options(&bridge.base_url()),
+        "/api/agents/s-probe/conversation",
+    )
+    .await
+    .expect("conversation request");
+
+    assert_eq!(exchange.status, 200, "payload: {}", exchange.body);
+    assert_eq!(exchange.body["source"], "canonical_log");
+    assert_eq!(exchange.body["session_id"], "s-probe");
+
+    let turns = exchange.body["turns"].as_array().expect("turns array");
+    assert_eq!(turns.len(), 2);
+    assert_eq!(turns[0]["role"], "user");
+    assert_eq!(turns[0]["text"], "Run tests");
+
+    assert_eq!(turns[1]["role"], "agent");
+    let parts = turns[1]["parts"].as_array().expect("parts array");
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0]["type"], "tool_call");
+    assert_eq!(parts[0]["name"], "cargo_test");
+    assert_eq!(parts[0]["output"], "test result: ok");
+    assert_eq!(parts[1]["type"], "text");
+    assert_eq!(parts[1]["text"], "Tests passed successfully");
+
+    bridge.stop().expect("bridge stop");
+    herdr.stop().await;
+    root.remove();
+}
+
+#[tokio::test]
+async fn submit_agent_prompt_delivers_input() {
+    let root = TempRoot::new("prompt-test");
+    let herdr = MockHerdr::start(&root);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+
+    // 1. Submit free-form prompt
+    let body = json!({
+        "type": "prompt",
+        "text": "run make check"
+    });
+    let exchange = probe::post_json(
+        &probe_options(&bridge.base_url()),
+        "/api/agents/s-probe/prompt",
+        &body,
+    )
+    .await
+    .expect("prompt request");
+
+    assert_eq!(exchange.status, 200, "payload: {}", exchange.body);
+    assert_eq!(exchange.body["event"], "prompt_sent");
+
+    // 2. Reject empty prompt
+    let empty_body = json!({
+        "type": "prompt",
+        "text": "   "
+    });
+    let err_exchange = probe::post_json(
+        &probe_options(&bridge.base_url()),
+        "/api/agents/s-probe/prompt",
+        &empty_body,
+    )
+    .await
+    .expect("empty prompt request");
+
+    assert_eq!(err_exchange.status, 400);
+
+    bridge.stop().expect("bridge stop");
+    herdr.stop().await;
+    root.remove();
+}
+
+#[tokio::test]
 async fn session_requires_nonempty_machine_id() {
     // A paired payload without machine_id must fail the check: spin an
     // HTTP/1 origin returning a machine_id-less paired body.

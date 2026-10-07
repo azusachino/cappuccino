@@ -246,4 +246,48 @@ class BridgeClientTest {
       }
     }
   }
+
+  @Test
+  fun fetchesConversationTurns() = runBlocking {
+    MockWebServer().use { server ->
+      server.enqueue(
+        MockResponse.Builder()
+          .body(
+            """{"session_id":"s-1","source":"canonical_log","turns":[{"id":"t1","role":"user","text":"hello"}]}"""
+          )
+          .build()
+      )
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      val turns = client.conversation("s-1")
+      assertEquals(1, turns.size)
+      assertEquals("t1", turns[0].id)
+      val req = server.takeRequest()
+      assertEquals("/api/agents/s-1/conversation", req.url.encodedPath)
+    }
+  }
+
+  @Test
+  fun submitsPromptAndAnswersPrompt() = runBlocking {
+    MockWebServer().use { server ->
+      server.enqueue(MockResponse.Builder().body("""{"status":"delivered"}""").build())
+      server.enqueue(MockResponse.Builder().body("""{"status":"delivered"}""").build())
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+
+      client.submitPrompt("s-1", "hello world")
+      val req1 = server.takeRequest()
+      assertEquals("/api/agents/s-1/prompt", req1.url.encodedPath)
+      assertEquals("POST", req1.method)
+      assertTrue(req1.body?.utf8()?.contains(""""text":"hello world"""") == true)
+
+      client.answerPrompt("s-1", "p-1", 0, "opt-1", "select_option")
+      val req2 = server.takeRequest()
+      assertEquals("/api/agents/s-1/prompt", req2.url.encodedPath)
+      assertEquals("POST", req2.method)
+      val body2 = req2.body?.utf8() ?: ""
+      assertTrue(body2.contains(""""prompt_id":"p-1""""))
+      assertTrue(body2.contains(""""option_index":0"""))
+    }
+  }
 }

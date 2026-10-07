@@ -2,7 +2,9 @@ package com.azusachino.cappuccino.ui
 
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ThemeTest {
@@ -12,14 +14,66 @@ class ThemeTest {
   private val fallbackDark = darkColorScheme(primary = androidx.compose.ui.graphics.Color.Blue)
 
   @Test
-  fun selectsWallpaperColorsOnApi31AndSystemAppearance() {
+  fun resolvesThemeModeCorrectly() {
+    assertTrue(resolveIsDark(ThemeMode.DARK, systemDark = false))
+    assertFalse(resolveIsDark(ThemeMode.LIGHT, systemDark = true))
+    assertTrue(resolveIsDark(ThemeMode.SYSTEM, systemDark = true))
+    assertFalse(resolveIsDark(ThemeMode.SYSTEM, systemDark = false))
+  }
+
+  @Test
+  fun selectsHerdrColorSchemesByDefaultEvenOnApi31() {
+    assertSame(
+      fallbackLight,
+      selectColorScheme(
+        31,
+        dark = false,
+        dynamicLight,
+        dynamicDark,
+        fallbackLight,
+        fallbackDark,
+        useDynamic = false,
+      ),
+    )
+    assertSame(
+      fallbackDark,
+      selectColorScheme(
+        34,
+        dark = true,
+        dynamicLight,
+        dynamicDark,
+        fallbackLight,
+        fallbackDark,
+        useDynamic = false,
+      ),
+    )
+  }
+
+  @Test
+  fun selectsWallpaperColorsWhenDynamicColorExplicitlyEnabled() {
     assertSame(
       dynamicLight,
-      selectColorScheme(31, false, dynamicLight, dynamicDark, fallbackLight, fallbackDark),
+      selectColorScheme(
+        31,
+        dark = false,
+        dynamicLight,
+        dynamicDark,
+        fallbackLight,
+        fallbackDark,
+        useDynamic = true,
+      ),
     )
     assertSame(
       dynamicDark,
-      selectColorScheme(37, true, dynamicLight, dynamicDark, fallbackLight, fallbackDark),
+      selectColorScheme(
+        37,
+        dark = true,
+        dynamicLight,
+        dynamicDark,
+        fallbackLight,
+        fallbackDark,
+        useDynamic = true,
+      ),
     )
   }
 
@@ -27,11 +81,27 @@ class ThemeTest {
   fun selectsLightAndDarkFallbackBeforeApi31() {
     assertSame(
       fallbackLight,
-      selectColorScheme(26, false, dynamicLight, dynamicDark, fallbackLight, fallbackDark),
+      selectColorScheme(
+        26,
+        dark = false,
+        dynamicLight,
+        dynamicDark,
+        fallbackLight,
+        fallbackDark,
+        useDynamic = true,
+      ),
     )
     assertSame(
       fallbackDark,
-      selectColorScheme(30, true, dynamicLight, dynamicDark, fallbackLight, fallbackDark),
+      selectColorScheme(
+        30,
+        dark = true,
+        dynamicLight,
+        dynamicDark,
+        fallbackLight,
+        fallbackDark,
+        useDynamic = true,
+      ),
     )
   }
 }

@@ -53,6 +53,73 @@ public struct BridgeClient: DaemonServing {
     _ = try await get(endpoint)
   }
 
+  /// Fetches structured conversation turns for an agent session
+  public func fetchConversation(base url: URL, session: String) async throws -> [String: Any] {
+    let endpoint = url.appendingPathComponent("/api/agents/\(session)/conversation")
+    return try await get(endpoint)
+  }
+
+  /// Sends a user prompt to an agent session via Bridge V2
+  public func submitPrompt(base url: URL, session: String, text: String) async throws {
+    let endpoint = url.appendingPathComponent("/api/agents/\(session)/prompt")
+    let body: [String: Any] = ["type": "prompt", "text": text]
+    _ = try await post(endpoint, body: body)
+  }
+
+  /// Answers an interactive prompt card (tool approval or ask_question)
+  public func answerPrompt(
+    base url: URL,
+    session: String,
+    promptID: String,
+    optionIndex: Int? = nil,
+    optionID: String? = nil,
+    action: String? = nil
+  ) async throws {
+    let endpoint = url.appendingPathComponent("/api/agents/\(session)/prompt")
+    var body: [String: Any] = [
+      "type": "answer_prompt",
+      "prompt_id": promptID,
+    ]
+    if let optionIndex { body["option_index"] = optionIndex }
+    if let optionID { body["option_id"] = optionID }
+    if let action { body["action"] = action }
+    _ = try await post(endpoint, body: body)
+  }
+
+  private func post(_ url: URL, body: [String: Any]) async throws -> [String: Any] {
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.timeoutInterval = timeout
+    do {
+      request.httpBody = try JSONSerialization.data(withJSONObject: body)
+    } catch {
+      throw DaemonClientError.protocolError("failed to serialize request body")
+    }
+    let (data, response): (Data, URLResponse)
+    do {
+      (data, response) = try await session.data(for: request)
+    } catch {
+      throw DaemonClientError.unreachable(error.localizedDescription)
+    }
+    guard let http = response as? HTTPURLResponse else {
+      throw DaemonClientError.unreachable("response is not HTTP")
+    }
+    guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      throw DaemonClientError.protocolError("response is not a JSON object")
+    }
+    switch http.statusCode {
+    case 200, 201:
+      return object
+    case 401:
+      throw DaemonClientError.unauthorized
+    default:
+      let code = object["code"] as? String ?? "http_\(http.statusCode)"
+      let message = object["message"] as? String ?? code
+      throw DaemonClientError.protocolError(message)
+    }
+  }
+
   private func get(_ url: URL) async throws -> [String: Any] {
     var request = URLRequest(url: url)
     request.timeoutInterval = timeout
