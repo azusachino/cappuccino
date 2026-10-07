@@ -91,7 +91,7 @@ pub async fn transcript(
     }
 }
 
-/// GET /api/stream?session=<locator>&token=…
+/// WS /api/stream?session=<locator>
 pub async fn stream(
     State(state): State<Arc<BridgeState>>,
     Query(query): Query<HashMap<String, String>>,

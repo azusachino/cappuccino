@@ -5,46 +5,41 @@ min_herdr_version = "0.9.0"
 description = "Loopback bridge plugin for the Cappuccino phone client: agent list, pi transcripts, pane-line stream (no auth; tailnet/loopback is the boundary)"
 platforms = ["macos", "linux"]
 
-# Rust on purpose (owner language decision 2026-10-06): the plugin ships as a
-# single statically-linked binary — no JS runtime prerequisite on the machine,
-# one toolchain, and the herdr socket client (tokio UnixStream) needs nothing
-# beyond the crate tree. herdr-web-ui was studied as a design reference for
-# the plugin surface and pi-store validation; the implementation is our own.
+# Rust on purpose (owner language decision 2026-10-06): no JavaScript runtime
+# prerequisite. This executable is a Herdr-managed plugin command and a
+# separate loopback transport process; it is not loaded into Herdr or an agent.
+# herdr-web-ui was studied as a design reference; this implementation is our own.
 
-[[build]]
-command = ["cargo", "build", "--release"]
-platforms = ["macos", "linux"]
-
-# herdr startup hooks are one-shot, not supervised: the script owns the
-# process, is idempotent, and never restarts a bridge that already answers.
+# Startup hooks are one-shot, not supervised; the binary owns its detached
+# server process through a private token-authenticated Unix control socket.
 [[startup]]
-command = ["sh", "scripts/bridge.sh", "start"]
+command = ["cappuccino-bridge", "start"]
 platforms = ["macos", "linux"]
 
 [[actions]]
 id = "start"
 title = "Start Cappuccino bridge"
 contexts = ["workspace"]
-command = ["sh", "scripts/bridge.sh", "start"]
+command = ["cappuccino-bridge", "start"]
 platforms = ["macos", "linux"]
 
 [[actions]]
 id = "stop"
 title = "Stop Cappuccino bridge"
 contexts = ["workspace"]
-command = ["sh", "scripts/bridge.sh", "stop"]
+command = ["cappuccino-bridge", "stop"]
 platforms = ["macos", "linux"]
 
 [[actions]]
 id = "status"
 title = "Cappuccino bridge status"
 contexts = ["workspace"]
-command = ["sh", "scripts/bridge.sh", "status"]
+command = ["cappuccino-bridge", "status"]
 platforms = ["macos", "linux"]
 
 [[actions]]
 id = "logs"
 title = "Cappuccino bridge log tail"
 contexts = ["workspace"]
-command = ["sh", "-c", "tail -n 80 \"$HOME/.local/state/cappuccino-bridge/bridge.log\""]
+command = ["cappuccino-bridge", "logs"]
 platforms = ["macos", "linux"]

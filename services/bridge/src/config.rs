@@ -4,7 +4,7 @@
 //! `enabled: true` is rejected until an authenticator exists, so the config
 //! format never has to change when one lands.
 
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -73,10 +73,6 @@ where
     Ok(option.unwrap_or(StrictBool(true)))
 }
 
-fn default_true() -> bool {
-    true
-}
-
 #[derive(Debug, Default, Deserialize)]
 struct ConfigFile {
     bind: Option<String>,
@@ -107,21 +103,41 @@ impl BridgeConfig {
     pub fn load() -> Result<Self, String> {
         let path = std::env::var("CAPP_BRIDGE_CONFIG")
             .unwrap_or_else(|_| format!("{}/.config/cappuccino-bridge/config.json", home_dir()));
-        Self::load_from(
+        Self::load_from_with_serve(
             Some(&path),
             std::env::var("CAPP_BRIDGE_HOST").ok().as_deref(),
             std::env::var("CAPP_BRIDGE_PORT").ok().as_deref(),
             std::env::var("CAPP_BRIDGE_DATA_DIR").ok().as_deref(),
+            std::env::var("CAPP_BRIDGE_SERVE_AUTO_APPLY")
+                .ok()
+                .as_deref(),
         )
     }
 
     /// Pure form for tests: no process-env reads (tests run in parallel and
     /// must not race each other's environment).
-    pub fn load_from(
+    #[cfg(test)]
+    fn load_from(
         config_path: Option<&str>,
         host_override: Option<&str>,
         port_override: Option<&str>,
         data_dir_override: Option<&str>,
+    ) -> Result<Self, String> {
+        Self::load_from_with_serve(
+            config_path,
+            host_override,
+            port_override,
+            data_dir_override,
+            None,
+        )
+    }
+
+    fn load_from_with_serve(
+        config_path: Option<&str>,
+        host_override: Option<&str>,
+        port_override: Option<&str>,
+        data_dir_override: Option<&str>,
+        serve_auto_apply_override: Option<&str>,
     ) -> Result<Self, String> {
         let mut config = Self::defaults();
         if let Some(path) = config_path {
@@ -156,14 +172,8 @@ impl BridgeConfig {
         if let Some(data_dir) = data_dir_override {
             config.data_dir = PathBuf::from(data_dir);
         }
-        if let Ok(auto) = std::env::var("CAPP_BRIDGE_SERVE_AUTO_APPLY") {
-            let disabled = matches!(
-                auto.trim().to_lowercase().as_str(),
-                "0" | "false" | "no" | "off"
-            );
-            if disabled {
-                config.serve_auto_apply = false;
-            }
+        if let Some(value) = serve_auto_apply_override {
+            config.serve_auto_apply = parse_serve_auto_apply(value)?;
         }
         if config.auth.enabled {
             return Err(
@@ -173,6 +183,16 @@ impl BridgeConfig {
             );
         }
         Ok(config)
+    }
+}
+
+fn parse_serve_auto_apply(value: &str) -> Result<bool, String> {
+    match value.trim().to_lowercase().as_str() {
+        "true" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(format!(
+            "invalid CAPP_BRIDGE_SERVE_AUTO_APPLY value '{value}' — accepted: true, 0, false, no, off (case-insensitive)"
+        )),
     }
 }
 
@@ -246,7 +266,10 @@ mod knob_tests {
         for text in ["0", "false", "no", "off", "FALSE", "No", "OFF"] {
             let path = config_file(&format!(r#"{{"serve": {{"auto_apply": "{text}"}}}}"#));
             let config = BridgeConfig::load_from(Some(&path), None, None, None).unwrap();
-            assert!(!config.serve_auto_apply, "string '{text}' must disable auto-apply");
+            assert!(
+                !config.serve_auto_apply,
+                "string '{text}' must disable auto-apply"
+            );
         }
     }
 
@@ -254,16 +277,53 @@ mod knob_tests {
     fn true_and_bool_true_parse_enabled() {
         let a = config_file(r#"{"serve": {"auto_apply": true}}"#);
         let b = config_file(r#"{"serve": {"auto_apply": "true"}}"#);
-        assert!(BridgeConfig::load_from(Some(&a), None, None, None).unwrap().serve_auto_apply);
-        assert!(BridgeConfig::load_from(Some(&b), None, None, None).unwrap().serve_auto_apply);
+        assert!(
+            BridgeConfig::load_from(Some(&a), None, None, None)
+                .unwrap()
+                .serve_auto_apply
+        );
+        assert!(
+            BridgeConfig::load_from(Some(&b), None, None, None)
+                .unwrap()
+                .serve_auto_apply
+        );
     }
 
     #[test]
     fn invalid_string_is_a_parse_error_not_a_silent_default() {
         let path = config_file(r#"{"serve": {"auto_apply": "maybe"}}"#);
         let error = BridgeConfig::load_from(Some(&path), None, None, None).unwrap_err();
-        assert!(error.contains("invalid serve.auto_apply value 'maybe'"), "{error}");
+        assert!(
+            error.contains("invalid serve.auto_apply value 'maybe'"),
+            "{error}"
+        );
         assert!(error.contains("0, false, no, off"));
+    }
+
+    #[test]
+    fn environment_override_is_strict_and_case_insensitive() {
+        for value in ["true", "TRUE"] {
+            assert!(
+                BridgeConfig::load_from_with_serve(None, None, None, None, Some(value))
+                    .unwrap()
+                    .serve_auto_apply
+            );
+        }
+        for value in ["0", "false", "no", "off", "FALSE", "No", "OFF"] {
+            assert!(
+                !BridgeConfig::load_from_with_serve(None, None, None, None, Some(value))
+                    .unwrap()
+                    .serve_auto_apply
+            );
+        }
+        for value in ["", "1", "maybe"] {
+            let error = BridgeConfig::load_from_with_serve(None, None, None, None, Some(value))
+                .unwrap_err();
+            assert!(
+                error.contains("invalid CAPP_BRIDGE_SERVE_AUTO_APPLY"),
+                "{error}"
+            );
+        }
     }
 
     #[test]

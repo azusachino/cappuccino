@@ -1,6 +1,6 @@
 # Behavior specification (provisional v0)
 
-Shared cross-platform contract for Cappuccino clients (iOS, Android). The companion-daemon framing below is frozen history from slice A: the production transport is now the herdr plugin bridge (`services/bridge`), and the reference daemon (`services/daemon`) exists only as a frozen implementation of these same behaviors. Both platform test suites consume the same [fixtures](../fixtures/); implementations stay native. This file records behavior, not a wire protocol: per the 2026-10-06 architecture pivots the production transport is the herdr plugin bridge (`services/bridge`, HTTP/WS loopback API over the herdr socket), which supersedes the SSH-exec direction; the slice-A daemon's wire v0 (`services/daemon/README.md`) remains a reference implementation only. Changes here require updating both platforms' conformance fixtures in the same commit.
+Shared cross-platform behavior contract for Cappuccino clients (iOS, Android). The companion-daemon and SSH-exec directions are superseded; `services/daemon` remains frozen reference work. The current client transport is the standalone Herdr plugin bridge (`services/bridge`), a loopback HTTP/WebSocket facade over selected Herdr APIs; it is not loaded into Herdr or an agent. Both platform test suites consume the same [fixtures](../fixtures/); implementations stay native. This file records intended behavior, not a published wire protocol. Changes here require updating both platforms' conformance fixtures in the same commit.
 
 Authority: [intent](intent.md). Process/session lifetime belongs to Herdr/Pi; a phone never starts, replaces or terminates an agent.
 
@@ -12,10 +12,16 @@ Authority: [intent](intent.md). Process/session lifetime belongs to Herdr/Pi; a 
 - `branch`: the session's active branch; abandoned branches are never concatenated into history.
 - `request_id`: one typed approval request; `action_id`: one delivery attempt; `grant_id`: one exact grant.
 
+**Current identity limit:** the read-only bridge catalog uses a Herdr agent name for named rows and a pane ID for unnamed rows as its current `session_id` locator. That value is not established as Pi's native session UUID or an occupant epoch. `agent_ref` is therefore only a current display/lookup locator; delivery must not target it as an immutable session identity. An approved delivery path must pin the native Pi session and Herdr terminal/pane incarnation at acceptance time.
+
 ## Delivery (Nudge / Follow-up)
 
+**Status:** this remains an intended contract, not a shipped capability. The owner-selected acceptance is that `confirmed` means Pi accepted the requested queue operation; an ambiguous outcome is final `unresolved` and that action is not replayed. These are acceptance semantics, not runtime capabilities proven through Herdr. The current bridge has no delivery endpoint. Herdr 0.9.3's `agent.prompt` writes text followed by Enter to the agent PTY and reports PTY submission completion; its optional wait observes lifecycle state and does not identify a Pi queue disposition. `agent.read/get/wait` observe terminal output and lifecycle; `agent.send-keys` writes validated terminal keys. None selects Nudge versus Follow-up or proves Pi queue acceptance. The installed Pi RPC docs separately describe `steer` and `follow_up`; their semantics are not exposed by Herdr's prompt schema. See [architecture](architecture.md#herdr-input-api-and-delivery-boundary).
+
+Do not map Herdr's prompt acknowledgement to `sent` or `confirmed`, and do not claim exactly-once delivery from bridge-side state. Reconcile owner acceptance before implementing a transport or Pi integration.
+
 - Both target the same existing `{machine_id, session_id}`; they differ in boundary semantics (Nudge interrupts at the next safe boundary; Follow-up queues for completion).
-- Every send produces a `DeliveryReceipt{action_id, state}` with states `pending → sent → confirmed`, or `unresolved` on ambiguous disconnect. `unresolved` is final for that `action_id`; a retry mints a new `action_id`. No blind retries.
+- Every send produces a `DeliveryReceipt{action_id, state}` with states `pending → sent → confirmed`, or `unresolved` on ambiguous disconnect. `confirmed` means Pi accepted the requested queue operation. `unresolved` is final for that `action_id` and must not be replayed; no blind or automatic retry. A later explicit user action, if offered, is a new attempt with a new `action_id`.
 - Receipts are idempotent per `action_id`; duplicate delivery of one action is a defect.
 - A stale composer targeting a replaced session occupant fails visibly and never delivers.
 
@@ -27,6 +33,8 @@ Authority: [intent](intent.md). Process/session lifetime belongs to Herdr/Pi; a 
 - The daemon/integration arbitrates races; cached client state is never an approval authority.
 
 ## History and reconciliation
+
+**Status:** this is the desired client contract. The issue #7 UI was accepted against scripted fixtures; a canonical live Pi transcript/WebSocket journey has not been verified. The current bridge fails closed when Herdr exposes no usable Pi session reference and otherwise reads pane output; do not treat scripted UI tests as live-history proof.
 
 - Initial load returns the session's durable active-branch history; streaming appends only confirmed-complete entries.
 - Reconciliation handles duplicates (idempotent by entry id), gaps (visible placeholder, never silent), out-of-order delivery (stable order by sequence), and session replacement (fresh stream; old pending actions/grants invalidated).
