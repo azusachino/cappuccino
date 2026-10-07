@@ -9,7 +9,59 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+
+val HerdrAmber = Color(0xFFF0A830)
+val HerdrAmberHover = Color(0xFFF6BB55)
+val HerdrBgDark = Color(0xFF12100E)
+val HerdrPanelDark = Color(0xFF181613)
+val HerdrElevatedDark = Color(0xFF211E1A)
+val HerdrBorderDark = Color(0xFF2D2924)
+val HerdrBorderStrongDark = Color(0xFF3E3830)
+val HerdrTextDark = Color(0xFFD8D0C3)
+val HerdrTextDimDark = Color(0xFF9B9183)
+val HerdrTextStrongDark = Color(0xFFF2EBDF)
+
+val HerdrStatusWorking = Color(0xFF6CB8D6)
+val HerdrStatusIdle = Color(0xFF9B9183)
+val HerdrStatusBlocked = Color(0xFFFF7B70)
+val HerdrStatusDone = Color(0xFF93C36B)
+
+val HerdrDarkColorScheme =
+  darkColorScheme(
+    primary = HerdrAmber,
+    onPrimary = Color(0xFF1B1407),
+    primaryContainer = HerdrElevatedDark,
+    onPrimaryContainer = HerdrTextStrongDark,
+    background = HerdrBgDark,
+    onBackground = HerdrTextDark,
+    surface = HerdrPanelDark,
+    onSurface = HerdrTextDark,
+    surfaceVariant = HerdrElevatedDark,
+    onSurfaceVariant = HerdrTextDimDark,
+    outline = HerdrBorderDark,
+    outlineVariant = HerdrBorderStrongDark,
+    error = HerdrStatusBlocked,
+    onError = Color(0xFF1B1407),
+  )
+
+val HerdrLightColorScheme =
+  lightColorScheme(
+    primary = Color(0xFF8C5000),
+    onPrimary = Color(0xFFFFFDF9),
+    primaryContainer = Color(0xFFF2EEE6),
+    onPrimaryContainer = Color(0xFF16120D),
+    background = Color(0xFFEEEAE2),
+    onBackground = Color(0xFF2A251F),
+    surface = Color(0xFFFAF8F3),
+    onSurface = Color(0xFF2A251F),
+    surfaceVariant = Color(0xFFF2EEE6),
+    onSurfaceVariant = Color(0xFF685E52),
+    outline = Color(0xFFDCD4C6),
+    error = Color(0xFFA82323),
+    onError = Color.White,
+  )
 
 fun selectColorScheme(
   apiLevel: Int,
@@ -30,8 +82,8 @@ fun selectColorScheme(
 fun CappuccinoTheme(content: @Composable () -> Unit) {
   val context = LocalContext.current
   val dark = isSystemInDarkTheme()
-  val lightFallback = lightColorScheme()
-  val darkFallback = darkColorScheme()
+  val lightFallback = HerdrLightColorScheme
+  val darkFallback = HerdrDarkColorScheme
   val dynamicLight =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicLightColorScheme(context)
     else lightFallback

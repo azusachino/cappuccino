@@ -1,33 +1,46 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,8 +59,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.azusachino.cappuccino.core.AgentRow
 import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
@@ -64,6 +79,37 @@ private enum class Destination(val title: Int, val icon: Int) {
     com.azusachino.cappuccino.R.string.machines,
     com.azusachino.cappuccino.R.drawable.ic_machine,
   ),
+}
+
+@Composable
+fun StatusBadge(status: String, modifier: Modifier = Modifier) {
+  val (color, text) =
+    when (status.lowercase()) {
+      "working" -> HerdrStatusWorking to "WORKING"
+      "done" -> HerdrStatusDone to "DONE"
+      "blocked" -> HerdrStatusBlocked to "BLOCKED"
+      else -> HerdrStatusIdle to "IDLE"
+    }
+  Surface(
+    modifier = modifier,
+    shape = RoundedCornerShape(12.dp),
+    color = color.copy(alpha = 0.15f),
+    border = BorderStroke(1.dp, color.copy(alpha = 0.4f)),
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+      Box(modifier = Modifier.size(6.dp).background(color, CircleShape))
+      Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+        fontWeight = FontWeight.SemiBold,
+      )
+    }
+  }
 }
 
 @Composable
@@ -90,6 +136,7 @@ fun CappuccinoScreen(
   var hasNewOutput by remember { mutableStateOf(false) }
   var followingOutput by remember { mutableStateOf(true) }
   val outputScope = rememberCoroutineScope()
+
   LaunchedEffect(outputListState) {
     var layoutReady = false
     snapshotFlow {
@@ -131,12 +178,54 @@ fun CappuccinoScreen(
     topBar = {
       TopAppBar(
         title = {
-          Text(if (selected != null) selected.label else stringResource(destination.title))
-        }
+          if (selected != null) {
+            Row(
+              modifier = Modifier.fillMaxWidth().padding(end = 8.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Column(modifier = Modifier.weight(1f, fill = false)) {
+                Text(
+                  selected.label,
+                  fontWeight = FontWeight.Bold,
+                  style = MaterialTheme.typography.titleMedium,
+                  maxLines = 1,
+                )
+                Text(
+                  "${state.profiles.firstOrNull { it.id == state.activeProfileId }?.label ?: "Machine"} · ${selected.sessionId}",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  maxLines = 1,
+                )
+              }
+              StatusBadge(selected.status)
+            }
+          } else {
+            Text(stringResource(destination.title), fontWeight = FontWeight.Bold)
+          }
+        },
+        navigationIcon = {
+          if (selected != null) {
+            IconButton(onClick = { actions.selectAgent(null) }) {
+              Icon(
+                painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
+                contentDescription = "Back",
+              )
+            }
+          }
+        },
+        colors =
+          TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+          ),
       )
     },
     bottomBar = {
-      NavigationBar {
+      NavigationBar(
+        containerColor = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+      ) {
         Destination.entries.forEach { item ->
           NavigationBarItem(
             selected = destination == item && selected == null,
@@ -157,16 +246,30 @@ fun CappuccinoScreen(
     ) {
       when {
         selected != null -> {
-          Text(
-            "Recent agent output · Read-only",
-            Modifier.padding(horizontal = 16.dp),
-            color = MaterialTheme.colorScheme.secondary,
-          )
-          Text(
-            "${state.profiles.firstOrNull { it.id == state.activeProfileId }?.label ?: "Machine"} · ${selected.sessionId} · ${selected.branch ?: "Branch unknown"}",
-            Modifier.padding(horizontal = 16.dp),
-            style = MaterialTheme.typography.labelMedium,
-          )
+          Surface(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Text(
+                "Recent agent output · Read-only",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+              )
+              Text(
+                "${state.profiles.firstOrNull { it.id == state.activeProfileId }?.label ?: "Machine"} · ${selected.sessionId} · ${selected.branch ?: "Branch unknown"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+          }
           when (val connection = state.connection) {
             ConnectionState.Connecting -> Text("Connecting…", Modifier.padding(16.dp))
             ConnectionState.Recovering ->
@@ -184,33 +287,74 @@ fun CappuccinoScreen(
             else -> Unit
           }
           if (hasNewOutput)
-            TextButton(
-              onClick = {
-                outputScope.launch {
-                  val last = state.stream.rows().lastIndex
-                  if (last >= 0) outputListState.animateScrollToItem(last)
-                  hasNewOutput = false
-                }
-              },
-              modifier = Modifier.align(Alignment.End).padding(end = 16.dp),
+            Box(
+              modifier = Modifier.fillMaxWidth().padding(end = 16.dp),
+              contentAlignment = Alignment.CenterEnd,
             ) {
-              Text("Jump to latest")
+              Surface(
+                onClick = {
+                  outputScope.launch {
+                    val last = state.stream.rows().lastIndex
+                    if (last >= 0) outputListState.animateScrollToItem(last)
+                    hasNewOutput = false
+                  }
+                },
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.primary,
+                shadowElevation = 4.dp,
+              ) {
+                Text(
+                  "Jump to latest",
+                  modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                  color = MaterialTheme.colorScheme.onPrimary,
+                  style = MaterialTheme.typography.labelSmall,
+                  fontWeight = FontWeight.Bold,
+                )
+              }
             }
           SelectionContainer(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(
               state = outputListState,
               modifier =
                 Modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("recentOutputList"),
-              verticalArrangement = Arrangement.spacedBy(8.dp),
+              verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
               items(state.stream.rows(), key = { it.key }) { row ->
-                Text(
-                  row.text,
-                  color =
-                    if (row.gap) MaterialTheme.colorScheme.tertiary
-                    else MaterialTheme.colorScheme.onSurface,
-                  fontFamily = if (row.gap) FontFamily.Default else FontFamily.Monospace,
-                )
+                if (row.gap) {
+                  Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    contentAlignment = Alignment.Center,
+                  ) {
+                    Surface(
+                      shape = RoundedCornerShape(12.dp),
+                      color = MaterialTheme.colorScheme.surfaceVariant,
+                      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    ) {
+                      Text(
+                        row.text,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelSmall,
+                      )
+                    }
+                  }
+                } else {
+                  Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border =
+                      BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                  ) {
+                    Text(
+                      row.text,
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                      color = MaterialTheme.colorScheme.onSurface,
+                      fontFamily = FontFamily.Monospace,
+                      style = MaterialTheme.typography.bodySmall,
+                    )
+                  }
+                }
               }
             }
           }
@@ -222,11 +366,33 @@ fun CappuccinoScreen(
             )
         }
         destination == Destination.CHATS -> {
-          Text(
-            "${state.connection.statusText()} · ${state.agents.size} agents",
-            Modifier.padding(horizontal = 16.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
+          Surface(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Text(
+                "${state.connection.statusText()} · ${state.agents.size} agents",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+              state.profiles
+                .firstOrNull { it.id == state.activeProfileId }
+                ?.let { active ->
+                  Text(
+                    active.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                  )
+                }
+            }
+          }
           if (state.agents.isEmpty()) {
             Text(
               if (state.activeProfileId == null)
@@ -235,23 +401,16 @@ fun CappuccinoScreen(
               Modifier.padding(16.dp),
             )
           }
-          LazyColumn(Modifier.weight(1f)) {
+          LazyColumn(
+            Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
             items(state.agents, key = { "${it.machineId}:${it.sessionId}" }) { agent ->
-              ListItem(
-                headlineContent = { Text(agent.label) },
-                supportingContent = {
-                  Text(
-                    "${state.profiles.firstOrNull { it.id == state.activeProfileId }?.label ?: "Machine"} · ${agent.sessionId} · ${agent.status}${agent.branch?.let { " · $it" } ?: ""}"
-                  )
-                },
-                modifier =
-                  Modifier.fillMaxWidth()
-                    .heightIn(min = 56.dp)
-                    .selectable(
-                      selected = false,
-                      onClick = { actions.selectAgent(agent) },
-                      role = Role.Button,
-                    ),
+              AgentItemCard(
+                agent = agent,
+                machineLabel =
+                  state.profiles.firstOrNull { it.id == state.activeProfileId }?.label ?: "Machine",
+                onClick = { actions.selectAgent(agent) },
               )
             }
           }
@@ -269,8 +428,9 @@ fun CappuccinoScreen(
           }
           Text(
             "Sending is not supported by this bridge yet",
-            Modifier.padding(16.dp),
+            Modifier.padding(horizontal = 16.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
           )
           Button(onClick = {}, enabled = false, modifier = Modifier.padding(horizontal = 16.dp)) {
             Text("Send unavailable")
@@ -304,13 +464,20 @@ fun CappuccinoScreen(
           LazyColumn(Modifier.weight(1f)) {
             items(state.profiles, key = { it.id }) { profile ->
               ListItem(
-                headlineContent = { Text(profile.label) },
+                headlineContent = { Text(profile.label, fontWeight = FontWeight.SemiBold) },
                 supportingContent = {
                   Text("${profile.endpoint.base.host} · ${profile.machineId}")
                 },
                 trailingContent = {
                   TextButton(onClick = { actions.removeProfile(profile.id) }) { Text("Remove") }
                 },
+                colors =
+                  ListItemDefaults.colors(
+                    containerColor =
+                      if (state.activeProfileId == profile.id)
+                        MaterialTheme.colorScheme.surfaceVariant
+                      else MaterialTheme.colorScheme.surface
+                  ),
                 modifier =
                   Modifier.fillMaxWidth()
                     .selectable(
@@ -398,6 +565,104 @@ fun CappuccinoScreen(
         }
       },
     )
+  }
+}
+
+@Composable
+private fun AgentItemCard(
+  agent: AgentRow,
+  machineLabel: String,
+  onClick: () -> Unit,
+) {
+  val railColor =
+    when (agent.status.lowercase()) {
+      "working" -> HerdrStatusWorking
+      "done" -> HerdrStatusDone
+      "blocked" -> HerdrStatusBlocked
+      else -> HerdrStatusIdle
+    }
+  Surface(
+    modifier =
+      Modifier.fillMaxWidth()
+        .padding(horizontal = 16.dp)
+        .selectable(
+          selected = false,
+          onClick = onClick,
+          role = Role.Button,
+        ),
+    shape = RoundedCornerShape(10.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Box(modifier = Modifier.width(4.dp).fillMaxHeight().background(railColor))
+      Box(
+        modifier =
+          Modifier.padding(start = 12.dp, end = 8.dp)
+            .size(36.dp)
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
+            .border(
+              1.dp,
+              MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+              RoundedCornerShape(8.dp),
+            ),
+        contentAlignment = Alignment.Center,
+      ) {
+        Text(
+          text =
+            when (agent.agent.lowercase()) {
+              "pi" -> "π"
+              "agy" -> "A"
+              "claude" -> "C"
+              "codex" -> "X"
+              else -> agent.agent.take(1).uppercase()
+            },
+          color = MaterialTheme.colorScheme.primary,
+          fontWeight = FontWeight.Bold,
+          style = MaterialTheme.typography.titleMedium,
+        )
+      }
+      Column(
+        modifier = Modifier.weight(1f).padding(vertical = 8.dp, horizontal = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+      ) {
+        Text(
+          agent.label,
+          style = MaterialTheme.typography.bodyMedium,
+          fontWeight = FontWeight.SemiBold,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Text(
+            "$machineLabel · ${agent.sessionId} · ${agent.status}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+          agent.branch?.let { branch ->
+            Surface(
+              shape = RoundedCornerShape(4.dp),
+              color = MaterialTheme.colorScheme.surface,
+              border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+            ) {
+              Text(
+                branch,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = FontFamily.Monospace,
+              )
+            }
+          }
+        }
+      }
+      StatusBadge(agent.status, modifier = Modifier.padding(end = 12.dp))
+    }
   }
 }
 
