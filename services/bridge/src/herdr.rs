@@ -85,21 +85,63 @@ pub async fn agent_get(target: &str) -> Result<Value, HerdrError> {
     request("agent.get", json!({ "target": target })).await
 }
 
-/// `pane.read` recent unwrapped text for one pane.
+/// Strips ANSI escape sequences and carriage returns from terminal text.
+pub fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if let Some(&next) = chars.peek() {
+                if next == '[' {
+                    chars.next();
+                    // CSI sequence: params (0x30-0x3F) / intermediates (0x20-0x2F), ending in 0x40-0x7E.
+                    while let Some(&p) = chars.peek() {
+                        chars.next();
+                        if (0x40..=0x7E).contains(&(p as u32)) {
+                            break;
+                        }
+                    }
+                } else if next == ']' {
+                    chars.next();
+                    // OSC sequence: until BEL (\x07) or ST (\x1b\\).
+                    while let Some(osc_c) = chars.next() {
+                        if osc_c == '\x07' {
+                            break;
+                        }
+                        if osc_c == '\x1b' && chars.peek() == Some(&'\\') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                } else if (0x40..=0x5F).contains(&(next as u32)) {
+                    chars.next();
+                }
+            }
+        } else if c != '\r' {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `pane.read` recent unwrapped text for one pane using passive ANSI format.
+///
+/// Passive ANSI format only snapshots stored rows without scrolling an idle
+/// agent's TUI terminal to harvest history (which text format does, causing
+/// the host terminal panel to jitter/frenzy on continuous polling).
 pub async fn pane_read_recent(pane_id: &str, lines: u32) -> Result<String, HerdrError> {
     let result = request(
         "pane.read",
         json!({
             "pane_id": pane_id,
             "source": "recent_unwrapped",
+            "format": "ansi",
             "lines": lines,
         }),
     )
     .await?;
-    Ok(result["read"]["text"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string())
+    let raw = result["read"]["text"].as_str().unwrap_or_default();
+    Ok(strip_ansi(raw))
 }
 
 #[cfg(test)]
@@ -117,5 +159,20 @@ mod tests {
             std::env::set_var("HERDR_SOCKET_PATH", saved);
         }
         assert!(error.is_err());
+    }
+
+    #[test]
+    fn test_strip_ansi_colors_and_controls() {
+        let input =
+            "\x1b[0m\x1b[38;2;138;180;248mRunning command...\x1b[0m\r\n\x1b[38;5;14mworking\x1b[0m";
+        let cleaned = strip_ansi(input);
+        assert_eq!(cleaned, "Running command...\nworking");
+    }
+
+    #[test]
+    fn test_strip_ansi_osc_and_plain_text() {
+        let input = "hello \x1b]0;terminal title\x07world\r\n";
+        let cleaned = strip_ansi(input);
+        assert_eq!(cleaned, "hello world\n");
     }
 }
