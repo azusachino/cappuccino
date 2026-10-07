@@ -33,9 +33,9 @@ interface BridgeTransport {
 
   fun stream(sessionId: String): Flow<StreamEvent>
 
-  suspend fun conversation(sessionId: String): List<ConversationTurn>
+  suspend fun conversation(sessionId: String): List<ConversationTurn> = emptyList()
 
-  suspend fun submitPrompt(sessionId: String, text: String)
+  suspend fun submitPrompt(sessionId: String, text: String) {}
 
   suspend fun answerPrompt(
     sessionId: String,
@@ -43,7 +43,7 @@ interface BridgeTransport {
     optionIndex: Int?,
     optionId: String?,
     action: String?,
-  )
+  ) {}
 }
 
 class BridgeClient(

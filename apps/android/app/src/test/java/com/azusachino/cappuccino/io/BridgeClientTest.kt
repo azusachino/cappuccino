@@ -279,13 +279,13 @@ class BridgeClientTest {
       val req1 = server.takeRequest()
       assertEquals("/api/agents/s-1/prompt", req1.url.encodedPath)
       assertEquals("POST", req1.method)
-      assertTrue(req1.body.readUtf8().contains(""""text":"hello world""""))
+      assertTrue(req1.body?.utf8()?.contains(""""text":"hello world"""") == true)
 
       client.answerPrompt("s-1", "p-1", 0, "opt-1", "select_option")
       val req2 = server.takeRequest()
       assertEquals("/api/agents/s-1/prompt", req2.url.encodedPath)
       assertEquals("POST", req2.method)
-      val body2 = req2.body.readUtf8()
+      val body2 = req2.body?.utf8() ?: ""
       assertTrue(body2.contains(""""prompt_id":"p-1""""))
       assertTrue(body2.contains(""""option_index":0"""))
     }
