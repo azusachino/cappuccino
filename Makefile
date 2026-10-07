@@ -63,9 +63,9 @@ check-bridge: ## Bridge Rust gate: fmt, all hermetic tests, mandatory resource s
 	$(CARGO) test --locked --manifest-path $(BRIDGE_MANIFEST) --test resource_soak -- --ignored
 	$(CARGO) build --locked --release --manifest-path $(BRIDGE_MANIFEST) --example test-client
 
-# Stream scenarios are part of the normal benchmark: SESSION names the WS
-# target (bridge returns a fail-closed not_found frame for unknown sessions,
-# which the bench still consumes and validates); STREAM_CYCLES must be > 0.
+# Stream scenarios require an existing readable SESSION and nonzero entries.
+# Unknown sessions fail closed; they are not representative benchmark success.
+# STREAM_CYCLES must be > 0.
 SESSION ?= s-probe
 STREAM_CYCLES ?= 20
 

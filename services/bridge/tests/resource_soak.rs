@@ -22,12 +22,13 @@
 
 #[path = "../examples/test-client/probe.rs"]
 mod probe;
+#[path = "common/task_scope.rs"]
+mod task_scope;
 
 use serde_json::json;
 use std::net::TcpListener;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -90,21 +91,10 @@ fn open_fd_targets() -> Vec<String> {
 /// Abort and join one tracked task under the teardown deadline. A panicked
 /// task is surfaced; expected cancellation (`is_cancelled`) is accepted. No
 /// join error is swallowed.
-async fn join_tracked(task: &mut tokio::task::JoinHandle<()>, label: &str) {
-    task.abort();
-    let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
-    match tokio::time::timeout_at(deadline, &mut *task).await {
-        Err(_) => {
-            task.abort();
-            panic!("{label} task did not join before the teardown deadline")
-        }
-        Ok(Err(join_error)) => {
-            if !join_error.is_cancelled() {
-                panic!("{label} task panicked: {join_error}");
-            }
-        }
-        Ok(Ok(())) => {}
-    }
+async fn join_tracked(task: tokio::task::JoinHandle<()>, _label: &str) {
+    task_scope::cancel_and_join(task, TEARDOWN_DEADLINE, false)
+        .await
+        .expect_clean();
 }
 
 /// Count of open file descriptors for this process (macOS /dev/fd,
@@ -118,12 +108,17 @@ fn open_fd_count() -> Option<usize> {
     std::fs::read_dir(dir).ok().map(|entries| entries.count())
 }
 
+#[path = "common/resource_scope.rs"]
+mod resource_scope;
 struct TempRoot {
-    path: PathBuf,
-    dev: u64,
-    ino: u64,
+    root: resource_scope::PrivateDir,
 }
-
+impl std::ops::Deref for TempRoot {
+    type Target = resource_scope::PrivateDir;
+    fn deref(&self) -> &Self::Target {
+        &self.root
+    }
+}
 impl TempRoot {
     fn new(label: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
@@ -131,53 +126,17 @@ impl TempRoot {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
-        std::fs::create_dir(&path).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let metadata = std::fs::symlink_metadata(&path).unwrap();
         Self {
-            path,
-            dev: metadata.dev(),
-            ino: metadata.ino(),
+            root: resource_scope::PrivateDir::new(path),
         }
     }
-
-    /// Identity-safe cleanup; errors are surfaced, never ignored.
     fn remove(self) {
-        let metadata = std::fs::symlink_metadata(&self.path).unwrap();
-        assert!(metadata.is_dir() && metadata.uid() == unsafe { libc::geteuid() });
-        assert_eq!(metadata.dev(), self.dev);
-        assert_eq!(metadata.ino(), self.ino);
-        std::fs::remove_dir_all(&self.path)
-            .unwrap_or_else(|error| panic!("soak cleanup {}: {error}", self.path.display()));
-    }
-}
-
-impl Drop for TempRoot {
-    /// Panic-path cleanup: best-effort, bounded, never silently ignored.
-    fn drop(&mut self) {
-        if let Ok(metadata) = std::fs::symlink_metadata(&self.path) {
-            let ours = metadata.is_dir()
-                && metadata.uid() == unsafe { libc::geteuid() }
-                && metadata.mode() & 0o7777 == 0o700
-                && metadata.dev() == self.dev
-                && metadata.ino() == self.ino;
-            if !ours {
-                eprintln!(
-                    "preserving replaced/unsafe temp root {}",
-                    self.path.display()
-                );
-                return;
-            }
-            if let Err(error) = std::fs::remove_dir_all(&self.path) {
-                eprintln!("could not remove {}: {error}", self.path.display());
-            }
-        }
+        self.root.remove();
     }
 }
 
 struct MockHerdr {
     socket_path: PathBuf,
-    tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     listener_task: tokio::task::JoinHandle<()>,
 }
 
@@ -185,63 +144,32 @@ impl MockHerdr {
     fn start(root: &TempRoot) -> Self {
         let socket_path = root.path.join("herdr.sock");
         let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
-        let tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
-        let tasks_task = Arc::clone(&tasks);
         let listener_task = tokio::spawn(async move {
+            let mut connections = futures_util::stream::FuturesUnordered::new();
             loop {
-                let (stream, _) = match listener.accept().await {
-                    Ok(accepted) => accepted,
-                    Err(_) => return,
-                };
-                let task = tokio::spawn(handle_mock_connection(stream));
-                let mut guard = tasks_task.lock().unwrap();
-                // Completed tasks are pruned: a retained JoinHandle keeps the
-                // finished task's whole allocation alive, which accumulates
-                // across the bridge's 400 ms polls and reads as an RSS leak.
-                guard.retain(|task| !task.is_finished());
-                guard.push(task);
+                tokio::select! {
+                    accepted = listener.accept() => match accepted {
+                        Ok((stream, _)) => connections.push(handle_mock_connection(stream)),
+                        Err(_) => return,
+                    },
+                    _ = futures_util::StreamExt::next(&mut connections), if !connections.is_empty() => {}
+                }
             }
         });
         Self {
             socket_path,
-            tasks,
             listener_task,
         }
     }
 
-    /// Full teardown: abort ALL owned handles (listener + every connection)
-    /// first, join each under the shared deadline, collect every error, and
-    /// only then report — an early failure can never drop the remaining
-    /// unjoined handles.
+    /// Join the connection-owning listener before removing its socket.
     async fn stop(self) {
-        let mut handles = vec![self.listener_task];
-        handles.extend(self.tasks.lock().unwrap().drain(..));
-        let mut errors = Vec::new();
-        for handle in handles.iter() {
-            handle.abort();
-        }
-        let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
-        for (index, handle) in handles.iter_mut().enumerate() {
-            match tokio::time::timeout_at(deadline, &mut *handle).await {
-                Err(_) => {
-                    handle.abort();
-                    errors.push(format!(
-                        "mock herdr task [{index}]: did not join before the deadline; re-aborted"
-                    ));
-                }
-                Ok(Err(join_error)) if !join_error.is_cancelled() => {
-                    errors.push(format!("mock herdr task [{index}] panicked: {join_error}"));
-                }
-                Ok(_) => {}
-            }
-        }
-        if let Err(error) = std::fs::remove_file(&self.socket_path) {
-            errors.push(format!("mock herdr socket cleanup: {error}"));
-        }
-        assert!(
-            errors.is_empty(),
-            "mock herdr cleanup failures after full teardown: {errors:?}"
-        );
+        let socket = self.socket_path;
+        task_scope::cancel_with_cleanup(self.listener_task, TEARDOWN_DEADLINE, false, move || {
+            std::fs::remove_file(socket).map_err(|error| format!("mock socket cleanup: {error}"))
+        })
+        .await
+        .expect_clean();
     }
 }
 
@@ -273,7 +201,7 @@ fn handle_mock_connection(stream: tokio::net::UnixStream) -> impl std::future::F
 }
 
 struct Bridge {
-    child: Child,
+    child: resource_scope::OwnedChild,
     port: u16,
 }
 
@@ -294,7 +222,10 @@ fn spawn_bridge(root: &TempRoot, herdr_socket: &Path) -> Bridge {
         .current_dir(&root.path)
         .spawn()
         .expect("spawn bridge");
-    Bridge { child, port }
+    Bridge {
+        child: child.into(),
+        port,
+    }
 }
 
 impl Bridge {
@@ -319,63 +250,9 @@ impl Bridge {
     /// Kill (errors surfaced), reap within a bounded wait, and assert the
     /// child is really gone (no zombie).
     fn stop(&mut self) {
-        if let Err(error) = self.child.kill() {
-            // A child that already exited is fine; anything else is surfaced.
-            match self.child.try_wait() {
-                Ok(Some(_)) => {}
-                _ => panic!("bridge kill failed: {error}"),
-            }
-        }
-        let deadline = std::time::Instant::now() + TEARDOWN_DEADLINE;
-        loop {
-            match self.child.try_wait() {
-                Ok(Some(status)) => {
-                    eprintln!("bridge stopped: {status}");
-                    return;
-                }
-                Ok(None) => {
-                    assert!(
-                        std::time::Instant::now() < deadline,
-                        "bridge child did not exit before the reap deadline"
-                    );
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                Err(error) => panic!("bridge wait failed: {error}"),
-            }
-        }
-    }
-}
-
-impl Drop for Bridge {
-    /// Panic-path cleanup: bounded kill+reap, never an unbounded wait; errors
-    /// surfaced, never silently swallowed.
-    fn drop(&mut self) {
-        match self.child.try_wait() {
-            Ok(Some(_)) => return, // already reaped
-            Ok(None) => {
-                if let Err(error) = self.child.kill() {
-                    eprintln!("bridge kill on drop: {error}");
-                }
-                let deadline = std::time::Instant::now() + TEARDOWN_DEADLINE;
-                loop {
-                    match self.child.try_wait() {
-                        Ok(Some(_)) => return,
-                        Ok(None) => {
-                            if std::time::Instant::now() > deadline {
-                                eprintln!("bridge child reaping exceeded drop deadline");
-                                return;
-                            }
-                            std::thread::sleep(Duration::from_millis(10));
-                        }
-                        Err(error) => {
-                            eprintln!("bridge wait on drop: {error}");
-                            return;
-                        }
-                    }
-                }
-            }
-            Err(error) => eprintln!("bridge try_wait on drop: {error}"),
-        }
+        self.child
+            .stop(TEARDOWN_DEADLINE)
+            .expect("bridge terminal cleanup");
     }
 }
 
@@ -558,18 +435,6 @@ async fn attributed_resource_recovery() {
     );
 }
 
-/// Classification of a joined task outcome at a cancellation point. The
-/// decision used by the soak's cancellation cycles; the negative regression
-/// `cancel_detector_rejects_panic` proves a panic is not mistaken for
-/// cancellation.
-fn classify_join(joined: Result<(), tokio::task::JoinError>) -> Result<(), String> {
-    match joined {
-        Ok(_) => Err("task completed; mid-flight cancellation expected".into()),
-        Err(join_error) if join_error.is_cancelled() => Ok(()),
-        Err(join_error) => Err(format!("task panicked instead of cancelling: {join_error}")),
-    }
-}
-
 /// Refusal, mid-flight cancellation and disconnect scenario classes against
 /// throwaway servers, each phase-matched and FD-attributed.
 #[tokio::test]
@@ -610,7 +475,7 @@ async fn scenario_recovery_error_cancel_disconnect() {
     let accepted = Arc::new(tokio::sync::Notify::new());
     let held_holder = Arc::clone(&held);
     let accepted_holder = Arc::clone(&accepted);
-    let mut holder = tokio::spawn(async move {
+    let holder = tokio::spawn(async move {
         loop {
             if let Ok((stream, _)) = stall.accept().await {
                 held_holder.lock().unwrap().push(stream);
@@ -626,15 +491,9 @@ async fn scenario_recovery_error_cancel_disconnect() {
         let task = tokio::spawn(async move { probe::run_checks(&options).await });
         accepted.notified().await; // a request is provably in flight
         let start = std::time::Instant::now();
-        task.abort();
-        // Bounded join; only a genuine tokio cancellation is accepted — a
-        // panicked task is classified as a failure, never as cancellation.
-        let deadline = tokio::time::Instant::now() + TEARDOWN_DEADLINE;
-        let joined = match tokio::time::timeout_at(deadline, task).await {
-            Err(_) => panic!("cancel cycle task did not join before the deadline"),
-            Ok(joined) => joined,
-        };
-        classify_join(joined.map(|_| ())).expect("cancel cycle must be a real cancellation");
+        task_scope::cancel_and_join(task, TEARDOWN_DEADLINE, true)
+            .await
+            .expect_clean();
         worst = worst.max(start.elapsed());
     }
     println!("soak[cancel]: {CYCLES} observed in-flight aborts joined, worst {worst:?}");
@@ -642,14 +501,14 @@ async fn scenario_recovery_error_cancel_disconnect() {
         worst < Duration::from_secs(2),
         "cancellation join must be prompt"
     );
-    join_tracked(&mut holder, "scenario holder").await;
+    join_tracked(holder, "scenario holder").await;
     held.lock().unwrap().clear();
     assert_exact_recovery("cancel", baseline, open_fd_count().expect("fds"));
 
     // Server disconnect: accept-and-close; every probe must fail loudly.
     let closer = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let closer_port = closer.local_addr().unwrap().port();
-    let mut holder = tokio::spawn(async move {
+    let holder = tokio::spawn(async move {
         loop {
             if let Ok((stream, _)) = closer.accept().await {
                 drop(stream); // immediate disconnect
@@ -664,7 +523,7 @@ async fn scenario_recovery_error_cancel_disconnect() {
             "disconnect must fail loudly"
         );
     }
-    join_tracked(&mut holder, "scenario holder").await;
+    join_tracked(holder, "scenario holder").await;
     assert_exact_recovery("disconnect", baseline, open_fd_count().expect("fds"));
 }
 
@@ -791,9 +650,13 @@ async fn cancel_detector_rejects_panic() {
     while !task.is_finished() {
         tokio::task::yield_now().await;
     }
-    let verdict = classify_join(task.await);
+    let verdict = task_scope::cancel_and_join(task, TEARDOWN_DEADLINE, true).await;
     assert!(
-        matches!(&verdict, Err(message) if message.contains("panicked")),
-        "a panicked task must be classified as a panic, not cancellation: {verdict:?}"
+        verdict
+            .errors
+            .iter()
+            .any(|message| message.contains("panicked")),
+        "the actual cancellation helper must reject a panicked task: {:?}",
+        verdict.errors
     );
 }
