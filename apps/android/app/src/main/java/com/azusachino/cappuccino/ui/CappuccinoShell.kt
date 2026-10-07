@@ -67,7 +67,6 @@ import com.azusachino.cappuccino.core.ConversationPart
 import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.OutputRow
 import com.azusachino.cappuccino.core.PromptCard
-import com.azusachino.cappuccino.core.PromptOption
 import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
@@ -323,6 +322,9 @@ fun CappuccinoScreen(
                 Modifier.padding(16.dp),
                 color = MaterialTheme.colorScheme.error,
               )
+            else -> Unit
+          }
+
           // If there is an active pending prompt on this agent, show the prompt card prominently
           state.stream.pendingPrompt?.let { card ->
             Box(Modifier.padding(horizontal = 16.dp)) {
@@ -331,9 +333,7 @@ fun CappuccinoScreen(
                 onSelectOption = { idx, optId ->
                   actions.answerPrompt(card.promptId, idx, optId, "select_option")
                 },
-                onCancel = {
-                  actions.answerPrompt(card.promptId, null, null, "cancel")
-                },
+                onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
               )
             }
           }
@@ -478,9 +478,7 @@ fun CappuccinoScreen(
                 onSelectOption = { idx, optId ->
                   actions.answerPrompt(pending.promptId, idx, optId, "select_option")
                 },
-                onCancel = {
-                  actions.answerPrompt(pending.promptId, null, null, "cancel")
-                },
+                onCancel = { actions.answerPrompt(pending.promptId, null, null, "cancel") },
               )
             }
           } else {
@@ -1283,10 +1281,11 @@ fun PromptInputBar(
         enabled = enabled,
         singleLine = true,
         shape = RoundedCornerShape(20.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-          focusedBorderColor = MaterialTheme.colorScheme.primary,
-          unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-        ),
+        colors =
+          OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+          ),
       )
       IconButton(
         onClick = {
@@ -1300,7 +1299,9 @@ fun PromptInputBar(
         Icon(
           painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_chat),
           contentDescription = "Send",
-          tint = if (enabled && input.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+          tint =
+            if (enabled && input.isNotBlank()) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outline,
         )
       }
     }
@@ -1316,11 +1317,15 @@ fun ConversationTurnRow(turn: ConversationTurn, modifier: Modifier = Modifier) {
   ) {
     Surface(
       shape = RoundedCornerShape(12.dp),
-      color = if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
-      border = BorderStroke(
-        1.dp,
-        if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-      ),
+      color =
+        if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+        else MaterialTheme.colorScheme.surfaceVariant,
+      border =
+        BorderStroke(
+          1.dp,
+          if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+          else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+        ),
       modifier = Modifier.fillMaxWidth(0.92f),
     ) {
       Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1333,7 +1338,9 @@ fun ConversationTurnRow(turn: ConversationTurn, modifier: Modifier = Modifier) {
             text = if (isUser) "You" else "Assistant",
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
-            color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            color =
+              if (isUser) MaterialTheme.colorScheme.primary
+              else MaterialTheme.colorScheme.onSurface,
           )
           turn.timestamp?.let { ts ->
             Text(
@@ -1382,7 +1389,10 @@ fun ConversationTurnRow(turn: ConversationTurn, modifier: Modifier = Modifier) {
                 border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
                 modifier = Modifier.fillMaxWidth(),
               ) {
-                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                  modifier = Modifier.padding(8.dp),
+                  verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                   Text(
                     text = "Tool: ${part.name}",
                     fontFamily = FontFamily.Monospace,
@@ -1415,4 +1425,3 @@ fun ConversationTurnRow(turn: ConversationTurn, modifier: Modifier = Modifier) {
     }
   }
 }
-

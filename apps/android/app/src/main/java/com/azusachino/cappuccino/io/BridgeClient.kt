@@ -35,7 +35,13 @@ interface BridgeTransport {
 
   suspend fun submitPrompt(sessionId: String, text: String)
 
-  suspend fun answerPrompt(sessionId: String, promptId: String, optionIndex: Int?, optionId: String?, action: String?)
+  suspend fun answerPrompt(
+    sessionId: String,
+    promptId: String,
+    optionIndex: Int?,
+    optionId: String?,
+    action: String?,
+  )
 }
 
 class BridgeClient(
@@ -144,31 +150,32 @@ class BridgeClient(
     )
   }
 
-  private suspend fun post(path: String, jsonBody: String): String = suspendCancellableCoroutine { continuation ->
-    val body = okhttp3.RequestBody.create(okhttp3.MediaType.parse("application/json"), jsonBody)
-    val request = Request.Builder().url(endpoint.route(path).toString()).post(body).build()
-    val call = client.newCall(request)
-    continuation.invokeOnCancellation { call.cancel() }
-    call.enqueue(
-      object : okhttp3.Callback {
-        override fun onFailure(call: okhttp3.Call, e: IOException) {
-          if (continuation.isActive) continuation.resumeWithException(e)
-        }
+  private suspend fun post(path: String, jsonBody: String): String =
+    suspendCancellableCoroutine { continuation ->
+      val body = okhttp3.RequestBody.create(okhttp3.MediaType.parse("application/json"), jsonBody)
+      val request = Request.Builder().url(endpoint.route(path).toString()).post(body).build()
+      val call = client.newCall(request)
+      continuation.invokeOnCancellation { call.cancel() }
+      call.enqueue(
+        object : okhttp3.Callback {
+          override fun onFailure(call: okhttp3.Call, e: IOException) {
+            if (continuation.isActive) continuation.resumeWithException(e)
+          }
 
-        override fun onResponse(call: okhttp3.Call, response: Response) {
-          response.use {
-            try {
-              if (!it.isSuccessful) throw IOException("Bridge returned HTTP ${it.code}")
-              val text = readBounded(it.body.source(), MAX_HTTP_BODY_BYTES)
-              if (continuation.isActive) continuation.resume(text)
-            } catch (error: Exception) {
-              if (continuation.isActive) continuation.resumeWithException(error)
+          override fun onResponse(call: okhttp3.Call, response: Response) {
+            response.use {
+              try {
+                if (!it.isSuccessful) throw IOException("Bridge returned HTTP ${it.code}")
+                val text = readBounded(it.body.source(), MAX_HTTP_BODY_BYTES)
+                if (continuation.isActive) continuation.resume(text)
+              } catch (error: Exception) {
+                if (continuation.isActive) continuation.resumeWithException(error)
+              }
             }
           }
         }
-      }
-    )
-  }
+      )
+    }
 
   companion object {
     fun defaultClient(): OkHttpClient =

@@ -252,7 +252,9 @@ class BridgeClientTest {
     MockWebServer().use { server ->
       server.enqueue(
         MockResponse.Builder()
-          .body("""{"session_id":"s-1","source":"canonical_log","turns":[{"id":"t1","role":"user","text":"hello"}]}""")
+          .body(
+            """{"session_id":"s-1","source":"canonical_log","turns":[{"id":"t1","role":"user","text":"hello"}]}"""
+          )
           .build()
       )
       server.start()

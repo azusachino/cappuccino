@@ -229,12 +229,13 @@ class BridgeProtocolTest {
 
   @Test
   fun parsesAgentStatusAndPromptStreamEvents() {
-    val statusObj = obj(
-      "event" to s("agent_status"),
-      "session_id" to s("s-1"),
-      "state" to s("working"),
-      "detail" to s("running tests"),
-    )
+    val statusObj =
+      obj(
+        "event" to s("agent_status"),
+        "session_id" to s("s-1"),
+        "state" to s("working"),
+        "detail" to s("running tests"),
+      )
     val parsedStatus = parseStreamEvent(statusObj)
     assertTrue(parsedStatus is StreamEvent.AgentStatus)
     val status = parsedStatus as StreamEvent.AgentStatus
@@ -242,28 +243,31 @@ class BridgeProtocolTest {
     assertEquals("working", status.state)
     assertEquals("running tests", status.detail)
 
-    val promptObj = obj(
-      "event" to s("prompt_request"),
-      "session_id" to s("s-1"),
-      "prompt" to JsonValue.Object(
-        obj(
-          "prompt_id" to s("p-1"),
-          "type" to s("tool_approval"),
-          "title" to s("Approve execution"),
-          "selected_index" to n(0),
-          "options" to JsonValue.Array(
-            listOf(
-              JsonValue.Object(
-                obj(
-                  "id" to s("opt-1"),
-                  "label" to s("Allow"),
-                )
-              )
+    val promptObj =
+      obj(
+        "event" to s("prompt_request"),
+        "session_id" to s("s-1"),
+        "prompt" to
+          JsonValue.Object(
+            obj(
+              "prompt_id" to s("p-1"),
+              "type" to s("tool_approval"),
+              "title" to s("Approve execution"),
+              "selected_index" to n(0),
+              "options" to
+                JsonValue.Array(
+                  listOf(
+                    JsonValue.Object(
+                      obj(
+                        "id" to s("opt-1"),
+                        "label" to s("Allow"),
+                      )
+                    )
+                  )
+                ),
             )
           ),
-        )
-      ),
-    )
+      )
     val parsedPrompt = parseStreamEvent(promptObj)
     assertTrue(parsedPrompt is StreamEvent.PromptRequest)
     val promptReq = parsedPrompt as StreamEvent.PromptRequest
@@ -272,11 +276,12 @@ class BridgeProtocolTest {
     assertEquals("tool_approval", promptReq.prompt.type)
     assertEquals(1, promptReq.prompt.options.size)
 
-    val resolvedObj = obj(
-      "event" to s("prompt_resolved"),
-      "session_id" to s("s-1"),
-      "prompt_id" to s("p-1"),
-    )
+    val resolvedObj =
+      obj(
+        "event" to s("prompt_resolved"),
+        "session_id" to s("s-1"),
+        "prompt_id" to s("p-1"),
+      )
     val parsedResolved = parseStreamEvent(resolvedObj)
     assertTrue(parsedResolved is StreamEvent.PromptResolved)
     val resolved = parsedResolved as StreamEvent.PromptResolved
@@ -301,22 +306,24 @@ class BridgeProtocolTest {
 
   @Test
   fun parsesConversationTurnResponse() {
-    val json = obj(
-      "session_id" to s("s-1"),
-      "source" to s("canonical_log"),
-      "turns" to JsonValue.Array(
-        listOf(
-          JsonValue.Object(
-            obj(
-              "id" to s("turn-1"),
-              "role" to s("user"),
-              "text" to s("hello"),
-              "parts" to JsonValue.Array(emptyList()),
+    val json =
+      obj(
+        "session_id" to s("s-1"),
+        "source" to s("canonical_log"),
+        "turns" to
+          JsonValue.Array(
+            listOf(
+              JsonValue.Object(
+                obj(
+                  "id" to s("turn-1"),
+                  "role" to s("user"),
+                  "text" to s("hello"),
+                  "parts" to JsonValue.Array(emptyList()),
+                )
+              )
             )
-          )
-        )
-      ),
-    )
+          ),
+      )
     val turns = parseConversationResponse(json)
     assertEquals(1, turns.size)
     assertEquals("turn-1", turns[0].id)

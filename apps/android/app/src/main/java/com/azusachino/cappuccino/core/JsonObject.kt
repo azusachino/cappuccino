@@ -32,8 +32,7 @@ data class JsonObject(val fields: Map<String, JsonValue>) {
       (it as? JsonValue.Object)?.value ?: throw ProtocolException("Invalid $key row")
     }
 
-  fun optionalObject(key: String): JsonObject? =
-    (fields[key] as? JsonValue.Object)?.value
+  fun optionalObject(key: String): JsonObject? = (fields[key] as? JsonValue.Object)?.value
 }
 
 sealed interface JsonValue {

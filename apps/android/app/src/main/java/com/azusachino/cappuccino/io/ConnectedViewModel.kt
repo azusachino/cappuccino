@@ -209,11 +209,12 @@ internal constructor(
         )
       return
     }
-    mutableState.value = mutableState.value.copy(
-      selectedAgent = agent,
-      stream = StreamState(),
-      conversationTurns = emptyList(),
-    )
+    mutableState.value =
+      mutableState.value.copy(
+        selectedAgent = agent,
+        stream = StreamState(),
+        conversationTurns = emptyList(),
+      )
     if (agent == null) clearSavedSelection()
     else {
       savedStateHandle[SELECTED_PROFILE] = profile?.id
@@ -251,14 +252,20 @@ internal constructor(
       try {
         client.submitPrompt(agent.sessionId, text)
       } catch (error: Exception) {
-        mutableState.value = mutableState.value.copy(
-          connection = ConnectionState.Error(error.message ?: "Failed to submit prompt")
-        )
+        mutableState.value =
+          mutableState.value.copy(
+            connection = ConnectionState.Error(error.message ?: "Failed to submit prompt")
+          )
       }
     }
   }
 
-  override fun answerPrompt(promptId: String, optionIndex: Int?, optionId: String?, action: String?) {
+  override fun answerPrompt(
+    promptId: String,
+    optionIndex: Int?,
+    optionId: String?,
+    action: String?,
+  ) {
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
     val client = bridgeFor(profile.endpoint)
@@ -266,9 +273,10 @@ internal constructor(
       try {
         client.answerPrompt(agent.sessionId, promptId, optionIndex, optionId, action)
       } catch (error: Exception) {
-        mutableState.value = mutableState.value.copy(
-          connection = ConnectionState.Error(error.message ?: "Failed to answer prompt")
-        )
+        mutableState.value =
+          mutableState.value.copy(
+            connection = ConnectionState.Error(error.message ?: "Failed to answer prompt")
+          )
       }
     }
   }

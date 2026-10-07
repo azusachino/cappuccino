@@ -94,7 +94,8 @@ sealed interface StreamEvent {
 
   data class Error(val code: String, val message: String) : StreamEvent
 
-  data class AgentStatus(val sessionId: String, val state: String, val detail: String?) : StreamEvent
+  data class AgentStatus(val sessionId: String, val state: String, val detail: String?) :
+    StreamEvent
 
   data class PromptRequest(val sessionId: String, val prompt: PromptCard) : StreamEvent
 
@@ -128,7 +129,9 @@ data class ConversationTurn(
 
 sealed interface ConversationPart {
   data class Text(val text: String) : ConversationPart
+
   data class Thinking(val text: String) : ConversationPart
+
   data class ToolCall(val name: String, val input: String, val output: String?) : ConversationPart
 }
 
@@ -250,8 +253,10 @@ fun parseConversationResponse(json: JsonObject): List<ConversationTurn> {
             "thinking" -> ConversationPart.Thinking(partObj.string("text"))
             "tool_call" -> {
               val name = partObj.string("name")
-              val inputStr = (partObj.fields["input"] as? JsonValue.StringValue)?.value
-                ?: (partObj.fields["input"] as? JsonValue.Object)?.value?.let { "..." } ?: ""
+              val inputStr =
+                (partObj.fields["input"] as? JsonValue.StringValue)?.value
+                  ?: (partObj.fields["input"] as? JsonValue.Object)?.value?.let { "..." }
+                  ?: ""
               val outputStr = partObj.optionalString("output")
               ConversationPart.ToolCall(name, inputStr, outputStr)
             }
@@ -305,7 +310,8 @@ fun parseStreamEvent(json: JsonObject): StreamEvent =
     }
     "prompt_request" -> {
       val session = json.string("session_id")
-      val promptObj = json.optionalObject("prompt") ?: throw ProtocolException("Missing prompt object")
+      val promptObj =
+        json.optionalObject("prompt") ?: throw ProtocolException("Missing prompt object")
       StreamEvent.PromptRequest(session, parsePromptCard(promptObj))
     }
     "prompt_resolved" -> {
@@ -382,17 +388,19 @@ fun reduce(state: StreamState, event: StreamEvent, selectedSession: String): Str
                 )
               ),
           )
+      }
+    }
     is StreamEvent.Error -> state.copy(error = "${event.code}: ${event.message}")
     is StreamEvent.AgentStatus -> {
       if (event.sessionId != selectedSession) state
       else state.copy(agentStatus = event.state, agentStatusDetail = event.detail)
     }
     is StreamEvent.PromptRequest -> {
-      if (event.sessionId != selectedSession) state
-      else state.copy(pendingPrompt = event.prompt)
+      if (event.sessionId != selectedSession) state else state.copy(pendingPrompt = event.prompt)
     }
     is StreamEvent.PromptResolved -> {
-      if (event.sessionId != selectedSession || state.pendingPrompt?.promptId != event.promptId) state
+      if (event.sessionId != selectedSession || state.pendingPrompt?.promptId != event.promptId)
+        state
       else state.copy(pendingPrompt = null)
     }
   }
