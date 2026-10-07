@@ -13,7 +13,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      global: ${{ steps.filter.outputs.global }}
+      apple: ${{ steps.filter.outputs.apple }}
+      android: ${{ steps.filter.outputs.android }}
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            global: &global
+              - '.github/workflows/ci.yml'
+              - 'Makefile'
+              - '.mise.toml'
+              - 'project.yml'
+            apple:
+              - *global
+              - 'apps/ios/**'
+              - 'apps/macos/**'
+              - 'packages/apple/**'
+            android:
+              - *global
+              - 'apps/android/**'
+            code:
+              - *global
+              - 'apps/**'
+              - 'packages/**'
+              - 'services/**'
+
+  apple:
+    name: Apple platform (macOS + iOS)
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.global == 'true' || needs.changes.outputs.apple == 'true'
     runs-on: macos-26
     timeout-minutes: 20
     env:
@@ -63,6 +102,9 @@ jobs:
         run: xcrun simctl delete "$SIMULATOR_ID"
 
   android:
+    name: Android platform
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.global == 'true' || needs.changes.outputs.android == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -111,3 +153,46 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+  docs:
+    name: Documentation (rumdl)
+    needs: [changes]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        with:
+          version: 2026.10.2
+      - name: Check documentation formatting
+        run: make md-check
+
+  check:
+    name: make check
+    if: ${{ always() }}
+    needs: [changes, apple, android, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every gate
+        env:
+          APPLE_RESULT: ${{ needs.apple.result }}
+          ANDROID_RESULT: ${{ needs.android.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+        run: |
+          for res in "$APPLE_RESULT" "$ANDROID_RESULT" "$DOCS_RESULT"; do
+            if [[ "$res" != "success" && "$res" != "skipped" ]]; then
+              echo "Gate failed with state: $res"
+              exit 1
+            fi
+          done
+          ran=0
+          for res in "$APPLE_RESULT" "$ANDROID_RESULT" "$DOCS_RESULT"; do
+            if [[ "$res" == "success" ]]; then
+              ran=1
+              break
+            fi
+          done
+          if [[ $ran -ne 1 ]]; then
+            echo "No gate was executed"
+            exit 1
+          fi
