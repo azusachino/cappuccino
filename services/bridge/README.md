@@ -122,6 +122,85 @@ cargo test
 cargo build --release
 ```
 
+From the repository root, `make check-bridge` runs the full Rust gate (fmt,
+hermetic tests including the client contract suite, release build of the
+companion). `make resource-bridge-client` runs the bounded leak/lifecycle soak
+(`tests/resource_soak.rs`, `#[ignore]`-gated). `make bench-bridge-client
+BASE_URL=http://127.0.0.1:7392` runs the reproducible benchmark against a
+running bridge. Rust diagnostics are treated as errors by review; no warning
+suppression or skipped tests.
+
+## Test companion (`test-client` example)
+
+`examples/test-client/` is a checked-in headless, read-only companion. It is
+an example target on purpose: `cargo run` and `cargo install` defaults of the
+bridge crate stay unchanged.
+
+- `check` mode: `GET /api/session` (paired/protocol 1/plugin/nonempty
+  machine_id), `GET /api/agents` (verified shapes against actual post-S1/S2
+  source: `event`, arrays, 502 `herdr_unreachable` envelope), a fail-closed
+  transcript probe (502 error envelope, or a coherent 200: `available:true`
+  requires a nonempty `transcript_path`, `available:false` a null path), and
+  an optional WS stream probe (`--session NAME`) that validates the first
+  frame (generation on `stream_open`, known error codes) and consumes
+  follow-up frames (entries/reset) under an explicit budget. HTTP legs prefer
+  HTTP/2 prior knowledge (h2c) and always report the observed protocol;
+  `--require-h2` makes an HTTP/1 downgrade an error.
+- `bench` mode: bounded cold/warm HTTP requests with **consumed, validated
+  bodies** and stream connection churn where a successful cycle requires a
+  `stream_open` first frame **and at least one validated entry**; a known
+  error-first session fails the run unless the explicit `--error-streams`
+  mode is selected (reported separately as `stream_error_*`, never counted as
+  success). Reports separate stream phase timings — handshake, first frame,
+  first entry, full cycle — in microseconds, plus throughput, a before/after
+  CPU delta, peak RSS (`ru_maxrss`) and a sampled **current** RSS trend
+  (`/proc/self/statm` on Linux, `proc_pid_rusage` on macOS). Requested
+  iteration/cycle counts are capped; invalid counts are rejected up front.
+  It establishes a baseline; it asserts no performance thresholds. Metric
+  failures (e.g. getrusage errors) fail the run, never zero-fill.
+- Protocol reality (implemented, tested): HTTP routes negotiate real HTTP/2
+  over h2c prior knowledge against this bridge (axum `http2` feature is
+  enabled) and fall back to HTTP/1.1 otherwise, reported per leg. The WS leg
+  uses the classic HTTP/1.1 Upgrade handshake — the bridge's only implemented
+  WS transport; WebSocket-over-HTTP/2 (RFC 8441 extended CONNECT) is not
+  implemented and never advertised. Tailscale Serve's ALPN behavior in front
+  of the bridge is untested by these hermetic suites and is not asserted.
+- Hermetic tests spawn the real bridge binary against a mock Herdr NDJSON
+  socket in temp dirs on loopback ephemeral ports. They use no owner sessions,
+  credentials or Tailscale (`CAPP_BRIDGE_SERVE_AUTO_APPLY=0`). These are
+  synthetic fixtures; they do not prove canonical live-transcript behavior.
+- Bounds are explicit, not assumed: HTTP response bodies are capped (1 MiB,
+  oversized bodies fail), WS frames/messages are capped client-side on the
+  connection (1 MiB / 64 KiB), every operation — including the WS handshake —
+  has a deadline, and a whole session budget bounds a full check or benchmark
+  run.
+- Stream validation follows the implemented bridge wire semantics: `entries`
+  entries need a u64 `seq` (or the documented gap placeholder: null seq,
+  `...gap...` id, null branch, complete, a well-formed `gap: missing entries
+  X-Y` range with X ≤ Y); `stream_reset` must strictly increase the observed
+  generation; unknown events, unknown error codes, non-text (binary) data
+  frames and missing fields all fail loudly; Ping is answered with Pong and
+  never counted as data.
+- Leak acceptance is baseline-relative and per scenario class (success,
+  refusal, mid-flight cancellation, server disconnect, child churn), with a
+  warm-up pass before baselines and phase-matched comparisons (services-up
+  vs services-down). FD growth over a phase baseline fails with the full FD
+  target list attached for attribution; a deficit is reported as runtime
+  event-fd teardown, not accepted as proof. Current RSS is sampled per
+  steady-state batch and must plateau; the allocator is pressure-relieved
+  before teardown sampling so cache retention is distinguished from true
+  retention. Soak tests run serially so baselines are not contaminated.
+  Short samples never prove absolute zero-leak. The soak runs as part of the
+  aggregate `check-bridge` gate, not only as an explicit target.
+- Leak acceptance is baseline-relative and per scenario class (success,
+  refusal, mid-flight cancellation, server disconnect, child churn): FD counts
+  may drop (async runtime teardown) but must not grow beyond a documented
+  tolerance after each class; children are reaped (asserted via try_wait);
+  mock tasks join under a deadline; temp state is removed. RSS evidence
+  combines sampled client RSS growth with peak; short samples never prove
+  absolute zero-leak. The soak runs as part of the aggregate `check-bridge`
+  gate, not only as an explicit target.
+
 The manifest uses argv arrays and invokes the installed Rust binary directly;
 there are no bridge shell launchers. The bridge uses `libc` narrowly for Unix
 operations not exposed as an equivalent stable safe standard-library API here:

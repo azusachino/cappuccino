@@ -330,6 +330,36 @@ mod tests {
         assert_eq!(ring.entries.len(), 1, "no abandoned-branch concatenation");
     }
 
+    /// The documented gap semantics: a sequence jump inside the entry ring
+    /// inserts a visible gap placeholder, never a silent drop.
+    #[test]
+    fn gap_placeholder_inserted_for_sequence_jump() {
+        let mut ring = StreamRing::new(Some("main".into()));
+        // Seed the ring's internal entry list directly through the private
+        // append path: entries 1 and 2 exist, then an entry with seq 5
+        // arrives (as it would if intermediate seqs were skipped elsewhere).
+        ring.append_with_gaps(vec![entry_with_seq(1), entry_with_seq(2)]);
+        ring.append_with_gaps(vec![entry_with_seq(5)]);
+        assert_eq!(ring.entries.len(), 4);
+        assert_eq!(ring.entries[2]["kind"], "gap");
+        assert!(
+            ring.entries[2]["seq"].is_null(),
+            "gap placeholder has no seq"
+        );
+        assert_eq!(ring.entries[2]["text"], "gap: missing entries 3-4");
+    }
+
+    fn entry_with_seq(seq: u64) -> Value {
+        serde_json::json!({
+            "seq": seq,
+            "id": format!("id-{seq}"),
+            "kind": "output",
+            "text": format!("line-{seq}"),
+            "branch": "main",
+            "complete": true,
+        })
+    }
+
     #[test]
     fn alignment_survives_in_place_churn() {
         let previous = vec![
