@@ -12,8 +12,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -152,7 +154,7 @@ class BridgeClient(
 
   private suspend fun post(path: String, jsonBody: String): String =
     suspendCancellableCoroutine { continuation ->
-      val body = okhttp3.RequestBody.create(okhttp3.MediaType.parse("application/json"), jsonBody)
+      val body = jsonBody.toRequestBody("application/json".toMediaType())
       val request = Request.Builder().url(endpoint.route(path).toString()).post(body).build()
       val call = client.newCall(request)
       continuation.invokeOnCancellation { call.cancel() }
