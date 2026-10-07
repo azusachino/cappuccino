@@ -403,3 +403,42 @@ To enable low-effort, focused execution by delegated agents:
    - Android: Remove legacy regexes from `TranscriptParser.kt`. Connect to `GET /conversation` and bind `agent_status` WS event directly to the header status badge.
    - Render clean `PromptCard` components when `prompt_request` arrives.
    - *Verification*: `make check-android && make check`.
+
+---
+
+## 8. Grilling Decisions & Edge-Case Contracts (Q1–Q11)
+
+The following 11 mechanical decisions were established during grilling review to close all unseen failure modes and security gaps:
+
+### Round 1: Safety & Core Foundations
+
+1. **Approval Keystroke Safety (Q1)**:
+   - Before typing keystrokes for an approval, the bridge computes a SHA256 of the normalized prompt bounding box lines from `pane.read(source: "visible")`.
+   - If the signature has drifted, the bridge aborts fail-closed and refuses to type into the PTY.
+2. **Hybrid Stream Synchronization (Q2)**:
+   - Historical turns are served from canonical session logs (`transcript.jsonl`).
+   - In-flight turns stream live PTY deltas from the bridge until the step completes, then seamlessly swap in the canonical markdown turn.
+3. **Multi-Choice Form Emulation (Q3)**:
+   - For `ask_question`, the bridge computes the delta from the currently selected index and simulates exact arrow/space/enter key sequences via `pane.send-keys`, with fallback to numeric text submission.
+4. **Stateful Reconnect Snapshot (Q4)**:
+   - The opening frame of the WebSocket (`stream_open`) immediately delivers the authoritative `agent_status` snapshot (`working`, `idle`, `exited`), preventing race conditions on phone wake.
+
+### Round 2: Drift, Buffer & Multi-Device Coordination
+
+5. **Transient Turn ID Binding (Q5)**:
+   - In-flight turns are assigned synthetic IDs (`in_flight:<step_index>`). On step completion, `turn_commit` atomically replaces the transient entry with the canonical markdown turn without UI flicker.
+6. **Semantic Anchor Hashing (Q6)**:
+   - Viewport hash checks isolate the prompt bounding box lines via title and divider regexes, ignoring unstable background scrollback or footer clock tickers.
+7. **Tail Window & Cursor Paging (Q7)**:
+   - To protect mobile memory, the bridge reads transcripts backwards starting from the latest 2MB window (20–30 turns). Clients prepend earlier history via `cursor=offset:<bytes>`.
+8. **Global Multi-Device Broadcast (Q8)**:
+   - Prompt requests and approvals are broadcast across all active client connections. Answering a card on a phone immediately broadcasts `prompt_resolved` to dismiss it on the tablet and Mac.
+
+### Round 3: Crash Recovery, Security & Control
+
+9. **Stateless Re-hydration on Boot (Q9)**:
+   - On bridge restart, it inspects Herdr's live pane state via `session.snapshot` and `agent.list`, re-emitting active prompts without requiring persistent disk state.
+10. **One-Time Nonce Ephemeral Prompt IDs (Q10)**:
+    - Every generated prompt card receives a cryptographically random, single-use nonce ID, closing replay and injection vulnerabilities over the local tailnet.
+11. **Graceful Cancellation Contract (Q11)**:
+    - User interruption from mobile sends `ctrl+c` / `agent.stop` via Herdr RPC. Bridge updates status to `"interrupted"` and emits `turn_complete`. If the agent fails to yield within 3 seconds, a forceful kill option is presented.
