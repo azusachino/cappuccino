@@ -3,12 +3,13 @@ package com.azusachino.cappuccino
 import android.graphics.Bitmap
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -40,27 +41,26 @@ class CappuccinoShellTest {
   @Test
   fun disconnectedJourneyAndRecreation() {
     compose
-      .onNodeWithText("Add a private bridge in Machines to discover agents.")
+      .onNodeWithText("Select or add a bridge in Machines to discover agents.")
       .assertIsDisplayed()
-    compose.onNodeWithText("Sending is not supported by this bridge yet").assertIsDisplayed()
-    compose.onNodeWithText("Send unavailable").assertIsNotEnabled()
+    compose.onNodeWithText("Not connected · 0 agents").assertIsDisplayed()
     capture("Chats")
 
     compose.onNode(hasText("Attention") and hasClickAction()).performClick()
-    compose.onNodeWithText("Approvals unavailable").assertIsDisplayed()
+    compose.onNodeWithText("No Pending Approvals").assertIsDisplayed()
     compose
       .onNodeWithText(
-        "This bridge does not expose tool approvals or alerts. Pending requests cannot be determined."
+        "All agents are running smoothly. Any tool approval or ask_question prompts will appear here."
       )
       .assertIsDisplayed()
     capture("Attention")
 
     compose.onNode(hasText("Machines") and hasClickAction()).performClick()
-    compose.onNodeWithText("No machines added").assertIsDisplayed()
-    compose.onNodeWithText("Add machine").assertIsDisplayed()
+    compose.onNodeWithText("No machines configured").assertIsDisplayed()
+    compose.onNodeWithContentDescription("Add machine").assertIsDisplayed()
     capture("Machines")
 
-    compose.onNodeWithText("Add machine").performClick()
+    compose.onNodeWithContentDescription("Add machine").performClick()
     compose.onNodeWithText("Private bridge URL").assertIsDisplayed()
     compose.onNodeWithText("Connect").assertIsDisplayed()
     compose.onNodeWithText("Private bridge URL").performClick()
@@ -69,9 +69,11 @@ class CappuccinoShellTest {
     capture("AddMachineIme")
     compose.activityRule.scenario.recreate()
     compose.waitForIdle()
-    compose.onNodeWithText("No machines added").assertIsDisplayed()
+    compose.onNodeWithText("No machines configured").assertIsDisplayed()
     compose.onNode(hasText("Chats") and hasClickAction()).performClick()
-    compose.onNodeWithText("Sending is not supported by this bridge yet").assertIsDisplayed()
+    compose
+      .onNodeWithText("Select or add a bridge in Machines to discover agents.")
+      .assertIsDisplayed()
   }
 
   @Test
@@ -90,6 +92,7 @@ class CappuccinoShellTest {
         ConnectedUiState(
           profiles = listOf(profile),
           activeProfileId = profile.id,
+          agents = listOf(agent),
           selectedAgent = agent,
           stream =
             StreamState(
@@ -100,10 +103,12 @@ class CappuccinoShellTest {
           connection = ConnectionState.Connected,
         )
       )
+    val actions = StateActions(state)
     compose.activity.runOnUiThread {
       compose.activity.setContent {
         CappuccinoTheme {
-          CappuccinoScreen(state.value, StateActions(state), requestConnect = { _, _ -> })
+          val s by state
+          CappuccinoScreen(s, actions, requestConnect = { _, _ -> })
         }
       }
     }
@@ -134,9 +139,9 @@ class CappuccinoShellTest {
     }
     compose.onNodeWithText("Synthetic transport error").assertIsDisplayed()
     capture("ConnectionError")
-    compose.activity.onBackPressedDispatcher.onBackPressed()
+    compose.onNodeWithContentDescription("Back").performClick()
     compose.waitForIdle()
-    compose.onNodeWithText("Sending is not supported by this bridge yet").assertIsDisplayed()
+    compose.onNodeWithText("synthetic-session", substring = true).assertIsDisplayed()
   }
 
   private class StateActions(private val state: MutableState<ConnectedUiState>) : ConnectedActions {

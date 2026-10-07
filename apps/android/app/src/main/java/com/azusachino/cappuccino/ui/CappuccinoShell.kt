@@ -527,6 +527,36 @@ fun CappuccinoScreen(
             }
           }
 
+          val connection = state.connection
+          if (connection is ConnectionState.Error) {
+            Surface(
+              modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+              shape = RoundedCornerShape(8.dp),
+              color = MaterialTheme.colorScheme.errorContainer,
+            ) {
+              Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+              ) {
+                Text(
+                  connection.message,
+                  modifier = Modifier.weight(1f),
+                  color = MaterialTheme.colorScheme.onErrorContainer,
+                  style = MaterialTheme.typography.bodySmall,
+                )
+                if (state.activeProfileId != null) {
+                  FilledTonalButton(
+                    onClick = actions::retry,
+                    modifier = Modifier.padding(start = 8.dp),
+                  ) {
+                    Text("Retry")
+                  }
+                }
+              }
+            }
+          }
+
           if (state.profiles.isEmpty()) {
             Box(
               modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp),
@@ -613,35 +643,6 @@ fun CappuccinoScreen(
             }
           }
 
-          val connection = state.connection
-          if (connection is ConnectionState.Error) {
-            Surface(
-              modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-              shape = RoundedCornerShape(8.dp),
-              color = MaterialTheme.colorScheme.errorContainer,
-            ) {
-              Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-              ) {
-                Text(
-                  connection.message,
-                  modifier = Modifier.weight(1f),
-                  color = MaterialTheme.colorScheme.onErrorContainer,
-                  style = MaterialTheme.typography.bodySmall,
-                )
-                if (state.activeProfileId != null) {
-                  FilledTonalButton(
-                    onClick = actions::retry,
-                    modifier = Modifier.padding(start = 8.dp),
-                  ) {
-                    Text("Retry")
-                  }
-                }
-              }
-            }
-          }
           if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }
       }

@@ -2,10 +2,14 @@ package com.azusachino.cappuccino
 
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -61,7 +65,7 @@ class MachinesJourneyTest {
       }
     }
     openMachines()
-    compose.onNodeWithText("Add machine").performClick()
+    compose.onNodeWithContentDescription("Add machine").performClick()
     compose.onNodeWithText("Label (optional)").performTextInput("Synthetic bridge")
     compose.onNodeWithText("Private bridge URL").performTextInput("https://bridge.example")
     compose.onNodeWithText("Connect").performClick()
@@ -94,18 +98,23 @@ class MachinesJourneyTest {
       )
     val actions = TestActions(state)
     compose.activity.setContent {
-      CappuccinoTheme { CappuccinoScreen(state.value, actions) { _, _ -> } }
+      CappuccinoTheme {
+        val s by state
+        CappuccinoScreen(s, actions) { _, _ -> }
+      }
     }
     openMachines()
-    compose.onNodeWithText("Retry connection").performClick()
+    compose.waitForIdle()
+    compose.onNodeWithText("Retry").assertIsDisplayed().performClick()
+    compose.waitForIdle()
     assertEquals(1, actions.retryCalls)
-    compose.onNodeWithText("Remove").performClick()
-    compose.onNodeWithText("No machines added").assertIsDisplayed()
+    compose.onNodeWithContentDescription("Remove").performClick()
+    compose.onNodeWithText("No machines configured").assertIsDisplayed()
     assertTrue(state.value.profiles.isEmpty())
   }
 
   private fun openMachines() {
-    compose.onAllNodesWithText("Machines")[1].performClick()
+    compose.onNode(hasText("Machines") and hasClickAction()).performClick()
   }
 
   private class TestActions(private val state: MutableState<ConnectedUiState>) : ConnectedActions {
