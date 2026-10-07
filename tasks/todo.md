@@ -9,7 +9,7 @@
 - [x] C: native Machines/catalog/output UI and unavailable sending/Attention states.
 - [x] C: actual synthetic transport and consuming Compose journeys on a task-owned emulator, including two-machine isolation and lifecycle failure cases.
 - [x] D: source freeze and fresh independent source/runtime/native/UI verification.
-- [ ] D: record exact evidence, artifact hash and identity-scoped cleanup; reviewed commit/draft PR.
+- [x] D: record exact evidence, artifact hash and identity-scoped cleanup; reviewed commit/draft PR #23.
 - [ ] E: hand debug APK to owner for phone installation and feature/UI iteration.
 - [ ] E: separately prove actual phone/tailnet journeys before accepting device claims.
 
