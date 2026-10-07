@@ -246,3 +246,102 @@ Earlier Linux attempts are retained in `.tmp/cappuccino-connected/spike-a/s1-s2-
 Independent Luna-medium S1/S2 verification passed at `d8a60f8222213fc056b3c77e4461415b6eb2f8c2`. Fresh isolated macOS and Linux/arm64 Herdr 0.9.3 journeys reproduced installed-PATH binary setup, plugin link/list, actual startup hook, repeated idempotent start, status/logs/stop, HTTP readiness and listener closure. Active state directories were `0700`; lock/control/log/socket files were `0600`. Tailscale sentinels were untouched. All task-owned bridge/server processes, sockets and temporary roots were stopped/removed; ephemeral Linux containers used `--rm`, while the existing Podman VM remained running.
 
 Independent source gates passed: Rust 41 tests, format/release, scoped full Apple/Android validation, Markdown and diff checks. Harness-only failures (incorrect log filename, missing artifact directory, incorrect server-status JSON selector) were corrected sequentially with task-owned cleanup; their outputs were not counted as successful journeys. This acceptance covers S1/S2 plugin lifecycle before device introduction, not live-agent delivery, physical-device connectivity, or the forthcoming headless-client performance/leak benchmarks.
+
+## Headless bridge client — independent acceptance
+
+Independent Luna-medium verification passed on `feat/bridge-test-client` at
+`b2f139a21e883d9619e28d6791cc11ab18fdc904` plus the four-file fixture diff below.
+The source-first review resolved connection-registration races, cancellation
+ownership, panic publication, and child/temp cleanup failure paths before the
+full gates ran. The final commit and hosted results are separate checkpoints.
+
+| Reviewed file under `services/bridge/tests/` | SHA256 |
+| --- | --- |
+| `client_contract.rs` | `493c4e4e3f82e58f6b082fac2d1146e584e1b8f7b9bda8c0f7d2eafbc546ffd2` |
+| `resource_soak.rs` | `62d60392855bc2a235f17539379b5772680258e5fd21d7941e606b4d27f6627d` |
+| `common/task_scope.rs` | `10473b135a03e55a813d0fde7367e85b42974fab70e115a91ccef1b8ccbd0689` |
+| `common/resource_scope.rs` | `a43569ef58f638f4f5ab9a64d57797b0591531db613a0ed61e5ddb7a1d8f1af7` |
+
+### Gates and failure coverage
+
+- macOS `make check-bridge`: exit 0; 90 normal tests (29 unit, 39 client,
+  6 lifecycle, 9 resource, 7 schema), all four mandatory ignored resource
+  cases, formatting, and release example build passed.
+- Linux/arm64 equivalent `make check-bridge`: exit 0 for the gate; the same
+  normal tests and all four ignored cases passed. Two additional complete
+  39-test client runs and child/temp ownership fault tests passed on each OS.
+- Both platforms independently repeated the four resource cases with visible
+  telemetry; each run passed in approximately 350 seconds.
+- Release bridge binaries were explicitly rebuilt before external benchmarks;
+  an existing release file alone was not matching-input evidence.
+- Scoped full `make validate` passed: Swift 39 tests, iOS Simulator/macOS
+  builds, Android formatting/unit/lint and app/test APK assembly, and Markdown
+  (15 files). No UI, emulator/device, or live connectivity journey is implied.
+  Gradle deprecation notices remain unsuppressed.
+
+Linux used Debian 12 on aarch64 and Rust/Cargo 1.98.0 in disposable containers
+from `rust:1.98.0-slim-bookworm` at digest
+`sha256:1469a27c125cb5a3aebfa4f4e4665d935b02fb72cc093b2c974b3d740e43f157`.
+Public source was read-only; separate Cargo/build/temp mounts contained no host
+HOME, credentials, sockets, or unrelated repositories. macOS used Darwin 27
+arm64 and Rust/Cargo 1.98.1. The Xcode and Android SDK selection was scoped,
+not changed globally.
+
+Initial container attempts lacked rustfmt or git and failed; these were not
+counted as passing gates. The successful Linux gate runner later failed on a
+scratch benchmark-script path after its gate/repeats/builds had passed. The
+corrected separate benchmark completed successfully. Both failed containers
+and subsequent task containers were removed.
+
+The fixtures now own unspawned connection futures through their listener.
+Shutdown closes registration before spawning can escape, aborts all tracked
+children before joining, and reports panics only after sibling cleanup.
+Caller cancellation or a missed deadline retains a live cleanup owner rather
+than equating `abort()` with termination. Injected child kill/reap and temp
+metadata/remove failures exercise normal Drop and existing panic unwinding:
+failed cleanup remains identifiable and owned for retry; tests observe that
+ownership, release a readiness gate, and require terminal cleanup and worker
+join. Persistent host failures remain explicitly unsuccessful/unresolved and
+require runner reconciliation; arbitrary non-yielding work is not forcibly
+terminable by Tokio.
+
+### Representative benchmark and recovery observations
+
+Each platform ran the checked-in `bench-bridge-client` target against a fresh,
+task-owned bridge and synthetic Herdr session: 300 HTTP iterations, 20/20 WS
+cycles, and 40 consumed entries. Strict H2 and HTTP/1-only fallback were also
+run separately. HTTP observed `http2`; WS used classic HTTP/1.1 Upgrade.
+
+| H2-preferred Make benchmark | macOS arm64 | Linux arm64 |
+| --- | ---: | ---: |
+| Cold p50 / p95 (µs) | 129 / 242 | 854 / 51,042 |
+| Warm p50 / p95 (µs) | 36 / 43 | 164 / 291 |
+| Warm requests/s | 26,490.6 | 5,693.5 |
+| CPU delta (ms) | 77 | 230 |
+| Current RSS start → end (KiB) | 3,728 → 4,912 | 3,800 → 4,140 |
+
+Separate strict-H2 external current-RSS samples plateaued at 4,896 KiB on
+macOS (116 samples) and 4,104 KiB on Linux (247 samples). These are single-run
+observations, not cross-platform comparisons or ratified performance budgets.
+Peak RSS is separate: the Make run reported 5,029,888 **bytes** on macOS and
+41,944 **KiB** on Linux; neither is substituted for current residency.
+
+Success-soak phase-matched FD teardown recovered exactly: macOS 11→11,
+Linux 15→15. Services-up batch counts remained 12/12/12 and 16/16/16,
+respectively. Current-RSS batch drift was 208 KiB and 260 KiB. After full
+teardown the reported current-RSS deltas were +560 KiB and +176 KiB.
+Refusal/disconnect reported FD deficits from runtime teardown, not unexplained
+growth. Twenty observed in-flight cancellations joined on each OS; worst join
+latency was approximately 197 µs / 245 µs. This is bounded regression/recovery
+evidence, not a claim of universal leak freedom.
+
+All verification jobs terminated; task benchmark children/listeners, sockets,
+temp roots, and containers were reconciled. Build caches and measurement logs
+were retained as scratch evidence, not live resources. Preexisting bridges,
+owner agents, Tailscale, and global toolchains were untouched. The task-started
+Podman VM restoration is a separate closeout action.
+
+Limits: synthetic loopback evidence does not prove canonical live Pi transcript
+parity, physical-device connectivity, tailnet HTTPS/ALPN, or WS-over-H2.
+Pi queue-kind selection/confirmed delivery remains unimplemented. Hosted
+Apple/Android checks remain separate from local Rust/Linux evidence.

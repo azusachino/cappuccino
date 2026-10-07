@@ -9,7 +9,10 @@ ANDROID_TEST_OUTPUT := apps/android/app/build/outputs/connected_android_test_add
 DESTINATION ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help setup generate fmt fmt-apple fmt-android fmt-check fmt-check-apple fmt-check-android md-format md-check test test-apple test-android lint-android check check-apple check-android build-ios build-macos build-android ui-test ui-test-android validate validate-apple validate-android
+.PHONY: help setup generate fmt fmt-apple fmt-android fmt-check fmt-check-apple fmt-check-android md-format md-check test test-apple test-android lint-android check check-apple check-android build-ios build-macos build-android ui-test ui-test-android validate validate-apple validate-android check-bridge bench-bridge-client resource-bridge-client
+
+CARGO ?= cargo
+BRIDGE_MANIFEST := services/bridge/Cargo.toml
 .NOTPARALLEL: check validate check-apple check-android validate-apple validate-android
 
 help: ## List project commands
@@ -53,6 +56,24 @@ test-android: ## Run pure Kotlin logic tests
 
 lint-android: ## Run Android lint with warnings as errors
 	$(ANDROID) :app:lintDebug
+
+check-bridge: ## Bridge Rust gate: fmt, all hermetic tests, mandatory resource soak, release example
+	$(CARGO) fmt --manifest-path $(BRIDGE_MANIFEST) -- --check
+	$(CARGO) test --locked --manifest-path $(BRIDGE_MANIFEST)
+	$(CARGO) test --locked --manifest-path $(BRIDGE_MANIFEST) --test resource_soak -- --ignored
+	$(CARGO) build --locked --release --manifest-path $(BRIDGE_MANIFEST) --example test-client
+
+# Stream scenarios require an existing readable SESSION and nonzero entries.
+# Unknown sessions fail closed; they are not representative benchmark success.
+# STREAM_CYCLES must be > 0.
+SESSION ?= s-probe
+STREAM_CYCLES ?= 20
+
+bench-bridge-client: ## Reproducible bridge benchmark (BASE_URL, SESSION, STREAM_CYCLES; consumes bodies + stream entries)
+	$(CARGO) run --locked --release --manifest-path $(BRIDGE_MANIFEST) --example test-client -- bench --base-url $(or $(BASE_URL),http://127.0.0.1:7392) --session $(SESSION) --stream-cycles $(STREAM_CYCLES) --iterations 300
+
+resource-bridge-client: ## Leak/lifecycle soak (bounded); asserts FD/RSS/child/temp recovery
+	$(CARGO) test --locked --manifest-path $(BRIDGE_MANIFEST) --test resource_soak -- --ignored --nocapture
 
 check: check-apple check-android ## Check all platforms; requires both toolchains
 
