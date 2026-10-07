@@ -1,6 +1,8 @@
 # Native Android client plan
 
-The owner selected iPhone first, Android next on 2026-10-05. The later owner-approved scaffold prepares a disconnected Compose app at `apps/android/`; connected slices below remain a plan, not installation approval. Keep the delivered Apple skeleton and macOS 26 build target; Mac-specific UX follows Android. [Intent](intent.md) remains the shared product and safety authority, and [the main plan](plan.md) owns bridge/iPhone prerequisites. Live implementation tasks belong in Asobi when their slice starts.
+The owner now selected **Android-first connected iteration with debug APKs**, deferring additional iOS distribution work. The detailed current [read-only implementation plan](../tasks/plan.md) and [checkpoint checklist](../tasks/todo.md) supersede the earlier platform ordering and daemon/token prerequisites for that slice. It consumes the accepted Rust bridge, with no authentication by owner decision. Sending and approvals remain unavailable; the current stream is recent pane output, not proven canonical Pi history.
+
+The sections below preserve the earlier architecture roadmap and broader, still-undelivered acceptance capabilities. They are not a grant to restore daemon pairing, implement delivery/approvals, or require iPhone delivery before this read-only slice. Keep the delivered Apple code and native gates. [Intent](intent.md) remains the shared product/safety authority; live task ownership belongs in Asobi.
 
 ## Architecture direction
 

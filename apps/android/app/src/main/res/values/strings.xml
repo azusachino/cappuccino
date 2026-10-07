@@ -4,16 +4,4 @@
   <string name="chats">Chats</string>
   <string name="attention">Attention</string>
   <string name="machines">Machines</string>
-  <string name="no_agents">No agents attached</string>
-  <string name="attachment_unavailable">Remote attachment is not implemented in this skeleton.</string>
-  <string name="no_requests">No pending requests</string>
-  <string name="bridge_required">Approvals and completion events require the remote bridge.</string>
-  <string name="no_machines">No machines added</string>
-  <string name="pairing_unavailable">Private machine pairing is not implemented yet.</string>
-  <string name="message_timing">Message timing</string>
-  <string name="nudge">Nudge</string>
-  <string name="follow_up">Follow-up</string>
-  <string name="message">Message</string>
-  <string name="attach_to_reply">Attach an agent to reply</string>
-  <string name="send">Send</string>
 </resources>

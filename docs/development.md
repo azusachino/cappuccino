@@ -18,6 +18,12 @@ The owner chose connected iPhone first, native Android next, then Mac-specific U
 
 Use JDK 21, Gradle 9.8.0, AGP 9.4.1, matching Kotlin/Compose compiler 2.4.20, Compose BOM 2026.09.00 and Activity 1.13.0. The catalog and wrapper are authoritative; SDK minimum is 26, compile/target 37, with API 35 emulator acceptance separate from actual-phone acceptance. AGP built-in Kotlin remains enabled; its documented explicit KGP upgrade supplies the selected compiler. Ktfmt uses two-space Google style. Kotlin compiler and Android lint warnings are errors; freshness checks are not disabled.
 
+### Local development environment
+
+The project `.mise.toml` loads tracked `.env` defaults followed by optional ignored `.env.local` through mise `[env] _.file`; relative file paths resolve from the config root, including when a command starts in a subdirectory. Keep `.env` portable and non-secret. Put machine-specific `ANDROID_HOME`, optional `DEVELOPER_DIR`, and existing JDK selection in `.env.local` or inherit them from the environment. Do not add private bridge endpoints or credentials to either file, and never shell-source dotenv files. The `.env.local` file may be absent on clean checkouts and CI.
+
+Run native gates through mise so both declared tools and local SDK selection are available, for example `mise exec -- make check-android`, `mise exec -- make validate-android`, and `ANDROID_SERIAL=<task-owned serial> mise exec -- make ui-test-android`. CI has no `.env`; it inherits its runner-provided SDK/toolchain environment. The config requires the tracked `.env` and references optional `.env.local`; verify that a missing local file is harmless for clean checkouts and CI when changing mise behavior. Do not print `mise env` output: it includes actual environment values. See the [mise environment and dotenv documentation](https://mise.jdx.dev/environments/#env-file).
+
 Kotlin's published fully-tested compatibility table currently ends at Gradle 9.7.0/AGP 9.3.1 for KGP 2.4.20; it explicitly permits later releases with possible deprecations/features limitations. Therefore the selected current releases need actual consuming gates, not a claim that every pair is covered by that table. Attribute any upstream Gradle warning to its plugin; do not hide project/compiler/lint diagnostics. No Flutter, React Native, Kotlin Multiplatform or generated SDK is adopted, and no wire protocol is frozen.
 
 ## Mac preparation

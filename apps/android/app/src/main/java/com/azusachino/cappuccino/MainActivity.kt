@@ -2,32 +2,86 @@ package com.azusachino.cappuccino
 
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.ui.graphics.Color
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.azusachino.cappuccino.io.ConnectedViewModel
+import com.azusachino.cappuccino.io.ProfileStore
 import com.azusachino.cappuccino.ui.CappuccinoShell
+import com.azusachino.cappuccino.ui.CappuccinoTheme
 
 class MainActivity : ComponentActivity() {
+  private var pendingConnect: Pair<String, String>? = null
+  private val localNetworkPermission =
+    registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+      val request = pendingConnect
+      pendingConnect = null
+      if (granted && request != null) connectedViewModel?.addMachine(request.first, request.second)
+      else if (!granted)
+        Toast.makeText(
+            this,
+            "Local network permission is required to connect to bridge hosts.",
+            Toast.LENGTH_LONG,
+          )
+          .show()
+    }
+  private var connectedViewModel: ConnectedViewModel? = null
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
     setContent {
-      val dark = isSystemInDarkTheme()
-      val colors =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-          if (dark) dynamicDarkColorScheme(this) else dynamicLightColorScheme(this)
-        } else {
-          if (dark) darkColorScheme(primary = Color(0xFFD7B79E))
-          else lightColorScheme(primary = Color(0xFF71513C))
+      val vm: ConnectedViewModel =
+        viewModel(
+          factory =
+            viewModelFactory {
+              initializer {
+                ConnectedViewModel(
+                  ProfileStore(application),
+                  { endpoint -> com.azusachino.cappuccino.io.BridgeClient(endpoint) },
+                  { kotlinx.coroutines.delay(it) },
+                  createSavedStateHandle(),
+                )
+              }
+            }
+        )
+      connectedViewModel = vm
+      val owner = LocalLifecycleOwner.current
+      androidx.compose.runtime.DisposableEffect(owner, vm) {
+        val observer = LifecycleEventObserver { _, event ->
+          when (event) {
+            Lifecycle.Event.ON_START -> vm.setForeground(true)
+            Lifecycle.Event.ON_STOP -> vm.setForeground(false)
+            else -> Unit
+          }
         }
-      MaterialTheme(colorScheme = colors) { CappuccinoShell() }
+        owner.lifecycle.addObserver(observer)
+        vm.setForeground(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+        onDispose { owner.lifecycle.removeObserver(observer) }
+      }
+      CappuccinoTheme {
+        CappuccinoShell(vm) { label, url ->
+          if (
+            Build.VERSION.SDK_INT >= 37 &&
+              checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+          ) {
+            pendingConnect = label to url
+            localNetworkPermission.launch("android.permission.ACCESS_LOCAL_NETWORK")
+          } else {
+            vm.addMachine(label, url)
+          }
+        }
+      }
     }
   }
 }

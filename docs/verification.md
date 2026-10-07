@@ -345,3 +345,40 @@ Limits: synthetic loopback evidence does not prove canonical live Pi transcript
 parity, physical-device connectivity, tailnet HTTPS/ALPN, or WS-over-H2.
 Pi queue-kind selection/confirmed delivery remains unimplemented. Hosted
 Apple/Android checks remain separate from local Rust/Linux evidence.
+
+## Android read-only connected client — independent acceptance
+
+Independent verification passed on `feat/android-connected` at
+`30a3a7259d392e5494d611f370a896e91eb6df23` with the 32 regular changed/untracked
+files cataloged below. The source-first independent review (`cap-android-glm-review`,
+`zai-coding-cn/glm-5.3-flash` LOW) verified all independent criteria, confirmed zero
+source defects, and verified that all production/test diffs match the accepted scope.
+
+| Metric / Artifact | Recorded value |
+| --- | --- |
+| Base HEAD | `30a3a7259d392e5494d611f370a896e91eb6df23` |
+| Tracked diff SHA-256 | `86231e6a1812dddf8936437ac524908db01710aecc2ed859496be87755d32b0f` |
+| 32-file manifest SHA-256 | `d79acc831c0b75de862d57be70c294518a9988354b793d561cf1251cec16ab5a` |
+| Debug APK path | `apps/android/app/build/outputs/apk/debug/app-debug.apk` |
+| Debug APK size | 13,047,614 bytes (~12 MiB) |
+| Debug APK SHA-256 | `036c269173d957733ecb33b1ba835f0a1cefeafa613e7609de68d8836909ace8` |
+
+### Independent gates and evidence
+
+- `mise exec -- make check-android`: exit 0; ktfmt, lintDebug, and testDebugUnitTest executed clean.
+- `mise exec -- apps/android/gradlew --no-daemon -p apps/android :app:testDebugUnitTest --rerun-tasks`:
+  exit 0; 26/26 tasks executed forced; 44 tests (3 identity, 14 ConnectedViewModel, 4 raw close peer,
+  2 theme, 12 protocol, 9 bridge client), 0 failures, 0 errors, 0 skipped.
+- `mise exec -- apps/android/gradlew --no-daemon -p apps/android :app:compileDebugAndroidTestKotlin --rerun-tasks`:
+  exit 0; 29/29 tasks executed forced.
+- `mise exec -- make validate-android`: exit 0; 71 actionable tasks executed/up-to-date; debug APK and
+  androidTest APK assembled.
+- `mise exec -- make md-check`: exit 0; rumdl check passed across all Markdown records.
+- `git diff --check`: exit 0.
+
+### Scope boundaries and limits
+
+Source and JVM clearance only: wire models, concrete OkHttp/WS transport, lifecycle controller,
+Material 3 / dynamic theme, and raw socket close fixture proof are verified. Broad Android runtime,
+OS process death under platform pressure, physical phone Tailscale HTTPS/WSS connectivity, and
+canonical Pi history parity remain separately unverified/blocked for device trial stage E.
