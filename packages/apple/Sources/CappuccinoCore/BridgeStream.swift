@@ -38,16 +38,65 @@ public struct BridgeTranscriptEntry: Equatable, Sendable, Decodable {
   }
 }
 
+public struct BridgePromptOption: Equatable, Sendable, Decodable {
+  public let id: String
+  public let label: String
+  public let description: String?
+
+  public init(id: String, label: String, description: String? = nil) {
+    self.id = id
+    self.label = label
+    self.description = description
+  }
+}
+
+public struct BridgePromptCard: Equatable, Sendable, Decodable {
+  public let promptID: String
+  public let type: String
+  public let title: String
+  public let message: String?
+  public let toolName: String?
+  public let command: String?
+  public let options: [BridgePromptOption]
+  public let selectedIndex: Int
+
+  public init(
+    promptID: String,
+    type: String,
+    title: String,
+    message: String? = nil,
+    toolName: String? = nil,
+    command: String? = nil,
+    options: [BridgePromptOption] = [],
+    selectedIndex: Int = 0
+  ) {
+    self.promptID = promptID
+    self.type = type
+    self.title = title
+    self.message = message
+    self.toolName = toolName
+    self.command = command
+    self.options = options
+    self.selectedIndex = selectedIndex
+  }
+}
+
 public enum BridgeStreamOutput: Equatable, Sendable {
   case open(generation: Int)
   case entries([BridgeTranscriptEntry])
   case reset(generation: Int)
+  case agentStatus(sessionID: String, state: String, detail: String?)
+  case promptRequest(sessionID: String, prompt: BridgePromptCard)
+  case promptResolved(sessionID: String, promptID: String)
 }
 
 enum BridgeStreamEvent: Equatable {
   case open(generation: Int)
   case entries([BridgeTranscriptEntry])
   case reset(generation: Int)
+  case agentStatus(sessionID: String, state: String, detail: String?)
+  case promptRequest(sessionID: String, prompt: BridgePromptCard)
+  case promptResolved(sessionID: String, promptID: String)
   case error(DaemonClientError)
 
   /// Parses one bridge stream event (a single JSON object).
@@ -60,6 +109,39 @@ enum BridgeStreamEvent: Equatable {
       return .open(generation: object["generation"] as? Int ?? 0)
     case "stream_reset":
       return .reset(generation: object["generation"] as? Int ?? 0)
+    case "agent_status":
+      let session = object["session_id"] as? String ?? ""
+      let state = object["state"] as? String ?? "idle"
+      let detail = object["detail"] as? String
+      return .agentStatus(sessionID: session, state: state, detail: detail)
+    case "prompt_request":
+      let session = object["session_id"] as? String ?? ""
+      guard let rawPrompt = object["prompt"] as? [String: Any] else {
+        throw DaemonClientError.protocolError("prompt_request missing prompt object")
+      }
+      let rawOptions = rawPrompt["options"] as? [[String: Any]] ?? []
+      let options = rawOptions.map { opt in
+        BridgePromptOption(
+          id: opt["id"] as? String ?? "",
+          label: opt["label"] as? String ?? "",
+          description: opt["description"] as? String
+        )
+      }
+      let card = BridgePromptCard(
+        promptID: rawPrompt["prompt_id"] as? String ?? "",
+        type: rawPrompt["type"] as? String ?? "",
+        title: rawPrompt["title"] as? String ?? "",
+        message: rawPrompt["message"] as? String,
+        toolName: rawPrompt["tool_name"] as? String,
+        command: rawPrompt["command"] as? String,
+        options: options,
+        selectedIndex: rawPrompt["selected_index"] as? Int ?? 0
+      )
+      return .promptRequest(sessionID: session, prompt: card)
+    case "prompt_resolved":
+      let session = object["session_id"] as? String ?? ""
+      let promptID = object["prompt_id"] as? String ?? ""
+      return .promptResolved(sessionID: session, promptID: promptID)
     case "entries":
       let raw = object["entries"] as? [[String: Any]] ?? []
       let parsed = raw.map { entry -> BridgeTranscriptEntry in
@@ -244,6 +326,12 @@ extension BridgeClient {
             case .reset(let generation):
               reassembler = TranscriptReassembler()
               continuation.yield(.reset(generation: generation))
+            case .agentStatus(let sessionID, let state, let detail):
+              continuation.yield(.agentStatus(sessionID: sessionID, state: state, detail: detail))
+            case .promptRequest(let sessionID, let prompt):
+              continuation.yield(.promptRequest(sessionID: sessionID, prompt: prompt))
+            case .promptResolved(let sessionID, let promptID):
+              continuation.yield(.promptResolved(sessionID: sessionID, promptID: promptID))
             case .error(let error):
               throw error
             }

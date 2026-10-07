@@ -243,4 +243,50 @@ enum BridgeStreamEntryID {
     }
     #expect(entries[0].tool == nil)
   }
+
+  @Test func parsesAgentStatusEvent() throws {
+    let frame = """
+      {"event":"agent_status","session_id":"s-aurora","state":"working","detail":"running cargo test"}
+      """.data(using: .utf8)!
+    guard
+      case .agentStatus(let sessionID, let state, let detail) = try BridgeStreamEvent.parse(frame)
+    else {
+      Issue.record("expected agent_status event")
+      return
+    }
+    #expect(sessionID == "s-aurora")
+    #expect(state == "working")
+    #expect(detail == "running cargo test")
+  }
+
+  @Test func parsesPromptRequestAndResolvedEvents() throws {
+    let reqFrame = """
+      {"event":"prompt_request","session_id":"s-aurora","prompt":{
+        "prompt_id":"p-1",
+        "type":"tool_approval",
+        "title":"Approve command?",
+        "options":[{"id":"opt-1","label":"Allow"}]
+      }}
+      """.data(using: .utf8)!
+    guard case .promptRequest(let sessionID, let card) = try BridgeStreamEvent.parse(reqFrame)
+    else {
+      Issue.record("expected prompt_request event")
+      return
+    }
+    #expect(sessionID == "s-aurora")
+    #expect(card.promptID == "p-1")
+    #expect(card.type == "tool_approval")
+    #expect(card.options.count == 1)
+
+    let resFrame = """
+      {"event":"prompt_resolved","session_id":"s-aurora","prompt_id":"p-1"}
+      """.data(using: .utf8)!
+    guard case .promptResolved(let resSession, let promptID) = try BridgeStreamEvent.parse(resFrame)
+    else {
+      Issue.record("expected prompt_resolved event")
+      return
+    }
+    #expect(resSession == "s-aurora")
+    #expect(promptID == "p-1")
+  }
 }

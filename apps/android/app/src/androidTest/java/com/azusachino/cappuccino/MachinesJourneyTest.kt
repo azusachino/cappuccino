@@ -144,5 +144,11 @@ class MachinesJourneyTest {
     override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
       state.value = state.value.copy(themeMode = mode)
     }
+
+    override fun submitPrompt(text: String) = Unit
+
+    override fun answerPrompt(promptId: String, optionIndex: Int?, optionId: String?, action: String?) = Unit
+
+    override fun loadConversation() = Unit
   }
 }

@@ -63,7 +63,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.azusachino.cappuccino.core.AgentRow
+import com.azusachino.cappuccino.core.ConversationPart
+import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.OutputRow
+import com.azusachino.cappuccino.core.PromptCard
+import com.azusachino.cappuccino.core.PromptOption
 import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
@@ -203,7 +207,7 @@ fun CappuccinoScreen(
                   maxLines = 1,
                 )
               }
-              StatusBadge(selected.status)
+              StatusBadge(state.stream.agentStatus ?: selected.status)
             }
           } else {
             Text(stringResource(destination.title), fontWeight = FontWeight.Bold)
@@ -319,8 +323,21 @@ fun CappuccinoScreen(
                 Modifier.padding(16.dp),
                 color = MaterialTheme.colorScheme.error,
               )
-            else -> Unit
+          // If there is an active pending prompt on this agent, show the prompt card prominently
+          state.stream.pendingPrompt?.let { card ->
+            Box(Modifier.padding(horizontal = 16.dp)) {
+              PromptCardView(
+                prompt = card,
+                onSelectOption = { idx, optId ->
+                  actions.answerPrompt(card.promptId, idx, optId, "select_option")
+                },
+                onCancel = {
+                  actions.answerPrompt(card.promptId, null, null, "cancel")
+                },
+              )
+            }
           }
+
           if (hasNewOutput)
             Box(
               modifier = Modifier.fillMaxWidth().padding(end = 16.dp),
@@ -348,23 +365,41 @@ fun CappuccinoScreen(
               }
             }
           SelectionContainer(Modifier.weight(1f).fillMaxWidth()) {
+            val turns = state.conversationTurns
             val rows = state.stream.rows()
-            val collapsedRows = remember(rows) { collapseOutputRows(rows) }
-            LazyColumn(
-              state = outputListState,
-              modifier =
-                Modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("recentOutputList"),
-              verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-              items(collapsedRows, key = { it.key }) { row -> OutputItemRow(row) }
+            if (turns.isNotEmpty()) {
+              LazyColumn(
+                state = outputListState,
+                modifier =
+                  Modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("recentOutputList"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+              ) {
+                items(turns, key = { it.id }) { turn -> ConversationTurnRow(turn) }
+              }
+            } else {
+              val collapsedRows = remember(rows) { collapseOutputRows(rows) }
+              LazyColumn(
+                state = outputListState,
+                modifier =
+                  Modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("recentOutputList"),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+              ) {
+                items(collapsedRows, key = { it.key }) { row -> OutputItemRow(row) }
+              }
             }
           }
-          if (state.stream.entries.isEmpty())
+          if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty())
             Text(
               "No recent output received.",
               Modifier.padding(16.dp),
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+          // Interactive prompt input bar
+          PromptInputBar(
+            onSend = { text -> actions.submitPrompt(text) },
+            enabled = state.connection == ConnectionState.Connected,
+          )
         }
         destination == Destination.CHATS -> {
           Surface(
@@ -424,18 +459,44 @@ fun CappuccinoScreen(
             }
           }
         }
-        destination == Destination.ATTENTION ->
-          Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-              "Approvals unavailable",
-              style = MaterialTheme.typography.titleLarge,
-              modifier = Modifier.semantics { heading() },
-            )
-            Text(
-              "This bridge does not expose tool approvals or alerts. Pending requests cannot be determined.",
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        destination == Destination.ATTENTION -> {
+          val pending = state.stream.pendingPrompt
+          if (pending != null) {
+            Column(
+              Modifier.fillMaxSize().padding(16.dp),
+              verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+              Text(
+                "Requires Attention",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.semantics { heading() },
+              )
+              PromptCardView(
+                prompt = pending,
+                onSelectOption = { idx, optId ->
+                  actions.answerPrompt(pending.promptId, idx, optId, "select_option")
+                },
+                onCancel = {
+                  actions.answerPrompt(pending.promptId, null, null, "cancel")
+                },
+              )
+            }
+          } else {
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+              Text(
+                "No Pending Approvals",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() },
+              )
+              Text(
+                "All agents are running smoothly. Any tool approval or ask_question prompts will appear here.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
           }
+        }
         destination == Destination.SETTINGS -> {
           SettingsScreen(
             themeMode = state.themeMode,
@@ -1089,3 +1150,269 @@ private fun ConnectionState.statusText(): String =
     ConnectionState.Recovering -> "Recovering"
     is ConnectionState.Error -> "Connection error"
   }
+
+@Composable
+fun PromptCardView(
+  prompt: PromptCard,
+  onSelectOption: (Int, String) -> Unit,
+  onCancel: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  Surface(
+    modifier = modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(12.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant,
+    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+  ) {
+    Column(
+      modifier = Modifier.padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          text = prompt.title,
+          style = MaterialTheme.typography.titleMedium,
+          fontWeight = FontWeight.Bold,
+          color = MaterialTheme.colorScheme.primary,
+        )
+        Surface(
+          shape = RoundedCornerShape(6.dp),
+          color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+        ) {
+          Text(
+            text = prompt.type.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+          )
+        }
+      }
+
+      prompt.message?.let { msg ->
+        Text(
+          text = msg,
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+      }
+
+      prompt.command?.let { cmd ->
+        Surface(
+          shape = RoundedCornerShape(6.dp),
+          color = MaterialTheme.colorScheme.surface,
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Text(
+            text = cmd,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(8.dp),
+          )
+        }
+      }
+
+      if (prompt.options.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          prompt.options.forEachIndexed { index, option ->
+            FilledTonalButton(
+              onClick = { onSelectOption(index, option.id) },
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(8.dp),
+            ) {
+              Column(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalAlignment = Alignment.Start,
+              ) {
+                Text(
+                  text = "${index + 1}. ${option.label}",
+                  style = MaterialTheme.typography.bodyMedium,
+                  fontWeight = FontWeight.SemiBold,
+                )
+                option.description?.let { desc ->
+                  Text(
+                    text = desc,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  )
+                }
+              }
+            }
+          }
+        }
+      }
+
+      TextButton(
+        onClick = onCancel,
+        modifier = Modifier.align(Alignment.End),
+      ) {
+        Text("Cancel / Dismiss")
+      }
+    }
+  }
+}
+
+@Composable
+fun PromptInputBar(
+  onSend: (String) -> Unit,
+  enabled: Boolean,
+  modifier: Modifier = Modifier,
+) {
+  var input by rememberSaveable { mutableStateOf("") }
+  Surface(
+    modifier = modifier.fillMaxWidth(),
+    tonalElevation = 3.dp,
+    color = MaterialTheme.colorScheme.surface,
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      OutlinedTextField(
+        value = input,
+        onValueChange = { input = it },
+        placeholder = { Text("Prompt agent…") },
+        modifier = Modifier.weight(1f),
+        enabled = enabled,
+        singleLine = true,
+        shape = RoundedCornerShape(20.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+          focusedBorderColor = MaterialTheme.colorScheme.primary,
+          unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+        ),
+      )
+      IconButton(
+        onClick = {
+          if (input.isNotBlank()) {
+            onSend(input)
+            input = ""
+          }
+        },
+        enabled = enabled && input.isNotBlank(),
+      ) {
+        Icon(
+          painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_chat),
+          contentDescription = "Send",
+          tint = if (enabled && input.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        )
+      }
+    }
+  }
+}
+
+@Composable
+fun ConversationTurnRow(turn: ConversationTurn, modifier: Modifier = Modifier) {
+  val isUser = turn.role.lowercase() == "user"
+  Column(
+    modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
+    horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
+  ) {
+    Surface(
+      shape = RoundedCornerShape(12.dp),
+      color = if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+      border = BorderStroke(
+        1.dp,
+        if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+      ),
+      modifier = Modifier.fillMaxWidth(0.92f),
+    ) {
+      Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = if (isUser) "You" else "Assistant",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+          )
+          turn.timestamp?.let { ts ->
+            Text(
+              text = ts,
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+        }
+
+        turn.text?.let { mainText ->
+          Text(
+            text = mainText,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+          )
+        }
+
+        turn.parts.forEach { part ->
+          when (part) {
+            is ConversationPart.Text -> {
+              Text(
+                text = part.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+              )
+            }
+            is ConversationPart.Thinking -> {
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                modifier = Modifier.fillMaxWidth(),
+              ) {
+                Text(
+                  text = part.text,
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  modifier = Modifier.padding(8.dp),
+                )
+              }
+            }
+            is ConversationPart.ToolCall -> {
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth(),
+              ) {
+                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                  Text(
+                    text = "Tool: ${part.name}",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                  )
+                  if (part.input.isNotBlank()) {
+                    Text(
+                      text = part.input,
+                      fontFamily = FontFamily.Monospace,
+                      style = MaterialTheme.typography.bodySmall,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                  }
+                  part.output?.let { out ->
+                    Text(
+                      text = out,
+                      fontFamily = FontFamily.Monospace,
+                      style = MaterialTheme.typography.bodySmall,
+                      color = MaterialTheme.colorScheme.onSurface,
+                    )
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+

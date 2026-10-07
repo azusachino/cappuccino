@@ -33,6 +33,9 @@ extension BridgeClient: TranscriptStreaming {
               continuation.yield(.open(generation: generation))
             case .reset(let generation):
               continuation.yield(.reset(generation: generation))
+            case .agentStatus, .promptRequest, .promptResolved:
+              // Handled by companion V2 event listeners; transcript stream passes through
+              break
             case .entries(let wireEntries):
               continuation.yield(
                 .entries(
