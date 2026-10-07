@@ -14,6 +14,72 @@ use std::collections::HashSet;
 /// Maximum window for the quadratic LCS pass; pane reads are capped upstream.
 const WINDOW: usize = 512;
 
+/// Checks if a line is transient status or chrome (spinners, status lines, dividers, usage footers)
+/// that should not be admitted into historical chat entries.
+pub fn is_transient_chrome(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // 1. Dividers and box drawing borders: ─────, ━━━━━, ╭─, etc.
+    let is_divider = trimmed.chars().all(|c| {
+        c == '─'
+            || c == '━'
+            || c == '═'
+            || c == '╌'
+            || c == '▔'
+            || c == '-'
+            || c == '='
+            || c == '╭'
+            || c == '╮'
+            || c == '╰'
+            || c == '╯'
+            || c == '├'
+            || c == '┤'
+            || c == '┬'
+            || c == '┴'
+            || c == '┼'
+    });
+    if is_divider && trimmed.chars().count() >= 3 {
+        return true;
+    }
+
+    // 2. Working status lines and spinners:
+    // e.g. "working · Gemini 3.8 Flash ...", "thinking · ...", "idle · ..."
+    if trimmed.starts_with("working ·")
+        || trimmed.starts_with("working...")
+        || trimmed.starts_with("thinking ·")
+        || trimmed.starts_with("thinking...")
+        || trimmed.starts_with("idle ·")
+    {
+        return true;
+    }
+
+    // Braille / clock spinners at line start: ⠋, ⠙, ⠹, ⠸, ⠼, ⠴, ⠦, ⠧, ⠇, ⠏, ⢿, etc.
+    if let Some(first_char) = trimmed.chars().next() {
+        if ('\u{2800}'..='\u{28FF}').contains(&first_char) {
+            return true;
+        }
+    }
+
+    // 3. Status meter / usage / footer lines:
+    // e.g. "↑73k ↓5.6k R779k CH99.0% $0.018 (sub)...", "codex 100% ↻ 4h46m..."
+    if (trimmed.starts_with('↑') || trimmed.starts_with('↓')) && trimmed.contains('$') {
+        return true;
+    }
+    if trimmed.contains("↻") && (trimmed.contains('%') || trimmed.contains('h')) {
+        return true;
+    }
+
+    // Single prompt input prefixes from TUI bottom if blank: ">", "❯", etc.
+    if trimmed == ">" || trimmed == "❯" || trimmed == "›" {
+        return true;
+    }
+
+    false
+}
+
 #[derive(Debug, Clone)]
 pub struct PaneSnapshot {
     pub lines: Vec<String>,
@@ -152,6 +218,9 @@ impl StreamRing {
 
         let mut new_entries = Vec::new();
         for text in &snapshot.lines {
+            if is_transient_chrome(text) {
+                continue;
+            }
             let id = entry_id(self.branch.as_deref(), text);
             if self.seen_ids.contains(&id) || !stable_ids.contains(&id) {
                 continue;
@@ -377,5 +446,46 @@ mod tests {
         let (matched, last_match) = align(&previous, &current);
         assert_eq!(last_match, 3);
         assert!(matched.contains(&0) && matched.contains(&2) && matched.contains(&3));
+    }
+
+    #[test]
+    fn transient_chrome_is_identified_and_filtered() {
+        assert!(is_transient_chrome("────────────────────────"));
+        assert!(is_transient_chrome("━━━━━━━━━━━━━━━━━━━━━━━━"));
+        assert!(is_transient_chrome(
+            "working · Gemini 3.8 Flash · harus-workstation"
+        ));
+        assert!(is_transient_chrome("thinking · analyzing directory..."));
+        assert!(is_transient_chrome("idle · standing by"));
+        assert!(is_transient_chrome("⠋ Running cargo test"));
+        assert!(is_transient_chrome("⢿ Compiling crate"));
+        assert!(is_transient_chrome(
+            "↑73k ↓5.6k R779k CH99.0% $0.018 (sub) 20.1%/272k (auto)"
+        ));
+        assert!(is_transient_chrome("codex 100% ↻ 4h46m 82% ↻ 6d12h"));
+        assert!(is_transient_chrome(">"));
+        assert!(is_transient_chrome("❯"));
+
+        assert!(!is_transient_chrome("cargo test passed successfully"));
+        assert!(!is_transient_chrome("let x = 42;"));
+        assert!(!is_transient_chrome("error: failed to compile"));
+
+        let mut ring = StreamRing::new(Some("main".into()));
+        let entries = ring.ingest(
+            &PaneSnapshot {
+                lines: vec![
+                    "real line 1".to_string(),
+                    "working · Gemini 3.8 Flash".to_string(),
+                    "────────────────".to_string(),
+                    "real line 2".to_string(),
+                ],
+            },
+            true,
+        );
+        let texts: Vec<&str> = entries
+            .iter()
+            .map(|e| e["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(texts, vec!["real line 1", "real line 2"]);
     }
 }

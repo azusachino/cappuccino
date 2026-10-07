@@ -356,6 +356,12 @@ fn validate_stream_frame(
             *last_generation = Some(generation);
             Ok(())
         }
+        "agent_status" => {
+            if frame["state"].as_str().is_none() {
+                return Err("agent_status frame missing state field".into());
+            }
+            Ok(())
+        }
         other => Err(format!("unknown stream event '{other}'")),
     }
 }

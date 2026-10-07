@@ -131,6 +131,8 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
         .and_then(|cwd| agents::own_branch(&cwd).branch);
     let mut ring = reconcile::StreamRing::new(initial_branch);
     let mut generation = ring.generation;
+    let mut last_status: Option<(String, Option<String>)> = None;
+
     if socket
         .send(Message::Text(
             json!({"event": "stream_open", "session_id": session, "generation": generation})
@@ -163,11 +165,42 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
             let branch = agents::own_branch(cwd).branch;
             ring.set_branch(branch);
         }
-        let working = agent
+        let current_status_str = agent
             .as_ref()
             .and_then(|info| info["agent"]["agent_status"].as_str())
-            .map(|status| status == "working")
-            .unwrap_or(true);
+            .unwrap_or("idle");
+        let working = current_status_str == "working";
+
+        // Extract detail line if available (e.g. running command or thinking detail)
+        let status_detail = if working {
+            lines.iter().rev().find_map(|line| {
+                let trimmed = line.trim();
+                if trimmed.starts_with("working ·") || trimmed.starts_with("thinking ·") {
+                    Some(trimmed.to_string())
+                } else if trimmed.starts_with("●") || trimmed.starts_with("⢿") {
+                    Some(trimmed.to_string())
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        };
+
+        let status_pair = (current_status_str.to_string(), status_detail);
+        if last_status.as_ref() != Some(&status_pair) {
+            last_status = Some(status_pair.clone());
+            let status_msg = json!({
+                "event": "agent_status",
+                "session_id": session,
+                "state": status_pair.0,
+                "detail": status_pair.1,
+            });
+            let _ = socket
+                .send(Message::Text(status_msg.to_string().into()))
+                .await;
+        }
+
         let new_entries = ring.ingest(&reconcile::PaneSnapshot { lines }, !working);
         if ring.generation != generation {
             if socket
