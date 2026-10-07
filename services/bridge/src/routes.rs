@@ -2,9 +2,9 @@
 //! `pane.read` and emits wire-v0-shaped events with the slice-A
 //! reconciliation semantics.
 
-use crate::{agents, conversation, herdr, reconcile, transcript};
+use crate::{agents, conversation, herdr, prompt, reconcile, transcript};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path as AxumPath, Query, State};
+use axum::extract::{Json, Path as AxumPath, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
@@ -132,6 +132,7 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
     let mut ring = reconcile::StreamRing::new(initial_branch);
     let mut generation = ring.generation;
     let mut last_status: Option<(String, Option<String>)> = None;
+    let mut last_prompt_id: Option<String> = None;
 
     if socket
         .send(Message::Text(
@@ -198,6 +199,32 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
             });
             let _ = socket
                 .send(Message::Text(status_msg.to_string().into()))
+                .await;
+        }
+
+        // Check for active interactive prompt (tool approval or ask_question)
+        let active_prompt = prompt::parse_prompt_from_screen(&text);
+        if let Some(card) = &active_prompt {
+            if last_prompt_id.as_deref() != Some(&card.prompt_id) {
+                last_prompt_id = Some(card.prompt_id.clone());
+                let prompt_msg = json!({
+                    "event": "prompt_request",
+                    "session_id": session,
+                    "prompt": card,
+                });
+                let _ = socket
+                    .send(Message::Text(prompt_msg.to_string().into()))
+                    .await;
+            }
+        } else if last_prompt_id.is_some() {
+            let prompt_id = last_prompt_id.take().unwrap();
+            let resolved_msg = json!({
+                "event": "prompt_resolved",
+                "session_id": session,
+                "prompt_id": prompt_id,
+            });
+            let _ = socket
+                .send(Message::Text(resolved_msg.to_string().into()))
                 .await;
         }
 
@@ -316,5 +343,146 @@ pub async fn agent_conversation(
             }
         }
         Err(err) => error_response(StatusCode::BAD_GATEWAY, "protocol", &err),
+    }
+}
+
+/// POST /api/agents/{sessionId}/prompt
+pub async fn submit_agent_prompt(
+    State(state): State<Arc<BridgeState>>,
+    AxumPath(session_id): AxumPath<String>,
+    Json(submission): Json<prompt::PromptSubmission>,
+) -> Response {
+    let pane_id = match resolve_pane(&state, &session_id).await {
+        Some(pane_id) => pane_id,
+        None => {
+            return error_response(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                &format!("no agent with session_id {session_id}"),
+            );
+        }
+    };
+
+    match submission {
+        prompt::PromptSubmission::Prompt { text } => {
+            if text.trim().is_empty() {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    "prompt text cannot be empty",
+                );
+            }
+            match herdr::agent_prompt(&session_id, &text).await {
+                Ok(_) => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "application/json")],
+                    json!({"event": "prompt_sent", "session_id": session_id}).to_string(),
+                )
+                    .into_response(),
+                Err(err) => error_response(
+                    StatusCode::BAD_GATEWAY,
+                    "herdr_error",
+                    &format!("cannot deliver prompt: {err}"),
+                ),
+            }
+        }
+        prompt::PromptSubmission::AnswerPrompt {
+            prompt_id,
+            action,
+            option_index,
+            option_id,
+        } => {
+            let active_screen = match herdr::pane_read_recent(&pane_id, 30).await {
+                Ok(text) => text,
+                Err(err) => {
+                    return error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "herdr_error",
+                        &err.to_string(),
+                    );
+                }
+            };
+
+            let Some(card) = prompt::parse_prompt_from_screen(&active_screen) else {
+                return error_response(
+                    StatusCode::CONFLICT,
+                    "stale_prompt",
+                    "interactive prompt is no longer visible on screen",
+                );
+            };
+
+            if card.prompt_id != prompt_id {
+                return error_response(
+                    StatusCode::CONFLICT,
+                    "stale_prompt",
+                    &format!(
+                        "prompt id mismatch: expected {}, on screen {}",
+                        prompt_id, card.prompt_id
+                    ),
+                );
+            }
+
+            // Determine key to send
+            if action.as_deref() == Some("cancel") {
+                let _ = herdr::pane_send_keys(&pane_id, &["esc"]).await;
+                return (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "application/json")],
+                    json!({"event": "prompt_answered", "action": "canceled", "prompt_id": prompt_id}).to_string(),
+                )
+                    .into_response();
+            }
+
+            let opt_idx = if let Some(idx) = option_index {
+                idx
+            } else if let Some(ref id) = option_id {
+                card.options.iter().position(|o| o.id == *id).unwrap_or(0)
+            } else {
+                0
+            };
+
+            // If numbered choice (1, 2, 3), press digit + enter
+            let key_digit = format!("{}", opt_idx + 1);
+            let send_res = herdr::pane_send_keys(&pane_id, &[&key_digit, "enter"]).await;
+            match send_res {
+                Ok(_) => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "application/json")],
+                    json!({
+                        "event": "prompt_answered",
+                        "prompt_id": prompt_id,
+                        "selected_index": opt_idx,
+                    })
+                    .to_string(),
+                )
+                    .into_response(),
+                Err(err) => error_response(
+                    StatusCode::BAD_GATEWAY,
+                    "herdr_error",
+                    &format!("cannot send keys: {err}"),
+                ),
+            }
+        }
+        prompt::PromptSubmission::AnswerQuestion { prompt_id, answers } => {
+            // For ask_question answers submitted as structured JSON or text
+            let answer_text = if let Some(s) = answers.as_str() {
+                s.to_string()
+            } else {
+                answers.to_string()
+            };
+            match herdr::pane_send_text(&pane_id, &format!("{answer_text}\n")).await {
+                Ok(_) => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "application/json")],
+                    json!({"event": "question_answered", "prompt_id": prompt_id}).to_string(),
+                )
+                    .into_response(),
+                Err(err) => error_response(
+                    StatusCode::BAD_GATEWAY,
+                    "herdr_error",
+                    &format!("cannot send answer: {err}"),
+                ),
+            }
+        }
     }
 }

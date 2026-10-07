@@ -144,6 +144,42 @@ pub async fn pane_read_recent(pane_id: &str, lines: u32) -> Result<String, Herdr
     Ok(strip_ansi(raw))
 }
 
+/// `agent.prompt`: writes text + Enter to the agent PTY.
+pub async fn agent_prompt(target: &str, text: &str) -> Result<Value, HerdrError> {
+    request(
+        "agent.prompt",
+        json!({
+            "target": target,
+            "text": text,
+        }),
+    )
+    .await
+}
+
+/// `pane.send_keys`: sends logical keystrokes (e.g. ["1", "enter"] or ["space", "enter"]).
+pub async fn pane_send_keys(pane_id: &str, keys: &[&str]) -> Result<Value, HerdrError> {
+    request(
+        "pane.send_keys",
+        json!({
+            "pane_id": pane_id,
+            "keys": keys,
+        }),
+    )
+    .await
+}
+
+/// `pane.send_text`: sends literal text to a pane PTY.
+pub async fn pane_send_text(pane_id: &str, text: &str) -> Result<Value, HerdrError> {
+    request(
+        "pane.send_text",
+        json!({
+            "pane_id": pane_id,
+            "text": text,
+        }),
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

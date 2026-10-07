@@ -9,6 +9,7 @@ mod conversation;
 mod herdr;
 mod lifecycle;
 mod modules;
+mod prompt;
 mod reconcile;
 mod routes;
 mod state;

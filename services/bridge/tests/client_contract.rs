@@ -526,6 +526,48 @@ async fn agent_conversation_returns_structured_turns() {
 }
 
 #[tokio::test]
+async fn submit_agent_prompt_delivers_input() {
+    let root = TempRoot::new("prompt-test");
+    let herdr = MockHerdr::start(&root);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+
+    // 1. Submit free-form prompt
+    let body = json!({
+        "type": "prompt",
+        "text": "run make check"
+    });
+    let exchange = probe::post_json(
+        &probe_options(&bridge.base_url()),
+        "/api/agents/s-probe/prompt",
+        &body,
+    )
+    .await
+    .expect("prompt request");
+
+    assert_eq!(exchange.status, 200, "payload: {}", exchange.body);
+    assert_eq!(exchange.body["event"], "prompt_sent");
+
+    // 2. Reject empty prompt
+    let empty_body = json!({
+        "type": "prompt",
+        "text": "   "
+    });
+    let err_exchange = probe::post_json(
+        &probe_options(&bridge.base_url()),
+        "/api/agents/s-probe/prompt",
+        &empty_body,
+    )
+    .await
+    .expect("empty prompt request");
+
+    assert_eq!(err_exchange.status, 400);
+
+    bridge.stop().expect("bridge stop");
+    herdr.stop().await;
+    root.remove();
+}
+
+#[tokio::test]
 async fn session_requires_nonempty_machine_id() {
     // A paired payload without machine_id must fail the check: spin an
     // HTTP/1 origin returning a machine_id-less paired body.

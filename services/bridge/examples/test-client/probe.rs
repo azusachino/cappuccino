@@ -211,6 +211,50 @@ pub async fn get(options: &ProbeOptions, path: &str) -> Result<HttpExchange, Str
     })
 }
 
+/// One POST request with a JSON payload using the configured preference.
+#[allow(dead_code)]
+pub async fn post_json(
+    options: &ProbeOptions,
+    path: &str,
+    payload: &Value,
+) -> Result<HttpExchange, String> {
+    let url: Uri = format!("{}{}", options.base_url.trim_end_matches('/'), path)
+        .parse()
+        .map_err(|error| format!("bad URL: {error}"))?;
+    let body_bytes = serde_json::to_vec(payload).map_err(|e| e.to_string())?;
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(url)
+        .header("content-type", "application/json")
+        .body(Full::new(Bytes::from(body_bytes)))
+        .map_err(|error| format!("build request: {error}"))?;
+
+    let send_fut = async {
+        let response = shared_client(false)
+            .request(request)
+            .await
+            .map_err(|error: HyperError| format!("transport: {error}"))?;
+        let version = response.version();
+        let status = response.status();
+        let body = collect_capped(response.into_body()).await?;
+        let body: Value = serde_json::from_slice(&body)
+            .map_err(|error| format!("response is not JSON: {error}"))?;
+        Ok::<_, String>((version, status, body))
+    };
+
+    let (version, status, body) = tokio::time::timeout(options.timeout, send_fut)
+        .await
+        .map_err(|_| "request timed out".to_string())??;
+
+    Ok(HttpExchange {
+        status,
+        body,
+        h2_fallback: false,
+        protocol: version_label(version),
+    })
+}
+
 fn ws_config() -> WebSocketConfig {
     let mut config = WebSocketConfig::default();
     config.max_message_size = Some(MAX_WS_MESSAGE_BYTES);
