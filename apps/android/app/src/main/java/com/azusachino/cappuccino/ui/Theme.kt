@@ -46,8 +46,8 @@ val HerdrDarkColorScheme =
     onSurface = HerdrTextDark,
     surfaceVariant = HerdrElevatedDark,
     onSurfaceVariant = HerdrTextDimDark,
-    outline = HerdrBorderDark,
-    outlineVariant = HerdrBorderStrongDark,
+    outline = HerdrBorderStrongDark,
+    outlineVariant = HerdrBorderDark,
     error = HerdrStatusBlocked,
     onError = Color(0xFF1B1407),
   )
@@ -64,8 +64,8 @@ val HerdrLightColorScheme =
     onSurface = Color(0xFF2A251F),
     surfaceVariant = Color(0xFFF2EEE6),
     onSurfaceVariant = Color(0xFF685E52),
-    outline = Color(0xFFDCD4C6),
-    outlineVariant = Color(0xFFC5BAA8),
+    outline = Color(0xFFC5BAA8),
+    outlineVariant = Color(0xFFDCD4C6),
     error = Color(0xFFA82323),
     onError = Color.White,
   )

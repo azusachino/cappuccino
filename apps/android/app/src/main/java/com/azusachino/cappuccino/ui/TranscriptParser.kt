@@ -20,13 +20,13 @@ object TranscriptParser {
   private val RULE_LINE = Regex("^[─━═]{6,}$")
 
   // The prompt echo: what the user typed, shown back by the agent TUI
-  private val USER_LINE = Regex("^[❯>]\\s?")
+  private val USER_LINE = Regex("^[❯>▸]\\s?")
 
   // Chrome the TUI repaints every turn — model/cwd line, context meters, mode footers, turn
   // metadata
   private val STATUS_LINE =
     Regex(
-      "^(?:\\[[^\\]]*\\]\\s*│|⏵|⣾|█|Context\\s|Usage\\s|[·•]\\s*\\d+\\s*shell|✳|※|working\\s*·|thinking\\b)"
+      "^(?:\\[[^\\]]*\\]\\s*│|⏵|⣾|█|Context\\s|Usage\\s|[·•]\\s*\\d+\\s*shell|✳|※|working\\s*·|thinking\\b|●\\s*\\[\\d+:\\d+:\\d+\\]|\\([^\\)]*to expand\\))"
     )
 
   // Tool lines: ● Read(...), ● Edit(...), ○ Bash(...), ● Command(...), etc.

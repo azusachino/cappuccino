@@ -13,6 +13,10 @@ class TranscriptParserTest {
     val prompt = TranscriptParser.parseLine("❯ another prompt")
     assertEquals(TranscriptRole.USER, prompt.role)
     assertEquals("another prompt", prompt.text)
+
+    val arrowPrompt = TranscriptParser.parseLine("▸ yet another prompt")
+    assertEquals(TranscriptRole.USER, arrowPrompt.role)
+    assertEquals("yet another prompt", arrowPrompt.text)
   }
 
   @Test
@@ -35,6 +39,12 @@ class TranscriptParserTest {
 
     val running = TranscriptParser.parseLine("⣾ Running command...")
     assertEquals(TranscriptRole.STATUS, running.role)
+
+    val runner =
+      TranscriptParser.parseLine(
+        "● [19:55:55] CAPP_BRIDGE_PORT=7392 HERDR_SOCKET_PATH=/path running"
+      )
+    assertEquals(TranscriptRole.STATUS, runner.role)
   }
 
   @Test
