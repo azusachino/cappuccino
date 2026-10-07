@@ -5,6 +5,7 @@
 
 mod agents;
 mod config;
+mod conversation;
 mod herdr;
 mod lifecycle;
 mod modules;

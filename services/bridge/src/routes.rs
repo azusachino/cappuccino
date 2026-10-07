@@ -2,9 +2,9 @@
 //! `pane.read` and emits wire-v0-shaped events with the slice-A
 //! reconciliation semantics.
 
-use crate::{agents, herdr, reconcile, transcript};
+use crate::{agents, conversation, herdr, reconcile, transcript};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
@@ -237,4 +237,84 @@ async fn resolve_pane(state: &Arc<BridgeState>, session: &str) -> Option<String>
     rows.into_iter()
         .find(|row| row.session_id == session || row.pane_id == session)
         .map(|row| row.pane_id)
+}
+
+/// GET /api/agents/{sessionId}/conversation
+pub async fn agent_conversation(
+    State(state): State<Arc<BridgeState>>,
+    AxumPath(session_id): AxumPath<String>,
+) -> Response {
+    if session_id.is_empty() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "sessionId is required",
+        );
+    }
+
+    match transcript::resolve_session_transcript(&session_id).await {
+        Ok(Some(resolved)) => {
+            let path = resolved.path();
+            match conversation::read_tail_lines(path, conversation::TRANSCRIPT_TAIL_BYTES) {
+                Ok(content) => {
+                    let turns = match resolved {
+                        transcript::ResolvedTranscript::Agy(_) => {
+                            conversation::parse_agy_transcript(&content)
+                        }
+                        transcript::ResolvedTranscript::Pi(_) => {
+                            conversation::parse_pi_transcript(&content)
+                        }
+                    };
+                    let payload = conversation::ConversationResponse {
+                        session_id,
+                        source: "canonical_log".to_string(),
+                        turns,
+                    };
+                    (
+                        StatusCode::OK,
+                        [(header::CONTENT_TYPE, "application/json")],
+                        serde_json::to_string(&payload).unwrap_or_default(),
+                    )
+                        .into_response()
+                }
+                Err(err) => error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "io_error",
+                    &format!("cannot read transcript: {err}"),
+                ),
+            }
+        }
+        Ok(None) => {
+            // Fallback: If no canonical session transcript exists, check if pane exists and parse recent scrollback
+            if let Some(pane_id) = resolve_pane(&state, &session_id).await {
+                match herdr::pane_read_recent(&pane_id, 200).await {
+                    Ok(text) => {
+                        let lines: Vec<String> = text.lines().map(str::to_string).collect();
+                        let turns = conversation::parse_scrollback_turns(&lines);
+                        let payload = conversation::ConversationResponse {
+                            session_id,
+                            source: "scrollback".to_string(),
+                            turns,
+                        };
+                        (
+                            StatusCode::OK,
+                            [(header::CONTENT_TYPE, "application/json")],
+                            serde_json::to_string(&payload).unwrap_or_default(),
+                        )
+                            .into_response()
+                    }
+                    Err(err) => {
+                        error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string())
+                    }
+                }
+            } else {
+                error_response(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    &format!("no agent with session_id {session_id}"),
+                )
+            }
+        }
+        Err(err) => error_response(StatusCode::BAD_GATEWAY, "protocol", &err),
+    }
 }
