@@ -23,7 +23,10 @@ android {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
   }
-  buildFeatures { compose = true }
+  buildFeatures {
+    compose = true
+    buildConfig = true
+  }
   lint {
     warningsAsErrors = true
     abortOnError = true
@@ -43,7 +46,15 @@ dependencies {
   implementation(platform(libs.compose.bom))
   implementation(libs.compose.material3)
   implementation(libs.activity.compose)
+  implementation(libs.kotlinx.serialization.json)
+  implementation(libs.okhttp)
+  implementation(libs.lifecycle.runtime.compose)
+  implementation(libs.lifecycle.viewmodel.compose)
+  implementation(libs.lifecycle.viewmodel.savedstate)
+  implementation(libs.coroutines.android)
   testImplementation(libs.junit)
+  testImplementation(libs.mockwebserver)
+  testImplementation(libs.coroutines.test)
   androidTestImplementation(platform(libs.compose.bom))
   androidTestImplementation(libs.compose.ui.test)
   androidTestImplementation(libs.androidx.junit)
