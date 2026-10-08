@@ -1,5 +1,9 @@
 package com.azusachino.cappuccino
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -8,6 +12,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -20,8 +27,37 @@ import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ProfileStore
 import com.azusachino.cappuccino.ui.CappuccinoShell
 import com.azusachino.cappuccino.ui.CappuccinoTheme
+import java.time.ZoneId
 
 class MainActivity : ComponentActivity() {
+  internal var deviceTimeZone by mutableStateOf(ZoneId.systemDefault())
+    private set
+
+  private val timezoneReceiver =
+    object : BroadcastReceiver() {
+      override fun onReceive(context: Context?, intent: Intent?) {
+        deviceTimeZone =
+          runCatching { ZoneId.of(intent?.getStringExtra("time-zone")) }
+            .getOrElse { ZoneId.systemDefault() }
+      }
+    }
+
+  override fun onStart() {
+    super.onStart()
+    ContextCompat.registerReceiver(
+      this,
+      timezoneReceiver,
+      IntentFilter(Intent.ACTION_TIMEZONE_CHANGED),
+      ContextCompat.RECEIVER_NOT_EXPORTED,
+    )
+    deviceTimeZone = ZoneId.systemDefault()
+  }
+
+  override fun onStop() {
+    unregisterReceiver(timezoneReceiver)
+    super.onStop()
+  }
+
   private var pendingConnect: Pair<String, String>? = null
   private val localNetworkPermission =
     registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -72,7 +108,7 @@ class MainActivity : ComponentActivity() {
       }
       val state by vm.state.collectAsStateWithLifecycle()
       CappuccinoTheme(themeMode = state.themeMode) {
-        CappuccinoShell(vm) { label, url ->
+        CappuccinoShell(vm, timeZone = deviceTimeZone) { label, url ->
           if (
             Build.VERSION.SDK_INT >= 37 &&
               checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") !=

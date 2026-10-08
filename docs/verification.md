@@ -382,3 +382,93 @@ Source and JVM clearance only: wire models, concrete OkHttp/WS transport, lifecy
 Material 3 / dynamic theme, and raw socket close fixture proof are verified. Broad Android runtime,
 OS process death under platform pressure, physical phone Tailscale HTTPS/WSS connectivity, and
 canonical Pi history parity remain separately unverified/blocked for device trial stage E.
+
+## Pi transcript identity — conversation-polish checkpoint
+
+Verified 2026-10-08 on `fix/conversation-polish`, base
+`183460b78e6cd71e5684d77b380cc1f03d6a9fae`, with only
+`services/bridge/src/transcript.rs` and `services/bridge/README.md` in the
+reviewed bridge diff. Transcript source SHA-256:
+`c8387d537a40b885ae5f40ab4316e8d772ac390ae9bc0832dcce8442fe6ee92f`.
+
+Fresh independent Herdr peer `cap-polish-review` used the owner-selected
+`zai-coding-cn/glm-5.3-flash` at low effort. All six criteria passed: exact
+path-kind session reports, both default Luna/Pi stores, exclusive override
+precedence, no cwd/title/newest-file guessing, canonical containment, and
+accurate documentation. Nine focused transcript cases include the known-Pi
+pane guard against an `agy` word in its title.
+
+The lead and reviewer each completed `make check-bridge`: 104 normal tests
+(41 unit, 41 client, 6 lifecycle, 9 resource, 7 schema), all four mandatory
+ignored resource cases, formatting and the release example build passed.
+The independent resource run took 349.30 seconds. Both completed `make
+md-check` with exit 0. This evidence-only record changes no runtime inputs;
+Markdown is checked again before its commit.
+
+Earlier reviewer attempts lost an exit result or timed out. They are not
+successful gate evidence; the complete independent rerun supersedes them.
+The outer Herdr wait also timed out before the peer's final response; the
+lead retrieved the completed report and actual exit-bearing logs afterward.
+The peer reconciled its interrupted attempt's stale socket/temp root and
+left pre-session, non-owned processes untouched. No owner bridge or agent
+was restarted, and no Tailscale configuration changed.
+
+Limits: this proves resolver/source and hermetic bridge behavior, not
+canonical live Pi/active-branch parity, a runtime deployment, physical-device
+connectivity or global issue #12 acceptance. Missing authoritative Pi
+identity still fails closed. Android presentation acceptance is separate.
+
+## Android conversation reader — conversation-polish checkpoint
+
+Independent local acceptance passed 2026-10-08 on `fix/conversation-polish`,
+base `c3113bc6d05a2c404ce7aebda51fc348586ad4e7` plus 14 working files:
+13 Android source/build/test files and README Android notes. Tracked binary
+patch SHA-256 was
+`fcc2a0ba3d7919628608590fdcef9546682cfb063d9449f1e4d518b18f3f2c77`.
+All six untracked feature/test files were fingerprinted before and after gates:
+
+| Untracked file (under Android app source) | SHA-256 |
+| --- | --- |
+| `androidTest/java/com/azusachino/cappuccino/ConversationPresentationTest.kt` | `dbe5299d8480fd57b8004b64f6c8920c6586cde3295f714a65b43451cac3c7eb` |
+| `main/java/com/azusachino/cappuccino/ui/ConversationDetails.kt` | `b71e55bde101599415e34947c7f1da867f0111a75372d16b956827a8393eeaa5` |
+| `main/java/com/azusachino/cappuccino/ui/ConversationTimestamp.kt` | `7f1beb8fc3183ab1e932bf12e64dc07ca691f2dd62351f9a633262ad692ed2c9` |
+| `main/java/com/azusachino/cappuccino/ui/MarkdownText.kt` | `60306dea576d37d293f7bfeb8ad1f294b7ae9d1e3c7cf983f3ced68e2f443345` |
+| `test/java/com/azusachino/cappuccino/ui/ConversationTimestampTest.kt` | `e4f707201afefb61339b299fd48c9d0ede85b16973598096ac1c7e2afaec0403` |
+| `test/java/com/azusachino/cappuccino/ui/MarkdownTextTest.kt` | `a8bffb6d0529865c400d81165fdd96ffd86c290c732dbd7e13c77e32553a55e9` |
+
+The lead initially implemented the slice, then the owner directed TL-only
+coordination. Worker `cap-polish-android-worker` completed the compilation
+repair and owning gates, inspected feature PNGs and released writer ownership.
+Separate fresh verifier `cap-polish-android-verifier` used the owner-selected
+`zai-coding-cn/glm-5.3-flash` at low effort; startup argv and visible runtime
+confirmed that route. Worker evidence was not substituted for its review.
+
+All six criteria passed: native passive CommonMark presentation, accessible
+collapsed tool/thought details, device-local `yyyy-MM-dd HH:mm:ss` timestamps
+and foreground timezone changes, true-bottom following with manual reading
+and explicit jump, profile/machine/session state isolation, and owned,
+coalesced, stale-safe conversation refresh. The narrow-screen metadata banner
+was changed to a vertical stack after screenshot review caught crowding.
+
+Independent commands all exited 0: `make validate-android`, forced
+`:app:testDebugUnitTest --rerun-tasks` (63 tests), explicit-serial
+`make ui-test-android` (13 tests across six classes), `make md-check` and
+`git diff --check`. No failures, errors or skips; no diagnostics or assertions
+were weakened. Five actual PNGs were decoded: collapsed/expanded details,
+Markdown, latest tall conversation and device timezone change. The OS-zone
+journey used only the task-owned API-35 AVD and restored its original setting.
+Debug APK SHA-256 after independent gates:
+`c1cdd68d5b51444be9ffc6652537e4d21c63661d677ae6560502a4cb674a81d4`.
+
+Failures retained: earlier Markdown expectation and stream-open fixture errors,
+and the missing `TextOverflow` import after the banner edit. They were fixed
+and required gates rerun. The verifier initially double-counted parent/child
+JUnit totals as 26; direct XML reconciliation establishes 13, not 26. It also
+corrected its inspected-PNG count to five and completed post-gate untracked
+hash comparison; source/index inputs were unchanged. This record is docs-only,
+so matching runtime evidence remains valid; Markdown is rerun before commit.
+
+Limits: synthetic UI/controller fixtures on API 35 only, not live canonical
+Pi/active-branch parity, physical devices, minimum-OS coverage or deployment.
+Owner phone, Pixel emulator, running bridge/agents and Tailscale were unchanged.
+Hosted CI and global issue #12 acceptance remain separate.

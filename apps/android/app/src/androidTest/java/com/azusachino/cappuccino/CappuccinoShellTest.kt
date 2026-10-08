@@ -1,14 +1,17 @@
 package com.azusachino.cappuccino
 
 import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -19,6 +22,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.platform.io.PlatformTestStorageRegistry
 import com.azusachino.cappuccino.core.AgentRow
+import com.azusachino.cappuccino.core.ConversationPart
+import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.Endpoint
 import com.azusachino.cappuccino.core.StreamEntry
 import com.azusachino.cappuccino.core.StreamState
@@ -28,7 +33,9 @@ import com.azusachino.cappuccino.io.ConnectionState
 import com.azusachino.cappuccino.io.MachineProfile
 import com.azusachino.cappuccino.ui.CappuccinoScreen
 import com.azusachino.cappuccino.ui.CappuccinoTheme
+import java.time.ZoneId
 import java.util.UUID
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -143,6 +150,164 @@ class CappuccinoShellTest {
     compose.waitForIdle()
     compose.onNodeWithText("synthetic-session", substring = true).assertIsDisplayed()
   }
+
+  @Test
+  fun structuredConversationFollowsGrowthButPreservesReadingPositionAndMachineIdentity() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile("conversation", "Synthetic", Endpoint.parse("https://bridge.example"), machine)
+    val agent = AgentRow(machine, "same-locator", "pane", "pi", "pi", "idle", false, "main")
+    val tail = (1..40).joinToString("\n\n") { "Tail paragraph $it" } + "\n\nFINAL-TAIL"
+    val turns =
+      (1..30)
+        .map { ConversationTurn("t$it", "assistant", null, "Synthetic turn $it", emptyList()) }
+        .dropLast(1) +
+        ConversationTurn("t30", "assistant", null, null, listOf(ConversationPart.Text(tail)))
+    val state =
+      mutableStateOf(
+        ConnectedUiState(
+          profiles = listOf(profile),
+          activeProfileId = profile.id,
+          selectedAgent = agent,
+          conversationTurns = turns,
+          connection = ConnectionState.Connected,
+          stream =
+            StreamState(
+              "same-locator",
+              1,
+              (1L..90L).map { StreamEntry("e$it", it, "text", "Raw output $it", "main") },
+            ),
+        )
+      )
+    compose.activity.runOnUiThread {
+      compose.activity.setContent {
+        CappuccinoTheme {
+          val s by state
+          CappuccinoScreen(s, StateActions(state)) { _, _ -> }
+        }
+      }
+    }
+    compose.onNodeWithText("FINAL-TAIL").assertIsDisplayed()
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          conversationTurns =
+            state.value.conversationTurns.dropLast(1) +
+              state.value.conversationTurns
+                .last()
+                .copy(parts = listOf(ConversationPart.Text(tail + "\n\nSame-count update")))
+        )
+    }
+    compose.onNodeWithText("Same-count update").assertIsDisplayed()
+    compose.onNodeWithTag("recentOutputList").performTouchInput { swipeDown() }
+    compose.waitForIdle()
+    val before =
+      compose
+        .onNodeWithTag("recentOutputList")
+        .fetchSemanticsNode()
+        .config[SemanticsProperties.VerticalScrollAxisRange]
+        .value()
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          conversationTurns =
+            state.value.conversationTurns +
+              ConversationTurn("t31", "assistant", null, "Newest structured response", emptyList())
+        )
+    }
+    compose.onNodeWithText("Jump to latest").assertIsDisplayed()
+    val after =
+      compose
+        .onNodeWithTag("recentOutputList")
+        .fetchSemanticsNode()
+        .config[SemanticsProperties.VerticalScrollAxisRange]
+        .value()
+    assertEquals(before, after, 0.01f)
+    compose.onNodeWithText("Jump to latest").performClick()
+    compose.onNodeWithText("Newest structured response").assertIsDisplayed()
+    capture("ConversationLatest")
+    compose.runOnIdle {
+      val otherMachine = UUID.randomUUID()
+      val otherProfile = profile.copy(id = "other-machine", machineId = otherMachine)
+      state.value =
+        state.value.copy(
+          profiles = listOf(otherProfile),
+          activeProfileId = otherProfile.id,
+          selectedAgent = agent.copy(machineId = otherMachine),
+          conversationTurns =
+            listOf(ConversationTurn("t31", "assistant", null, "Other machine latest", emptyList())),
+        )
+    }
+    compose.onNodeWithText("Other machine latest").assertIsDisplayed()
+    compose.onNodeWithText("Jump to latest").assertDoesNotExist()
+  }
+
+  @Test
+  fun visibleTimestampTracksDeviceTimezoneChangesWithoutReloadingConversation() {
+    // This OS-setting journey is emulator-only; never mutate a physical phone's timezone.
+    assertEquals("1", shell("getprop ro.kernel.qemu").trim())
+    val originalZone = ZoneId.of(shell("getprop persist.sys.timezone").trim()).id
+    fun setZone(zone: String) {
+      require(zone.matches(Regex("[A-Za-z0-9_+/:.-]+")))
+      shell("cmd alarm set-timezone $zone")
+      assertEquals(zone, shell("getprop persist.sys.timezone").trim())
+    }
+    try {
+      setZone("UTC")
+      val machine = UUID.randomUUID()
+      val profile =
+        MachineProfile("timezone", "Synthetic", Endpoint.parse("https://bridge.example"), machine)
+      val agent = AgentRow(machine, "timezone-agent", "pane", "pi", "pi", "idle", false, "main")
+      val state =
+        mutableStateOf(
+          ConnectedUiState(
+            profiles = listOf(profile),
+            activeProfileId = profile.id,
+            selectedAgent = agent,
+            conversationTurns =
+              listOf(
+                ConversationTurn(
+                  "tz-turn",
+                  "assistant",
+                  "2026-10-07T16:02:03Z",
+                  "Timezone reply",
+                  emptyList(),
+                )
+              ),
+            connection = ConnectionState.Connected,
+          )
+        )
+      compose.activity.runOnUiThread {
+        compose.activity.setContent {
+          CappuccinoTheme {
+            val s by state
+            CappuccinoScreen(s, StateActions(state), timeZone = compose.activity.deviceTimeZone) {
+              _,
+              _ ->
+            }
+          }
+        }
+      }
+      compose.onNodeWithText("2026-10-07 16:02:03").assertIsDisplayed()
+      setZone("Asia/Tokyo")
+      compose.waitUntil(timeoutMillis = 5000) {
+        compose.onAllNodesWithText("2026-10-08 01:02:03").fetchSemanticsNodes().isNotEmpty()
+      }
+      compose.onNodeWithText("2026-10-08 01:02:03").assertIsDisplayed()
+      compose.onNodeWithText("Timezone reply").assertIsDisplayed()
+      capture("DeviceTimezoneChanged")
+    } finally {
+      setZone(originalZone)
+      compose.waitUntil(timeoutMillis = 5000) { ZoneId.systemDefault() == ZoneId.of(originalZone) }
+    }
+  }
+
+  private fun shell(command: String): String =
+    ParcelFileDescriptor.AutoCloseInputStream(
+        InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
+      )
+      .bufferedReader()
+      .use { it.readText() }
 
   private class StateActions(private val state: MutableState<ConnectedUiState>) : ConnectedActions {
     override fun addMachine(label: String, url: String) = Unit

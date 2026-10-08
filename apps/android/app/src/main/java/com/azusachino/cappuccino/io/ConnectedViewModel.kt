@@ -83,6 +83,8 @@ internal constructor(
   val state: StateFlow<ConnectedUiState> = mutableState.asStateFlow()
   private var operation: Job? = null
   private var streamJob: Job? = null
+  private var conversationJob: Job? = null
+  private var conversationRequested = false
   private var foreground = false
   private var epoch = 0L
   private var pendingRestore = savedStateHandle.get<String>(SELECTED_PROFILE) != null
@@ -231,16 +233,31 @@ internal constructor(
   override fun loadConversation() {
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
+    if (!foreground) return
+    conversationRequested = true
+    if (conversationJob?.isActive == true) return
     val client = bridgeFor(profile.endpoint)
-    viewModelScope.launch {
-      try {
-        val turns = client.conversation(agent.sessionId)
-        if (mutableState.value.selectedAgent?.sessionId == agent.sessionId) {
-          mutableState.value = mutableState.value.copy(conversationTurns = turns)
+    val token = epoch
+    conversationJob = viewModelScope.launch {
+      do {
+        conversationRequested = false
+        try {
+          val turns = client.conversation(agent.sessionId)
+          val current = mutableState.value
+          if (
+            token != epoch ||
+              !foreground ||
+              current.activeProfileId != profile.id ||
+              current.selectedAgent?.machineId != agent.machineId ||
+              current.selectedAgent.sessionId != agent.sessionId
+          )
+            return@launch
+          mutableState.value = current.copy(conversationTurns = turns)
+        } catch (error: Exception) {
+          if (error is kotlinx.coroutines.CancellationException) throw error
+          // Keep earlier turns (or scrollback) when this read-only refresh is unavailable.
         }
-      } catch (_: Exception) {
-        // Conversation fallback to scrollback or empty turns is transparent
-      }
+      } while (conversationRequested && token == epoch && foreground)
     }
   }
 
@@ -354,6 +371,13 @@ internal constructor(
                 connection = streamError?.let(ConnectionState::Error) ?: ConnectionState.Connected,
               )
             if (streamError != null) throw BridgeStreamError(streamError)
+            if (
+              event is StreamEvent.Open ||
+                event is StreamEvent.Entries ||
+                event is StreamEvent.Reset ||
+                event is StreamEvent.AgentStatus
+            )
+              loadConversation()
           }
           break
         } catch (error: Exception) {
@@ -469,6 +493,9 @@ internal constructor(
     operation?.cancel()
     operation = null
     cancelStream()
+    conversationJob?.cancel()
+    conversationJob = null
+    conversationRequested = false
   }
 
   companion object {

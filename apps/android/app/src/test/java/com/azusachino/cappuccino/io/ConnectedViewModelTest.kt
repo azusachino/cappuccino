@@ -2,13 +2,18 @@ package com.azusachino.cappuccino.io
 
 import androidx.lifecycle.SavedStateHandle
 import com.azusachino.cappuccino.core.AgentRow
+import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.Endpoint
+import com.azusachino.cappuccino.core.StreamEntry
 import com.azusachino.cappuccino.core.StreamEvent
 import java.io.IOException
 import java.util.UUID
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -16,6 +21,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -575,8 +581,96 @@ class ConnectedViewModelTest {
       )
     )
 
+  @Test
+  fun streamUpdatesRefreshVisibleConversation() =
+    runTest(dispatcher) {
+      val events = MutableSharedFlow<StreamEvent>()
+      var text = "Initial reply"
+      viewModel =
+        createViewModel(
+          pause = {},
+          conversationFactory = {
+            listOf(ConversationTurn("turn", "assistant", null, text, emptyList()))
+          },
+          streamFactory = { events },
+        )
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      runCurrent()
+      events.emit(StreamEvent.Open(agent.sessionId, 1))
+      runCurrent()
+      assertEquals("Initial reply", viewModel.state.value.conversationTurns.single().text)
+      text = "Live reply"
+      events.emit(StreamEvent.Entries(listOf(StreamEntry("entry", 1, "text", "Live reply", null))))
+      advanceUntilIdle()
+      assertEquals("Live reply", viewModel.state.value.conversationTurns.single().text)
+    }
+
+  @Test
+  fun updatesDuringAnInflightReadCoalesceIntoOneFreshFollowup() =
+    runTest(dispatcher) {
+      val events = MutableSharedFlow<StreamEvent>()
+      val firstRead = CompletableDeferred<List<ConversationTurn>>()
+      var reads = 0
+      viewModel =
+        createViewModel(
+          pause = {},
+          conversationFactory = {
+            if (++reads == 1) firstRead.await()
+            else listOf(ConversationTurn("latest", "assistant", null, "Latest reply", emptyList()))
+          },
+          streamFactory = { events },
+        )
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      runCurrent()
+      events.emit(StreamEvent.Open(agent.sessionId, 1))
+      repeat(3) { events.emit(StreamEvent.AgentStatus(agent.sessionId, "working", "update $it")) }
+      runCurrent()
+      assertEquals(1, reads)
+      firstRead.complete(
+        listOf(ConversationTurn("initial", "assistant", null, "Earlier reply", emptyList()))
+      )
+      advanceUntilIdle()
+      assertEquals(2, reads)
+      assertEquals("Latest reply", viewModel.state.value.conversationTurns.single().text)
+    }
+
+  @Test
+  fun lateConversationCannotOverwriteReselectedSameLocator() =
+    runTest(dispatcher) {
+      val late = CompletableDeferred<List<ConversationTurn>>()
+      var reads = 0
+      viewModel =
+        createViewModel(
+          pause = {},
+          conversationFactory = {
+            if (++reads == 1) withContext(NonCancellable) { late.await() }
+            else listOf(ConversationTurn("new", "assistant", null, "New reply", emptyList()))
+          },
+          streamFactory = { flow { kotlinx.coroutines.awaitCancellation() } },
+        )
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      runCurrent()
+      viewModel.selectAgent(null)
+      viewModel.selectAgent(agent)
+      runCurrent()
+      assertEquals("New reply", viewModel.state.value.conversationTurns.single().text)
+      late.complete(listOf(ConversationTurn("old", "assistant", null, "Stale reply", emptyList())))
+      advanceUntilIdle()
+      assertEquals("New reply", viewModel.state.value.conversationTurns.single().text)
+    }
+
   private fun createViewModel(
     pause: suspend (Long) -> Unit,
+    conversationFactory: suspend (String) -> List<ConversationTurn> = { emptyList() },
     streamFactory: (String) -> Flow<StreamEvent>,
   ): ConnectedViewModel =
     ConnectedViewModel(
@@ -591,7 +685,7 @@ class ConnectedViewModelTest {
 
           override suspend fun conversation(
             sessionId: String
-          ): List<com.azusachino.cappuccino.core.ConversationTurn> = emptyList()
+          ): List<com.azusachino.cappuccino.core.ConversationTurn> = conversationFactory(sessionId)
 
           override suspend fun submitPrompt(sessionId: String, text: String) {}
 
