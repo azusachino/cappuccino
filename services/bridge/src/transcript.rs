@@ -5,16 +5,42 @@
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-/// pi's sessions store: `PI_CODING_AGENT_SESSION_DIR` moves it; otherwise
-/// `<pi agent dir>/sessions` where the agent dir is `~/.pi/agent`.
-pub fn sessions_dir() -> PathBuf {
-    if let Ok(explicit) = std::env::var("PI_CODING_AGENT_SESSION_DIR") {
-        return PathBuf::from(explicit);
+/// Explicit store/config overrides are exclusive. Otherwise accept reported
+/// paths in either supported installation; never infer session identity from cwd.
+fn session_stores(
+    home: &Path,
+    session_dir: Option<PathBuf>,
+    agent_dir: Option<PathBuf>,
+) -> Vec<PathBuf> {
+    if let Some(store) = session_dir {
+        return vec![store];
     }
-    PathBuf::from(home_dir())
-        .join(".pi")
-        .join("agent")
-        .join("sessions")
+    if let Some(dir) = agent_dir {
+        return vec![dir.join("sessions")];
+    }
+    vec![
+        home.join(".luna/agent/sessions"),
+        home.join(".pi/agent/sessions"),
+    ]
+}
+
+fn pi_session_stores() -> Vec<PathBuf> {
+    session_stores(
+        Path::new(&home_dir()),
+        std::env::var_os("PI_CODING_AGENT_SESSION_DIR").map(PathBuf::from),
+        std::env::var_os("PI_CODING_AGENT_DIR").map(PathBuf::from),
+    )
+}
+
+fn reported_pi_transcript(agent_info: &Value, stores: &[PathBuf]) -> Option<PathBuf> {
+    let report = &agent_info["agent_session"];
+    if report["kind"].as_str() != Some("path") {
+        return None;
+    }
+    let path = Path::new(report["value"].as_str()?);
+    stores
+        .iter()
+        .find_map(|store| transcript_in_store(path, store))
 }
 
 /// agy's brain store: `ANTIGRAVITY_APP_DATA_DIR` moves it; otherwise
@@ -95,17 +121,11 @@ pub async fn resolve_session_transcript(
     let agent_name = agent_info["agent"].as_str().unwrap_or("");
     let pane_id = agent_info["pane_id"].as_str().unwrap_or("");
 
-    // 1. Try herdr-reported agent_session (standard for pi)
-    let session_report = &agent_info["agent_session"];
-    if session_report["kind"].as_str() == Some("path") {
-        if let Some(value) = session_report["value"].as_str() {
-            if let Some(path) = transcript_in_store(Path::new(value), &sessions_dir()) {
-                return Ok(Some(ResolvedTranscript::Pi(path)));
-            }
-        }
+    if let Some(path) = reported_pi_transcript(agent_info, &pi_session_stores()) {
+        return Ok(Some(ResolvedTranscript::Pi(path)));
     }
 
-    // 2. If agent is agy (or pane runs agy), attempt agy resolution
+    // If agent is agy (or pane runs agy), attempt agy resolution
     if agent_name == "agy" || is_agy_pane(pane_id, agent_info) {
         if let Some(path) = resolve_agy_transcript_for_pane(pane_id, agent_info) {
             return Ok(Some(ResolvedTranscript::Agy(path)));
@@ -116,6 +136,10 @@ pub async fn resolve_session_transcript(
 }
 
 fn is_agy_pane(pane_id: &str, agent_info: &Value) -> bool {
+    // A Pi title can mention agy in the task/cwd; never cross agent stores.
+    if agent_info["agent"].as_str() == Some("pi") {
+        return false;
+    }
     if agent_info["terminal_title"]
         .as_str()
         .unwrap_or("")
@@ -224,6 +248,66 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.path);
         }
+    }
+
+    #[test]
+    fn reported_path_accepts_both_installations_without_cwd_guessing() {
+        let home = TempStore::new("pi-stores");
+        let stores = session_stores(&home.path, None, None);
+        for store in &stores {
+            std::fs::create_dir_all(store).unwrap();
+            let selected = store.join("selected.jsonl");
+            let other = store.join("newer.jsonl");
+            std::fs::write(&selected, "{}\n").unwrap();
+            std::fs::write(&other, "{}\n").unwrap();
+            let info = serde_json::json!({
+                "agent": "pi", "cwd": "/synthetic", "terminal_title": "π",
+                "agent_session": {"kind": "path", "value": selected}
+            });
+            assert_eq!(
+                reported_pi_transcript(&info, &stores),
+                Some(std::fs::canonicalize(selected).unwrap())
+            );
+            assert_eq!(
+                reported_pi_transcript(
+                    &serde_json::json!({"agent": "pi", "cwd": "/synthetic"}),
+                    &stores
+                ),
+                None
+            );
+            assert_eq!(
+                reported_pi_transcript(
+                    &serde_json::json!({"agent_session": {"kind": "id", "value": other}}),
+                    &stores
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn pi_title_cannot_trigger_agy_discovery() {
+        assert!(!is_agy_pane(
+            "pane",
+            &serde_json::json!({
+                "agent": "pi", "terminal_title": "π - agy-integration"
+            })
+        ));
+    }
+
+    #[test]
+    fn explicit_pi_overrides_are_exclusive() {
+        let home = Path::new("/synthetic/home");
+        let config = PathBuf::from("/synthetic/config");
+        let store = PathBuf::from("/synthetic/sessions");
+        assert_eq!(
+            session_stores(home, Some(store.clone()), Some(config.clone())),
+            vec![store]
+        );
+        assert_eq!(
+            session_stores(home, None, Some(config.clone())),
+            vec![config.join("sessions")]
+        );
     }
 
     #[test]

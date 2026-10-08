@@ -37,6 +37,17 @@ same base URL for both transports.
 
 The current bridge has no send route. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
 
+### Pi transcript identity
+
+Pi resolution requires Herdr's exact path-kind `agent_session` report. Without
+an explicit override, paths inside either `~/.luna/agent/sessions` or
+`~/.pi/agent/sessions` are accepted after canonical containment checks.
+`PI_CODING_AGENT_SESSION_DIR` restricts resolution to that store;
+`PI_CODING_AGENT_DIR` otherwise restricts it to that config directory's
+`sessions` subdirectory. Missing, invalid or ambiguous locators remain
+unavailable: cwd, terminal titles and newest-file timestamps never establish
+the selected Pi session's identity.
+
 ## Configuration and security
 
 Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, optional JSON (`CAPP_BRIDGE_CONFIG` or `~/.config/cappuccino-bridge/config.json`), then environment (`CAPP_BRIDGE_HOST`, `CAPP_BRIDGE_PORT`, `CAPP_BRIDGE_DATA_DIR`, `CAPP_BRIDGE_SERVE_AUTO_APPLY`). Non-loopback binds and enabled reserved auth are rejected.

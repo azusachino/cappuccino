@@ -382,3 +382,38 @@ Source and JVM clearance only: wire models, concrete OkHttp/WS transport, lifecy
 Material 3 / dynamic theme, and raw socket close fixture proof are verified. Broad Android runtime,
 OS process death under platform pressure, physical phone Tailscale HTTPS/WSS connectivity, and
 canonical Pi history parity remain separately unverified/blocked for device trial stage E.
+
+## Pi transcript identity — conversation-polish checkpoint
+
+Verified 2026-10-08 on `fix/conversation-polish`, base
+`183460b78e6cd71e5684d77b380cc1f03d6a9fae`, with only
+`services/bridge/src/transcript.rs` and `services/bridge/README.md` in the
+reviewed bridge diff. Transcript source SHA-256:
+`c8387d537a40b885ae5f40ab4316e8d772ac390ae9bc0832dcce8442fe6ee92f`.
+
+Fresh independent Herdr peer `cap-polish-review` used the owner-selected
+`zai-coding-cn/glm-5.3-flash` at low effort. All six criteria passed: exact
+path-kind session reports, both default Luna/Pi stores, exclusive override
+precedence, no cwd/title/newest-file guessing, canonical containment, and
+accurate documentation. Nine focused transcript cases include the known-Pi
+pane guard against an `agy` word in its title.
+
+The lead and reviewer each completed `make check-bridge`: 104 normal tests
+(41 unit, 41 client, 6 lifecycle, 9 resource, 7 schema), all four mandatory
+ignored resource cases, formatting and the release example build passed.
+The independent resource run took 349.30 seconds. Both completed `make
+md-check` with exit 0. This evidence-only record changes no runtime inputs;
+Markdown is checked again before its commit.
+
+Earlier reviewer attempts lost an exit result or timed out. They are not
+successful gate evidence; the complete independent rerun supersedes them.
+The outer Herdr wait also timed out before the peer's final response; the
+lead retrieved the completed report and actual exit-bearing logs afterward.
+The peer reconciled its interrupted attempt's stale socket/temp root and
+left pre-session, non-owned processes untouched. No owner bridge or agent
+was restarted, and no Tailscale configuration changed.
+
+Limits: this proves resolver/source and hermetic bridge behavior, not
+canonical live Pi/active-branch parity, a runtime deployment, physical-device
+connectivity or global issue #12 acceptance. Missing authoritative Pi
+identity still fails closed. Android presentation acceptance is separate.
