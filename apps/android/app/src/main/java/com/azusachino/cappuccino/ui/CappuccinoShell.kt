@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -45,6 +47,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,6 +63,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.azusachino.cappuccino.core.AgentRow
@@ -71,6 +75,7 @@ import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ConnectionState
+import java.time.ZoneId
 import kotlinx.coroutines.launch
 
 private enum class Destination(val title: Int, val icon: Int) {
@@ -121,9 +126,13 @@ fun StatusBadge(status: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun CappuccinoShell(viewModel: ConnectedViewModel, requestConnect: (String, String) -> Unit) {
+fun CappuccinoShell(
+  viewModel: ConnectedViewModel,
+  timeZone: ZoneId = ZoneId.systemDefault(),
+  requestConnect: (String, String) -> Unit,
+) {
   val state by viewModel.state.collectAsStateWithLifecycle()
-  CappuccinoScreen(state, viewModel, requestConnect)
+  CappuccinoScreen(state, viewModel, timeZone, requestConnect)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -131,6 +140,7 @@ fun CappuccinoShell(viewModel: ConnectedViewModel, requestConnect: (String, Stri
 fun CappuccinoScreen(
   state: ConnectedUiState,
   actions: ConnectedActions,
+  timeZone: ZoneId = ZoneId.systemDefault(),
   requestConnect: (String, String) -> Unit,
 ) {
   var destination by rememberSaveable { mutableStateOf(Destination.CHATS) }
@@ -140,34 +150,44 @@ fun CappuccinoScreen(
   var pendingAdd by rememberSaveable { mutableStateOf(false) }
   var previousProfileIds by rememberSaveable { mutableStateOf("") }
   val selected = state.selectedAgent
-  val outputListState = rememberLazyListState()
-  var hasNewOutput by remember { mutableStateOf(false) }
-  var followingOutput by remember { mutableStateOf(true) }
+  val outputIdentity = Triple(state.activeProfileId, selected?.machineId, selected?.sessionId)
+  val outputListState = key(outputIdentity) { rememberLazyListState() }
+  val turns = state.conversationTurns
+  val rows = state.stream.rows()
+  val collapsedRows = remember(rows) { collapseOutputRows(rows) }
+  val displayedContent: List<*> = if (turns.isNotEmpty()) turns else collapsedRows
+  var hasNewOutput by remember(outputIdentity) { mutableStateOf(false) }
+  var followingOutput by remember(outputIdentity) { mutableStateOf(true) }
+  var automaticScroll by remember(outputIdentity) { mutableStateOf(false) }
   val outputScope = rememberCoroutineScope()
 
   LaunchedEffect(outputListState) {
-    var layoutReady = false
+    var observedManualScroll = false
     snapshotFlow {
-      val info = outputListState.layoutInfo
-      info.totalItemsCount to
-        ((info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 2)
+      Triple(outputListState.isScrollInProgress, !outputListState.canScrollForward, automaticScroll)
     }
-      .collect { (total, nearEnd) ->
-        if (total > 0) {
-          if (layoutReady) followingOutput = nearEnd else layoutReady = true
+      .collect { (scrolling, atEnd, automatic) ->
+        if (scrolling && !automatic) {
+          observedManualScroll = true
+          followingOutput = false
+        } else if (!scrolling && !automatic && observedManualScroll) {
+          observedManualScroll = false
+          followingOutput = atEnd
+          if (atEnd) hasNewOutput = false
         }
       }
   }
-  LaunchedEffect(selected?.sessionId) {
-    followingOutput = true
-    hasNewOutput = false
-  }
-  LaunchedEffect(state.stream.entries.size, selected?.sessionId, state.connection) {
-    val rows = state.stream.rows()
-    if (rows.isNotEmpty()) {
-      if (followingOutput || rows.size <= 1) {
-        outputListState.scrollToItem(rows.lastIndex)
-        hasNewOutput = false
+  LaunchedEffect(displayedContent, outputIdentity) {
+    if (selected != null && displayedContent.isNotEmpty()) {
+      if (followingOutput) {
+        automaticScroll = true
+        try {
+          // A bottom marker handles tall last turns and collapsed stream rows alike.
+          outputListState.scrollToItem(displayedContent.size)
+          hasNewOutput = false
+        } finally {
+          automaticScroll = false
+        }
       } else {
         hasNewOutput = true
       }
@@ -290,10 +310,9 @@ fun CappuccinoScreen(
             color = MaterialTheme.colorScheme.surfaceVariant,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
           ) {
-            Row(
+            Column(
               modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
               Text(
                 "Recent agent output · Read-only",
@@ -305,6 +324,8 @@ fun CappuccinoScreen(
                 "${state.profiles.firstOrNull { it.id == state.activeProfileId }?.label ?: "Machine"} · ${selected.sessionId} · ${selected.branch ?: "Branch unknown"}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
               )
             }
           }
@@ -346,9 +367,14 @@ fun CappuccinoScreen(
               Surface(
                 onClick = {
                   outputScope.launch {
-                    val last = state.stream.rows().lastIndex
-                    if (last >= 0) outputListState.animateScrollToItem(last)
-                    hasNewOutput = false
+                    followingOutput = true
+                    automaticScroll = true
+                    try {
+                      outputListState.animateScrollToItem(displayedContent.size)
+                      hasNewOutput = false
+                    } finally {
+                      automaticScroll = false
+                    }
                   }
                 },
                 shape = RoundedCornerShape(16.dp),
@@ -365,8 +391,6 @@ fun CappuccinoScreen(
               }
             }
           SelectionContainer(Modifier.weight(1f).fillMaxWidth()) {
-            val turns = state.conversationTurns
-            val rows = state.stream.rows()
             if (turns.isNotEmpty()) {
               LazyColumn(
                 state = outputListState,
@@ -374,17 +398,25 @@ fun CappuccinoScreen(
                   Modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("recentOutputList"),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
               ) {
-                items(turns, key = { it.id }) { turn -> ConversationTurnRow(turn) }
+                items(
+                  turns,
+                  key = {
+                    "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
+                  },
+                ) { turn ->
+                  ConversationTurnRow(turn, timeZone = timeZone)
+                }
+                item(key = "conversation-bottom") { Spacer(Modifier.height(1.dp)) }
               }
             } else {
-              val collapsedRows = remember(rows) { collapseOutputRows(rows) }
               LazyColumn(
                 state = outputListState,
                 modifier =
                   Modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("recentOutputList"),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
               ) {
-                items(collapsedRows, key = { it.key }) { row -> OutputItemRow(row) }
+                items(collapsedRows, key = { "row:${it.key}" }) { row -> OutputItemRow(row) }
+                item(key = "stream-bottom") { Spacer(Modifier.height(1.dp)) }
               }
             }
           }
@@ -1310,7 +1342,11 @@ fun PromptInputBar(
 }
 
 @Composable
-fun ConversationTurnRow(turn: ConversationTurn, modifier: Modifier = Modifier) {
+fun ConversationTurnRow(
+  turn: ConversationTurn,
+  modifier: Modifier = Modifier,
+  timeZone: ZoneId = ZoneId.systemDefault(),
+) {
   val isUser = turn.role.lowercase() == "user"
   Column(
     modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -1343,82 +1379,23 @@ fun ConversationTurnRow(turn: ConversationTurn, modifier: Modifier = Modifier) {
               if (isUser) MaterialTheme.colorScheme.primary
               else MaterialTheme.colorScheme.onSurface,
           )
-          turn.timestamp?.let { ts ->
-            Text(
-              text = ts,
-              style = MaterialTheme.typography.labelSmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-          }
-        }
-
-        turn.text?.let { mainText ->
-          Text(
-            text = mainText,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-          )
-        }
-
-        turn.parts.forEach { part ->
-          when (part) {
-            is ConversationPart.Text -> {
+          turn.timestamp
+            ?.let { formatConversationTimestamp(it, timeZone) }
+            ?.let { timestamp ->
               Text(
-                text = part.text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                text = timestamp,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
-            is ConversationPart.Thinking -> {
-              Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                modifier = Modifier.fillMaxWidth(),
-              ) {
-                Text(
-                  text = part.text,
-                  style = MaterialTheme.typography.bodySmall,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  modifier = Modifier.padding(8.dp),
-                )
-              }
-            }
-            is ConversationPart.ToolCall -> {
-              Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
-                modifier = Modifier.fillMaxWidth(),
-              ) {
-                Column(
-                  modifier = Modifier.padding(8.dp),
-                  verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                  Text(
-                    text = "Tool: ${part.name}",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                  )
-                  if (part.input.isNotBlank()) {
-                    Text(
-                      text = part.input,
-                      fontFamily = FontFamily.Monospace,
-                      style = MaterialTheme.typography.bodySmall,
-                      color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                  }
-                  part.output?.let { out ->
-                    Text(
-                      text = out,
-                      fontFamily = FontFamily.Monospace,
-                      style = MaterialTheme.typography.bodySmall,
-                      color = MaterialTheme.colorScheme.onSurface,
-                    )
-                  }
-                }
-              }
+        }
+
+        turn.text?.let { MarkdownText(it) }
+        turn.parts.forEachIndexed { index, part ->
+          key(turn.id, index) {
+            when (part) {
+              is ConversationPart.Text -> MarkdownText(part.text)
+              else -> ConversationDetails(part)
             }
           }
         }

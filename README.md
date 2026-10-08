@@ -74,9 +74,25 @@ make validate-android
 ANDROID_SERIAL=<task-owned emulator serial> make ui-test-android
 ```
 
-Create a new, uniquely named AVD from an already available image; do not reuse or overwrite an owner's AVD. Local evidence uses an API 35 ARM emulator; CI selects API 35 x86_64 on its disposable Linux runner. Instrumentation visits Chats, Attention and Machines, checks disabled messaging and explicit delivery choices, and exercises activity recreation. Reports remain under `apps/android/app/build/`; three synthetic screenshots export to `.build/android/screens/`.
+The Android conversation reader renders native CommonMark prose/code, keeps tool
+and thought details collapsed until expanded, and formats timestamps in the
+device timezone as `yyyy-MM-dd HH:mm:ss`. It follows the newest displayed
+content unless you scroll back; incoming content then offers an explicit jump
+to latest. Canonical Pi identity still requires an authoritative Herdr session
+report; see [Pi identity](services/bridge/README.md#pi-transcript-identity).
 
-Release keys and physical-phone installation are separate work. Debug APK assembly uses development signing only. The skeleton declares no network permission; legacy and modern backup/transfer rules exclude app data. Those rules are not a credential-storage implementation.
+Create a new, uniquely named AVD from an already available image; do not reuse
+or overwrite an owner's AVD. Local evidence uses an API 35 ARM emulator; CI
+selects API 35 x86_64 on its disposable Linux runner. Instrumentation covers
+navigation/recreation, machine and foreground recovery, connection failures,
+conversation scrolling, disclosures, Markdown and live timezone changes.
+Reports and additional synthetic PNGs remain under `apps/android/app/build/`;
+the three baseline screenshots export to `.build/android/screens/`.
+
+Release keys and physical-phone installation are separate work. Debug APK
+assembly uses development signing only. Android declares network access for
+bridge connections; legacy and modern backup/transfer rules exclude app data.
+Those rules are not a credential-storage implementation.
 
 ## Gates
 

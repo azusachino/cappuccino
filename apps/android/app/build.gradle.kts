@@ -46,6 +46,7 @@ ktfmt { googleStyle() }
 dependencies {
   implementation(platform(libs.compose.bom))
   implementation(libs.compose.material3)
+  implementation(libs.commonmark)
   implementation(libs.activity.compose)
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.okhttp)
