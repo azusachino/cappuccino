@@ -569,3 +569,73 @@ Status: the local repair is accepted at this checkpoint; hosted CI has not yet
 re-run. The historical run 37756325936 remains FAILED as a record; subsequent
 delivery (lead commit + push) must produce a green hosted run on PR #29 before
 any DONE/merge claim — no hosted-green claim is made here.
+
+## Short-CI geometry failure (run 37761436036) — test visibility-precondition repair, reviewed local checkpoint
+
+Hosted CI run 37761436036 (API 35 ARM, AVD frame 320x640 @ density 160) failed
+`ConversationPreviewScreenshotTest.captureConversationExpandedDark` at line 203:
+`No node found that matches ... contains '63 passed · 0 failed' ... Tag:
+'recentOutputList'` with scroll pinned at `value=maxValue=993.0`. Read-only
+diagnosis (separate session, scratch `ci-ui-diag/`) reproduced the same
+deterministic red on a local task-owned AVD at the exact CI frame and identified
+a test-fixture assumption bug, not a production failure: at the 316 px viewport
+the `Tool: bash · Result available` row sits below the fold after the
+bottom-pinning scroll to the Thinking detail, and the test clicked it with no
+`assertIsDisplayed()` guard, so the click landed on a clipped node and the
+disclosure never expanded. This short-viewport behavior has no counterpart in
+the prior tall local AVDs where the whole history fit on screen; production
+one-click expansion is unchanged and correct (the sibling click test passes on
+CI and locally).
+
+Minimal test-only repair (this writer, sole file changed): before the single
+expand click, `performScrollToNode(hasText("Tool: bash · Result available"))` on
+`recentOutputList` plus `assertIsDisplayed()` on the row — mirroring the
+existing Thinking-row pattern. The single click, expanded-state assertions,
+exact full tool input (`bun run test --filter android`) and exact output
+(`63 passed · 0 failed`) with `assertIsDisplayed` are all preserved; no skip,
+relaxation, retry, sleep or production/style/catalog change.
+
+Local proof on the task-owned AVD `cappuccino-material3-ci-shape-api35`
+(explicit `-port 5560`, exact CI frame 320x640 @ 160, ARM API 35), max three UI
+runs: (1) focused pre-patch run RED — 1 test / 1 failure, byte-identical failure
+semantics to CI (same assertion text, list bounds, scroll range); (2) focused
+post-patch run GREEN — 1/1, exit 0; (3) full `make ui-test-android` exit 0 —
+21 tests / 0 failures / 0 errors / 0 skips. The fresh 320x640 capture
+`Conversation320DarkExpanded.png` (whole-file SHA-256
+`37e3bf708bac0295c18c9cbee8148309397f950362c6b6d744757b3c3c195c1a`) shows both
+disclosures expanded with the exact input and output visible in frame. Other
+gates: `make fmt-check` exit 0; `make check-android` exit 0; forced
+`:app:testDebugUnitTest --rerun` exit 0, 63 tests / 0 failures / 0 errors / 0
+skips; `make validate-android` exit 0; `make md-check` exit 0. `make validate`
+(full) exit 2: the Apple half fails to build on this host (`TestingMacros`
+SourceLocationMacro plugin not found under CommandLineTools) in untouched
+`packages/apple` files — a host toolchain limitation unrelated to this
+Android-only change, reported as a gate blocker rather than substituted.
+
+Whole-tree identity (175 tracked files, SHA-256 per file, same method as the
+diagnosis): exactly one file differs from the frozen diagnosis before-tree —
+`ConversationPreviewScreenshotTest.kt`
+(`5e691cbe…` → `edbed781…`). Production source, theme, catalog and all approved
+historical PNG assets are unchanged from base 340bd37fe (HEAD, clean at start).
+
+Fresh independent verification (separate LOW session, read-only, scratch
+`ci-ui-verify/report.md`) PASSED all criteria: device identity guarded to the
+task-owned `emulator-5560`/PID 69136 before every action; the diff reviewed as
+a minimal single-click visibility precondition with no weakening; independent
+focused rerun 1/0/0/0 and full `make ui-test-android` **21/0/0/0** at the exact
+320x640 @ 160 frame with verified 320x640 captures; forced JVM tests
+**63/0/0/0**; `make md-check` clean; manifest stable (175 files) across all
+gates; and the full gate rerun as `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+make validate` → **exit 0 under Xcode 27.0**, resolving the earlier host
+CommandLineTools Swift-macro build failure by toolchain selection only — no
+waiver, suppression or easier check. The earlier `make validate` exit-2 record
+above stands as the historical CLT-toolchain observation; the reviewed local
+state is accepted at base HEAD `340bd37fe` plus exactly this two-file working
+diff (test fixture + this section).
+
+Status: hosted CI run 37761436036 remains FAILED as the historical red that
+motivated this repair. Local gates are reviewed and accepted; hosted green is
+not claimed — the lead must commit/push this diff and a NEW hosted CI run on
+PR #29 must pass before any DONE/merge claim. The port incident from the
+diagnosis session (unowned use of reserved 5554, PID 68428, terminated and
+observed gone) is recorded in task scratch, not in this public project document.

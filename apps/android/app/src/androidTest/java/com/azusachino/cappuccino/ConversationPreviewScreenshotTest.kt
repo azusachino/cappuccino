@@ -199,6 +199,13 @@ class ConversationPreviewScreenshotTest {
     compose
       .onNodeWithText("Hidden thought details: check collapse, contrast and spacing.")
       .assertIsDisplayed()
+    // At the 320x640@160 CI frame the Tool row sits below the fold after the bottom-pinning
+    // scroll to the Thinking detail; a click injected at its clipped center never lands.
+    // Bring the row into view and prove it is displayed before the single expand click.
+    compose
+      .onNodeWithTag("recentOutputList")
+      .performScrollToNode(hasText("Tool: bash · Result available"))
+    compose.onNodeWithText("Tool: bash · Result available").assertIsDisplayed()
     compose.onNodeWithText("Tool: bash · Result available").performClick()
     compose.onNodeWithTag("recentOutputList").performScrollToNode(hasText("63 passed · 0 failed"))
     compose.waitUntil(timeoutMillis = 5_000) { anyDisplayed("63 passed · 0 failed") }
