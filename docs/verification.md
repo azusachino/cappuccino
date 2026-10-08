@@ -521,3 +521,51 @@ asserted without a visible keyboard and are excluded (the included 320 dp frame 
 the genuine IME evidence); static screenshots do not replace dynamic tests; other
 screens changed color only via the shared tokens, their layouts are not restyled.
 No public PR exists at this checkpoint; broader rollout remains an owner decision.
+
+## CI freshness repair checkpoint — compose compiler 2.4.21 (locally verified; hosted re-run pending)
+
+Hosted CI run 37756325936 on `feat/android-material3-redesign` (PR #29) failed
+`:app:lintDebug` — this is the recorded historical trigger of this repair, not a
+standing status; the branch's current hosted truth is PR #29's checks
+(<https://github.com/azusachino/cappuccino/pull/29>/checks), which the next
+delivery push must turn green.
+(`NewerVersionAvailable`: org.jetbrains.kotlin.plugin.compose 2.4.20 → 2.4.21).
+Repair: single catalog line `kotlin = "2.4.20"` → `"2.4.21"` in
+`apps/android/gradle/libs.versions.toml` (feeds both `kotlin-gradle-plugin` and the
+compose compiler plugin, which are version-locked). No other source, test, UI, gate
+or workflow change. Version availability verified against official artifacts:
+Gradle Plugin Portal marker POM
+`org.jetbrains.kotlin.plugin.compose/org.jetbrains.kotlin.plugin.compose.gradle.plugin/2.4.21`
+and Maven Central
+`org.jetbrains.kotlin/compose-compiler-gradle-plugin/2.4.21` both resolve (HTTP 200).
+
+Local gates at this checkpoint (working tree, uncommitted): pre-patch fresh
+`:app:lintDebug --rerun-tasks --refresh-dependencies` exit 0 (cached-green, CI red
+remains the authoritative failure signal); post-patch fresh lint exit 0, 29/29
+executed; `make check-android` exit 0; `make validate-android` exit 0 (71 tasks);
+forced `:app:testDebugUnitTest --rerun-tasks` exit 0, 63 tests / 0 failures /
+0 errors / 0 skips; full `make ui-test-android` (`ANDROID_SERIAL=emulator-5560`)
+exit 0, 21 tests / 0 failures / 0 errors / 0 skips on the new task-owned AVD
+`cappuccino-material3-ci-api35` (API 35 google_apis arm64-v8a, serial
+emulator-5560, launcher PID recorded in task scratch). Fresh runtime captures at
+compose compiler 2.4.21 (12 PNGs, normal 448 dp + compact 320 dp density override,
+restored and verified) show no material appearance change versus the accepted
+7-image set; the accepted PNGs remain historical 2.4.20 evidence and are not
+replaced. Capture-width reconciliation: the first compact attempt (density 540)
+rendered 398 dp frames, not contract compact; a corrective density-672 run
+produced the true-320 dp set (1344 px ÷ (672/160) = 320 dp). Both overrides were
+reset and verified; only the 672 run is compact-contract evidence.
+
+Fresh independent verification (GLM Flash, LOW reasoning, separate session,
+read-only, source frozen) PASSED the local repair: independently reran fresh
+lint (exit 0, 29/29), `make validate-android` (exit 0, 71 tasks), forced JVM
+tests 63/0/0/0, full UI suite 21/0/0/0, plus a focused true-320 dp preview run
+5/0/0/0 — and confirmed no material appearance change at 320 dp (bottom-end FAB,
+genuine in-frame Gboard, identical tokens), so no owner re-approval is needed.
+The 2.4.21 catalog line (`f06fd72b…`) and all 7 approved PNG assets were
+whole-file SHA-256 stable before and after verification, unchanged from HEAD.
+
+Status: the local repair is accepted at this checkpoint; hosted CI has not yet
+re-run. The historical run 37756325936 remains FAILED as a record; subsequent
+delivery (lead commit + push) must produce a green hosted run on PR #29 before
+any DONE/merge claim — no hosted-green claim is made here.
