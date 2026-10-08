@@ -1,12 +1,12 @@
 package com.azusachino.cappuccino.ui
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -69,7 +69,7 @@ private fun MarkdownBlock(node: Node, depth: Int) {
   when (node) {
     is Heading ->
       Text(
-        markdownInlineText(node, MaterialTheme.colorScheme.surface),
+        markdownInlineText(node, MaterialTheme.colorScheme.surfaceContainer),
         modifier = Modifier.semantics { heading() }.padding(top = 4.dp),
         style =
           when (node.level) {
@@ -77,11 +77,10 @@ private fun MarkdownBlock(node: Node, depth: Int) {
             2 -> MaterialTheme.typography.titleLarge
             else -> MaterialTheme.typography.titleMedium
           },
-        fontWeight = FontWeight.Bold,
       )
     is Paragraph ->
       Text(
-        markdownInlineText(node, MaterialTheme.colorScheme.surface),
+        markdownInlineText(node, MaterialTheme.colorScheme.surfaceContainer),
         style = MaterialTheme.typography.bodyMedium,
       )
     is FencedCodeBlock -> MarkdownCode(node.literal.trimEnd('\n'))
@@ -104,11 +103,10 @@ private fun MarkdownBlock(node: Node, depth: Int) {
       }
     is BlockQuote ->
       Surface(
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.small,
       ) {
-        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
           node.children().forEach { MarkdownBlock(it, depth + 1) }
         }
       }
@@ -118,14 +116,15 @@ private fun MarkdownBlock(node: Node, depth: Int) {
 
 @Composable
 private fun MarkdownCode(text: String) {
+  // Code is content, not decoration: monospace on a tonal surface, no border.
   Surface(
-    color = MaterialTheme.colorScheme.surface,
-    shape = RoundedCornerShape(6.dp),
+    color = MaterialTheme.colorScheme.surfaceContainer,
+    shape = MaterialTheme.shapes.small,
     modifier = Modifier.fillMaxWidth(),
   ) {
     Text(
       text,
-      modifier = Modifier.padding(8.dp),
+      modifier = Modifier.padding(12.dp).horizontalScroll(rememberScrollState()),
       fontFamily = FontFamily.Monospace,
       style = MaterialTheme.typography.bodySmall,
     )

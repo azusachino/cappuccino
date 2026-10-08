@@ -22,7 +22,7 @@ class ThemeTest {
   }
 
   @Test
-  fun selectsHerdrColorSchemesByDefaultEvenOnApi31() {
+  fun selectsFallbackColorSchemesByDefaultEvenOnApi31() {
     assertSame(
       fallbackLight,
       selectColorScheme(

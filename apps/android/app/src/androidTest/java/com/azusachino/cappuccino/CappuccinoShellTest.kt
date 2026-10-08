@@ -136,7 +136,9 @@ class CappuccinoShellTest {
         )
     }
     compose.waitForIdle()
+    awaitJumpAffordance()
     compose.onNodeWithText("Jump to latest").assertIsDisplayed()
+    assertJumpAffordanceSitsAboveComposer()
     compose.onNodeWithText("Jump to latest").performClick()
     compose.onNodeWithText("Synthetic output 31").assertIsDisplayed()
 
@@ -215,7 +217,9 @@ class CappuccinoShellTest {
               ConversationTurn("t31", "assistant", null, "Newest structured response", emptyList())
         )
     }
+    awaitJumpAffordance()
     compose.onNodeWithText("Jump to latest").assertIsDisplayed()
+    assertJumpAffordanceSitsAboveComposer()
     val after =
       compose
         .onNodeWithTag("recentOutputList")
@@ -300,6 +304,40 @@ class CappuccinoShellTest {
       setZone(originalZone)
       compose.waitUntil(timeoutMillis = 5000) { ZoneId.systemDefault() == ZoneId.of(originalZone) }
     }
+  }
+
+  private fun assertJumpAffordanceSitsAboveComposer() {
+    // Contract geometry, not just text presence (android-material3.md region 8): the
+    // extended FAB must render in flow at the bottom end, between the transcript and the
+    // composer — never back at the top of the transcript column.
+    val decor = compose.activity.window.decorView
+    val fab = compose.onNodeWithText("Jump to latest").fetchSemanticsNode().boundsInRoot
+    val composer = compose.onNodeWithTag("promptInput").fetchSemanticsNode().boundsInRoot
+    val transcript = compose.onNodeWithTag("recentOutputList").fetchSemanticsNode().boundsInRoot
+    assertTrue(
+      "FAB must sit in the bottom half of the screen " +
+        "(bottom=${fab.bottom}, window=${decor.height})",
+      fab.bottom > decor.height / 2f,
+    )
+    assertTrue(
+      "FAB bottom must stay above the composer (fab=$fab, composer=$composer)",
+      fab.bottom <= composer.top,
+    )
+    assertTrue(
+      "FAB must not overlap the transcript above it (transcript=$transcript, fab=$fab)",
+      transcript.bottom <= fab.top,
+    )
+  }
+
+  private fun awaitJumpAffordance() {
+    // The M3 extended FAB animates its width in on appearance; wait (bounded, test
+    // thread) until the affordance has real size, then the unchanged display assertions apply.
+    compose.waitUntil(timeoutMillis = 5_000) {
+      compose.onAllNodesWithText("Jump to latest").fetchSemanticsNodes().any {
+        it.boundsInRoot.width > 100
+      }
+    }
+    compose.waitForIdle()
   }
 
   private fun shell(command: String): String =

@@ -26,13 +26,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -43,7 +46,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -59,10 +61,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -103,12 +107,8 @@ fun StatusBadge(status: String, modifier: Modifier = Modifier) {
       "blocked" -> HerdrStatusBlocked to "BLOCKED"
       else -> HerdrStatusIdle to "IDLE"
     }
-  Surface(
-    modifier = modifier,
-    shape = RoundedCornerShape(12.dp),
-    color = color.copy(alpha = 0.15f),
-    border = BorderStroke(1.dp, color.copy(alpha = 0.4f)),
-  ) {
+  // Tonal pill with a semantic status color; full/circle shape, no border stroke.
+  Surface(modifier = modifier, shape = CircleShape, color = color.copy(alpha = 0.15f)) {
     Row(
       modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
       verticalAlignment = Alignment.CenterVertically,
@@ -242,6 +242,7 @@ fun CappuccinoScreen(
             }
           }
         },
+        // M3 app bar defaults apply: no colors override (android-material3.md region 1).
         actions = {
           if (selected == null && state.activeProfileId != null) {
             IconButton(onClick = actions::refresh, enabled = !state.busy) {
@@ -258,11 +259,6 @@ fun CappuccinoScreen(
             }
           }
         },
-        colors =
-          TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-          ),
       )
     },
     floatingActionButton = {
@@ -280,10 +276,7 @@ fun CappuccinoScreen(
       }
     },
     bottomBar = {
-      NavigationBar(
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
-      ) {
+      NavigationBar {
         Destination.entries.forEach { item ->
           NavigationBarItem(
             selected = destination == item && selected == null,
@@ -304,38 +297,42 @@ fun CappuccinoScreen(
     ) {
       when {
         selected != null -> {
-          Surface(
+          // Transcript metadata as plain text lines under the app bar; cardless
+          // (android-material3.md region 2).
+          Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
           ) {
-            Column(
-              modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-              verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-              Text(
-                "Recent agent output · Read-only",
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Medium,
-              )
-              Text(
-                "${state.profiles.firstOrNull { it.id == state.activeProfileId }?.label ?: "Machine"} · ${selected.sessionId} · ${selected.branch ?: "Branch unknown"}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-              )
-            }
+            Text(
+              "Recent agent output · Read-only",
+              style = MaterialTheme.typography.labelMedium,
+            )
+            Text(
+              "${state.profiles.firstOrNull { it.id == state.activeProfileId }?.label ?: "Machine"} · ${selected.sessionId} · ${selected.branch ?: "Branch unknown"}",
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              maxLines = 2,
+              overflow = TextOverflow.Ellipsis,
+            )
           }
           when (val connection = state.connection) {
-            ConnectionState.Connecting -> Text("Connecting…", Modifier.padding(16.dp))
+            ConnectionState.Connecting ->
+              Column(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+              ) {
+                Text(
+                  "Connecting…",
+                  style = MaterialTheme.typography.bodyMedium,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+              }
             ConnectionState.Recovering ->
               Text(
                 "Reconnecting; earlier output may be missing",
                 Modifier.padding(16.dp),
-                color = MaterialTheme.colorScheme.tertiary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             is ConnectionState.Error ->
               Text(
@@ -359,37 +356,6 @@ fun CappuccinoScreen(
             }
           }
 
-          if (hasNewOutput)
-            Box(
-              modifier = Modifier.fillMaxWidth().padding(end = 16.dp),
-              contentAlignment = Alignment.CenterEnd,
-            ) {
-              Surface(
-                onClick = {
-                  outputScope.launch {
-                    followingOutput = true
-                    automaticScroll = true
-                    try {
-                      outputListState.animateScrollToItem(displayedContent.size)
-                      hasNewOutput = false
-                    } finally {
-                      automaticScroll = false
-                    }
-                  }
-                },
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.primary,
-                shadowElevation = 4.dp,
-              ) {
-                Text(
-                  "Jump to latest",
-                  modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                  color = MaterialTheme.colorScheme.onPrimary,
-                  style = MaterialTheme.typography.labelSmall,
-                  fontWeight = FontWeight.Bold,
-                )
-              }
-            }
           SelectionContainer(Modifier.weight(1f).fillMaxWidth()) {
             if (turns.isNotEmpty()) {
               LazyColumn(
@@ -427,6 +393,36 @@ fun CappuccinoScreen(
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
+          // Jump affordance as a native extended FAB at the bottom end, in flow between
+          // the transcript and the composer so it never overlaps the composer, IME or
+          // navigation bar and never steals transcript height (region 8).
+          if (hasNewOutput)
+            Row(
+              modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+              horizontalArrangement = Arrangement.End,
+            ) {
+              ExtendedFloatingActionButton(
+                onClick = {
+                  outputScope.launch {
+                    followingOutput = true
+                    automaticScroll = true
+                    try {
+                      outputListState.animateScrollToItem(displayedContent.size)
+                      hasNewOutput = false
+                    } finally {
+                      automaticScroll = false
+                    }
+                  }
+                }
+              ) {
+                Icon(
+                  painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_arrow_downward),
+                  contentDescription = null,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Jump to latest")
+              }
+            }
           // Interactive prompt input bar
           PromptInputBar(
             onSend = { text -> actions.submitPrompt(text) },
@@ -880,23 +876,14 @@ private fun shouldCollapseStreamTails(prevText: String, currentText: String): Bo
 @Composable
 private fun OutputItemRow(row: OutputRow) {
   if (row.gap) {
-    Box(
+    // Gap markers are plain centered lines on the background (region 5d).
+    Text(
+      row.text,
       modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-      contentAlignment = Alignment.Center,
-    ) {
-      Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-      ) {
-        Text(
-          row.text,
-          modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-          color = MaterialTheme.colorScheme.primary,
-          style = MaterialTheme.typography.labelSmall,
-        )
-      }
-    }
+      textAlign = TextAlign.Center,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.labelSmall,
+    )
     return
   }
 
@@ -909,90 +896,60 @@ private fun OutputItemRow(row: OutputRow) {
         contentAlignment = Alignment.CenterEnd,
       ) {
         Surface(
-          shape = RoundedCornerShape(12.dp),
-          color = MaterialTheme.colorScheme.surfaceVariant,
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+          shape = MaterialTheme.shapes.large,
+          color = MaterialTheme.colorScheme.primaryContainer,
         ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-          ) {
-            Text(
-              "❯",
-              color = MaterialTheme.colorScheme.primary,
-              fontWeight = FontWeight.Bold,
-              style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-              parsed.text,
-              color = MaterialTheme.colorScheme.onSurface,
-              fontWeight = FontWeight.Medium,
-              style = MaterialTheme.typography.bodySmall,
-            )
-          }
+          Text(
+            parsed.text,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            style = MaterialTheme.typography.bodyMedium,
+          )
         }
       }
     }
     TranscriptRole.TOOL -> {
-      Surface(
+      Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        shape = RoundedCornerShape(6.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
       ) {
-        Row(
-          modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
+        Text(
+          parsed.toolName ?: "tool",
+          color = MaterialTheme.colorScheme.onSurface,
+          fontFamily = FontFamily.Monospace,
+          style = MaterialTheme.typography.bodySmall,
+        )
+        parsed.toolArg?.let { arg ->
           Text(
-            parsed.toolGlyph ?: "●",
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.labelSmall,
-          )
-          Text(
-            parsed.toolName ?: "tool",
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold,
+            "($arg)",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontFamily = FontFamily.Monospace,
             style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
           )
-          parsed.toolArg?.let { arg ->
-            Text(
-              "($arg)",
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-              fontFamily = FontFamily.Monospace,
-              style = MaterialTheme.typography.bodySmall,
-              maxLines = 1,
-            )
-          }
         }
       }
     }
     TranscriptRole.STATUS -> {
       if (parsed.text.isNotBlank()) {
-        Surface(
+        Row(
           modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-          shape = RoundedCornerShape(6.dp),
-          color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-          border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-          ) {
-            Box(modifier = Modifier.size(6.dp).background(HerdrStatusWorking, CircleShape))
-            Text(
-              parsed.text,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-              fontFamily = FontFamily.Monospace,
-              style = MaterialTheme.typography.labelSmall,
-              maxLines = 2,
-            )
-          }
+          // Small semantic-color status dot; its visuals carry no semantics of their own.
+          Box(
+            modifier =
+              Modifier.size(6.dp)
+                .background(HerdrStatusWorking, CircleShape)
+                .clearAndSetSemantics {}
+          )
+          Text(
+            parsed.text,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+          )
         }
       }
     }
@@ -1013,8 +970,6 @@ private fun AgentMessageContent(text: String) {
         text = trimmed.removePrefix("### ").trim(),
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),
         style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
       )
     }
     trimmed.startsWith("## ") -> {
@@ -1022,8 +977,6 @@ private fun AgentMessageContent(text: String) {
         text = trimmed.removePrefix("## ").trim(),
         modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp),
         style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
       )
     }
     trimmed.startsWith("# ") -> {
@@ -1031,8 +984,6 @@ private fun AgentMessageContent(text: String) {
         text = trimmed.removePrefix("# ").trim(),
         modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 6.dp),
         style = MaterialTheme.typography.headlineSmall,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
       )
     }
     trimmed.startsWith("• ") || trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
@@ -1041,12 +992,7 @@ private fun AgentMessageContent(text: String) {
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp, horizontal = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
       ) {
-        Text(
-          "•",
-          color = MaterialTheme.colorScheme.primary,
-          fontWeight = FontWeight.Bold,
-          style = MaterialTheme.typography.bodyMedium,
-        )
+        Text("•", style = MaterialTheme.typography.bodyMedium)
         Text(
           bulletText,
           color = MaterialTheme.colorScheme.onSurface,
@@ -1057,13 +1003,12 @@ private fun AgentMessageContent(text: String) {
     trimmed.startsWith("```") || (trimmed.startsWith("    ") && !trimmed.startsWith("     ")) -> {
       Surface(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        shape = RoundedCornerShape(6.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainer,
       ) {
         Text(
           text = trimmed.removePrefix("```").removeSuffix("```").trim(),
-          modifier = Modifier.padding(8.dp),
+          modifier = Modifier.padding(12.dp),
           color = MaterialTheme.colorScheme.onSurface,
           fontFamily = FontFamily.Monospace,
           style = MaterialTheme.typography.bodySmall,
@@ -1189,12 +1134,8 @@ fun PromptCardView(
   onCancel: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  Surface(
-    modifier = modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(12.dp),
-    color = MaterialTheme.colorScheme.surfaceVariant,
-    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
-  ) {
+  // Approval stays prominent as a default ElevatedCard — no custom border (region 6).
+  ElevatedCard(modifier = modifier.fillMaxWidth()) {
     Column(
       modifier = Modifier.padding(16.dp),
       verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1204,22 +1145,16 @@ fun PromptCardView(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        Text(
-          text = prompt.title,
-          style = MaterialTheme.typography.titleMedium,
-          fontWeight = FontWeight.Bold,
-          color = MaterialTheme.colorScheme.primary,
-        )
+        Text(text = prompt.title, style = MaterialTheme.typography.titleMedium)
         Surface(
-          shape = RoundedCornerShape(6.dp),
-          color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+          shape = CircleShape,
+          color = MaterialTheme.colorScheme.secondaryContainer,
         ) {
           Text(
             text = prompt.type.uppercase(),
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
           )
         }
       }
@@ -1233,10 +1168,10 @@ fun PromptCardView(
       }
 
       prompt.command?.let { cmd ->
+        // Command on a tonal monospace block, no border.
         Surface(
-          shape = RoundedCornerShape(6.dp),
-          color = MaterialTheme.colorScheme.surface,
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+          shape = MaterialTheme.shapes.small,
+          color = MaterialTheme.colorScheme.surfaceContainer,
           modifier = Modifier.fillMaxWidth(),
         ) {
           Text(
@@ -1244,7 +1179,7 @@ fun PromptCardView(
             fontFamily = FontFamily.Monospace,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(8.dp),
+            modifier = Modifier.padding(12.dp),
           )
         }
       }
@@ -1255,7 +1190,6 @@ fun PromptCardView(
             FilledTonalButton(
               onClick = { onSelectOption(index, option.id) },
               modifier = Modifier.fillMaxWidth(),
-              shape = RoundedCornerShape(8.dp),
             ) {
               Column(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -1296,47 +1230,34 @@ fun PromptInputBar(
   modifier: Modifier = Modifier,
 ) {
   var input by rememberSaveable { mutableStateOf("") }
-  Surface(
-    modifier = modifier.fillMaxWidth(),
-    tonalElevation = 3.dp,
-    color = MaterialTheme.colorScheme.surface,
+  // Native composer: OutlinedTextField with default shape and colors; connectivity and
+  // nonblank-send semantics are exactly as merged (region 9).
+  Row(
+    modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
-    Row(
-      modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    OutlinedTextField(
+      value = input,
+      onValueChange = { input = it },
+      placeholder = { Text("Prompt agent…") },
+      modifier = Modifier.weight(1f).testTag("promptInput"),
+      enabled = enabled,
+      singleLine = true,
+    )
+    IconButton(
+      onClick = {
+        if (input.isNotBlank()) {
+          onSend(input)
+          input = ""
+        }
+      },
+      enabled = enabled && input.isNotBlank(),
     ) {
-      OutlinedTextField(
-        value = input,
-        onValueChange = { input = it },
-        placeholder = { Text("Prompt agent…") },
-        modifier = Modifier.weight(1f),
-        enabled = enabled,
-        singleLine = true,
-        shape = RoundedCornerShape(20.dp),
-        colors =
-          OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-          ),
+      Icon(
+        painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_chat),
+        contentDescription = "Send",
       )
-      IconButton(
-        onClick = {
-          if (input.isNotBlank()) {
-            onSend(input)
-            input = ""
-          }
-        },
-        enabled = enabled && input.isNotBlank(),
-      ) {
-        Icon(
-          painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_chat),
-          contentDescription = "Send",
-          tint =
-            if (enabled && input.isNotBlank()) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.outline,
-        )
-      }
     }
   }
 }
@@ -1352,44 +1273,52 @@ fun ConversationTurnRow(
     modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
     horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
   ) {
-    Surface(
-      shape = RoundedCornerShape(12.dp),
-      color =
-        if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-        else MaterialTheme.colorScheme.surfaceVariant,
-      border =
-        BorderStroke(
-          1.dp,
-          if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-          else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-        ),
-      modifier = Modifier.fillMaxWidth(0.92f),
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
+      Text(
+        text = if (isUser) "You" else "Assistant",
+        style = MaterialTheme.typography.labelMedium,
+        color =
+          if (isUser) MaterialTheme.colorScheme.primary
+          else MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      turn.timestamp
+        ?.let { formatConversationTimestamp(it, timeZone) }
+        ?.let { timestamp ->
           Text(
-            text = if (isUser) "You" else "Assistant",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color =
-              if (isUser) MaterialTheme.colorScheme.primary
-              else MaterialTheme.colorScheme.onSurface,
+            text = timestamp,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
-          turn.timestamp
-            ?.let { formatConversationTimestamp(it, timeZone) }
-            ?.let { timestamp ->
-              Text(
-                text = timestamp,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
-            }
         }
-
+    }
+    if (isUser) {
+      // User turn: content-hugging primaryContainer bubble with a shapes token;
+      // never a fraction-width fill (region 5a).
+      Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.primaryContainer,
+      ) {
+        Column(
+          modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          turn.text?.let { MarkdownText(it) }
+          turn.parts.forEachIndexed { index, part ->
+            key(turn.id, index) {
+              when (part) {
+                is ConversationPart.Text -> MarkdownText(part.text)
+                else -> ConversationDetails(part)
+              }
+            }
+          }
+        }
+      }
+    } else {
+      // Assistant turn: prose directly on the background, no wrapping card.
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         turn.text?.let { MarkdownText(it) }
         turn.parts.forEachIndexed { index, part ->
           key(turn.id, index) {
