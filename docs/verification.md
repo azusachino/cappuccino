@@ -472,3 +472,52 @@ Limits: synthetic UI/controller fixtures on API 35 only, not live canonical
 Pi/active-branch parity, physical devices, minimum-OS coverage or deployment.
 Owner phone, Pixel emulator, running bridge/agents and Tailscale were unchanged.
 Hosted CI and global issue #12 acceptance remain separate.
+
+## Native Material 3 conversation slice checkpoint
+
+Accepted 2026-10-08 for the [native Material 3 conversation slice](design/android-material3.md)
+([issue #12](https://github.com/azusachino/cappuccino/issues/12) scope only) on branch
+`feat/android-material3-redesign`, base `36f3afe` (merged PR #28), verified content
+committed unchanged as `cc898ef`. The owner explicitly approved the 7-capture
+preview set of real screenshots — **the conversation slice's app appearance only**;
+no broader redesign, merge, deployment or live/physical acceptance is granted.
+
+Slice delivered: stock M3 color schemes replacing the hand-mixed palette, tonal
+cardless reader rows and disclosures, native app bar / navigation / composer
+components, `primaryContainer` user bubble, and the follow-latest extended FAB —
+with all pre-existing behavior preserved. An independent review found two real
+deviations (jump FAB rendered at the top of the column instead of bottom-end above
+the composer; dark in-app theme drew dark status icons on the near-black surface
+under a light system). Both were repaired surgically (in-flow FAB placement with
+bounds-based geometry assertions; theme→system-bar appearance sync through the
+production composition, `enableEdgeToEdge()` still the single enabler) with no
+assertion weakened.
+
+A fresh independent reviewer (GLM flash, low reasoning, no implementation context)
+rechecked the frozen tree: tracked working diff SHA-256
+`d930c1f97b4e96da9e0094fb63f2b96528098367d2c46ff56ed2b1d1631cb7f8` at start, end and
+after gates, with a whole-tree 12-path manifest (7 tracked-modified + 5 untracked)
+identical before and after. Note: the working-patch hash covers tracked files only;
+the untracked files of the reviewed state are pinned by the manifest itself, and the
+state was committed unchanged as `cc898ef` afterwards. All gates exit 0 at the exact
+final source: `make validate-android`, forced `:app:testDebugUnitTest --rerun-tasks`
+(63 tests), full `make ui-test-android` (21 tests) — zero failures, errors, skips —
+plus `make md-check` and `git diff --check`. Both findings verified FIXED on source,
+tests and the reviewer's own runtime captures. A low-severity bookkeeping defect in
+the implementation writer's scratch after-manifest (10 of 12 paths listed) was
+corrected against the stable reviewed record; the source was never affected.
+
+Accepted evidence: 7 synthetic full-frame captures (1080 × 2340, byte-identical
+originals) in [`evidence/android-material3/`](evidence/android-material3/README.md),
+covering 393/320 dp light/dark, collapsed and expanded disclosures, markdown +
+user bubble, bottom-end FAB, a genuine visible-Gboard IME frame at 320 dp, and the
+production Settings status path (incidental shared-palette evidence only, not a
+Settings redesign). Privacy: synthetic fixtures throughout; no owner sessions,
+tokens or private addresses.
+
+Limits: emulator fixtures on API 35 only — no live Pi/active-branch parity, no
+physical device, no deployment, no merge; some compact IME frames show insets
+asserted without a visible keyboard and are excluded (the included 320 dp frame is
+the genuine IME evidence); static screenshots do not replace dynamic tests; other
+screens changed color only via the shared tokens, their layouts are not restyled.
+No public PR exists at this checkpoint; broader rollout remains an owner decision.
