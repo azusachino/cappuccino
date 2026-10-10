@@ -1,0 +1,452 @@
+{
+  "status": "provisional: source/evidence review and owner visual/library decision pending",
+  "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+  "runs": {
+    "short-light": {
+      "directory": "141744-final-source-short-light",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "exit": 0,
+      "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+      "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+      "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+      "profile_after": {
+        "wm_size": "1080x2340\nOVERRIDE:320x640",
+        "wm_density": "Physical density: 440\nOverride density: 160",
+        "night": "Night mode: no",
+        "font_scale": "1.0"
+      },
+      "xml": "writer/matrix-gallery/evidence/141744-final-source-short-light/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+    },
+    "short-dark": {
+      "directory": "141814-final-source-short-dark",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "exit": 0,
+      "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+      "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+      "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+      "profile_after": {
+        "wm_size": "1080x2340\nOVERRIDE:320x640",
+        "wm_density": "Physical density: 440\nOverride density: 160",
+        "night": "Night mode: yes",
+        "font_scale": "1.0"
+      },
+      "xml": "writer/matrix-gallery/evidence/141814-final-source-short-dark/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+    },
+    "normal-light": {
+      "directory": "141118-normal-light",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "exit": 0,
+      "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+      "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+      "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+      "profile_after": {
+        "wm_size": "1080x2340",
+        "wm_density": "Physical density: 440",
+        "night": "Night mode: no",
+        "font_scale": "1.0"
+      },
+      "xml": "writer/matrix-gallery/evidence/141118-normal-light/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+    },
+    "normal-dark": {
+      "directory": "141158-normal-dark",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "exit": 0,
+      "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+      "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+      "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+      "profile_after": {
+        "wm_size": "1080x2340",
+        "wm_density": "Physical density: 440",
+        "night": "Night mode: yes",
+        "font_scale": "1.0"
+      },
+      "xml": "writer/matrix-gallery/evidence/141158-normal-dark/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+    }
+  },
+  "images": [
+    {
+      "title": "roster",
+      "file": "roster.png",
+      "sha256": "8c7f085fe110eab0594c026575c8528346bb6e4a82bf5cb1f9e22e5d7b2f0118",
+      "width": 320,
+      "height": 640,
+      "density": 160,
+      "theme": "light",
+      "profile": "short-light",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "a_roster_shows_groups_identity_job_session_status",
+      "run": {
+        "directory": "141744-final-source-short-light",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340\nOVERRIDE:320x640",
+          "wm_density": "Physical density: 440\nOverride density: 160",
+          "night": "Night mode: no",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141744-final-source-short-light/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    },
+    {
+      "title": "workspace-default",
+      "file": "workspace-default.png",
+      "sha256": "d135102652430ab958ef7d54b4a0429d1e127f63ceebbec917de02fb65eec974",
+      "width": 1080,
+      "height": 2340,
+      "density": 440,
+      "theme": "dark",
+      "profile": "normal-dark",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "i_workspace_transcript_viewport_nonzero_and_first_turn_visible",
+      "run": {
+        "directory": "141158-normal-dark",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340",
+          "wm_density": "Physical density: 440",
+          "night": "Night mode: yes",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141158-normal-dark/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    },
+    {
+      "title": "ime-short-light",
+      "file": "ime-short-light.png",
+      "sha256": "52db547b9bc82f33414638ca4e2c341bdfcc8bfcf3fa9433c1d2be6fb0445ca7",
+      "width": 320,
+      "height": 640,
+      "density": 160,
+      "theme": "light",
+      "profile": "short-light",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "d_connected_composer_ime_visible",
+      "run": {
+        "directory": "141744-final-source-short-light",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340\nOVERRIDE:320x640",
+          "wm_density": "Physical density: 440\nOverride density: 160",
+          "night": "Night mode: no",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141744-final-source-short-light/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    },
+    {
+      "title": "ime-normal-dark",
+      "file": "ime-normal-dark.png",
+      "sha256": "b34cb1fd5b3058ef857c4d253397214767121746bbd950a1d4b770524032cddd",
+      "width": 1080,
+      "height": 2340,
+      "density": 440,
+      "theme": "dark",
+      "profile": "normal-dark",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "d_connected_composer_ime_visible",
+      "run": {
+        "directory": "141158-normal-dark",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340",
+          "wm_density": "Physical density: 440",
+          "night": "Night mode: yes",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141158-normal-dark/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    },
+    {
+      "title": "thinking-expanded",
+      "file": "thinking-expanded.png",
+      "sha256": "686ee0eb0560110b013678d70153aa6cea5cff06fa644603b753bef131a4c198",
+      "width": 1080,
+      "height": 2340,
+      "density": 440,
+      "theme": "light",
+      "profile": "normal-light",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "c_cross_session_state_reset",
+      "run": {
+        "directory": "141118-normal-light",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340",
+          "wm_density": "Physical density: 440",
+          "night": "Night mode: no",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141118-normal-light/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    },
+    {
+      "title": "tool-expanded",
+      "file": "tool-expanded.png",
+      "sha256": "c8f46fc57915e344fdc5ac9fdef458c2b4d6fd56b73dfb880589060d6bfc3eab",
+      "width": 1080,
+      "height": 2340,
+      "density": 440,
+      "theme": "light",
+      "profile": "normal-light",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "c_cross_session_state_reset",
+      "run": {
+        "directory": "141118-normal-light",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340",
+          "wm_density": "Physical density: 440",
+          "night": "Night mode: no",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141118-normal-light/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    },
+    {
+      "title": "unavailable-capabilities",
+      "file": "unavailable-capabilities.png",
+      "sha256": "17500c97d20e64d4e15a710b7729712dafe90122df0cb722eec4b6d849ea939e",
+      "width": 1080,
+      "height": 2340,
+      "density": 440,
+      "theme": "dark",
+      "profile": "normal-dark",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "e_all_unavailable_actions_with_visible_reasons_reachable",
+      "run": {
+        "directory": "141158-normal-dark",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340",
+          "wm_density": "Physical density: 440",
+          "night": "Night mode: yes",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141158-normal-dark/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    },
+    {
+      "title": "growth-during-jump",
+      "file": "growth-during-jump.png",
+      "sha256": "b6e0cdc50b8e7217f97547e5546279ff9044f07a9fd49f928d25276b1a512ab5",
+      "width": 320,
+      "height": 640,
+      "density": 160,
+      "theme": "light",
+      "profile": "short-light",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "g3_size_growth_during_jump_is_not_dropped",
+      "run": {
+        "directory": "141744-final-source-short-light",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340\nOVERRIDE:320x640",
+          "wm_density": "Physical density: 440\nOverride density: 160",
+          "night": "Night mode: no",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141744-final-source-short-light/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    },
+    {
+      "title": "manual-reading",
+      "file": "manual-reading.png",
+      "sha256": "556b080e315d179646938622b93f206fc2c832d78d2a3229fa4603c25636a849",
+      "width": 320,
+      "height": 640,
+      "density": 160,
+      "theme": "dark",
+      "profile": "short-dark",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "g_drag_from_tail_disables_follow_jump_resumes",
+      "run": {
+        "directory": "141814-final-source-short-dark",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340\nOVERRIDE:320x640",
+          "wm_density": "Physical density: 440\nOverride density: 160",
+          "night": "Night mode: yes",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141814-final-source-short-dark/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    },
+    {
+      "title": "readonly",
+      "file": "readonly.png",
+      "sha256": "f39b6dcf6b6a5c56e76c011707045befb746ebaccb99477020edd2f591253a37",
+      "width": 320,
+      "height": 640,
+      "density": 160,
+      "theme": "light",
+      "profile": "short-light",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "b_select_back_and_reselect_presets",
+      "run": {
+        "directory": "141744-final-source-short-light",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340\nOVERRIDE:320x640",
+          "wm_density": "Physical density: 440\nOverride density: 160",
+          "night": "Night mode: no",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141744-final-source-short-light/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    },
+    {
+      "title": "disconnected",
+      "file": "disconnected.png",
+      "sha256": "acf18c654c09ab98c69c1415dc4e8a2849a26d2e296288ce28a3ad0833c413df",
+      "width": 320,
+      "height": 640,
+      "density": 160,
+      "theme": "dark",
+      "profile": "short-dark",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "b_select_back_and_reselect_presets",
+      "run": {
+        "directory": "141814-final-source-short-dark",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340\nOVERRIDE:320x640",
+          "wm_density": "Physical density: 440\nOverride density: 160",
+          "night": "Night mode: yes",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141814-final-source-short-dark/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    },
+    {
+      "title": "stream-structured",
+      "file": "stream-structured.png",
+      "sha256": "a6cc2e6afae1c87fb09207e5c38411d87f73bbf36ba693b1ad889ed6a7688ff7",
+      "width": 1080,
+      "height": 2340,
+      "density": 440,
+      "theme": "light",
+      "profile": "normal-light",
+      "font_scale": "1.0",
+      "fixture": "synthetic PiFixtures; no live bridge",
+      "method": "s_streaming_structured_authoritative_rendered_passive",
+      "run": {
+        "directory": "141118-normal-light",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "exit": 0,
+        "source_manifest_sha256": "1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c",
+        "app_apk_sha256": "3662c3ae8064d72f5da42e82424a6d01b5149137c1e225a0da948eace73284f9",
+        "test_apk_sha256": "259db677cebde205b97db988048ac2f5b91e20a8f9b9ae2205ab8f0beb485c65",
+        "profile_after": {
+          "wm_size": "1080x2340",
+          "wm_density": "Physical density: 440",
+          "night": "Night mode: no",
+          "font_scale": "1.0"
+        },
+        "xml": "writer/matrix-gallery/evidence/141118-normal-light/xml/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      }
+    }
+  ]
+}
