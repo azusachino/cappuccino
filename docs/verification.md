@@ -30,6 +30,10 @@ All commands below were independently performed with exit 0; no earlier lead gat
 
 Environment: Xcode 27.0, Swift 6.4, task-owned iPhone 18 Pro Simulator with iOS 27.0. Independent XCTest result: `.build/xcode/Logs/Test/Test-Cappuccino-2026.10.05_18-05-28-+0900.xcresult` in Cappuccino. Build/test bundles are ignored local evidence, not portable release artifacts.
 
+## Accepted native Pi workspace prototype evidence (2026-10-10)
+
+Owner choice recorded: **Accept fit; proceed to D1** (candidate rendering scope only; see the [evidence record](evidence/pi-native-workspace-prototype/README.md)). The frozen synthetic prototype, its 12-original gallery, prerequisite and per-profile gate evidence, provenance and archival source snapshot live under [docs/evidence/pi-native-workspace-prototype/](evidence/pi-native-workspace-prototype/README.md). This is accepted-fixture evidence only: no live Pi parity, physical-device/TalkBack acceptance, production adoption, or merge/deploy authorization. The independent Agy C7 report is published as originally received with a required lead correction regarding the wrapper JAR; see [the correction note](evidence/pi-native-workspace-prototype/README.md#wrapper-jar-correction-read-before-citing-the-report).
+
 ## Criterion results
 
 1. **Met:** dependency-free SwiftPM core and minimal shared SwiftUI shell replace Java/Gradle; Git history and GPL-3.0 unchanged; no fabricated connection or speculative bridge.

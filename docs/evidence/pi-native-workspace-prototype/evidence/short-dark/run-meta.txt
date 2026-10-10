@@ -1,0 +1,7 @@
+started_utc=2026-10-10T05:18:14Z
+ended_utc=2026-10-10T05:18:45Z
+exit_code=0
+profile=short theme=dark
+android_serial=
+png_gate=PASS (14 pngs exact)
+profile_after={'wm_size': '1080x2340\nOVERRIDE:320x640', 'wm_density': 'Physical density: 440\nOverride density: 160', 'night': 'Night mode: yes', 'font_scale': '1.0'}

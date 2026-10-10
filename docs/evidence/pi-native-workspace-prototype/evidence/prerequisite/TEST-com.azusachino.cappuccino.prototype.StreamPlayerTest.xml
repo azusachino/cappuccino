@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.azusachino.cappuccino.prototype.StreamPlayerTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-10-10T05:17:41.022Z" hostname="MacMini.local" time="0.003">
+  <properties/>
+  <testcase name="reset returns to generation zero empty" classname="com.azusachino.cappuccino.prototype.StreamPlayerTest" time="0.0"/>
+  <testcase name="next past end is a no-op" classname="com.azusachino.cappuccino.prototype.StreamPlayerTest" time="0.0"/>
+  <testcase name="chunk rebuild equals reducer model" classname="com.azusachino.cappuccino.prototype.StreamPlayerTest" time="0.0"/>
+  <testcase name="authoritative step resets generation and seeds full replacement" classname="com.azusachino.cappuccino.prototype.StreamPlayerTest" time="0.0"/>
+  <testcase name="delta steps append chunks within generation zero" classname="com.azusachino.cappuccino.prototype.StreamPlayerTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

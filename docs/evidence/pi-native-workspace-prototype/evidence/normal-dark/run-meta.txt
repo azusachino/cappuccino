@@ -1,0 +1,7 @@
+started_utc=2026-10-10T05:11:58Z
+ended_utc=2026-10-10T05:12:31Z
+exit_code=0
+profile=normal theme=dark
+android_serial=
+png_gate=PASS (14 pngs exact)
+profile_after={'wm_size': '1080x2340', 'wm_density': 'Physical density: 440', 'night': 'Night mode: yes', 'font_scale': '1.0'}
