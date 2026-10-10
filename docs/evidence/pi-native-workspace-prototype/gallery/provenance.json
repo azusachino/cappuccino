@@ -18,7 +18,7 @@
         "night": "Night mode: no",
         "font_scale": "1.0"
       },
-      "xml": "../evidence/141744-final-source-short-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      "xml": "../evidence/short-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
     },
     "short-dark": {
       "directory": "141814-final-source-short-dark",
@@ -36,7 +36,7 @@
         "night": "Night mode: yes",
         "font_scale": "1.0"
       },
-      "xml": "../evidence/141814-final-source-short-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      "xml": "../evidence/short-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
     },
     "normal-light": {
       "directory": "141118-normal-light",
@@ -54,7 +54,7 @@
         "night": "Night mode: no",
         "font_scale": "1.0"
       },
-      "xml": "../evidence/141118-normal-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      "xml": "../evidence/normal-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
     },
     "normal-dark": {
       "directory": "141158-normal-dark",
@@ -72,7 +72,7 @@
         "night": "Night mode: yes",
         "font_scale": "1.0"
       },
-      "xml": "../evidence/141158-normal-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+      "xml": "../evidence/normal-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
     }
   },
   "images": [
@@ -104,7 +104,7 @@
           "night": "Night mode: no",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141744-final-source-short-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/short-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     },
     {
@@ -135,7 +135,7 @@
           "night": "Night mode: yes",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141158-normal-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/normal-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     },
     {
@@ -166,7 +166,7 @@
           "night": "Night mode: no",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141744-final-source-short-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/short-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     },
     {
@@ -197,7 +197,7 @@
           "night": "Night mode: yes",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141158-normal-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/normal-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     },
     {
@@ -228,7 +228,7 @@
           "night": "Night mode: no",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141118-normal-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/normal-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     },
     {
@@ -259,7 +259,7 @@
           "night": "Night mode: no",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141118-normal-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/normal-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     },
     {
@@ -290,7 +290,7 @@
           "night": "Night mode: yes",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141158-normal-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/normal-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     },
     {
@@ -321,7 +321,7 @@
           "night": "Night mode: no",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141744-final-source-short-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/short-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     },
     {
@@ -352,7 +352,7 @@
           "night": "Night mode: yes",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141814-final-source-short-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/short-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     },
     {
@@ -383,7 +383,7 @@
           "night": "Night mode: no",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141744-final-source-short-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/short-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     },
     {
@@ -414,7 +414,7 @@
           "night": "Night mode: yes",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141814-final-source-short-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/short-dark/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     },
     {
@@ -445,7 +445,7 @@
           "night": "Night mode: no",
           "font_scale": "1.0"
         },
-        "xml": "../evidence/141118-normal-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
+        "xml": "../evidence/normal-light/TEST-cappuccino-pi-workspace-preview-api35(AVD) - 15.xml"
       }
     }
   ]
