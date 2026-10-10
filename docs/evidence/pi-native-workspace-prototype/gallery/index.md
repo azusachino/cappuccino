@@ -2,7 +2,7 @@
 
 Synthetic fixtures only. Not live Pi parity, physical-device acceptance or production adoption. Owner accepted fit and chose to proceed to D1 on this basis; the record is frozen evidence, see the [record README](../README.md).
 
-Common 24-file source manifest SHA-256: `1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c`.
+Common 25-file source manifest SHA-256 (includes the wrapper JAR): `1a1a61e41d6da3c79354362abe62f1109c4694ba8c56883432affe8970aada0c`.
 
 32 current JVM tests green; 13 UI tests green in each approved profile/theme. Runs (owner-approved reuse): `141744-final-source-short-light`, `141814-final-source-short-dark`, `141118-normal-light`, `141158-normal-dark`; app APK `3662c3ae…84f9`, test APK `259db677…65c6` — full values in [provenance.json](provenance.json) and the per-run XMLs under [../evidence/](../evidence/).
 
