@@ -22,9 +22,10 @@ data class RecentConversation(
 
 fun boundedConversation(turns: List<ConversationTurn>): RecentConversation {
   val messages = recentWindow(turns, MAX_RECENT_MESSAGES)
-  val totalTools =
+  val totalTools = turns.sumOf { turn -> turn.parts.count { it is ConversationPart.ToolCall } }
+  val windowTools =
     messages.items.sumOf { turn -> turn.parts.count { it is ConversationPart.ToolCall } }
-  var skipTools = (totalTools - MAX_RECENT_TOOLS).coerceAtLeast(0)
+  var skipTools = (windowTools - MAX_RECENT_TOOLS).coerceAtLeast(0)
   val clipped =
     messages.items.map { turn ->
       turn.copy(
@@ -42,7 +43,7 @@ fun boundedConversation(turns: List<ConversationTurn>): RecentConversation {
   return RecentConversation(
     clipped,
     messages.omitted,
-    (totalTools - MAX_RECENT_TOOLS).coerceAtLeast(0),
+    totalTools - minOf(windowTools, MAX_RECENT_TOOLS),
   )
 }
 

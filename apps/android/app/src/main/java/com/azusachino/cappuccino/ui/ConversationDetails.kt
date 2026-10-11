@@ -88,7 +88,7 @@ internal fun ConversationDetails(part: ConversationPart, onInspect: () -> Unit =
       val status =
         when (part.activityState) {
           ToolActivityState.FAILED -> "Failed"
-          ToolActivityState.AWAITING_RESULT -> "Awaiting result"
+          ToolActivityState.RESULT_NOT_RECORDED -> "Result not recorded"
           ToolActivityState.RESULT_AVAILABLE -> "Result available"
         }
       title = "${part.name} · $status"

@@ -26,6 +26,7 @@ internal fun ReaderFloatingControls(
   onLatest: () -> Unit,
   modifier: Modifier = Modifier,
   newActivity: Boolean = false,
+  omittedOperations: Int = 0,
 ) {
   if (entries.isEmpty() && !hasNewOutput) return
   val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -52,7 +53,7 @@ internal fun ReaderFloatingControls(
           colors = buttonColors,
           modifier =
             Modifier.semantics {
-              contentDescription = toolActivityLabel(entries)
+              contentDescription = toolActivityLabel(entries, omittedOperations)
               stateDescription = if (newActivity) "New tool activity" else "Tool activity"
             },
         ) {
@@ -69,7 +70,7 @@ internal fun ReaderFloatingControls(
           Spacer(Modifier.width(4.dp))
           Surface(color = toolsColor.background, shape = CircleShape) {
             Text(
-              "Tools · ${entries.size}",
+              "Tools · ${toolActivityCount(entries.size, omittedOperations)}",
               Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
               style = MaterialTheme.typography.labelLarge,
               color = toolsColor.foreground,

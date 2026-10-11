@@ -30,13 +30,20 @@ internal fun toolActivityEntries(turns: List<ConversationTurn>): List<ToolActivi
     }
   }
 
-internal fun toolActivityLabel(entries: List<ToolActivityEntry>): String {
+internal fun toolActivityCount(shown: Int, omitted: Int): String {
+  require(shown >= 0 && omitted >= 0)
+  return if (omitted == 0) "$shown" else "$shown/${shown.toLong() + omitted}"
+}
+
+internal fun toolActivityLabel(entries: List<ToolActivityEntry>, omitted: Int = 0): String {
   val failed = entries.count { it.part.activityState == ToolActivityState.FAILED }
-  val pending = entries.count { it.part.activityState == ToolActivityState.AWAITING_RESULT }
+  val unknown = entries.count { it.part.activityState == ToolActivityState.RESULT_NOT_RECORDED }
   return listOfNotNull(
-      "Show tool activity · ${entries.size}",
+      "Show tool activity · ${toolActivityCount(entries.size, omitted)}",
+      if (omitted > 0) "${entries.size} shown from loaded history" else null,
       if (failed > 0) "$failed failed" else null,
-      if (pending > 0) "$pending awaiting result" else null,
+      if (unknown > 0) "$unknown ${if (unknown == 1) "result" else "results"} not recorded"
+      else null,
     )
     .joinToString(" · ")
 }
@@ -48,6 +55,7 @@ internal fun ToolActivitySheet(
   targetTurnId: String?,
   onDismiss: () -> Unit,
   earlierOmitted: Boolean = false,
+  omittedOperations: Int = 0,
 ) {
   val initial =
     entries.indexOfFirst { it.turnId == targetTurnId }.takeIf { it >= 0 }
@@ -78,8 +86,11 @@ internal fun ToolActivitySheet(
       }
     }
     Text(
-      "${entries.size} operations · chronological order" +
-        if (earlierOmitted) " · Earlier history not shown" else "",
+      (if (omittedOperations > 0)
+        "${entries.size} of ${entries.size.toLong() + omittedOperations} loaded operations shown"
+      else "${entries.size} recorded operations") +
+        " · Source order" +
+        if (earlierOmitted) " · Earlier activity isn't shown" else "",
       Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
       style = MaterialTheme.typography.bodySmall,
       color = MaterialTheme.colorScheme.onSurfaceVariant,

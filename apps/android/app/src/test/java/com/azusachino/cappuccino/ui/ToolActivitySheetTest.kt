@@ -38,9 +38,23 @@ class ToolActivitySheetTest {
   }
 
   @Test
+  fun cappedCountDistinguishesShownHistoryFromRecordedHistoryAndIsNotAQueue() {
+    assertEquals("100/350", toolActivityCount(100, 250))
+    assertEquals("3", toolActivityCount(3, 0))
+    val entries =
+      listOf(ToolActivityEntry("old", 0, ConversationPart.ToolCall("bash", "echo hello", null)))
+    assertEquals(
+      "Show tool activity · 1/4 · 1 shown from loaded history · 1 result not recorded",
+      toolActivityLabel(entries, 3),
+    )
+    assertFalse(toolActivityLabel(entries).contains("awaiting"))
+    assertFalse(toolActivityLabel(entries).contains("queued"))
+  }
+
+  @Test
   fun unknownResultIsNotSuccessfulAndExplicitFailureIsNotPending() {
     assertEquals(
-      ToolActivityState.AWAITING_RESULT,
+      ToolActivityState.RESULT_NOT_RECORDED,
       ConversationPart.ToolCall("any-provider", "", null).activityState,
     )
     assertEquals(

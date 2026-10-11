@@ -82,6 +82,46 @@ class RecentHistoryTest {
   }
 
   @Test
+  fun omittedToolsIncludeOperationsLostOutsideTheMessageWindow() {
+    val input =
+      (0 until 350).map { index ->
+        ConversationTurn(
+          "t$index",
+          "agent",
+          null,
+          null,
+          listOf(ConversationPart.ToolCall("tool$index", "", "result")),
+        )
+      }
+    val recent = boundedConversation(input)
+    val tools = recent.turns.flatMap { it.parts }.filterIsInstance<ConversationPart.ToolCall>()
+    assertEquals(100, tools.size)
+    assertEquals(250, recent.omittedTools)
+    assertEquals(150, recent.omittedMessages)
+    assertEquals("tool250", tools.first().name)
+    assertEquals("tool349", tools.last().name)
+    assertEquals(350, tools.size + recent.omittedTools)
+    assertEquals(350, input.size)
+  }
+
+  @Test
+  fun omittedToolsAreCountedEvenWhenAllAreOutsideTheRetainedWindow() {
+    val input =
+      listOf(
+        ConversationTurn(
+          "old-tool",
+          "agent",
+          null,
+          null,
+          listOf(ConversationPart.ToolCall("read", "", null)),
+        )
+      ) + (0 until 201).map { ConversationTurn("text$it", "agent", null, "reply", emptyList()) }
+    val recent = boundedConversation(input)
+    assertEquals(1, recent.omittedTools)
+    assertTrue(recent.turns.flatMap { it.parts }.none { it is ConversationPart.ToolCall })
+  }
+
+  @Test
   fun smallAndEmptyWindowsAreUnchanged() {
     assertEquals(RecentConversation(emptyList(), 0, 0), boundedConversation(emptyList()))
     val one = ConversationTurn("t", "user", null, "hello", emptyList())

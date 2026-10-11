@@ -627,6 +627,7 @@ fun CappuccinoScreen(
                   toolActivities,
                   hasNewOutput,
                   newActivity = toolPulse,
+                  omittedOperations = state.omittedToolOperations,
                   onTools = {
                     toolActivityTarget = null
                     followingOutput = false
@@ -926,6 +927,7 @@ fun CappuccinoScreen(
       toolActivityTarget,
       onDismiss = { showingToolActivity = false },
       earlierOmitted = state.omittedConversationTurns > 0 || state.omittedToolOperations > 0,
+      omittedOperations = state.omittedToolOperations,
     )
   }
 

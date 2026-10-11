@@ -2,7 +2,7 @@ package com.azusachino.cappuccino.core
 
 /** Common presentation concepts; a result does not establish successful execution. */
 enum class ToolActivityState {
-  AWAITING_RESULT,
+  RESULT_NOT_RECORDED,
   RESULT_AVAILABLE,
   FAILED,
 }
@@ -12,5 +12,6 @@ val ConversationPart.ToolCall.activityState: ToolActivityState
     when {
       isError == true -> ToolActivityState.FAILED
       output != null -> ToolActivityState.RESULT_AVAILABLE
-      else -> ToolActivityState.AWAITING_RESULT
+      // Missing historical output is not evidence of an active or queued operation.
+      else -> ToolActivityState.RESULT_NOT_RECORDED
     }
