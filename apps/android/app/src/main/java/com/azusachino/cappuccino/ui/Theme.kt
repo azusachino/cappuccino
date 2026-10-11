@@ -26,8 +26,8 @@ val HerdrStatusIdle = Color(0xFF9B9183)
 val HerdrStatusBlocked = Color(0xFFFF7B70)
 val HerdrStatusDone = Color(0xFF93C36B)
 
-// Owner-selected GitHub/VS Code-inspired neutral canvases and blue accents.
-// This supersedes the earlier stock/purple palette; Material components remain native.
+// Fixed fallback for older Android versions and deterministic previews.
+// Supported devices use Android's wallpaper-derived Material colors by default.
 val FallbackLightColorScheme =
   lightColorScheme(
     primary = Color(0xFF0969DA),
@@ -119,7 +119,7 @@ fun selectColorScheme(
   dynamicDark: ColorScheme,
   fallbackLight: ColorScheme,
   fallbackDark: ColorScheme,
-  useDynamic: Boolean = false,
+  useDynamic: Boolean = true,
 ): ColorScheme =
   when {
     useDynamic && apiLevel >= Build.VERSION_CODES.S && dark -> dynamicDark
@@ -131,7 +131,7 @@ fun selectColorScheme(
 @Composable
 fun CappuccinoTheme(
   themeMode: ThemeMode = ThemeMode.SYSTEM,
-  useDynamicColor: Boolean = false,
+  useDynamicColor: Boolean = true,
   // Optional activity-owned sink for the actually resolved theme (e.g. system-bar
   // appearance). Resolution stays pure here; the platform window mutation lives in the
   // caller (android-material3.md repair ledger, review finding 2).

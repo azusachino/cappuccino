@@ -55,7 +55,7 @@ class ThemeTest {
   }
 
   @Test
-  fun selectsFallbackColorSchemesByDefaultEvenOnApi31() {
+  fun explicitFixedPaletteRemainsAvailableEvenOnApi31() {
     assertSame(
       fallbackLight,
       selectColorScheme(
@@ -80,6 +80,20 @@ class ThemeTest {
         useDynamic = false,
       ),
     )
+  }
+
+  @Test
+  fun wallpaperColorsAreTheDefaultOnSupportedDevices() {
+    for (dark in listOf(false, true)) {
+      assertSame(
+        if (dark) dynamicDark else dynamicLight,
+        selectColorScheme(31, dark, dynamicLight, dynamicDark, fallbackLight, fallbackDark),
+      )
+      assertSame(
+        if (dark) fallbackDark else fallbackLight,
+        selectColorScheme(30, dark, dynamicLight, dynamicDark, fallbackLight, fallbackDark),
+      )
+    }
   }
 
   @Test
