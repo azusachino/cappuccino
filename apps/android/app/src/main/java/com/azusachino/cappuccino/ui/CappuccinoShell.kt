@@ -565,17 +565,21 @@ fun CappuccinoScreen(
                 },
               )
             }
-            if (
-              turns.isNotEmpty() &&
-                (state.omittedConversationTurns > 0 || state.omittedToolOperations > 0)
-            )
-              Text(
-                "Earlier history not shown · recent 200 messages / 100 tool operations",
-                Modifier.padding(horizontal = 16.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
             readerState.SaveableStateProvider(conversationKey) {
+              var historyNoticeShown by rememberSaveable { mutableStateOf(false) }
+              val historyNotice = remember { androidx.compose.material3.SnackbarHostState() }
+              val historyOmitted =
+                turns.isNotEmpty() &&
+                  (state.omittedConversationTurns > 0 || state.omittedToolOperations > 0)
+              LaunchedEffect(historyOmitted) {
+                if (historyOmitted && !historyNoticeShown) {
+                  historyNoticeShown = true
+                  historyNotice.showSnackbar(
+                    "Earlier history not shown · recent 200 messages / 100 tool operations",
+                    duration = androidx.compose.material3.SnackbarDuration.Short,
+                  )
+                }
+              }
               Box(Modifier.weight(1f).fillMaxWidth()) {
                 SelectionContainer(Modifier.fillMaxSize()) {
                   if (
@@ -629,6 +633,10 @@ fun CappuccinoScreen(
                     }
                   }
                 }
+                androidx.compose.material3.SnackbarHost(
+                  historyNotice,
+                  Modifier.align(Alignment.TopCenter).padding(horizontal = 16.dp),
+                )
                 ReaderFloatingControls(
                   toolActivities,
                   hasNewOutput,
@@ -709,12 +717,12 @@ fun CappuccinoScreen(
             } else {
               Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                  "No Pending Approvals",
+                  "No question received",
                   style = MaterialTheme.typography.titleLarge,
                   modifier = Modifier.semantics { heading() },
                 )
                 Text(
-                  "All agents are running smoothly. Any tool approval or ask_question prompts will appear here.",
+                  "Questions are currently received only from the open agent stream. Other agents are not monitored here yet.",
                   color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
               }

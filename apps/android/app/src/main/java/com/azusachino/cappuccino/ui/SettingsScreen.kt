@@ -79,12 +79,17 @@ internal fun SettingsScreen(
         Column {
           ThemeMode.entries.forEach { mode ->
             Surface(
+              color = androidx.compose.ui.graphics.Color.Transparent,
               onClick = {
                 onSelectTheme(mode)
                 choosingTheme = false
-              }
+              },
             ) {
               ListItem(
+                colors =
+                  androidx.compose.material3.ListItemDefaults.colors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent
+                  ),
                 headlineContent = {
                   Text(mode.name.lowercase().replaceFirstChar { it.uppercase() })
                 },

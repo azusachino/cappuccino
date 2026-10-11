@@ -9,7 +9,9 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
@@ -140,9 +142,9 @@ fun CappuccinoTheme(
 ) {
   val context = LocalContext.current
   val isDark = resolveIsDark(themeMode, isSystemInDarkTheme())
-  // Reports whenever the resolved theme changes, whether from the preference or the
-  // system mode; idempotent per composition, no extra observer lifecycle.
-  SideEffect { onResolvedDarkChanged?.invoke(isDark) }
+  // Stream/discovery recompositions must not rewrite window appearance flags.
+  val themeSink by rememberUpdatedState(onResolvedDarkChanged)
+  LaunchedEffect(isDark) { themeSink?.invoke(isDark) }
   val lightFallback = FallbackLightColorScheme
   val darkFallback = FallbackDarkColorScheme
   val dynamicLight =

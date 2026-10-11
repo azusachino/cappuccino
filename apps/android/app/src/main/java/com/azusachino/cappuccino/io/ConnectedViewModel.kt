@@ -253,11 +253,13 @@ internal constructor(
     mutableState.value.profiles
       .filter { it.id !in disconnectedMachines }
       .forEach { profile ->
-        if (machineJobs[profile.id]?.isActive != true) refreshProfile(profile.id)
+        if (machineJobs[profile.id]?.isActive != true) refreshProfile(profile.id, background = true)
       }
   }
 
-  override fun refreshProfile(id: String) {
+  override fun refreshProfile(id: String) = refreshProfile(id, background = false)
+
+  private fun refreshProfile(id: String, background: Boolean) {
     val profile = mutableState.value.profiles.firstOrNull { it.id == id } ?: return
     disconnectedMachines.remove(id)
     machineJobs.remove(id)?.cancel()
@@ -273,7 +275,7 @@ internal constructor(
                 connection =
                   if (previous.connection == ConnectionState.Connected) previous.connection
                   else ConnectionState.Connecting,
-                busy = true,
+                busy = !background,
               ))
       )
     machineJobs[id] = viewModelScope.launch { refresh(profile) }
