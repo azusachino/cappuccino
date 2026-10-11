@@ -218,6 +218,8 @@ private fun ToolDetailSection(
   language: String,
   onInspect: () -> Unit,
 ) {
+  val shellCommand =
+    remember(source, title) { if (title == "Arguments") toolCommand(source) else null }
   val command =
     remember(source, title) {
       if (title == "Arguments") toolSummary(source).takeIf { it != source } else null
@@ -238,12 +240,14 @@ private fun ToolDetailSection(
     color = MaterialTheme.colorScheme.secondary,
   )
   if (command != null) {
-    Text(
-      toolPreview(command),
-      fontFamily = FontFamily.Monospace,
-      style = MaterialTheme.typography.bodyMedium,
-      softWrap = true,
-    )
+    if (shellCommand != null) NativeCodeBlock(toolPreview(command), shellCommand.language)
+    else
+      Text(
+        toolPreview(command),
+        fontFamily = FontFamily.Monospace,
+        style = MaterialTheme.typography.bodyMedium,
+        softWrap = true,
+      )
   }
   if (details.isEmpty()) {
     if (command == null) Text("No text output", style = MaterialTheme.typography.bodySmall)
@@ -282,7 +286,10 @@ private fun ToolDetailSection(
           }
           SelectionContainer(Modifier.weight(1f)) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-              if (command != null) Text(command, fontFamily = FontFamily.Monospace, softWrap = true)
+              if (command != null) {
+                if (shellCommand != null) NativeCodeBlock(command, shellCommand.language)
+                else Text(command, fontFamily = FontFamily.Monospace, softWrap = true)
+              }
               if (details.isNotEmpty()) MarkdownText(fencedToolContent(content))
             }
           }

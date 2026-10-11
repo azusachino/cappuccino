@@ -14,8 +14,10 @@ coroutines = "1.11.0"
 mockwebserver = "5.5.0"
 commonmark = "0.30.0"
 mikepenz-markdown = "0.45.0"
+textmate = "0.3.0"
 
 [libraries]
+kotlin-textmate-core = { module = "io.github.ivan-magda:kotlin-textmate-core", version.ref = "textmate" }
 commonmark = { module = "org.commonmark:commonmark", version.ref = "commonmark" }
 mikepenz-markdown-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "mikepenz-markdown" }
 mikepenz-markdown-code = { module = "com.mikepenz:multiplatform-markdown-renderer-code", version.ref = "mikepenz-markdown" }

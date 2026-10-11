@@ -5,7 +5,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.AnnotatedString
@@ -19,16 +18,14 @@ import androidx.compose.ui.text.withStyle
 import com.mikepenz.markdown.annotator.annotatorSettings
 import com.mikepenz.markdown.compose.Markdown
 import com.mikepenz.markdown.compose.components.markdownComponents
-import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeBlock
-import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeFence
+import com.mikepenz.markdown.compose.elements.MarkdownCodeBlock
+import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
 import com.mikepenz.markdown.compose.elements.MarkdownParagraph
 import com.mikepenz.markdown.compose.elements.MarkdownTable
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.NoOpImageTransformerImpl
 import com.mikepenz.markdown.model.rememberMarkdownState
-import dev.snipme.highlights.Highlights
-import dev.snipme.highlights.model.SyntaxLanguage
 import org.commonmark.node.Code
 import org.commonmark.node.Emphasis
 import org.commonmark.node.FencedCodeBlock
@@ -44,7 +41,6 @@ import org.commonmark.node.StrongEmphasis
 import org.commonmark.node.Text as MarkdownLiteral
 import org.commonmark.parser.Parser
 import org.intellij.markdown.MarkdownElementTypes
-import org.intellij.markdown.MarkdownTokenTypes
 import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.parser.CancellationToken
@@ -214,47 +210,16 @@ internal fun passiveMarkdownComponents() =
       )
     },
     codeFence = { model ->
-      MarkdownHighlightedCodeFence(
-        content = model.content,
-        node = model.node,
-        style = model.typography.code.copy(fontSize = MaterialTheme.typography.bodySmall.fontSize),
-        highlightsBuilder =
-          codeHighlightsBuilder(
-            model.node.children
-              .firstOrNull { it.type == MarkdownTokenTypes.FENCE_LANG }
-              ?.let { model.content.substring(it.startOffset, it.endOffset).trim() }
-          ),
-        showHeader = true,
-      )
+      MarkdownCodeFence(content = model.content, node = model.node) { code, language, _ ->
+        NativeCodeBlock(code, language)
+      }
     },
     codeBlock = { model ->
-      MarkdownHighlightedCodeBlock(
-        content = model.content,
-        node = model.node,
-        style = model.typography.code.copy(fontSize = MaterialTheme.typography.bodySmall.fontSize),
-        highlightsBuilder = codeHighlightsBuilder(),
-        showHeader = true,
-      )
+      MarkdownCodeBlock(content = model.content, node = model.node) { code, language, _ ->
+        NativeCodeBlock(code, language)
+      }
     },
   )
-
-@Composable
-private fun codeHighlightsBuilder(language: String? = null): Highlights.Builder {
-  val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-  // Highlights 1.1.0 has no JSON lexer. Valid JSON uses the existing JavaScript
-  // literal lexer, while the native code header correctly continues to say JSON.
-  val syntax =
-    when (language?.lowercase()) {
-      "json" -> SyntaxLanguage.JAVASCRIPT
-      "bash",
-      "sh",
-      "shell" -> SyntaxLanguage.SHELL
-      else -> language?.let { SyntaxLanguage.getByName(it) } ?: SyntaxLanguage.DEFAULT
-    }
-  return remember(dark, syntax) {
-    Highlights.Builder().language(syntax).theme(githubCodeTheme(dark))
-  }
-}
 
 /**
  * Retained pure inline flattener: the documented passive-text semantics (ALT text, no annotations,

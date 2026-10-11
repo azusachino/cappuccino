@@ -49,6 +49,7 @@ dependencies {
   implementation(libs.commonmark)
   implementation(libs.mikepenz.markdown.m3)
   implementation(libs.mikepenz.markdown.code)
+  implementation(libs.kotlin.textmate.core)
   implementation(libs.activity.compose)
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.okhttp)

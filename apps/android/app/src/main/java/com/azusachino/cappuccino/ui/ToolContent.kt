@@ -19,6 +19,26 @@ internal fun formatToolContent(text: String, language: String = "text"): ToolCon
     ToolContent(text, language)
   }
 
+internal fun toolCommand(input: String): ToolContent? {
+  val fields =
+    try {
+      Json.parseToJsonElement(input) as? JsonObject
+    } catch (_: IllegalArgumentException) {
+      null
+    } ?: return null
+  val command =
+    listOf("command", "CommandLine", "cmd").firstNotNullOfOrNull { key ->
+      (fields[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    } ?: return null
+  val shell =
+    (fields["shell"] as? JsonPrimitive)
+      ?.takeIf { it.isString }
+      ?.content
+      ?.substringAfterLast('/')
+      ?.takeIf { it.isNotBlank() } ?: "shell"
+  return ToolContent(command, shell)
+}
+
 internal fun toolSummary(input: String): String {
   val fields =
     try {
@@ -26,7 +46,7 @@ internal fun toolSummary(input: String): String {
     } catch (_: IllegalArgumentException) {
       null
     }
-  return listOf("command", "CommandLine", "path", "file_path", "pattern", "query", "url")
+  return listOf("command", "CommandLine", "cmd", "path", "file_path", "pattern", "query", "url")
     .firstNotNullOfOrNull { key ->
       (fields?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content
     } ?: input
@@ -41,9 +61,10 @@ internal fun toolOtherArguments(input: String): String? {
     } ?: return null
   val summary = toolSummary(input)
   val key =
-    listOf("command", "CommandLine", "path", "file_path", "pattern", "query", "url").firstOrNull {
-      (fields[it] as? JsonPrimitive)?.takeIf { value -> value.isString }?.content == summary
-    }
+    listOf("command", "CommandLine", "cmd", "path", "file_path", "pattern", "query", "url")
+      .firstOrNull {
+        (fields[it] as? JsonPrimitive)?.takeIf { value -> value.isString }?.content == summary
+      }
   val remaining = fields.filterKeys { it != key }
   return if (remaining.isEmpty()) null else JsonObject(remaining).toString()
 }
