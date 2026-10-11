@@ -79,6 +79,32 @@ class MarkdownTextUiTest {
   }
 
   @Test
+  fun defaultReaderHeadingsUseMobileBodySize() {
+    var expected: androidx.compose.ui.unit.TextUnit? = null
+    compose.setContent {
+      MaterialTheme {
+        expected = MaterialTheme.typography.bodyLarge.fontSize
+        Surface { MarkdownText("# Mobile heading") }
+      }
+    }
+    compose.waitForIdle()
+    val layouts = mutableListOf<TextLayoutResult>()
+    compose.onNodeWithText("Mobile heading", useUnmergedTree = true).performSemanticsAction(
+      SemanticsActions.GetTextLayoutResult
+    ) { action ->
+      org.junit.Assert.assertTrue(action(layouts))
+    }
+    org.junit.Assert.assertEquals(
+      requireNotNull(expected),
+      layouts.single().layoutInput.style.fontSize,
+    )
+    org.junit.Assert.assertEquals(
+      androidx.compose.ui.text.font.FontWeight.SemiBold,
+      layouts.single().layoutInput.style.fontWeight,
+    )
+  }
+
+  @Test
   fun rendersHeadingsListsQuotesTablesAndCode() {
     setContent(
       """

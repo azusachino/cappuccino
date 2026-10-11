@@ -149,7 +149,7 @@ object NoOpUriHandler : UriHandler {
  * no-navigation boundary.
  */
 @Composable
-fun MarkdownText(text: String, modifier: Modifier = Modifier, compact: Boolean = false) {
+fun MarkdownText(text: String, modifier: Modifier = Modifier, compact: Boolean = true) {
   // Input-keyed memoization: the pre-pass is pure in [text], so recompositions reuse the
   // normalized string without re-parsing (stable transformer/components inputs likewise).
   val renderingText = remember(text) { normalizeImageCaptions(text) }
