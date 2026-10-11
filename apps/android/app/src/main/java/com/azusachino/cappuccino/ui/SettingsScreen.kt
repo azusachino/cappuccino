@@ -26,13 +26,15 @@ import androidx.compose.ui.unit.dp
 import com.azusachino.cappuccino.BuildConfig
 import com.azusachino.cappuccino.R
 
+internal data class SettingsConnection(val id: String, val label: String, val status: String)
+
 @Composable
 internal fun SettingsScreen(
   themeMode: ThemeMode,
   onSelectTheme: (ThemeMode) -> Unit,
   onManageMachines: () -> Unit,
-  connectionDescription: String,
-  onConnectionDetails: (() -> Unit)?,
+  connections: List<SettingsConnection>,
+  onConnectionDetails: (String) -> Unit,
 ) {
   var choosingTheme by rememberSaveable { mutableStateOf(false) }
   Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
@@ -51,8 +53,22 @@ internal fun SettingsScreen(
       R.drawable.ic_machine,
       onManageMachines,
     )
-    SettingsHeading("About & diagnostics")
-    PreferenceRow("Connection", connectionDescription, R.drawable.ic_machine, onConnectionDetails)
+    SettingsHeading("Connections")
+    if (connections.isEmpty()) {
+      Text(
+        "No machines added",
+        Modifier.padding(horizontal = 16.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
+    connections.forEach { connection ->
+      androidx.compose.runtime.key(connection.id) {
+        PreferenceRow(connection.label, connection.status, R.drawable.ic_machine) {
+          onConnectionDetails(connection.id)
+        }
+      }
+    }
+    SettingsHeading("About")
     PreferenceRow("App version", BuildConfig.VERSION_NAME, R.drawable.ic_chat)
   }
   if (choosingTheme) {

@@ -725,14 +725,18 @@ fun CappuccinoScreen(
               themeMode = state.themeMode,
               onSelectTheme = actions::setThemeMode,
               onManageMachines = { destination = Destination.MACHINES },
-              connectionDescription = state.connection.statusText(),
-              onConnectionDetails =
-                if (selectedProfile != null)
-                  ({
-                    detailsProfileId = selectedProfile.id
-                    showingConnection = true
-                  })
-                else null,
+              connections =
+                state.profiles.map { profile ->
+                  SettingsConnection(
+                    profile.id,
+                    profile.label,
+                    state.machineConnection(profile).connection.statusText(),
+                  )
+                },
+              onConnectionDetails = { profileId ->
+                detailsProfileId = profileId
+                showingConnection = true
+              },
             )
           }
           else -> {
