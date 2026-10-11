@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.azusachino.cappuccino.BuildConfig
 import com.azusachino.cappuccino.R
+import kotlinx.coroutines.launch
 
 internal data class SettingsConnection(val id: String, val label: String, val status: String)
 
@@ -32,11 +33,24 @@ internal data class SettingsConnection(val id: String, val label: String, val st
 internal fun SettingsScreen(
   themeMode: ThemeMode,
   onSelectTheme: (ThemeMode) -> Unit,
-  onManageMachines: () -> Unit,
+  onReloadMachines: () -> Unit,
   connections: List<SettingsConnection>,
   onConnectionDetails: (String) -> Unit,
 ) {
   var choosingTheme by rememberSaveable { mutableStateOf(false) }
+  var confirmingClear by rememberSaveable { mutableStateOf(false) }
+  var clearing by androidx.compose.runtime.remember { mutableStateOf(false) }
+  var cacheBytes by androidx.compose.runtime.remember { mutableStateOf<Long?>(null) }
+  var cacheResult by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+  val context = androidx.compose.ui.platform.LocalContext.current
+  val scope = androidx.compose.runtime.rememberCoroutineScope()
+  androidx.compose.runtime.LaunchedEffect(Unit) {
+    cacheBytes =
+      kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching { com.azusachino.cappuccino.io.temporaryCacheBytes(context.cacheDir) }
+          .getOrNull()
+      }
+  }
   Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
     SettingsHeading("Appearance")
     PreferenceRow(
@@ -46,13 +60,20 @@ internal fun SettingsScreen(
     ) {
       choosingTheme = true
     }
-    SettingsHeading("Machines")
+    SettingsHeading("Storage")
     PreferenceRow(
-      "Manage machines",
-      "Names, connections and attached agents",
-      R.drawable.ic_machine,
-      onManageMachines,
+      "Clear cache",
+      if (clearing) "Clearing temporary files…"
+      else
+        cacheBytes?.let {
+          "Temporary files · ${android.text.format.Formatter.formatShortFileSize(context, it)}"
+        } ?: "Temporary file size unavailable",
+      R.drawable.ic_settings,
+      if (clearing) null else ({ confirmingClear = true }),
     )
+    cacheResult?.let {
+      Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+    }
     SettingsHeading("Connections")
     if (connections.isEmpty()) {
       Text(
@@ -69,7 +90,60 @@ internal fun SettingsScreen(
       }
     }
     SettingsHeading("About")
-    PreferenceRow("App version", BuildConfig.VERSION_NAME, R.drawable.ic_chat)
+    PreferenceRow(
+      "Cappuccino",
+      "A native companion for your existing Herdr agents. Read conversations and tool activity across your machines.",
+      R.drawable.ic_chat,
+    )
+    PreferenceRow(
+      "App version",
+      "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.BUILD_TYPE}",
+      R.drawable.ic_chat,
+    )
+    Text(
+      "Machines own their agent sessions. Cappuccino connects without replacing them. Connection diagnostics are available above for each machine.",
+      Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+  }
+  if (confirmingClear) {
+    AlertDialog(
+      onDismissRequest = { confirmingClear = false },
+      title = { Text("Clear temporary cache?") },
+      text = {
+        Text(
+          "Remove temporary files and reload machine lists. Saved machines, drafts and reading preferences stay. Remote sessions are never deleted. Conversation history is held in memory, not stored in this disk cache."
+        )
+      },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            confirmingClear = false
+            clearing = true
+            scope.launch {
+              try {
+                cacheBytes =
+                  kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.azusachino.cappuccino.io.temporaryCacheBytes(context.cacheDir, clear = true)
+                    com.azusachino.cappuccino.io.temporaryCacheBytes(context.cacheDir)
+                  }
+                onReloadMachines()
+                cacheResult = "Temporary files cleared. Machine list reload requested."
+              } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                cacheResult = "Unable to clear all temporary files. Try again."
+              } finally {
+                clearing = false
+              }
+            }
+          }
+        ) {
+          Text("Clear cache")
+        }
+      },
+      dismissButton = { TextButton(onClick = { confirmingClear = false }) { Text("Cancel") } },
+    )
   }
   if (choosingTheme) {
     AlertDialog(

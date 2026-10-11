@@ -24,7 +24,7 @@ class SettingsConnectionsTest {
         SettingsScreen(
           themeMode = ThemeMode.SYSTEM,
           onSelectTheme = {},
-          onManageMachines = {},
+          onReloadMachines = {},
           connections =
             listOf(
               SettingsConnection("mac", "MacMini", "Connected"),

@@ -732,7 +732,7 @@ fun CappuccinoScreen(
             SettingsScreen(
               themeMode = state.themeMode,
               onSelectTheme = actions::setThemeMode,
-              onManageMachines = { destination = Destination.MACHINES },
+              onReloadMachines = actions::refreshAll,
               connections =
                 state.profiles.map { profile ->
                   SettingsConnection(
