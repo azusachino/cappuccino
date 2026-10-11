@@ -13,6 +13,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 
 enum class ThemeMode {
@@ -21,90 +23,104 @@ enum class ThemeMode {
   DARK,
 }
 
-// Semantic agent-status colors remain separate from application accent roles.
-val HerdrStatusWorking = Color(0xFF6CB8D6)
-val HerdrStatusIdle = Color(0xFF9B9183)
-val HerdrStatusBlocked = Color(0xFFFF7B70)
-val HerdrStatusDone = Color(0xFF93C36B)
-
-// Owner-selected Cappuccino identity: cream, espresso and caramel. Code highlighting
-// retains its independent GitHub palette; wallpaper colors are not the app default.
+// Catppuccin palette 1.8.0: https://github.com/catppuccin/palette
+// Material container roles use accent tints; small text uses the stronger text tone.
 val FallbackLightColorScheme =
   lightColorScheme(
-    primary = Color(0xFF785039),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFDCC2),
-    onPrimaryContainer = Color(0xFF2B170C),
-    secondary = Color(0xFF705B4D),
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFFF9DECA),
-    onSecondaryContainer = Color(0xFF291C13),
-    tertiary = Color(0xFF59613C),
-    onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFDDE6B8),
-    onTertiaryContainer = Color(0xFF181F05),
-    background = Color(0xFFFFF8F2),
-    onBackground = Color(0xFF2E211B),
-    surface = Color(0xFFFFF8F2),
-    onSurface = Color(0xFF2E211B),
-    surfaceVariant = Color(0xFFE5D2C2),
-    onSurfaceVariant = Color(0xFF66554A),
-    surfaceContainerLowest = Color.White,
-    surfaceContainerLow = Color(0xFFFCF0E5),
-    surfaceContainer = Color(0xFFF5E7DC),
-    surfaceContainerHigh = Color(0xFFEDDDD0),
-    surfaceContainerHighest = Color(0xFFE5D2C2),
-    surfaceDim = Color(0xFFE5D2C2),
-    surfaceBright = Color(0xFFFFF8F2),
-    outline = Color(0xFF857469),
-    outlineVariant = Color(0xFFD6C3B5),
-    error = Color(0xFFBA1A1A),
+    primary = Color(0xFF8839EF),
+    onPrimary = Color(0xFFEFF1F5),
+    primaryContainer = Color(0xFF8839EF).copy(alpha = 0.12f).compositeOver(Color(0xFFEFF1F5)),
+    onPrimaryContainer = Color(0xFF4C4F69),
+    secondary = Color(0xFF7287FD),
+    onSecondary = Color(0xFF11111B),
+    secondaryContainer = Color(0xFFE6E9EF),
+    onSecondaryContainer = Color(0xFF4C4F69),
+    tertiary = Color(0xFF40A02B),
+    onTertiary = Color(0xFF11111B),
+    tertiaryContainer = Color(0xFFEFF1F5),
+    onTertiaryContainer = Color(0xFF4C4F69),
+    background = Color(0xFFEFF1F5),
+    onBackground = Color(0xFF4C4F69),
+    surface = Color(0xFFEFF1F5),
+    onSurface = Color(0xFF4C4F69),
+    surfaceVariant = Color(0xFFDCE0E8),
+    onSurfaceVariant = Color(0xFF4C4F69),
+    surfaceContainerLowest = Color(0xFFEFF1F5),
+    surfaceContainerLow = Color(0xFFE6E9EF),
+    surfaceContainer = Color(0xFFE6E9EF),
+    surfaceContainerHigh = Color(0xFFDCE0E8),
+    surfaceContainerHighest = Color(0xFFCCD0DA),
+    surfaceDim = Color(0xFFCCD0DA),
+    surfaceBright = Color(0xFFEFF1F5),
+    outline = Color(0xFF6C6F85),
+    outlineVariant = Color(0xFFBCC0CC),
+    error = Color(0xFFD20F39),
     onError = Color.White,
-    errorContainer = Color(0xFFFFDAD6),
-    onErrorContainer = Color(0xFF410002),
-    surfaceTint = Color(0xFF785039),
-    inverseSurface = Color(0xFF372A22),
-    inverseOnSurface = Color(0xFFFFF0E3),
-    inversePrimary = Color(0xFFE8B38E),
+    errorContainer = Color(0xFFD20F39).copy(alpha = 0.1f).compositeOver(Color(0xFFEFF1F5)),
+    onErrorContainer = Color(0xFF4C4F69),
+    surfaceTint = Color(0xFF8839EF),
+    inverseSurface = Color(0xFF313244),
+    inverseOnSurface = Color(0xFFCDD6F4),
+    inversePrimary = Color(0xFFCBA6F7),
   )
 val FallbackDarkColorScheme =
   darkColorScheme(
-    primary = Color(0xFFE8B38E),
-    onPrimary = Color(0xFF442A18),
-    primaryContainer = Color(0xFF5F3E27),
-    onPrimaryContainer = Color(0xFFFFDBC0),
-    secondary = Color(0xFFDAC1AE),
-    onSecondary = Color(0xFF3D2D22),
-    secondaryContainer = Color(0xFF554235),
-    onSecondaryContainer = Color(0xFFF9DECA),
-    tertiary = Color(0xFFC1CA9D),
-    onTertiary = Color(0xFF2B3316),
-    tertiaryContainer = Color(0xFF414A2A),
-    onTertiaryContainer = Color(0xFFDDE6B8),
-    background = Color(0xFF1B1410),
-    onBackground = Color(0xFFF2E4D8),
-    surface = Color(0xFF1B1410),
-    onSurface = Color(0xFFF2E4D8),
-    surfaceVariant = Color(0xFF44352C),
-    onSurfaceVariant = Color(0xFFD3BFAF),
-    surfaceContainerLowest = Color(0xFF140E0B),
-    surfaceContainerLow = Color(0xFF241B16),
-    surfaceContainer = Color(0xFF2D221C),
-    surfaceContainerHigh = Color(0xFF382B23),
-    surfaceContainerHighest = Color(0xFF44352C),
-    surfaceDim = Color(0xFF1B1410),
-    surfaceBright = Color(0xFF44352C),
-    outline = Color(0xFFA08B7C),
-    outlineVariant = Color(0xFF534338),
-    error = Color(0xFFFFB4AB),
-    onError = Color(0xFF690005),
-    errorContainer = Color(0xFF93000A),
-    onErrorContainer = Color(0xFFFFDAD6),
-    surfaceTint = Color(0xFFE8B38E),
-    inverseSurface = Color(0xFFF2E4D8),
-    inverseOnSurface = Color(0xFF372A22),
-    inversePrimary = Color(0xFF785039),
+    primary = Color(0xFFCBA6F7),
+    onPrimary = Color(0xFF11111B),
+    primaryContainer = Color(0xFFCBA6F7).copy(alpha = 0.15f).compositeOver(Color(0xFF1E1E2E)),
+    onPrimaryContainer = Color(0xFFCDD6F4),
+    secondary = Color(0xFFB4BEFE),
+    onSecondary = Color(0xFF11111B),
+    secondaryContainer = Color(0xFF313244),
+    onSecondaryContainer = Color(0xFFCDD6F4),
+    tertiary = Color(0xFFA6E3A1),
+    onTertiary = Color(0xFF11111B),
+    tertiaryContainer = Color(0xFF313244),
+    onTertiaryContainer = Color(0xFFCDD6F4),
+    background = Color(0xFF1E1E2E),
+    onBackground = Color(0xFFCDD6F4),
+    surface = Color(0xFF1E1E2E),
+    onSurface = Color(0xFFCDD6F4),
+    surfaceVariant = Color(0xFF45475A),
+    onSurfaceVariant = Color(0xFFBAC2DE),
+    surfaceContainerLowest = Color(0xFF11111B),
+    surfaceContainerLow = Color(0xFF181825),
+    surfaceContainer = Color(0xFF313244),
+    surfaceContainerHigh = Color(0xFF313244),
+    surfaceContainerHighest = Color(0xFF45475A),
+    surfaceDim = Color(0xFF181825),
+    surfaceBright = Color(0xFF45475A),
+    outline = Color(0xFF9399B2),
+    outlineVariant = Color(0xFF585B70),
+    error = Color(0xFFF38BA8),
+    onError = Color(0xFF11111B),
+    errorContainer = Color(0xFFF38BA8).copy(alpha = 0.15f).compositeOver(Color(0xFF1E1E2E)),
+    onErrorContainer = Color(0xFFCDD6F4),
+    surfaceTint = Color(0xFFCBA6F7),
+    inverseSurface = Color(0xFFEFF1F5),
+    inverseOnSurface = Color(0xFF4C4F69),
+    inversePrimary = Color(0xFF8839EF),
   )
+
+internal data class AgentStatusStyle(
+  val background: Color,
+  val foreground: Color,
+  val label: String,
+)
+
+internal fun agentStatusStyle(status: String, dark: Boolean): AgentStatusStyle {
+  val (background, label) =
+    when (status.lowercase()) {
+      "working" -> (if (dark) Color(0xFF89B4FA) else Color(0xFF1E66F5)) to "Working"
+      "idle" -> (if (dark) Color(0xFFFAB387) else Color(0xFFFE640B)) to "Idle"
+      "done" -> (if (dark) Color(0xFFA6E3A1) else Color(0xFF40A02B)) to "Done"
+      "blocked" -> (if (dark) Color(0xFFF38BA8) else Color(0xFFD20F39)) to "Blocked"
+      else -> (if (dark) Color(0xFF313244) else Color(0xFFDCE0E8)) to "Unknown"
+    }
+  val foreground =
+    if ((1.05f / (background.luminance() + 0.05f)) >= 4.5f) Color.White else Color(0xFF11111B)
+  return AgentStatusStyle(background, foreground, label)
+}
 
 fun resolveIsDark(themeMode: ThemeMode, systemDark: Boolean): Boolean =
   when (themeMode) {
@@ -138,7 +154,6 @@ fun CappuccinoTheme(
 ) {
   val context = LocalContext.current
   val isDark = resolveIsDark(themeMode, isSystemInDarkTheme())
-  // Stream/discovery recompositions must not rewrite window appearance flags.
   val themeSink by rememberUpdatedState(onResolvedDarkChanged)
   LaunchedEffect(isDark) { themeSink?.invoke(isDark) }
   val dynamicLight =

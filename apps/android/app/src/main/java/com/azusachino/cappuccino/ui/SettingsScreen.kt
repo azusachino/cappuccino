@@ -37,6 +37,8 @@ internal fun SettingsScreen(
   connections: List<SettingsConnection>,
   onConnectionDetails: (String) -> Unit,
 ) {
+  val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+  var helpError by rememberSaveable { mutableStateOf<String?>(null) }
   var choosingTheme by rememberSaveable { mutableStateOf(false) }
   var confirmingClear by rememberSaveable { mutableStateOf(false) }
   var clearing by androidx.compose.runtime.remember { mutableStateOf(false) }
@@ -55,7 +57,7 @@ internal fun SettingsScreen(
     SettingsHeading("Appearance")
     PreferenceRow(
       "Theme",
-      themeMode.name.lowercase().replaceFirstChar { it.uppercase() },
+      "Catppuccin · ${themeMode.name.lowercase().replaceFirstChar { it.uppercase() }}",
       R.drawable.ic_settings,
     ) {
       choosingTheme = true
@@ -92,7 +94,7 @@ internal fun SettingsScreen(
     SettingsHeading("About")
     PreferenceRow(
       "Cappuccino",
-      "A native companion for your existing Herdr agents. Read conversations and tool activity across your machines.",
+      "Read your agents' conversations and tool activity across your machines.",
       R.drawable.ic_chat,
     )
     PreferenceRow(
@@ -101,11 +103,20 @@ internal fun SettingsScreen(
       R.drawable.ic_chat,
     )
     Text(
-      "Machines own their agent sessions. Cappuccino connects without replacing them. Connection diagnostics are available above for each machine.",
+      "Your agent sessions stay on your machines.",
       Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
       style = MaterialTheme.typography.bodySmall,
       color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    PreferenceRow("Setup & troubleshooting", "Open the GitHub guide", R.drawable.ic_chat) {
+      helpError =
+        runCatching {
+          uriHandler.openUri("https://github.com/azusachino/cappuccino#readme")
+        }
+          .exceptionOrNull()
+          ?.let { "Couldn't open the guide. Visit github.com/azusachino/cappuccino." }
+    }
+    helpError?.let { Text(it, Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall) }
   }
   if (confirmingClear) {
     AlertDialog(
@@ -113,7 +124,7 @@ internal fun SettingsScreen(
       title = { Text("Clear temporary cache?") },
       text = {
         Text(
-          "Remove temporary files and reload machine lists. Saved machines, drafts and reading preferences stay. Remote sessions are never deleted. Conversation history is held in memory, not stored in this disk cache."
+          "Delete temporary files and refresh machine lists? Saved machines, drafts and reading preferences stay. Remote sessions are unchanged. Conversation history stays in memory; it isn't part of this cache."
         )
       },
       confirmButton = {
@@ -129,10 +140,10 @@ internal fun SettingsScreen(
                     com.azusachino.cappuccino.io.temporaryCacheBytes(context.cacheDir)
                   }
                 onReloadMachines()
-                cacheResult = "Temporary files cleared. Machine list reload requested."
+                cacheResult = "Temporary files cleared."
               } catch (error: Exception) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
-                cacheResult = "Unable to clear all temporary files. Try again."
+                cacheResult = "Couldn't clear all temporary files. Try again."
               } finally {
                 clearing = false
               }

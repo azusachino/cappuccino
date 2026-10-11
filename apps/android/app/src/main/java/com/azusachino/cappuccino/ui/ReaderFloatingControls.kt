@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -27,6 +28,11 @@ internal fun ReaderFloatingControls(
   newActivity: Boolean = false,
 ) {
   if (entries.isEmpty() && !hasNewOutput) return
+  val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+  val toolsColor = agentStatusStyle("working", dark)
+  val errorColor = agentStatusStyle("blocked", dark)
+  val buttonColors =
+    ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
   val updateAlpha by
     animateFloatAsState(
       if (newActivity) 1f else 0f,
@@ -43,6 +49,7 @@ internal fun ReaderFloatingControls(
       if (entries.isNotEmpty())
         TextButton(
           onClick = onTools,
+          colors = buttonColors,
           modifier =
             Modifier.semantics {
               contentDescription = toolActivityLabel(entries)
@@ -58,30 +65,33 @@ internal fun ReaderFloatingControls(
             contentDescription = null,
           )
           Spacer(Modifier.width(6.dp))
-          Box(
-            Modifier.size(6.dp)
-              .alpha(updateAlpha)
-              .background(MaterialTheme.colorScheme.primary, CircleShape)
-          )
+          Box(Modifier.size(6.dp).alpha(updateAlpha).background(toolsColor.background, CircleShape))
           Spacer(Modifier.width(4.dp))
-          Text(
-            "Tools · ${entries.size}",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-          )
+          Surface(color = toolsColor.background, shape = CircleShape) {
+            Text(
+              "Tools · ${entries.size}",
+              Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+              style = MaterialTheme.typography.labelLarge,
+              color = toolsColor.foreground,
+            )
+          }
           val failedCount = entries.count { it.part.isError == true }
           if (failedCount > 0) {
             Spacer(Modifier.width(6.dp))
-            Text(
-              "$failedCount",
-              style = MaterialTheme.typography.labelLarge,
-              color = MaterialTheme.colorScheme.error,
-            )
+            Surface(color = errorColor.background, shape = CircleShape) {
+              Text(
+                "$failedCount",
+                Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = errorColor.foreground,
+              )
+            }
           }
         }
       if (hasNewOutput)
         TextButton(
           onClick = onLatest,
+          colors = buttonColors,
           modifier = Modifier.semantics { contentDescription = "Jump to latest" },
         ) {
           Icon(

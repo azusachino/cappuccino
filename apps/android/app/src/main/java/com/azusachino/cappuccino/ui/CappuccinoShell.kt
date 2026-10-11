@@ -57,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -106,25 +107,18 @@ private enum class Destination(val title: Int, val icon: Int) {
 
 @Composable
 fun StatusBadge(status: String, modifier: Modifier = Modifier) {
-  val (color, text) =
-    when (status.lowercase()) {
-      "working" -> MaterialTheme.colorScheme.primary to "WORKING"
-      "done" -> MaterialTheme.colorScheme.tertiary to "DONE"
-      "blocked" -> MaterialTheme.colorScheme.error to "BLOCKED"
-      else -> MaterialTheme.colorScheme.onSurfaceVariant to "IDLE"
-    }
-  // Tonal pill with a semantic status color; full/circle shape, no border stroke.
-  Surface(modifier = modifier, shape = CircleShape, color = color.copy(alpha = 0.15f)) {
+  val badge = agentStatusStyle(status, MaterialTheme.colorScheme.background.luminance() < 0.5f)
+  Surface(modifier = modifier, shape = CircleShape, color = badge.background) {
     Row(
       modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-      Box(modifier = Modifier.size(6.dp).background(color, CircleShape))
+      Box(modifier = Modifier.size(6.dp).background(badge.foreground, CircleShape))
       Text(
-        text = text,
+        text = badge.label,
         style = MaterialTheme.typography.labelSmall,
-        color = color,
+        color = badge.foreground,
         fontWeight = FontWeight.SemiBold,
       )
     }
@@ -566,20 +560,8 @@ fun CappuccinoScreen(
               )
             }
             readerState.SaveableStateProvider(conversationKey) {
-              var historyNoticeShown by rememberSaveable { mutableStateOf(false) }
-              val historyNotice = remember { androidx.compose.material3.SnackbarHostState() }
               val historyOmitted =
-                turns.isNotEmpty() &&
-                  (state.omittedConversationTurns > 0 || state.omittedToolOperations > 0)
-              LaunchedEffect(historyOmitted) {
-                if (historyOmitted && !historyNoticeShown) {
-                  historyNoticeShown = true
-                  historyNotice.showSnackbar(
-                    "Earlier history not shown · recent 200 messages / 100 tool operations",
-                    duration = androidx.compose.material3.SnackbarDuration.Short,
-                  )
-                }
-              }
+                state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
               Box(Modifier.weight(1f).fillMaxWidth()) {
                 SelectionContainer(Modifier.fillMaxSize()) {
                   if (
@@ -603,6 +585,14 @@ fun CappuccinoScreen(
                           "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
                         },
                       ) { turn ->
+                        if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
+                          Text(
+                            "Older messages aren't loaded.",
+                            Modifier.padding(vertical = 12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                          )
+                        }
                         ConversationTurnRow(
                           turn,
                           timeZone = timeZone,
@@ -633,10 +623,6 @@ fun CappuccinoScreen(
                     }
                   }
                 }
-                androidx.compose.material3.SnackbarHost(
-                  historyNotice,
-                  Modifier.align(Alignment.TopCenter).padding(horizontal = 16.dp),
-                )
                 ReaderFloatingControls(
                   toolActivities,
                   hasNewOutput,
@@ -676,7 +662,7 @@ fun CappuccinoScreen(
             if (
               state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") == false
             ) {
-              Text("Prompt input unsupported by this bridge", Modifier.padding(horizontal = 16.dp))
+              Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
             }
             composerState.SaveableStateProvider(conversationKey) {
               PromptInputBar(
@@ -722,7 +708,7 @@ fun CappuccinoScreen(
                   modifier = Modifier.semantics { heading() },
                 )
                 Text(
-                  "Questions are currently received only from the open agent stream. Other agents are not monitored here yet.",
+                  "Question notifications aren't available on this screen yet.",
                   color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
               }
@@ -971,7 +957,7 @@ fun CappuccinoScreen(
           OutlinedTextField(
             value = endpoint,
             onValueChange = { endpoint = it },
-            label = { Text("Private bridge URL") },
+            label = { Text("Bridge address") },
             placeholder = { Text("https://machine.example") },
             singleLine = true,
             isError = state.addError != null,
@@ -1141,7 +1127,14 @@ private fun OutputItemRow(row: OutputRow, onInspect: () -> Unit = {}) {
           Box(
             modifier =
               Modifier.size(6.dp)
-                .background(HerdrStatusWorking, CircleShape)
+                .background(
+                  agentStatusStyle(
+                      "working",
+                      MaterialTheme.colorScheme.background.luminance() < 0.5f,
+                    )
+                    .background,
+                  CircleShape,
+                )
                 .clearAndSetSemantics {}
           )
           Text(
@@ -1276,7 +1269,7 @@ fun PromptCardView(
         }
       }
 
-      if (!enabled) Text("Prompt answers unsupported by this bridge")
+      if (!enabled) Text("This bridge can't accept answers.")
       if (prompt.options.isNotEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
           prompt.options.forEachIndexed { index, option ->
@@ -1312,7 +1305,7 @@ fun PromptCardView(
         enabled = enabled,
         modifier = Modifier.align(Alignment.End),
       ) {
-        Text("Cancel / Dismiss")
+        Text("Cancel")
       }
     }
   }

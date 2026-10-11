@@ -38,7 +38,7 @@ internal fun ConnectionDiagnostics(profile: MachineProfile, state: ConnectedUiSt
     DetailGroup("Versions") {
       DetailRow("App version", BuildConfig.VERSION_NAME)
       DetailRow("Bridge version", details?.version ?: "Not reported")
-      DetailRow("Protocol", "${details?.protocol?.toString() ?: "Not verified"} · App requires 1")
+      DetailRow("Protocol version", details?.protocol?.toString() ?: "Not checked")
     }
     DetailGroup("Bridge support") {
       for ((key, label) in
@@ -46,8 +46,8 @@ internal fun ConnectionDiagnostics(profile: MachineProfile, state: ConnectedUiSt
           "agent_discovery" to "Agent discovery",
           "live_output" to "Live output",
           "conversation_history" to "Conversation history",
-          "prompt_input" to "Prompt input",
-          "prompt_answers" to "Approval / question answers",
+          "prompt_input" to "Send messages",
+          "prompt_answers" to "Answer questions and approvals",
         )) {
         DetailRow(
           label,
@@ -63,6 +63,9 @@ internal fun ConnectionDiagnostics(profile: MachineProfile, state: ConnectedUiSt
       state.activeProfileId == profile.id && state.selectedAgent?.machineId == profile.machineId
     ) {
       DetailGroup("Current agent") {
+        if (state.omittedConversationTurns > 0 || state.omittedToolOperations > 0) {
+          DetailRow("History window", "Up to 200 recent messages and 100 tool calls")
+        }
         state.conversationTurns
           .flatMap { it.parts }
           .filterIsInstance<com.azusachino.cappuccino.core.ConversationPart.ResponseStatus>()
