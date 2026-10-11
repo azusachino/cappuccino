@@ -4,6 +4,7 @@
 //! tailnet/loopback boundary is the security model.
 
 mod agents;
+mod compression;
 mod config;
 mod conversation;
 mod herdr;
@@ -78,6 +79,7 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
         app = app.merge((module.router)());
     }
     let app = app
+        .layer(compression::json_layer())
         .layer(axum::middleware::from_fn(auth_middleware))
         .with_state(state);
 

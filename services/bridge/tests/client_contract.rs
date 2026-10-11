@@ -507,18 +507,25 @@ async fn agent_conversation_returns_structured_turns() {
     assert_eq!(exchange.body["session_id"], "s-probe");
 
     let turns = exchange.body["turns"].as_array().expect("turns array");
-    assert_eq!(turns.len(), 2);
+    assert_eq!(turns.len(), 3);
     assert_eq!(turns[0]["role"], "user");
     assert_eq!(turns[0]["text"], "Run tests");
 
     assert_eq!(turns[1]["role"], "agent");
     let parts = turns[1]["parts"].as_array().expect("parts array");
-    assert_eq!(parts.len(), 2);
+    assert_eq!(parts.len(), 1);
+    assert_eq!(turns[1]["timestamp"], "2026-10-07T12:00:01Z");
+    assert_eq!(parts[0]["started_at"], "2026-10-07T12:00:01Z");
+    assert_eq!(parts[0]["finished_at"], "2026-10-07T12:00:05Z");
     assert_eq!(parts[0]["type"], "tool_call");
     assert_eq!(parts[0]["name"], "cargo_test");
     assert_eq!(parts[0]["output"], "test result: ok");
-    assert_eq!(parts[1]["type"], "text");
-    assert_eq!(parts[1]["text"], "Tests passed successfully");
+    assert_eq!(turns[2]["role"], "agent");
+    assert_eq!(turns[2]["timestamp"], "2026-10-07T12:00:06Z");
+    let reply = turns[2]["parts"].as_array().expect("response parts");
+    assert_eq!(reply.len(), 1);
+    assert_eq!(reply[0]["type"], "text");
+    assert_eq!(reply[0]["text"], "Tests passed successfully");
 
     bridge.stop().expect("bridge stop");
     herdr.stop().await;

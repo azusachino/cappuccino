@@ -13,11 +13,30 @@ use std::sync::Arc;
 
 pub struct BridgeState {
     pub machine_id: String,
+    pub machine_name: Option<String>,
 }
 
 impl BridgeState {
     pub fn new(machine_id: String) -> Self {
-        BridgeState { machine_id }
+        BridgeState {
+            machine_id,
+            machine_name: host_name(),
+        }
+    }
+}
+
+fn host_name() -> Option<String> {
+    let mut bytes = [0u8; 256];
+    // SAFETY: gethostname receives a writable buffer and its exact capacity.
+    if unsafe { libc::gethostname(bytes.as_mut_ptr().cast(), bytes.len()) } != 0 {
+        return None;
+    }
+    let end = bytes.iter().position(|byte| *byte == 0)?;
+    let name = std::str::from_utf8(&bytes[..end]).ok()?.trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
     }
 }
 
@@ -37,8 +56,18 @@ pub async fn session(State(state): State<Arc<BridgeState>>) -> Response {
         json!({
             "event": "paired",
             "machine_id": state.machine_id,
+            "machine_name": state.machine_name,
             "protocol": 1,
             "plugin": "azusachino.cappuccino-bridge",
+            "bridge_version": env!("CARGO_PKG_VERSION"),
+            // Endpoint support, not a promise that every agent can use it or is healthy.
+            "capabilities": {
+                "agent_discovery": true,
+                "live_output": true,
+                "conversation_history": true,
+                "prompt_input": true,
+                "prompt_answers": true,
+            },
         })
         .to_string(),
     )
@@ -484,5 +513,30 @@ pub async fn submit_agent_prompt(
                 ),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn machine_name_is_additive_metadata_not_machine_identity() {
+        let mut state = BridgeState::new("stable-machine-id".to_string());
+        state.machine_name = Some("Owner's Mac".to_string());
+        let response = session(State(Arc::new(state))).await;
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["machine_name"], "Owner's Mac");
+        assert_eq!(value["machine_id"], "stable-machine-id");
+        assert_eq!(value["protocol"], 1);
+        assert_eq!(value["bridge_version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(value["capabilities"]["agent_discovery"], true);
+        assert_eq!(value["capabilities"]["live_output"], true);
+        assert_eq!(value["capabilities"]["conversation_history"], true);
+        assert_eq!(value["capabilities"]["prompt_input"], true);
+        assert_eq!(value["capabilities"]["prompt_answers"], true);
     }
 }

@@ -36,12 +36,24 @@ pub enum ConversationPart {
     Text { text: String },
     #[serde(rename = "thinking")]
     Thinking { text: String },
+    #[serde(rename = "response_status")]
+    ResponseStatus {
+        status: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
     #[serde(rename = "tool_call")]
     ToolCall {
         name: String,
         input: Value,
         #[serde(skip_serializing_if = "Option::is_none")]
         output: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        is_error: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        started_at: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        finished_at: Option<String>,
     },
 }
 
@@ -136,6 +148,9 @@ pub fn parse_agy_transcript(content: &str) -> Vec<ConversationTurn> {
                             name,
                             input,
                             output: None,
+                            is_error: None,
+                            started_at: timestamp.clone(),
+                            finished_at: None,
                         });
                     }
                 }
@@ -214,6 +229,7 @@ fn clean_agy_user_prompt(raw: &str) -> String {
 pub fn parse_pi_transcript(content: &str) -> Vec<ConversationTurn> {
     let mut turns: Vec<ConversationTurn> = Vec::new();
     let mut turn_counter = 1usize;
+    let mut tool_calls = std::collections::HashMap::new();
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -297,10 +313,16 @@ pub fn parse_pi_transcript(content: &str) -> Vec<ConversationTurn> {
                                     .or_else(|| block.get("toolInput"))
                                     .cloned()
                                     .unwrap_or(Value::Null);
+                                if let Some(id) = block.get("id").and_then(Value::as_str) {
+                                    tool_calls.insert(id.to_string(), (turns.len(), parts.len()));
+                                }
                                 parts.push(ConversationPart::ToolCall {
                                     name,
                                     input,
                                     output: None,
+                                    is_error: None,
+                                    started_at: timestamp.clone(),
+                                    finished_at: None,
                                 });
                             }
                             _ => {}
@@ -308,41 +330,82 @@ pub fn parse_pi_transcript(content: &str) -> Vec<ConversationTurn> {
                     }
                 }
 
+                let status = match msg.get("stopReason").and_then(Value::as_str) {
+                    Some("aborted") => Some("aborted"),
+                    Some("error") => Some("failed"),
+                    _ => None,
+                };
+                if let Some(status) = status {
+                    parts.push(ConversationPart::ResponseStatus {
+                        status: status.to_string(),
+                        detail: msg
+                            .get("errorMessage")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                    });
+                }
                 if parts.is_empty() {
                     continue;
                 }
 
-                let merge = turns.last().map(|t| t.role.as_str()) == Some("agent");
-                if merge {
-                    if let Some(last) = turns.last_mut() {
-                        last.parts.extend(parts);
-                    }
-                } else {
-                    turns.push(ConversationTurn {
-                        id: format!("t-{turn_counter:03}"),
-                        role: "agent".to_string(),
-                        timestamp,
-                        text: None,
-                        parts,
-                    });
-                    turn_counter += 1;
-                }
+                // Preserve actual response boundaries and their timestamps.
+                turns.push(ConversationTurn {
+                    id: format!("t-{turn_counter:03}"),
+                    role: "agent".to_string(),
+                    timestamp,
+                    text: None,
+                    parts,
+                });
+                turn_counter += 1;
             }
             "toolResult" | "tool_result" => {
                 let content_str = if let Some(s) = msg.get("content").and_then(|c| c.as_str()) {
                     s.to_string()
+                } else if let Some(blocks) = msg.get("content").and_then(Value::as_array) {
+                    blocks
+                        .iter()
+                        .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+                        .filter_map(|block| block.get("text").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 } else if let Some(output) = msg.get("output").and_then(|c| c.as_str()) {
                     output.to_string()
                 } else {
                     String::new()
                 };
 
-                if let Some(last) = turns.last_mut() {
+                if let Some(id) = msg.get("toolCallId").and_then(Value::as_str) {
+                    if let Some((turn_index, part_index)) = tool_calls.remove(id) {
+                        if let Some(ConversationPart::ToolCall {
+                            output,
+                            is_error,
+                            finished_at,
+                            ..
+                        }) = turns
+                            .get_mut(turn_index)
+                            .and_then(|turn| turn.parts.get_mut(part_index))
+                        {
+                            *output = Some(content_str);
+                            *is_error = msg.get("isError").and_then(Value::as_bool);
+                            *finished_at = timestamp.clone();
+                        }
+                    }
+                    // An unmatched typed result must never attach to another tool.
+                } else if let Some(last) = turns.last_mut() {
+                    // Legacy logs without IDs retain their sequential association.
                     if last.role == "agent" {
                         for part in last.parts.iter_mut().rev() {
-                            if let ConversationPart::ToolCall { output, .. } = part {
+                            if let ConversationPart::ToolCall {
+                                output,
+                                is_error,
+                                finished_at,
+                                ..
+                            } = part
+                            {
                                 if output.is_none() {
-                                    *output = Some(content_str.trim().to_string());
+                                    *output = Some(content_str);
+                                    *is_error = msg.get("isError").and_then(Value::as_bool);
+                                    *finished_at = timestamp.clone();
                                     break;
                                 }
                             }
@@ -458,23 +521,114 @@ mod tests {
 {"type":"message","timestamp":"2026-10-07T12:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests passed successfully"}]}}"#;
 
         let turns = parse_pi_transcript(jsonl);
-        assert_eq!(turns.len(), 2);
+        assert_eq!(turns.len(), 3);
         assert_eq!(turns[0].role, "user");
         assert_eq!(turns[0].text.as_deref(), Some("Run tests"));
 
         assert_eq!(turns[1].role, "agent");
-        assert_eq!(turns[1].parts.len(), 2);
+        assert_eq!(turns[1].parts.len(), 1);
+        assert_eq!(turns[1].timestamp.as_deref(), Some("2026-10-07T12:00:01Z"));
+        assert_eq!(turns[2].timestamp.as_deref(), Some("2026-10-07T12:00:06Z"));
         match &turns[1].parts[0] {
-            ConversationPart::ToolCall { name, output, .. } => {
+            ConversationPart::ToolCall {
+                name,
+                output,
+                started_at,
+                finished_at,
+                ..
+            } => {
                 assert_eq!(name, "cargo_test");
                 assert_eq!(output.as_deref(), Some("test result: ok"));
+                assert_eq!(started_at.as_deref(), Some("2026-10-07T12:00:01Z"));
+                assert_eq!(finished_at.as_deref(), Some("2026-10-07T12:00:05Z"));
             }
             _ => panic!("expected tool_call"),
         }
-        match &turns[1].parts[1] {
+        match &turns[2].parts[0] {
             ConversationPart::Text { text } => assert_eq!(text, "Tests passed successfully"),
             _ => panic!("expected text"),
         }
+    }
+
+    #[test]
+    fn pi_text_blocks_match_parallel_tool_ids_not_result_order() {
+        let jsonl = r#"{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"a","name":"read","arguments":{"path":"a.md"}},{"type":"toolCall","id":"b","name":"bash","arguments":{"command":"pwd"}}]}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"missing","content":[{"type":"text","text":"must not attach"}]}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"a","content":[{"type":"text","text":"first block"},{"type":"text","text":"second block"}]}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"b","content":[{"type":"text","text":"/project"}]}}"#;
+        let turns = parse_pi_transcript(jsonl);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].parts.len(), 2);
+        assert!(
+            matches!(&turns[0].parts[0], ConversationPart::ToolCall { name, input, output, .. }
+            if name == "read" && input["path"] == "a.md" && output.as_deref() == Some("first block\nsecond block"))
+        );
+        assert!(
+            matches!(&turns[0].parts[1], ConversationPart::ToolCall { name, output, .. }
+            if name == "bash" && output.as_deref() == Some("/project"))
+        );
+    }
+
+    #[test]
+    fn pi_error_flag_follows_the_matching_tool_result() {
+        let log = r#"{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"a","name":"read","arguments":{}},{"type":"toolCall","id":"b","name":"bash","arguments":{}}]}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"b","isError":true,"content":[{"type":"text","text":"command failed"}]}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"a","isError":false,"content":[{"type":"text","text":"contains the word error but succeeded"}]}}"#;
+        let turns = parse_pi_transcript(log);
+        assert!(matches!(
+            &turns[0].parts[0],
+            ConversationPart::ToolCall {
+                is_error: Some(false),
+                ..
+            }
+        ));
+        assert!(
+            matches!(&turns[0].parts[1], ConversationPart::ToolCall { is_error: Some(true), output: Some(output), .. } if output == "command failed")
+        );
+    }
+
+    #[test]
+    fn pi_explicit_abort_keeps_partial_and_empty_responses_without_guessing() {
+        let turns = parse_pi_transcript(
+            r#"{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"Partial reply"}],"stopReason":"aborted","errorMessage":"Operation cancelled"}}
+{"type":"message","message":{"role":"user","content":"next"}}
+{"type":"message","message":{"role":"assistant","content":[],"stopReason":"aborted"}}"#,
+        );
+        assert!(
+            matches!(&turns[0].parts[0], ConversationPart::Text { text } if text == "Partial reply")
+        );
+        assert!(
+            matches!(&turns[0].parts[1], ConversationPart::ResponseStatus { status, detail: Some(detail) } if status == "aborted" && detail == "Operation cancelled")
+        );
+        assert!(
+            matches!(&turns[2].parts[0], ConversationPart::ResponseStatus { status, detail: None } if status == "aborted")
+        );
+        let ordinary = parse_pi_transcript(
+            r#"{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"The operation aborted yesterday"}],"stopReason":"stop"}}"#,
+        );
+        assert_eq!(ordinary[0].parts.len(), 1);
+        let failed = parse_pi_transcript(
+            r#"{"type":"message","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Provider failed"}}"#,
+        );
+        assert!(
+            matches!(&failed[0].parts[0], ConversationPart::ResponseStatus { status, .. } if status == "failed")
+        );
+    }
+
+    #[test]
+    fn pi_tool_times_remain_id_bound_across_separate_responses() {
+        let log = r#"{"type":"message","timestamp":"2026-10-10T01:00:00Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"a","name":"read","arguments":{}}]}}
+{"type":"message","timestamp":"2026-10-10T01:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"b","name":"bash","arguments":{}}]}}
+{"type":"message","timestamp":"2026-10-10T01:00:02Z","message":{"role":"toolResult","toolCallId":"b","content":"b"}}
+{"type":"message","timestamp":"2026-10-10T01:00:03Z","message":{"role":"toolResult","toolCallId":"a","content":"a"}}"#;
+        let turns = parse_pi_transcript(log);
+        assert_eq!(turns.len(), 2);
+        assert!(
+            matches!(&turns[0].parts[0], ConversationPart::ToolCall { started_at: Some(start), finished_at: Some(end), output: Some(output), .. } if start == "2026-10-10T01:00:00Z" && end == "2026-10-10T01:00:03Z" && output == "a")
+        );
+        assert!(
+            matches!(&turns[1].parts[0], ConversationPart::ToolCall { finished_at: Some(end), output: Some(output), .. } if end == "2026-10-10T01:00:02Z" && output == "b")
+        );
     }
 
     #[test]

@@ -30,12 +30,20 @@ same base URL for both transports.
 
 | Method / route | Transport | Behavior |
 | --- | --- | --- |
-| `GET /api/session` | HTTP | reachability and machine identity |
+| `GET /api/session` | HTTP | reachability, machine identity, version and capability advertisement |
 | `GET /api/agents` | HTTP | Herdr `agent.list` mapping; names/pane IDs are locators, not proven native Pi session IDs |
 | `GET /api/transcript?session=…` | HTTP | resolves Herdr-reported `agent_session`; fails closed when missing or outside Pi's canonical session store |
 | `/api/stream?session=…` | WebSocket | read-only pane-line append/reset events with visible gaps |
 
-The current bridge has no send route. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
+`GET /api/session` adds optional `bridge_version` (the Cargo package version) and a boolean `capabilities` object: `agent_discovery`, `live_output`, `conversation_history`, `prompt_input`, and `prompt_answers`. These advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Missing fields mean not reported; `false` explicitly means unsupported. Protocol remains 1 and existing identity validation is unchanged. Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog.
+
+The bridge exposes `/api/agents/{sessionId}/conversation` and a legacy `POST /api/agents/{sessionId}/prompt` route for prompt text and validated prompt-card answers; this is not native Pi queue selection or a correlated delivery receipt. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
+
+Pi conversation tool parts optionally include `is_error`, directly from the matching Pi `toolResult.isError`. Unknown-ID results remain unattached; missing flags remain absent rather than claiming success. This additive field preserves protocol 1 and existing clients. The Android reader uses it to expose failed results by default, not a keyword heuristic.
+
+Pi assistant records retain their individual timestamps/boundaries. Explicit `stopReason: aborted` or `error` becomes a `response_status` part with `aborted`/`failed` and optional reported detail; empty aborted responses are retained. Tool parts optionally include `started_at` from the call record and `finished_at` from the matching result record. No clock substitution, cancellation guessing or keyword classification is used.
+
+Ordinary JSON responses negotiate gzip with `Accept-Encoding`; SSE and WebSocket bodies are excluded. Android's existing OkHttp decoder handles it transparently and still enforces the decompressed response limit. The owner approved tower-http gzip middleware (and its standard test decoder) as a scoped dependency exception. Small/non-negotiated responses retain identity encoding. This changes transfer size, not session semantics or the trust boundary.
 
 ### Pi transcript identity
 

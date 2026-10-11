@@ -127,7 +127,7 @@ pub async fn resolve_session_transcript(
 
     // If agent is agy (or pane runs agy), attempt agy resolution
     if agent_name == "agy" || is_agy_pane(pane_id, agent_info) {
-        if let Some(path) = resolve_agy_transcript_for_pane(pane_id, agent_info) {
+        if let Some(path) = resolve_agy_transcript_for_pane(pane_id).await {
             return Ok(Some(ResolvedTranscript::Agy(path)));
         }
     }
@@ -153,61 +153,79 @@ fn is_agy_pane(pane_id: &str, agent_info: &Value) -> bool {
     false
 }
 
-/// Resolves active agy session transcript.
-/// Checks the agy brain directory for an active presence lock or newest session.
-pub fn resolve_agy_transcript_for_pane(_pane_id: &str, _agent_info: &Value) -> Option<PathBuf> {
-    let brain_dir = agy_brain_dir();
-    let presence_dir = brain_dir.parent()?.join("presence");
-
-    // Look for active presence locks
-    if let Ok(entries) = std::fs::read_dir(&presence_dir) {
-        let mut locks: Vec<PathBuf> = entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|ext| ext.to_str()) == Some("lock"))
-            .collect();
-        // Sort newest first
-        locks.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
-        locks.reverse();
-
-        for lock in locks {
-            if let Some(stem) = lock.file_stem().and_then(|s| s.to_str()) {
-                let candidate = brain_dir
-                    .join(stem)
-                    .join(".system_generated")
-                    .join("logs")
-                    .join("transcript.jsonl");
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
-        }
+/// The selected pane must contain exactly one foreground Agy process.
+fn agy_pid(info: &Value, pane_id: &str) -> Option<u32> {
+    let process_info = &info["process_info"];
+    if process_info["pane_id"].as_str()? != pane_id {
+        return None;
     }
-
-    // Fallback: look for the most recently modified transcript in brain/
-    if let Ok(entries) = std::fs::read_dir(&brain_dir) {
-        let mut candidates: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
-        for entry in entries.filter_map(|e| e.ok()) {
-            let log = entry
-                .path()
-                .join(".system_generated")
-                .join("logs")
-                .join("transcript.jsonl");
-            if let Ok(meta) = std::fs::metadata(&log) {
-                if meta.is_file() {
-                    if let Ok(mod_time) = meta.modified() {
-                        candidates.push((log, mod_time));
-                    }
-                }
-            }
-        }
-        candidates.sort_by_key(|(_, t)| *t);
-        if let Some((newest, _)) = candidates.pop() {
-            return Some(newest);
-        }
+    let mut pids = process_info["foreground_processes"]
+        .as_array()?
+        .iter()
+        .filter(|process| process["name"].as_str() == Some("agy"))
+        .filter_map(|process| u32::try_from(process["pid"].as_u64()?).ok());
+    let pid = pids.next().filter(|pid| *pid > 0)?;
+    if pids.next().is_some() {
+        return None;
     }
+    Some(pid)
+}
 
-    None
+/// Only a presence file OPEN BY that process identifies its session. Stale files,
+/// directory mtimes, terminal titles and cwd are never session identity.
+fn agy_open_transcript(files: &str, brain_dir: &Path) -> Option<PathBuf> {
+    let presence = std::fs::canonicalize(brain_dir.parent()?.join("presence")).ok()?;
+    let mut sessions = std::collections::BTreeSet::new();
+    for line in files.lines().filter_map(|line| line.strip_prefix('n')) {
+        let path = Path::new(line);
+        if path.extension().and_then(|ext| ext.to_str()) != Some("lock") {
+            continue;
+        }
+        let canonical = std::fs::canonicalize(path).ok()?;
+        if canonical.parent() != Some(presence.as_path()) {
+            continue;
+        }
+        let session = canonical.file_stem()?.to_str()?;
+        sessions.insert(session.to_string());
+    }
+    if sessions.len() != 1 {
+        return None;
+    }
+    let path = brain_dir
+        .join(sessions.first()?)
+        .join(".system_generated/logs/transcript.jsonl");
+    transcript_in_store(&path, brain_dir)
+}
+
+async fn resolve_agy_transcript_for_pane(pane_id: &str) -> Option<PathBuf> {
+    let params = serde_json::json!({"pane_id": pane_id});
+    let info = crate::herdr::request("pane.process_info", params.clone())
+        .await
+        .ok()?;
+    let pid = agy_pid(&info, pane_id)?;
+    // lsof is a passive, process-scoped FD query. Missing tool, timeout, changed
+    // process or ambiguous ownership means no canonical history, never a guess.
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        tokio::process::Command::new("lsof")
+            .args(["-a", "-p", &pid.to_string(), "-Fn"])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = agy_open_transcript(std::str::from_utf8(&output.stdout).ok()?, &agy_brain_dir())?;
+    let current = crate::herdr::request("pane.process_info", params)
+        .await
+        .ok()?;
+    if agy_pid(&current, pane_id) != Some(pid) {
+        return None;
+    }
+    Some(path)
 }
 
 /// Shape returned by GET /api/transcript.
@@ -283,6 +301,35 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn agy_session_is_owned_by_the_selected_process_not_newest_file() {
+        let home = TempStore::new("agy-owner");
+        let brain = home.path.join("brain");
+        let presence = home.path.join("presence");
+        std::fs::create_dir_all(&presence).unwrap();
+        for session in ["selected", "newer-closed"] {
+            let logs = brain.join(session).join(".system_generated/logs");
+            std::fs::create_dir_all(&logs).unwrap();
+            std::fs::write(logs.join("transcript.jsonl"), "{}\n").unwrap();
+            std::fs::write(presence.join(format!("{session}.lock")), "").unwrap();
+        }
+        let owned = format!("p42\nn{}\n", presence.join("selected.lock").display());
+        let expected =
+            std::fs::canonicalize(brain.join("selected/.system_generated/logs/transcript.jsonl"))
+                .unwrap();
+        assert_eq!(agy_open_transcript(&owned, &brain), Some(expected));
+        assert_eq!(agy_open_transcript("p42\n", &brain), None);
+        let ambiguous = format!("{owned}n{}\n", presence.join("newer-closed.lock").display());
+        assert_eq!(agy_open_transcript(&ambiguous, &brain), None);
+        let info = serde_json::json!({"process_info": {
+            "pane_id": "selected-pane", "foreground_processes": [
+                {"name": "agy", "pid": 42}, {"name": "node", "pid": 43}
+            ]
+        }});
+        assert_eq!(agy_pid(&info, "selected-pane"), Some(42));
+        assert_eq!(agy_pid(&info, "other-pane"), None);
     }
 
     #[test]
