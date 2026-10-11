@@ -17,9 +17,9 @@ class ThemeTest {
   private val fallbackDark = darkColorScheme(primary = androidx.compose.ui.graphics.Color.Blue)
 
   @Test
-  fun githubInspiredCanvasesAndNormalTextHaveReadableContrast() {
-    assertEquals(Color.White, FallbackLightColorScheme.background)
-    assertEquals(Color(0xFF0D1117), FallbackDarkColorScheme.background)
+  fun cappuccinoCanvasesAndNormalTextHaveReadableContrast() {
+    assertEquals(Color(0xFFFFF8F2), FallbackLightColorScheme.background)
+    assertEquals(Color(0xFF1B1410), FallbackDarkColorScheme.background)
     for (scheme in listOf(FallbackLightColorScheme, FallbackDarkColorScheme)) {
       for ((foreground, background) in
         listOf(
@@ -27,6 +27,18 @@ class ThemeTest {
           scheme.onSurface to scheme.surfaceContainerHigh,
           scheme.onSurfaceVariant to scheme.surfaceContainerHigh,
           scheme.onPrimary to scheme.primary,
+          scheme.onPrimaryContainer to scheme.primaryContainer,
+          scheme.onSecondary to scheme.secondary,
+          scheme.onSecondaryContainer to scheme.secondaryContainer,
+          scheme.onTertiary to scheme.tertiary,
+          scheme.onTertiaryContainer to scheme.tertiaryContainer,
+          scheme.onError to scheme.error,
+          scheme.onErrorContainer to scheme.errorContainer,
+          scheme.onSurfaceVariant to scheme.surfaceContainerHighest,
+          scheme.onSurface to scheme.surface,
+          scheme.onSurface to scheme.surfaceContainerLow,
+          scheme.onSurface to scheme.surfaceContainer,
+          scheme.inverseOnSurface to scheme.inverseSurface,
         )) {
         val a = foreground.luminance()
         val b = background.luminance()
@@ -83,10 +95,10 @@ class ThemeTest {
   }
 
   @Test
-  fun wallpaperColorsAreTheDefaultOnSupportedDevices() {
+  fun cappuccinoColorsAreTheDefaultOnSupportedDevices() {
     for (dark in listOf(false, true)) {
       assertSame(
-        if (dark) dynamicDark else dynamicLight,
+        if (dark) fallbackDark else fallbackLight,
         selectColorScheme(31, dark, dynamicLight, dynamicDark, fallbackLight, fallbackDark),
       )
       assertSame(
