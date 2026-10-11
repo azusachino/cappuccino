@@ -26,7 +26,15 @@ class BridgeWebSocketClosedException(val code: Int, val reason: String) :
     "Bridge stream closed (code=$code${if (reason.isEmpty()) "" else ", reason=$reason"})"
   )
 
+data class ConversationSnapshot(val turns: List<ConversationTurn>, val source: String)
+
 interface BridgeTransport {
+  val bridgeDetails: BridgeDetails?
+    get() = null
+
+  val machineName: String?
+    get() = null
+
   suspend fun verify(expectedMachine: UUID? = null): UUID
 
   suspend fun agents(machine: UUID): List<AgentRow>
@@ -34,6 +42,9 @@ interface BridgeTransport {
   fun stream(sessionId: String): Flow<StreamEvent>
 
   suspend fun conversation(sessionId: String): List<ConversationTurn> = emptyList()
+
+  suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
+    ConversationSnapshot(conversation(sessionId), "canonical_log")
 
   suspend fun submitPrompt(sessionId: String, text: String) {}
 
@@ -50,12 +61,21 @@ class BridgeClient(
   private val endpoint: Endpoint,
   private val client: OkHttpClient = defaultClient(),
 ) : BridgeTransport {
+  override var bridgeDetails: BridgeDetails? = null
+    private set
+
+  override var machineName: String? = null
+    private set
+
   override suspend fun verify(expectedMachine: UUID?): UUID =
     withContext(Dispatchers.IO) {
-      val json = get("api/session")
-      val machine = parsePaired(parseJsonObject(json))
+      val json = parseJsonObject(get("api/session"))
+      val machine = parsePaired(json)
       if (expectedMachine != null && machine != expectedMachine)
         throw ProtocolException("Machine identity changed")
+      val details = parseBridgeDetails(json)
+      machineName = json.optionalString("machine_name")?.trim()?.takeIf { it.isNotEmpty() }
+      bridgeDetails = details
       machine
     }
 
@@ -63,13 +83,18 @@ class BridgeClient(
     withContext(Dispatchers.IO) { parseAgents(parseJsonObject(get("api/agents")), machine) }
 
   override suspend fun conversation(sessionId: String): List<ConversationTurn> =
+    conversationSnapshot(sessionId).turns
+
+  override suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
     withContext(Dispatchers.IO) {
-      val json = get("api/agents/$sessionId/conversation")
-      parseConversationResponse(parseJsonObject(json))
+      val json = parseJsonObject(get("api/agents/$sessionId/conversation"))
+      ConversationSnapshot(parseConversationResponse(json), json.string("source"))
     }
 
   override suspend fun submitPrompt(sessionId: String, text: String): Unit =
     withContext(Dispatchers.IO) {
+      if (bridgeDetails?.capabilities?.get("prompt_input") == false)
+        throw ProtocolException("Prompt input unsupported by this bridge")
       val escapedText = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
       val body = """{"type":"prompt","text":"$escapedText"}"""
       post("api/agents/$sessionId/prompt", body)
@@ -83,6 +108,8 @@ class BridgeClient(
     action: String?,
   ): Unit =
     withContext(Dispatchers.IO) {
+      if (bridgeDetails?.capabilities?.get("prompt_answers") == false)
+        throw ProtocolException("Prompt answers unsupported by this bridge")
       val parts = mutableListOf<String>()
       parts.add(""""type":"answer_prompt"""")
       parts.add(""""prompt_id":"$promptId"""")

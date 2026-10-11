@@ -61,6 +61,16 @@ fun validateWebSocketMessage(text: String) {
     throw ProtocolException("WebSocket message exceeds local limit")
 }
 
+internal fun JsonValue.toJsonElement(): JsonElement =
+  when (this) {
+    is JsonValue.Object -> SerializationObject(value.fields.mapValues { it.value.toJsonElement() })
+    is JsonValue.Array -> kotlinx.serialization.json.JsonArray(value.map { it.toJsonElement() })
+    is JsonValue.StringValue -> JsonPrimitive(value)
+    is JsonValue.Number -> JsonPrimitive(value)
+    is JsonValue.BooleanValue -> JsonPrimitive(value)
+    JsonValue.Null -> JsonNull
+  }
+
 private fun parseJson(text: String): JsonValue =
   try {
     Json.parseToJsonElement(text).toValue()

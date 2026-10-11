@@ -119,7 +119,7 @@ class CappuccinoShellTest {
         }
       }
     }
-    compose.onNodeWithText("Recent agent output · Read-only").assertIsDisplayed()
+    compose.onNodeWithText("Recent output · History not verified").assertIsDisplayed()
     compose.onNodeWithText("Synthetic output 30").assertIsDisplayed()
     capture("SelectedOutput")
 
@@ -349,6 +349,13 @@ class CappuccinoShellTest {
 
   private class StateActions(private val state: MutableState<ConnectedUiState>) : ConnectedActions {
     override fun addMachine(label: String, url: String) = Unit
+
+    override fun renameProfile(id: String, label: String) {
+      state.value =
+        state.value.copy(
+          profiles = state.value.profiles.map { if (it.id == id) it.copy(label = label) else it }
+        )
+    }
 
     override fun selectProfile(id: String) = Unit
 

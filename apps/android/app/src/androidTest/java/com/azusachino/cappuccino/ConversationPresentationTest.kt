@@ -53,7 +53,7 @@ class ConversationPresentationTest {
     compose.onNodeWithText("Thinking").performClick()
     compose.onNodeWithText("Hidden thought details").assertIsDisplayed()
     compose.onNodeWithText("Hidden tool result").assertDoesNotExist()
-    compose.onNodeWithText("Tool: bash · Result available").performClick()
+    compose.onNodeWithText("bash · Result available").performClick()
     compose.onNodeWithText("Hidden tool result").assertIsDisplayed()
     capture("ConversationExpanded")
     compose.onNodeWithText("Thinking").performClick()

@@ -582,6 +582,42 @@ class ConnectedViewModelTest {
     )
 
   @Test
+  fun machineRenamePersistsWithoutChangingIdentityOrConnecting() =
+    runTest(dispatcher) {
+      viewModel =
+        ConnectedViewModel(store, { error("Renaming must not connect") }, {}, SavedStateHandle())
+      viewModel.renameProfile(profile.id, "  My Mac mini  ")
+      val renamed = viewModel.state.value.profiles.single()
+      assertEquals("My Mac mini", renamed.label)
+      assertEquals(profile.id, renamed.id)
+      assertEquals(profile.machineId, renamed.machineId)
+      assertEquals(profile.endpoint, renamed.endpoint)
+      assertEquals(renamed, store.read().single())
+      viewModel.renameProfile(profile.id, "   ")
+      assertEquals(renamed, store.read().single())
+    }
+
+  @Test
+  fun bridgeNameMigratesUrlDefaultsButNeverOverridesAnOwnerName() =
+    runTest(dispatcher) {
+      store.save(profile.copy(label = profile.endpoint.base.host))
+      viewModel =
+        createViewModel(
+          pause = {},
+          reportedMachineName = "Mac mini",
+          streamFactory = { flow { kotlinx.coroutines.awaitCancellation() } },
+        )
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      assertEquals("Mac mini", viewModel.state.value.profiles.single().label)
+      viewModel.renameProfile(profile.id, "Owner name")
+      viewModel.refresh()
+      advanceUntilIdle()
+      assertEquals("Owner name", viewModel.state.value.profiles.single().label)
+      assertEquals(profile.machineId, store.read().single().machineId)
+    }
+
+  @Test
   fun streamUpdatesRefreshVisibleConversation() =
     runTest(dispatcher) {
       val events = MutableSharedFlow<StreamEvent>()
@@ -606,6 +642,38 @@ class ConnectedViewModelTest {
       events.emit(StreamEvent.Entries(listOf(StreamEntry("entry", 1, "text", "Live reply", null))))
       advanceUntilIdle()
       assertEquals("Live reply", viewModel.state.value.conversationTurns.single().text)
+    }
+
+  @Test
+  fun terminalFallbackIsNotRebuiltAsMarkdownHistoryOnExternalInput() =
+    runTest(dispatcher) {
+      val events = MutableSharedFlow<StreamEvent>()
+      viewModel =
+        createViewModel(
+          pause = {},
+          conversationFactory = {
+            listOf(
+              ConversationTurn("unstable", "assistant", null, "Terminal snapshot", emptyList())
+            )
+          },
+          conversationSource = "scrollback",
+          streamFactory = { events },
+        )
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      runCurrent()
+      events.emit(StreamEvent.Open(agent.sessionId, 1))
+      events.emit(
+        StreamEvent.Entries(listOf(StreamEntry("external", 1, "text", "External input", null)))
+      )
+      advanceUntilIdle()
+      assertTrue(viewModel.state.value.conversationTurns.isEmpty())
+      assertEquals("scrollback", viewModel.state.value.conversationSource)
+      assertEquals("External input", viewModel.state.value.stream.entries.single().text)
+      viewModel.selectAgent(null)
+      assertNull(viewModel.state.value.conversationSource)
     }
 
   @Test
@@ -671,6 +739,8 @@ class ConnectedViewModelTest {
   private fun createViewModel(
     pause: suspend (Long) -> Unit,
     conversationFactory: suspend (String) -> List<ConversationTurn> = { emptyList() },
+    conversationSource: String = "canonical_log",
+    reportedMachineName: String? = null,
     streamFactory: (String) -> Flow<StreamEvent>,
   ): ConnectedViewModel =
     ConnectedViewModel(
@@ -681,11 +751,16 @@ class ConnectedViewModelTest {
 
           override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
 
+          override val machineName = reportedMachineName
+
           override fun stream(sessionId: String): Flow<StreamEvent> = streamFactory(sessionId)
 
           override suspend fun conversation(
             sessionId: String
           ): List<com.azusachino.cappuccino.core.ConversationTurn> = conversationFactory(sessionId)
+
+          override suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
+            ConversationSnapshot(conversationFactory(sessionId), conversationSource)
 
           override suspend fun submitPrompt(sessionId: String, text: String) {}
 

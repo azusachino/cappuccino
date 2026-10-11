@@ -305,6 +305,21 @@ class BridgeProtocolTest {
   }
 
   @Test
+  fun preservesStructuredToolArgumentsAndResultsForDisclosure() {
+    val turns =
+      parseConversationResponse(
+        parseJsonObject(
+          """{"turns":[{"id":"entry","role":"agent","parts":[{"type":"tool_call","name":"bash","input":{"command":"printf \"hello\"","timeout":10,"nested":[true,null]},"output":"hello"}]}]}"""
+        )
+      )
+    val tool = turns.single().parts.single() as ConversationPart.ToolCall
+    assertEquals("bash", tool.name)
+    assertEquals("printf \"hello\"", parseJsonObject(tool.input).string("command"))
+    assertEquals(10L, parseJsonObject(tool.input).long("timeout"))
+    assertEquals("hello", tool.output)
+  }
+
+  @Test
   fun parsesConversationTurnResponse() {
     val json =
       obj(

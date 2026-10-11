@@ -47,6 +47,8 @@ dependencies {
   implementation(platform(libs.compose.bom))
   implementation(libs.compose.material3)
   implementation(libs.commonmark)
+  implementation(libs.mikepenz.markdown.m3)
+  implementation(libs.mikepenz.markdown.code)
   implementation(libs.activity.compose)
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.okhttp)

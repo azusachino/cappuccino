@@ -2,6 +2,9 @@ package com.azusachino.cappuccino.ui
 
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -12,6 +15,36 @@ class ThemeTest {
   private val dynamicDark = darkColorScheme()
   private val fallbackLight = lightColorScheme(primary = androidx.compose.ui.graphics.Color.Red)
   private val fallbackDark = darkColorScheme(primary = androidx.compose.ui.graphics.Color.Blue)
+
+  @Test
+  fun githubInspiredCanvasesAndNormalTextHaveReadableContrast() {
+    assertEquals(Color.White, FallbackLightColorScheme.background)
+    assertEquals(Color(0xFF0D1117), FallbackDarkColorScheme.background)
+    for (scheme in listOf(FallbackLightColorScheme, FallbackDarkColorScheme)) {
+      for ((foreground, background) in
+        listOf(
+          scheme.onBackground to scheme.background,
+          scheme.onSurface to scheme.surfaceContainerHigh,
+          scheme.onSurfaceVariant to scheme.surfaceContainerHigh,
+          scheme.onPrimary to scheme.primary,
+        )) {
+        val a = foreground.luminance()
+        val b = background.luminance()
+        assertTrue(
+          "Text contrast must be at least 4.5:1",
+          (maxOf(a, b) + 0.05f) / (minOf(a, b) + 0.05f) >= 4.5f,
+        )
+      }
+    }
+  }
+
+  @Test
+  fun agentIconsAreDistinctAndUnknownAgentsHaveANeutralFallback() {
+    assertTrue(agentIconResource("pi") != agentIconResource("agy"))
+    assertTrue(agentIconResource("claude") != agentIconResource("codex"))
+    assertEquals(agentIconResource("agy"), agentIconResource("antigravity-cli"))
+    assertEquals(com.azusachino.cappuccino.R.drawable.ic_machine, agentIconResource("unknown"))
+  }
 
   @Test
   fun resolvesThemeModeCorrectly() {

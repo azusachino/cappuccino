@@ -143,7 +143,7 @@ class ConversationPreviewScreenshotTest {
       }
     }
     compose.waitForIdle()
-    compose.onNodeWithText("Recent agent output · Read-only").assertIsDisplayed()
+    compose.onNodeWithText("Recent output · History not verified").assertIsDisplayed()
   }
 
   @Test
@@ -202,12 +202,12 @@ class ConversationPreviewScreenshotTest {
     // At the 320x640@160 CI frame the Tool row sits below the fold after the bottom-pinning
     // scroll to the Thinking detail; a click injected at its clipped center never lands.
     // Bring the row into view and prove it is displayed before the single expand click.
-    compose
-      .onNodeWithTag("recentOutputList")
-      .performScrollToNode(hasText("Tool: bash · Result available"))
-    compose.onNodeWithText("Tool: bash · Result available").assertIsDisplayed()
-    compose.onNodeWithText("Tool: bash · Result available").performClick()
-    compose.onNodeWithTag("recentOutputList").performScrollToNode(hasText("63 passed · 0 failed"))
+    compose.onNodeWithText("Tools · 1").assertIsDisplayed()
+    compose.onNodeWithText("Tools · 1").performClick()
+    compose.onNodeWithText("Tool activity").assertIsDisplayed()
+    compose.onNodeWithText("bash · Result available").assertIsDisplayed()
+    compose.onNodeWithText("bash · Result available").performClick()
+    compose.onNodeWithTag("toolActivityList").performScrollToNode(hasText("63 passed · 0 failed"))
     compose.waitUntil(timeoutMillis = 5_000) { anyDisplayed("63 passed · 0 failed") }
     compose.onNodeWithText("63 passed · 0 failed").assertIsDisplayed()
     capture("${capturePrefix()}DarkExpanded")
@@ -340,6 +340,13 @@ class ConversationPreviewScreenshotTest {
   private class PreviewActions(private val state: MutableState<ConnectedUiState>) :
     ConnectedActions {
     override fun addMachine(label: String, url: String) = Unit
+
+    override fun renameProfile(id: String, label: String) {
+      state.value =
+        state.value.copy(
+          profiles = state.value.profiles.map { if (it.id == id) it.copy(label = label) else it }
+        )
+    }
 
     override fun selectProfile(id: String) = Unit
 

@@ -75,6 +75,7 @@ data class AgentRow(
   val status: String,
   val working: Boolean,
   val branch: String?,
+  val cwd: String? = null,
 )
 
 data class StreamEntry(
@@ -132,7 +133,17 @@ sealed interface ConversationPart {
 
   data class Thinking(val text: String) : ConversationPart
 
-  data class ToolCall(val name: String, val input: String, val output: String?) : ConversationPart
+  data class ResponseStatus(val status: String, val detail: String?) : ConversationPart
+
+  data class ToolCall(
+    val name: String,
+    val input: String,
+    val output: String?,
+    val isError: Boolean? = null,
+    val startedAt: String? = null,
+    val finishedAt: String? = null,
+    val originalPartIndex: Int? = null,
+  ) : ConversationPart
 }
 
 data class OutputRow(val key: String, val text: String, val gap: Boolean = false)
@@ -175,12 +186,11 @@ data class StreamState(
 }
 
 fun parsePaired(json: JsonObject): UUID {
-  if (
-    json.string("event") != "paired" ||
-      json.long("protocol") != 1L ||
-      json.string("plugin") != BRIDGE_PLUGIN_ID
-  )
+  if (json.string("event") != "paired" || json.string("plugin") != BRIDGE_PLUGIN_ID)
     throw ProtocolException("Unsupported bridge session response")
+  val protocol = json.long("protocol")
+  if (protocol != 1L)
+    throw ProtocolException("Incompatible bridge protocol $protocol; app requires 1")
   return uuid(json.string("machine_id"))
 }
 
@@ -206,6 +216,7 @@ fun parseAgents(json: JsonObject, expectedMachine: UUID): List<AgentRow> {
       row.optionalString("status") ?: "unknown",
       (row.fields["working"] as? JsonValue.BooleanValue)?.value ?: false,
       row.optionalString("active_branch"),
+      row.optionalString("cwd"),
     )
   }
 }
@@ -251,14 +262,33 @@ fun parseConversationResponse(json: JsonObject): List<ConversationTurn> {
           when (partObj.string("type")) {
             "text" -> ConversationPart.Text(partObj.string("text"))
             "thinking" -> ConversationPart.Thinking(partObj.string("text"))
+            "response_status" ->
+              partObj
+                .string("status")
+                .takeIf { it == "aborted" || it == "failed" }
+                ?.let { ConversationPart.ResponseStatus(it, partObj.optionalString("detail")) }
             "tool_call" -> {
               val name = partObj.string("name")
               val inputStr =
                 (partObj.fields["input"] as? JsonValue.StringValue)?.value
-                  ?: (partObj.fields["input"] as? JsonValue.Object)?.value?.let { "..." }
+                  ?: partObj.fields["input"]?.toJsonElement()?.toString()
                   ?: ""
               val outputStr = partObj.optionalString("output")
-              ConversationPart.ToolCall(name, inputStr, outputStr)
+              val isError =
+                when (val flag = partObj.fields["is_error"]) {
+                  null,
+                  JsonValue.Null -> null
+                  is JsonValue.BooleanValue -> flag.value
+                  else -> throw ProtocolException("Invalid tool error flag")
+                }
+              ConversationPart.ToolCall(
+                name,
+                inputStr,
+                outputStr,
+                isError,
+                partObj.optionalString("started_at"),
+                partObj.optionalString("finished_at"),
+              )
             }
             else -> null
           }

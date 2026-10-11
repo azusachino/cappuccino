@@ -28,14 +28,32 @@ sealed interface ConnectionState {
   data class Error(val message: String) : ConnectionState
 }
 
+data class MachineConnection(
+  val connection: ConnectionState = ConnectionState.Disconnected,
+  val agents: List<AgentRow> = emptyList(),
+  val busy: Boolean = false,
+)
+
+fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnection =
+  machines[profile.id]
+    ?: if (activeProfileId == profile.id)
+      MachineConnection(connection, agents.filter { it.machineId == profile.machineId }, busy)
+    else MachineConnection()
+
 data class ConnectedUiState(
   val profiles: List<MachineProfile> = emptyList(),
+  val bridgeDetails: Map<String, BridgeDetails> = emptyMap(),
+  val machines: Map<String, MachineConnection> = emptyMap(),
+  val addError: String? = null,
   val addedProfileIds: Set<String> = emptySet(),
   val activeProfileId: String? = null,
   val agents: List<AgentRow> = emptyList(),
   val selectedAgent: AgentRow? = null,
   val stream: StreamState = StreamState(),
   val conversationTurns: List<ConversationTurn> = emptyList(),
+  val omittedConversationTurns: Int = 0,
+  val omittedToolOperations: Int = 0,
+  val conversationSource: String? = null,
   val connection: ConnectionState = ConnectionState.Disconnected,
   val busy: Boolean = false,
   val themeMode: com.azusachino.cappuccino.ui.ThemeMode =
@@ -45,9 +63,17 @@ data class ConnectedUiState(
 interface ConnectedActions {
   fun addMachine(label: String, url: String)
 
+  fun renameProfile(id: String, label: String)
+
   fun selectProfile(id: String)
 
   fun disconnectProfile()
+
+  fun refreshProfile(id: String) = refresh()
+
+  fun disconnectMachine(id: String) = disconnectProfile()
+
+  fun refreshAll() = refresh()
 
   fun refresh()
 
@@ -81,6 +107,11 @@ internal constructor(
       )
     )
   val state: StateFlow<ConnectedUiState> = mutableState.asStateFlow()
+  private val machineJobs = mutableMapOf<String, Job>()
+  private val machineEpochs = mutableMapOf<String, Long>()
+  private val disconnectedMachines = mutableSetOf<String>()
+  private var addJob: Job? = null
+  private var addEpoch = 0L
   private var operation: Job? = null
   private var streamJob: Job? = null
   private var conversationJob: Job? = null
@@ -89,20 +120,47 @@ internal constructor(
   private var epoch = 0L
   private var pendingRestore = savedStateHandle.get<String>(SELECTED_PROFILE) != null
 
+  override fun renameProfile(id: String, label: String) {
+    val name = label.trim().takeIf { it.isNotEmpty() } ?: return
+    val profile = mutableState.value.profiles.firstOrNull { it.id == id } ?: return
+    store.save(profile.copy(label = name))
+    mutableState.value = mutableState.value.copy(profiles = store.read())
+  }
+
+  private fun recordMachineName(
+    profile: MachineProfile,
+    reportedName: String?,
+    details: BridgeDetails?,
+  ) {
+    if (details != null && details.machineId == profile.machineId) {
+      mutableState.value =
+        mutableState.value.copy(
+          bridgeDetails = mutableState.value.bridgeDetails + (profile.id to details)
+        )
+    }
+    val name = reportedName?.trim()?.takeIf { it.isNotEmpty() } ?: return
+    val current = store.read().firstOrNull { it.id == profile.id } ?: return
+    // Migrate only old URL-derived defaults; never overwrite an owner-given name.
+    if (current.label != current.endpoint.base.host) return
+    store.save(current.copy(label = name))
+    mutableState.value = mutableState.value.copy(profiles = store.read())
+  }
+
   override fun addMachine(label: String, url: String) {
-    cancelOwnedWork()
-    val token = epoch
-    mutableState.value =
-      mutableState.value.copy(busy = true, connection = ConnectionState.Connecting)
-    operation = viewModelScope.launch {
+    addEpoch++
+    val token = addEpoch
+    addJob?.cancel()
+    mutableState.value = mutableState.value.copy(busy = true, addError = null)
+    addJob = viewModelScope.launch {
       try {
         val endpoint = Endpoint.parse(url, allowLocalHttp = BuildConfig.DEBUG)
-        val machineId = bridgeFor(endpoint).verify()
-        if (token != epoch) return@launch
+        val client = bridgeFor(endpoint)
+        val machineId = client.verify()
+        if (token != addEpoch) return@launch
         val profile =
           MachineProfile(
             UUID.randomUUID().toString(),
-            label.ifBlank { endpoint.base.host },
+            label.ifBlank { client.machineName ?: endpoint.base.host },
             endpoint,
             machineId,
           )
@@ -111,16 +169,26 @@ internal constructor(
           mutableState.value.copy(
             profiles = store.read(),
             addedProfileIds = mutableState.value.addedProfileIds + profile.id,
-            activeProfileId = profile.id,
-            connection = ConnectionState.Connected,
+            bridgeDetails =
+              mutableState.value.bridgeDetails +
+                listOfNotNull(client.bridgeDetails?.let { profile.id to it }).toMap(),
+            activeProfileId = mutableState.value.activeProfileId ?: profile.id,
+            connection =
+              if (mutableState.value.activeProfileId == null) ConnectionState.Connected
+              else mutableState.value.connection,
             busy = false,
           )
-        refresh(profile)
+        refreshProfile(profile.id)
       } catch (error: Exception) {
-        if (token == epoch)
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        if (token == addEpoch)
           mutableState.value =
             mutableState.value.copy(
-              connection = ConnectionState.Error(error.message ?: "Connection failed"),
+              addError = error.message ?: "Connection failed",
+              connection =
+                if (mutableState.value.activeProfileId == null)
+                  ConnectionState.Error(error.message ?: "Connection failed")
+                else mutableState.value.connection,
               busy = false,
             )
       }
@@ -136,24 +204,40 @@ internal constructor(
         activeProfileId = id,
         selectedAgent = null,
         stream = StreamState(),
-        connection = ConnectionState.Connecting,
-        busy = true,
+        connection = mutableState.value.machineConnection(profile).connection,
+        agents = mutableState.value.machineConnection(profile).agents,
+        conversationTurns = emptyList(),
+        conversationSource = null,
+        busy = false,
       )
-    operation = viewModelScope.launch { refresh(profile) }
+    if (mutableState.value.machineConnection(profile).connection != ConnectionState.Connected)
+      refreshProfile(id)
   }
 
   override fun disconnectProfile() {
-    cancelOwnedWork()
-    clearSavedSelection()
+    mutableState.value.activeProfileId?.let { disconnectMachine(it) }
+  }
+
+  override fun disconnectMachine(id: String) {
+    disconnectedMachines.add(id)
+    machineEpochs[id] = (machineEpochs[id] ?: 0L) + 1
+    machineJobs.remove(id)?.cancel()
+    if (mutableState.value.activeProfileId == id) {
+      cancelOwnedWork()
+      clearSavedSelection()
+      mutableState.value =
+        mutableState.value.copy(
+          selectedAgent = null,
+          agents = emptyList(),
+          stream = StreamState(),
+          conversationTurns = emptyList(),
+          conversationSource = null,
+          connection = ConnectionState.Disconnected,
+          busy = false,
+        )
+    }
     mutableState.value =
-      mutableState.value.copy(
-        activeProfileId = null,
-        selectedAgent = null,
-        agents = emptyList(),
-        stream = StreamState(),
-        connection = ConnectionState.Disconnected,
-        busy = false,
-      )
+      mutableState.value.copy(machines = mutableState.value.machines + (id to MachineConnection()))
   }
 
   override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
@@ -162,20 +246,60 @@ internal constructor(
   }
 
   override fun refresh() {
-    val profile = activeProfile() ?: return
-    cancelOwnedWork()
+    activeProfile()?.let { refreshProfile(it.id) }
+  }
+
+  override fun refreshAll() {
+    mutableState.value.profiles
+      .filter { it.id !in disconnectedMachines }
+      .forEach { profile ->
+        if (machineJobs[profile.id]?.isActive != true) refreshProfile(profile.id)
+      }
+  }
+
+  override fun refreshProfile(id: String) {
+    val profile = mutableState.value.profiles.firstOrNull { it.id == id } ?: return
+    disconnectedMachines.remove(id)
+    machineJobs.remove(id)?.cancel()
+    val token = (machineEpochs[id] ?: 0L) + 1
+    machineEpochs[id] = token
+    val previous = mutableState.value.machineConnection(profile)
     mutableState.value =
-      mutableState.value.copy(busy = true, connection = ConnectionState.Connecting)
-    operation = viewModelScope.launch { refresh(profile) }
+      mutableState.value.copy(
+        machines =
+          mutableState.value.machines +
+            (id to
+              previous.copy(
+                connection =
+                  if (previous.connection == ConnectionState.Connected) previous.connection
+                  else ConnectionState.Connecting,
+                busy = true,
+              ))
+      )
+    machineJobs[id] = viewModelScope.launch { refresh(profile) }
   }
 
   private suspend fun refresh(profile: MachineProfile) {
     val token = epoch
+    val machineToken = machineEpochs[profile.id]
     try {
       val client = bridgeFor(profile.endpoint)
       client.verify(profile.machineId)
       val agents = client.agents(profile.machineId)
-      if (token != epoch) return
+      if (
+        machineToken != machineEpochs[profile.id] ||
+          profile.id in disconnectedMachines ||
+          mutableState.value.profiles.none { it.id == profile.id }
+      )
+        return
+      recordMachineName(profile, client.machineName, client.bridgeDetails)
+      mutableState.value =
+        mutableState.value.copy(
+          machines =
+            mutableState.value.machines +
+              (profile.id to MachineConnection(ConnectionState.Connected, agents))
+        )
+      if (token != epoch || mutableState.value.activeProfileId != profile.id) return
       val selected =
         mutableState.value.selectedAgent?.let { old ->
           agents.firstOrNull { it.machineId == old.machineId && it.sessionId == old.sessionId }
@@ -184,17 +308,21 @@ internal constructor(
         mutableState.value.copy(
           agents = agents,
           selectedAgent = selected,
-          connection = ConnectionState.Connected,
+          connection =
+            if (mutableState.value.selectedAgent == null) ConnectionState.Connected
+            else mutableState.value.connection,
           busy = false,
         )
-      if (foreground && selected != null) openStream(profile, selected)
     } catch (error: Exception) {
-      if (token == epoch)
-        mutableState.value =
-          mutableState.value.copy(
-            connection = ConnectionState.Error(error.message ?: "Bridge unavailable"),
-            busy = false,
-          )
+      if (error is kotlinx.coroutines.CancellationException) throw error
+      if (machineToken != machineEpochs[profile.id] || profile.id in disconnectedMachines) return
+      val failed = ConnectionState.Error(error.message ?: "Bridge unavailable")
+      mutableState.value =
+        mutableState.value.copy(
+          machines = mutableState.value.machines + (profile.id to MachineConnection(failed))
+        )
+      if (token == epoch && mutableState.value.activeProfileId == profile.id)
+        mutableState.value = mutableState.value.copy(connection = failed, busy = false)
     }
   }
 
@@ -207,6 +335,7 @@ internal constructor(
           selectedAgent = null,
           stream = StreamState(),
           conversationTurns = emptyList(),
+          conversationSource = null,
           connection = ConnectionState.Error("Agent belongs to a different machine"),
         )
       return
@@ -216,6 +345,7 @@ internal constructor(
         selectedAgent = agent,
         stream = StreamState(),
         conversationTurns = emptyList(),
+        conversationSource = null,
       )
     if (agent == null) clearSavedSelection()
     else {
@@ -242,7 +372,7 @@ internal constructor(
       do {
         conversationRequested = false
         try {
-          val turns = client.conversation(agent.sessionId)
+          val snapshot = client.conversationSnapshot(agent.sessionId)
           val current = mutableState.value
           if (
             token != epoch ||
@@ -252,10 +382,34 @@ internal constructor(
               current.selectedAgent.sessionId != agent.sessionId
           )
             return@launch
-          mutableState.value = current.copy(conversationTurns = turns)
+          // Terminal snapshots already arrive through the stream. Reconstructing a
+          // second, unstable Markdown history from them flashes/rekeys the screen.
+          val recent =
+            com.azusachino.cappuccino.core.boundedConversation(
+              if (snapshot.source == "canonical_log") snapshot.turns else emptyList()
+            )
+          mutableState.value =
+            current.copy(
+              conversationTurns = recent.turns,
+              omittedConversationTurns = recent.omittedMessages,
+              omittedToolOperations = recent.omittedTools,
+              conversationSource = snapshot.source,
+            )
         } catch (error: Exception) {
           if (error is kotlinx.coroutines.CancellationException) throw error
-          // Keep earlier turns (or scrollback) when this read-only refresh is unavailable.
+          // Keep earlier turns; on a newly opened view allow verified stream scrollback
+          // rather than leaving a restored reader waiting for unavailable history.
+          if (
+            token == epoch &&
+              foreground &&
+              mutableState.value.activeProfileId == profile.id &&
+              mutableState.value.selectedAgent?.sessionId == agent.sessionId
+          ) {
+            mutableState.value =
+              mutableState.value.copy(
+                conversationSource = mutableState.value.conversationSource ?: "terminal_scrollback"
+              )
+          }
         }
       } while (conversationRequested && token == epoch && foreground)
     }
@@ -265,10 +419,13 @@ internal constructor(
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
     val client = bridgeFor(profile.endpoint)
+    val requestEpoch = epoch
     viewModelScope.launch {
       try {
         client.submitPrompt(agent.sessionId, text)
       } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        if (requestEpoch != epoch || mutableState.value.activeProfileId != profile.id) return@launch
         mutableState.value =
           mutableState.value.copy(
             connection = ConnectionState.Error(error.message ?: "Failed to submit prompt")
@@ -286,10 +443,13 @@ internal constructor(
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
     val client = bridgeFor(profile.endpoint)
+    val requestEpoch = epoch
     viewModelScope.launch {
       try {
         client.answerPrompt(agent.sessionId, promptId, optionIndex, optionId, action)
       } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        if (requestEpoch != epoch || mutableState.value.activeProfileId != profile.id) return@launch
         mutableState.value =
           mutableState.value.copy(
             connection = ConnectionState.Error(error.message ?: "Failed to answer prompt")
@@ -304,27 +464,41 @@ internal constructor(
     if (!value) {
       if (savedStateHandle.get<String>(SELECTED_PROFILE) != null) pendingRestore = true
       cancelOwnedWork()
+      stopMachineJobs()
       mutableState.value =
         mutableState.value.copy(connection = ConnectionState.Disconnected, busy = false)
     } else {
       if (pendingRestore) {
         restoreSelection()
+        // Invalid saved ownership must not silently fall back to another profile.
+        if (pendingRestore) {
+          mutableState.value.profiles
+            .filter {
+              it.id != mutableState.value.activeProfileId && it.id !in disconnectedMachines
+            }
+            .forEach { refreshProfile(it.id) }
+        }
       } else {
-        val profile = activeProfile() ?: return
-        mutableState.value =
-          mutableState.value.copy(connection = ConnectionState.Recovering, busy = true)
-        operation = viewModelScope.launch { refresh(profile) }
+        if (mutableState.value.activeProfileId == null)
+          mutableState.value =
+            mutableState.value.copy(activeProfileId = mutableState.value.profiles.firstOrNull()?.id)
+        refreshAll()
       }
     }
   }
 
   override fun removeProfile(id: String) {
-    cancelOwnedWork()
+    disconnectMachine(id)
     if (savedStateHandle.get<String>(SELECTED_PROFILE) == id) clearSavedSelection()
     store.remove(id)
-    val profiles = store.read()
+    val current = mutableState.value
     mutableState.value =
-      ConnectedUiState(profiles = profiles, activeProfileId = profiles.firstOrNull()?.id)
+      current.copy(
+        profiles = store.read(),
+        machines = current.machines - id,
+        bridgeDetails = current.bridgeDetails - id,
+        activeProfileId = current.activeProfileId.takeUnless { it == id },
+      )
   }
 
   override fun retry() {
@@ -354,6 +528,8 @@ internal constructor(
       while (foreground && token == epoch) {
         try {
           client.verify(profile.machineId)
+          if (token != epoch) return@launch
+          recordMachineName(profile, client.machineName, client.bridgeDetails)
           client.stream(agent.sessionId).collect { event ->
             val selected = mutableState.value.selectedAgent
             if (
@@ -382,6 +558,8 @@ internal constructor(
           break
         } catch (error: Exception) {
           if (error is kotlinx.coroutines.CancellationException) throw error
+          if (!foreground || token != epoch || mutableState.value.activeProfileId != profile.id)
+            return@launch
           if (error is ProtocolException || error is SSLException || error is BridgeStreamError) {
             mutableState.value =
               mutableState.value.copy(
@@ -430,6 +608,13 @@ internal constructor(
         client.verify(profile.machineId)
         val agents = client.agents(profile.machineId)
         if (restoreToken != epoch || !foreground) return@launch
+        recordMachineName(profile, client.machineName, client.bridgeDetails)
+        mutableState.value =
+          mutableState.value.copy(
+            machines =
+              mutableState.value.machines +
+                (profile.id to MachineConnection(ConnectionState.Connected, agents))
+          )
         val match = agents.firstOrNull { it.machineId == machineId && it.sessionId == locator }
         if (match == null) {
           mutableState.value = mutableState.value.copy(agents = agents)
@@ -498,6 +683,20 @@ internal constructor(
     conversationRequested = false
   }
 
+  private fun stopMachineJobs() {
+    machineJobs.keys.toList().forEach { id ->
+      machineEpochs[id] = (machineEpochs[id] ?: 0L) + 1
+      machineJobs.remove(id)?.cancel()
+    }
+    mutableState.value =
+      mutableState.value.copy(
+        machines =
+          mutableState.value.machines.mapValues { (_, value) ->
+            value.copy(connection = ConnectionState.Disconnected, busy = false)
+          }
+      )
+  }
+
   companion object {
     const val SELECTED_PROFILE = "selected_profile_id"
     const val SELECTED_MACHINE = "selected_machine_id"
@@ -507,5 +706,7 @@ internal constructor(
 
   override fun onCleared() {
     cancelOwnedWork()
+    stopMachineJobs()
+    addJob?.cancel()
   }
 }

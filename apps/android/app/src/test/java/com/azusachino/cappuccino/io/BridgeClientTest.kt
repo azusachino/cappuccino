@@ -24,6 +24,51 @@ class BridgeClientTest {
   private val machine = UUID.fromString("11111111-1111-4111-8111-111111111111")
 
   @Test
+  fun transparentlyNegotiatesAndDecodesGzipWithoutChangingIdentity() = runBlocking {
+    MockWebServer().use { server ->
+      val payload =
+        """{"event":"paired","machine_id":"$machine","protocol":1,"plugin":"azusachino.cappuccino-bridge"}"""
+      val bytes = java.io.ByteArrayOutputStream()
+      java.util.zip.GZIPOutputStream(bytes).use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+      server.enqueue(
+        MockResponse.Builder()
+          .addHeader("Content-Encoding", "gzip")
+          .addHeader("Content-Type", "application/json")
+          .body(okio.Buffer().write(bytes.toByteArray()))
+          .build()
+      )
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      assertEquals(machine, client.verify())
+      assertEquals("gzip", server.takeRequest().headers["Accept-Encoding"])
+    }
+  }
+
+  @Test
+  fun gzipCannotBypassTheDecompressedBodyLimit() = runBlocking {
+    MockWebServer().use { server ->
+      val bytes = java.io.ByteArrayOutputStream()
+      java.util.zip.GZIPOutputStream(bytes).use {
+        it.write(" ".repeat(MAX_HTTP_BODY_BYTES + 1).toByteArray())
+      }
+      server.enqueue(
+        MockResponse.Builder()
+          .addHeader("Content-Encoding", "gzip")
+          .body(okio.Buffer().write(bytes.toByteArray()))
+          .build()
+      )
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      try {
+        client.verify()
+        fail("Decompressed limit must be enforced")
+      } catch (error: ProtocolException) {
+        assertEquals("HTTP body exceeds local limit", error.message)
+      }
+    }
+  }
+
+  @Test
   fun requestsPairingAndCatalogWithoutMutatingRoutes() = runBlocking {
     MockWebServer().use { server ->
       server.enqueue(

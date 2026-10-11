@@ -26,10 +26,84 @@ val HerdrStatusIdle = Color(0xFF9B9183)
 val HerdrStatusBlocked = Color(0xFFFF7B70)
 val HerdrStatusDone = Color(0xFF93C36B)
 
-// Stock Material 3 fallback schemes. The preview contract keeps component defaults
-// authoritative and forbids hand-mixed scheme slots (android-material3.md rev 2).
-val FallbackLightColorScheme = lightColorScheme()
-val FallbackDarkColorScheme = darkColorScheme()
+// Owner-selected GitHub/VS Code-inspired neutral canvases and blue accents.
+// This supersedes the earlier stock/purple palette; Material components remain native.
+val FallbackLightColorScheme =
+  lightColorScheme(
+    primary = Color(0xFF0969DA),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFDDF4FF),
+    onPrimaryContainer = Color(0xFF0550AE),
+    secondary = Color(0xFF57606A),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFEAEFF4),
+    onSecondaryContainer = Color(0xFF24292F),
+    tertiary = Color(0xFF1A7F37),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFDAFBE1),
+    onTertiaryContainer = Color(0xFF116329),
+    background = Color.White,
+    onBackground = Color(0xFF24292F),
+    surface = Color.White,
+    onSurface = Color(0xFF24292F),
+    surfaceVariant = Color(0xFFF6F8FA),
+    onSurfaceVariant = Color(0xFF57606A),
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFF6F8FA),
+    surfaceContainer = Color(0xFFF6F8FA),
+    surfaceContainerHigh = Color(0xFFEAEFF4),
+    surfaceContainerHighest = Color(0xFFE1E7ED),
+    surfaceDim = Color(0xFFEAEFF4),
+    surfaceBright = Color.White,
+    outline = Color(0xFF6E7781),
+    outlineVariant = Color(0xFFD0D7DE),
+    error = Color(0xFFCF222E),
+    onError = Color.White,
+    errorContainer = Color(0xFFFFEBE9),
+    onErrorContainer = Color(0xFFA40E26),
+    surfaceTint = Color(0xFF0969DA),
+    inverseSurface = Color(0xFF24292F),
+    inverseOnSurface = Color(0xFFF6F8FA),
+    inversePrimary = Color(0xFF58A6FF),
+  )
+val FallbackDarkColorScheme =
+  darkColorScheme(
+    primary = Color(0xFF58A6FF),
+    onPrimary = Color(0xFF0D1117),
+    primaryContainer = Color(0xFF163356),
+    onPrimaryContainer = Color(0xFFCAE8FF),
+    secondary = Color(0xFF8B949E),
+    onSecondary = Color(0xFF0D1117),
+    secondaryContainer = Color(0xFF21262D),
+    onSecondaryContainer = Color(0xFFE6EDF3),
+    tertiary = Color(0xFF3FB950),
+    onTertiary = Color(0xFF0D1117),
+    tertiaryContainer = Color(0xFF143D24),
+    onTertiaryContainer = Color(0xFFAFF5B4),
+    background = Color(0xFF0D1117),
+    onBackground = Color(0xFFE6EDF3),
+    surface = Color(0xFF0D1117),
+    onSurface = Color(0xFFE6EDF3),
+    surfaceVariant = Color(0xFF161B22),
+    onSurfaceVariant = Color(0xFF8B949E),
+    surfaceContainerLowest = Color(0xFF010409),
+    surfaceContainerLow = Color(0xFF0D1117),
+    surfaceContainer = Color(0xFF161B22),
+    surfaceContainerHigh = Color(0xFF21262D),
+    surfaceContainerHighest = Color(0xFF30363D),
+    surfaceDim = Color(0xFF010409),
+    surfaceBright = Color(0xFF30363D),
+    outline = Color(0xFF8B949E),
+    outlineVariant = Color(0xFF30363D),
+    error = Color(0xFFFF7B72),
+    onError = Color(0xFF0D1117),
+    errorContainer = Color(0xFF490202),
+    onErrorContainer = Color(0xFFFFDCD7),
+    surfaceTint = Color(0xFF58A6FF),
+    inverseSurface = Color(0xFFE6EDF3),
+    inverseOnSurface = Color(0xFF24292F),
+    inversePrimary = Color(0xFF0969DA),
+  )
 
 fun resolveIsDark(themeMode: ThemeMode, systemDark: Boolean): Boolean =
   when (themeMode) {
