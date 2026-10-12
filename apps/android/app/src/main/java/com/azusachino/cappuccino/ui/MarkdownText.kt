@@ -10,7 +10,6 @@ import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -162,20 +161,14 @@ fun MarkdownText(text: String, modifier: Modifier = Modifier, compact: Boolean =
   CompositionLocalProvider(LocalUriHandler provides NoOpUriHandler) {
     Markdown(
       markdownState = markdownState,
-      colors = markdownColor(),
-      typography =
-        if (compact) {
-          val heading = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
-          markdownTypography(
-            text = MaterialTheme.typography.bodyMedium,
-            h1 = heading,
-            h2 = heading,
-            h3 = heading,
-            h4 = heading,
-            h5 = heading,
-            h6 = heading,
-          )
-        } else markdownTypography(),
+      colors =
+        markdownColor(
+          text = MaterialTheme.appColors.body,
+          codeBackground = MaterialTheme.appColors.codeBackground,
+          inlineCodeBackground = MaterialTheme.appColors.card2,
+          dividerColor = MaterialTheme.appColors.line,
+        ),
+      typography = appMarkdownTypography(compact),
       modifier = modifier,
       imageTransformer = imageTransformer,
       components = components,
@@ -243,7 +236,7 @@ internal fun markdownInlineText(
     when (current) {
       is MarkdownLiteral -> append(current.literal)
       is Code ->
-        withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBackground)) {
+        withStyle(SpanStyle(fontFamily = JetBrainsMono, background = codeBackground)) {
           append(current.literal)
         }
       is StrongEmphasis -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { children() }
@@ -286,3 +279,38 @@ internal fun plainMarkdownText(node: Node): String = buildString {
     }
   }
 }
+
+// Every block role is set: unset ones fall back to the library's bodyLarge/display sizes.
+@Composable
+private fun appMarkdownTypography(compact: Boolean) =
+  with(MaterialTheme.typography) {
+    val text = if (compact) bodyMedium else bodyLarge
+    val heading = text.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.appColors.text)
+    markdownTypography(
+      h1 = heading,
+      h2 = heading,
+      h3 = heading,
+      h4 = heading,
+      h5 = heading,
+      h6 = heading,
+      text = text,
+      code = bodySmall,
+      inlineCode =
+        text.copy(fontSize = text.fontSize * 0.92f, color = MaterialTheme.appColors.text),
+      quote = text.copy(color = MaterialTheme.appColors.muted),
+      paragraph = text,
+      ordered = text,
+      bullet = text,
+      list = text,
+      textLink =
+        androidx.compose.ui.text.TextLinkStyles(
+          style =
+            SpanStyle(
+              color = MaterialTheme.appColors.accent,
+              textDecoration = TextDecoration.Underline,
+            )
+        ),
+      table = bodySmall,
+      alertTitle = text.copy(fontWeight = FontWeight.Bold),
+    )
+  }

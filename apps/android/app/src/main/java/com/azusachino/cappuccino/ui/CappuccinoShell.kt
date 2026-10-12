@@ -2,6 +2,7 @@ package com.azusachino.cappuccino.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -67,12 +67,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -82,6 +80,8 @@ import com.azusachino.cappuccino.core.ConversationPart
 import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.OutputRow
 import com.azusachino.cappuccino.core.PromptCard
+import com.azusachino.cappuccino.core.TranscriptSegment
+import com.azusachino.cappuccino.core.transcriptSegments
 import com.azusachino.cappuccino.core.visibleInChat
 import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
@@ -224,7 +224,7 @@ fun CappuccinoScreen(
   val toolActivities = remember(turns) { toolActivityEntries(turns) }
   val chatTurns =
     remember(turns) {
-      turns.filter { turn -> !turn.text.isNullOrBlank() || turn.parts.any { it.visibleInChat } }
+      turns.filter { turn -> !turn.text.isNullOrBlank() || turn.parts.isNotEmpty() }
     }
   var sessionTab by rememberSaveable(conversationKey) { mutableStateOf(SessionTab.TRANSCRIPT) }
   var toolUpdates by remember(outputIdentity) { mutableStateOf(ToolUpdates()) }
@@ -378,42 +378,50 @@ fun CappuccinoScreen(
         TopAppBar(
           title = {
             if (selected != null) {
-              Row(
-                modifier = Modifier.fillMaxWidth().padding(end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-              ) {
+              val status =
+                agentStatusStyle(
+                  if (state.stream.pendingPrompt != null) "blocked"
+                  else state.stream.agentStatus ?: selected.status,
+                  MaterialTheme.colorScheme.background.luminance() < 0.5f,
+                )
+              Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(
-                  modifier = Modifier.weight(1f),
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                   Icon(
                     painterResource(agentIconResource(selected.agent)),
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.appColors.accent,
                   )
                   Text(
                     selected.label,
-                    fontFamily = FontFamily.Monospace,
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                   )
                 }
-                val status =
-                  agentStatusStyle(
-                    if (state.stream.pendingPrompt != null) "blocked"
-                    else state.stream.agentStatus ?: selected.status,
-                    MaterialTheme.colorScheme.background.luminance() < 0.5f,
-                  )
-                Surface(color = status.background, shape = RoundedCornerShape(4.dp)) {
+                // Status keeps its color as a square beside its word, never color alone.
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                  StatusSquare(status.background)
                   Text(
-                    status.label,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    color = status.foreground,
+                    listOfNotNull(
+                        status.label,
+                        selectedProfile?.label,
+                        selected.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf {
+                          it.isNotBlank()
+                        },
+                        selected.branch?.takeIf { it.isNotBlank() },
+                      )
+                      .joinToString(" · "),
                     style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.appColors.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                   )
                 }
               }
@@ -506,18 +514,6 @@ fun CappuccinoScreen(
               modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
               verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-              Text(
-                listOfNotNull(
-                    selectedProfile?.label,
-                    selected.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() },
-                    selected.branch?.takeIf { it.isNotBlank() },
-                  )
-                  .joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-              )
               if (state.conversationSource in setOf("scrollback", "terminal_scrollback"))
                 Text(
                   "Recent output · Scrollback fallback",
@@ -623,7 +619,7 @@ fun CappuccinoScreen(
                             Modifier.fillMaxSize()
                               .padding(horizontal = 16.dp)
                               .testTag("recentOutputList"),
-                          verticalArrangement = Arrangement.spacedBy(8.dp),
+                          verticalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
                           items(
                             chatTurns,
@@ -644,11 +640,30 @@ fun CappuccinoScreen(
                               timeZone = timeZone,
                               assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
                               onInspect = { followingOutput = false },
-                              showToolsInline = false,
+                              showToolsInline = true,
                               onTextSizeChanged = onTextLayoutChanged,
                             )
                           }
-                          item(key = "conversation-bottom") { Spacer(Modifier.height(8.dp)) }
+                          // The live line lives in the bottom marker so follow targets stay put.
+                          item(key = "conversation-bottom") {
+                            Column {
+                              val liveStatus =
+                                if (state.stream.pendingPrompt != null) "blocked"
+                                else (state.stream.agentStatus ?: selected.status).lowercase()
+                              if (
+                                state.offlineSavedAt == null &&
+                                  liveStatus in setOf("working", "blocked")
+                              )
+                                LiveStatusLine(
+                                  if (liveStatus == "working") "Working"
+                                  else "Waiting for your answer",
+                                  if (liveStatus == "working") MaterialTheme.appColors.working
+                                  else MaterialTheme.appColors.warn,
+                                  state.stream.agentStatusDetail,
+                                )
+                              Spacer(Modifier.height(8.dp))
+                            }
+                          }
                         }
                       } else {
                         LazyColumn(
@@ -686,6 +701,8 @@ fun CappuccinoScreen(
                   composerState.SaveableStateProvider(conversationKey) {
                     PromptInputBar(
                       onSend = { text -> actions.submitPrompt(text) },
+                      placeholder =
+                        "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
                       enabled =
                         state.connection == ConnectionState.Connected &&
                           state.bridgeDetails[state.activeProfileId]
@@ -1124,14 +1141,14 @@ private fun OutputItemRow(row: OutputRow, onInspect: () -> Unit = {}) {
         Text(
           parsed.toolName ?: "tool",
           color = MaterialTheme.colorScheme.onSurface,
-          fontFamily = FontFamily.Monospace,
+          fontFamily = JetBrainsMono,
           style = MaterialTheme.typography.bodySmall,
         )
         parsed.toolArg?.let { arg ->
           Text(
             "($arg)",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = JetBrainsMono,
             style = MaterialTheme.typography.bodySmall,
             maxLines = 1,
           )
@@ -1219,7 +1236,7 @@ internal fun agentIconResource(agent: String): Int =
     "agy",
     "antigravity",
     "antigravity-cli" -> com.azusachino.cappuccino.R.drawable.ic_agent_spark
-    "claude" -> com.azusachino.cappuccino.R.drawable.ic_chat
+    "claude" -> com.azusachino.cappuccino.R.drawable.ic_agent_claude
     "codex" -> com.azusachino.cappuccino.R.drawable.ic_agent_code
     else -> com.azusachino.cappuccino.R.drawable.ic_machine
   }
@@ -1283,7 +1300,7 @@ fun PromptCardView(
         ) {
           Text(
             text = cmd,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = JetBrainsMono,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(12.dp),
@@ -1338,51 +1355,66 @@ fun PromptInputBar(
   onSend: (String) -> Unit,
   enabled: Boolean,
   modifier: Modifier = Modifier,
+  placeholder: String = "Message agent…",
   controls: @Composable () -> Unit = {},
 ) {
   var input by rememberSaveable { mutableStateOf("") }
-  Surface(
-    modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-    shape = RoundedCornerShape(4.dp),
-    color = MaterialTheme.colorScheme.surfaceContainerLow,
+  val colors = MaterialTheme.appColors
+  val canSend = enabled && input.isNotBlank()
+  Column(
+    modifier
+      .fillMaxWidth()
+      .padding(horizontal = 12.dp, vertical = 8.dp)
+      .background(colors.card)
+      .border(1.dp, colors.line)
   ) {
-    Column {
-      androidx.compose.material3.TextField(
-        value = input,
-        onValueChange = { input = it },
-        placeholder = { Text("Message agent…", fontFamily = FontFamily.Monospace) },
-        modifier = Modifier.fillMaxWidth().testTag("promptInput"),
-        enabled = enabled,
-        maxLines = 4,
-        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-        colors =
-          androidx.compose.material3.TextFieldDefaults.colors(
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-          ),
-      )
-      Row(
-        Modifier.fillMaxWidth().padding(end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    androidx.compose.foundation.text.BasicTextField(
+      value = input,
+      onValueChange = { input = it },
+      modifier =
+        Modifier.fillMaxWidth()
+          .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp)
+          .testTag("promptInput"),
+      enabled = enabled,
+      maxLines = 6,
+      textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
+      cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.accent),
+      decorationBox = { field ->
+        Box {
+          if (input.isEmpty())
+            Text(
+              if (enabled) placeholder else "Not connected",
+              style = MaterialTheme.typography.bodyMedium,
+              color = colors.faint,
+            )
+          field()
+        }
+      },
+    )
+    Row(
+      Modifier.fillMaxWidth().padding(start = 4.dp, end = 6.dp, bottom = 6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Box(Modifier.weight(1f)) { controls() }
+      IconButton(
+        onClick = {
+          if (input.isNotBlank()) {
+            onSend(input)
+            input = ""
+          }
+        },
+        enabled = canSend,
+        modifier = Modifier.size(40.dp),
       ) {
-        Box(Modifier.weight(1f)) { controls() }
-        IconButton(
-          onClick = {
-            if (input.isNotBlank()) {
-              onSend(input)
-              input = ""
-            }
-          },
-          enabled = enabled && input.isNotBlank(),
+        Box(
+          Modifier.size(32.dp).background(if (canSend) colors.accent else colors.card2),
+          contentAlignment = Alignment.Center,
         ) {
           Icon(
             painterResource(com.azusachino.cappuccino.R.drawable.ic_arrow_downward),
-            modifier = Modifier.rotate(180f),
+            modifier = Modifier.size(18.dp).rotate(180f),
             contentDescription = "Send",
+            tint = if (canSend) MaterialTheme.colorScheme.onPrimary else colors.faint,
           )
         }
       }
@@ -1409,87 +1441,55 @@ fun ConversationTurnRow(
     turn.text?.takeIf { it.isNotBlank() }?.let { add(ConversationPart.Text(it)) }
     addAll(turn.parts)
   }
-  val visibleParts = parts.filter { it.visibleInChat }
-  val timestamp = turn.timestamp?.let { formatConversationTimestamp(it, timeZone) }
-  androidx.compose.foundation.layout.BoxWithConstraints(
-    modifier.fillMaxWidth().padding(vertical = 2.dp)
+  val shownParts = parts.filter {
+    it.visibleInChat || (showToolsInline && it is ConversationPart.ToolCall)
+  }
+  val segments = remember(shownParts) { transcriptSegments(shownParts) }
+  if (segments.isEmpty()) return
+  Column(
+    modifier.fillMaxWidth().semantics {
+      contentDescription = if (isUser) "You" else assistantLabel
+    },
+    verticalArrangement = Arrangement.spacedBy(10.dp),
   ) {
-    val bubbleWidth = maxWidth
-    Column(
-      Modifier.fillMaxWidth(),
-      horizontalAlignment = Alignment.Start,
-      verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-      if (visibleParts.isNotEmpty()) {
-        Surface(
-          modifier =
-            Modifier.fillMaxWidth().widthIn(max = bubbleWidth).semantics {
-              contentDescription = if (isUser) "You" else assistantLabel
-            },
-          shape = RoundedCornerShape(4.dp),
-          color =
-            if (isUser) MaterialTheme.colorScheme.surfaceContainerLow
-            else MaterialTheme.colorScheme.surface,
-        ) {
-          MaterialTheme(
-            typography =
-              MaterialTheme.typography.copy(
-                bodyMedium =
-                  MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp,
-                  ),
-                bodyLarge =
-                  MaterialTheme.typography.bodyLarge.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp,
-                    lineHeight = 21.sp,
-                  ),
-              )
-          ) {
-            Column(
-              Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-              verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-              Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                  if (isUser) "› You" else assistantLabel,
-                  style = MaterialTheme.typography.labelSmall,
-                  fontFamily = FontFamily.Monospace,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (timestamp != null)
-                  Text(
-                    java.time.Instant.parse(turn.timestamp)
-                      .atZone(timeZone)
-                      .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")),
-                    Modifier.semantics { contentDescription = timestamp },
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    segments.forEachIndexed { index, segment ->
+      key(turn.id, index) {
+        when (segment) {
+          is TranscriptSegment.Activity -> ActivityGroup(segment.parts, onInspect)
+          is TranscriptSegment.Prose -> {
+            val part = segment.part
+            if (part !is ConversationPart.Text) ConversationDetails(part, onInspect)
+            else if (isUser)
+              UserPromptRow(
+                body = {
+                  MessageBody(
+                    part.text,
+                    modifier = textModifier,
+                    markdown = false,
+                    onInspect = onInspect,
+                    transcript = true,
                   )
-              }
-              visibleParts.forEachIndexed { index, part ->
-                key(turn.id, index) {
-                  if (part is ConversationPart.Text)
-                    MessageBody(
-                      part.text,
-                      onInspect = onInspect,
-                      modifier = textModifier,
-                      transcript = true,
-                    )
-                  else ConversationDetails(part, onInspect)
-                }
-              }
-            }
+                },
+                time =
+                  turn.timestamp
+                    ?.takeIf { index == 0 }
+                    ?.let {
+                      java.time.Instant.parse(it)
+                        .atZone(timeZone)
+                        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+                    },
+                timeDescription = turn.timestamp?.let { formatConversationTimestamp(it, timeZone) },
+              )
+            else
+              MessageBody(
+                part.text,
+                onInspect = onInspect,
+                modifier = textModifier,
+                transcript = true,
+              )
           }
         }
       }
-      if (showToolsInline)
-        parts.filterIsInstance<ConversationPart.ToolCall>().forEachIndexed { index, part ->
-          key(turn.id, "tool", index) { ConversationDetails(part, onInspect) }
-        }
     }
   }
 }

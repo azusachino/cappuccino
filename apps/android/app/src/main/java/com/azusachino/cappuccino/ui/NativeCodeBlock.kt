@@ -24,7 +24,6 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.textmate.grammar.Grammar
 import dev.textmate.grammar.raw.GrammarReader
@@ -268,7 +267,7 @@ internal fun NativeCodeBlock(code: String, language: String?, modifier: Modifier
         rendered,
         Modifier.horizontalScroll(rememberScrollState()).padding(12.dp),
         color = codeScopeColor(emptyList(), dark),
-        fontFamily = FontFamily.Monospace,
+        fontFamily = JetBrainsMono,
         style = MaterialTheme.typography.bodySmall,
       )
     }

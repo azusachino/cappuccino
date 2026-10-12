@@ -27,7 +27,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -151,7 +150,7 @@ internal fun ConversationDetails(part: ConversationPart, onInspect: () -> Unit =
             Text(
               summary,
               style = MaterialTheme.typography.bodySmall,
-              fontFamily = if (part is ConversationPart.ToolCall) FontFamily.Monospace else null,
+              fontFamily = if (part is ConversationPart.ToolCall) JetBrainsMono else null,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               maxLines = 3,
               softWrap = true,
@@ -171,7 +170,7 @@ internal fun ConversationDetails(part: ConversationPart, onInspect: () -> Unit =
           Text(if (failed) "Error" else "Result", style = MaterialTheme.typography.labelMedium)
           Text(
             if (failed) toolErrorPreview(part.output) else toolPreview(part.output),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = JetBrainsMono,
             style = MaterialTheme.typography.bodySmall,
             maxLines = if (failed) 12 else 6,
             overflow = TextOverflow.Ellipsis,
@@ -183,28 +182,35 @@ internal fun ConversationDetails(part: ConversationPart, onInspect: () -> Unit =
           Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
           verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-          when (part) {
-            is ConversationPart.Thinking -> MarkdownText(part.text)
-            is ConversationPart.ToolCall -> {
-              if (part.input.isNotBlank()) {
-                ToolDetailSection(
-                  "Arguments",
-                  part.input,
-                  if (part.name == "bash") "bash" else "text",
-                  onInspect,
-                )
-              }
-              part.output?.let {
-                ToolDetailSection(if (failed) "Error" else "Result", it, "text", onInspect)
-              }
-              if (failed && part.output == null) Text("No error text reported")
-            }
-            is ConversationPart.Text,
-            is ConversationPart.ResponseStatus -> Unit
-          }
+          ConversationPartBody(part, onInspect)
         }
       }
     }
+  }
+}
+
+/** The opened content of a thinking or tool part, shared by the Tools log and the transcript. */
+@Composable
+internal fun ConversationPartBody(part: ConversationPart, onInspect: () -> Unit = {}) {
+  when (part) {
+    is ConversationPart.Thinking -> MarkdownText(part.text)
+    is ConversationPart.ToolCall -> {
+      val failed = part.activityState == ToolActivityState.FAILED
+      if (part.input.isNotBlank()) {
+        ToolDetailSection(
+          "Arguments",
+          part.input,
+          if (part.name == "bash") "bash" else "text",
+          onInspect,
+        )
+      }
+      part.output?.let {
+        ToolDetailSection(if (failed) "Error" else "Result", it, "text", onInspect)
+      }
+      if (failed && part.output == null) Text("No error text reported")
+    }
+    is ConversationPart.Text,
+    is ConversationPart.ResponseStatus -> Unit
   }
 }
 
@@ -244,7 +250,7 @@ private fun ToolDetailSection(
     else
       Text(
         toolPreview(command),
-        fontFamily = FontFamily.Monospace,
+        fontFamily = JetBrainsMono,
         style = MaterialTheme.typography.bodyMedium,
         softWrap = true,
       )
@@ -288,7 +294,7 @@ private fun ToolDetailSection(
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
               if (command != null) {
                 if (shellCommand != null) NativeCodeBlock(command, shellCommand.language)
-                else Text(command, fontFamily = FontFamily.Monospace, softWrap = true)
+                else Text(command, fontFamily = JetBrainsMono, softWrap = true)
               }
               if (details.isNotEmpty()) MarkdownText(fencedToolContent(content))
             }
