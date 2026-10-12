@@ -56,6 +56,7 @@ data class ConnectedUiState(
   val omittedConversationTurns: Int = 0,
   val omittedToolOperations: Int = 0,
   val conversationSource: String? = null,
+  val sessionStats: SessionStats? = null,
   val savedConversations: List<SavedConversationInfo> = emptyList(),
   val offlineBytes: Long? = null,
   val offlineProblem: String? = null,
@@ -97,6 +98,8 @@ interface ConnectedActions {
   fun setAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette)
 
   fun submitPrompt(text: String)
+
+  fun controlAgent(action: String) = Unit
 
   fun answerPrompt(promptId: String, optionIndex: Int?, optionId: String?, action: String?)
 
@@ -193,6 +196,7 @@ internal constructor(
             omittedConversationTurns = saved.history.omittedMessages,
             omittedToolOperations = saved.history.omittedTools,
             conversationSource = "offline_snapshot",
+            sessionStats = null,
             conversationId = saved.conversationId,
             offlineSavedAt = saved.savedAt,
             connection = ConnectionState.Disconnected,
@@ -317,6 +321,7 @@ internal constructor(
         agents = mutableState.value.machineConnection(profile).agents,
         conversationTurns = emptyList(),
         conversationSource = null,
+        sessionStats = null,
         busy = false,
       )
     if (mutableState.value.machineConnection(profile).connection != ConnectionState.Connected)
@@ -342,6 +347,7 @@ internal constructor(
           stream = StreamState(),
           conversationTurns = emptyList(),
           conversationSource = null,
+          sessionStats = null,
           connection = ConnectionState.Disconnected,
           busy = false,
         )
@@ -460,6 +466,7 @@ internal constructor(
           stream = StreamState(),
           conversationTurns = emptyList(),
           conversationSource = null,
+          sessionStats = null,
           connection = ConnectionState.Error("Agent belongs to a different machine"),
         )
       return
@@ -470,6 +477,7 @@ internal constructor(
         stream = StreamState(),
         conversationTurns = emptyList(),
         conversationSource = null,
+        sessionStats = null,
       )
     if (agent == null) clearSavedSelection()
     else {
@@ -532,6 +540,7 @@ internal constructor(
               omittedConversationTurns = recent.omittedMessages,
               omittedToolOperations = recent.omittedTools,
               conversationSource = snapshot.source,
+              sessionStats = snapshot.stats,
               conversationId = snapshot.conversationId,
               offlineSavedAt = null,
             )
@@ -597,6 +606,26 @@ internal constructor(
         mutableState.value =
           mutableState.value.copy(
             connection = ConnectionState.Error(error.message ?: "Failed to submit prompt")
+          )
+      }
+    }
+  }
+
+  override fun controlAgent(action: String) {
+    if (mutableState.value.offlineSavedAt != null) return
+    val profile = activeProfile() ?: return
+    val agent = mutableState.value.selectedAgent ?: return
+    val client = bridgeFor(profile.endpoint)
+    val requestEpoch = epoch
+    viewModelScope.launch {
+      try {
+        client.controlAgent(agent.sessionId, action)
+      } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        if (requestEpoch != epoch || mutableState.value.activeProfileId != profile.id) return@launch
+        mutableState.value =
+          mutableState.value.copy(
+            connection = ConnectionState.Error(error.message ?: "Failed to control the agent")
           )
       }
     }

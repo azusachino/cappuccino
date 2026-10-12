@@ -379,4 +379,60 @@ class BridgeClientTest {
       assertTrue(body2.contains(""""option_index":0"""))
     }
   }
+
+  @Test
+  fun conversationCarriesSessionStatsWhenTheBridgeSendsThem() = runBlocking {
+    MockWebServer().use { server ->
+      server.enqueue(
+        MockResponse.Builder()
+          .body(
+            """{"session_id":"s-1","source":"canonical_log","turns":[],"stats":{"model":"glm","thinking_level":"low","context_tokens":1100,"cache_percent":60}}"""
+          )
+          .build()
+      )
+      server.enqueue(
+        MockResponse.Builder()
+          .body("""{"session_id":"s-1","source":"canonical_log","turns":[]}""")
+          .build()
+      )
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      assertEquals(
+        SessionStats("glm", "low", 1100, null, 60),
+        client.conversationSnapshot("s-1").stats,
+      )
+      assertNull(client.conversationSnapshot("s-1").stats)
+    }
+  }
+
+  @Test
+  fun controlsAgentOnlyWhenTheBridgeAdvertisesIt() = runBlocking {
+    MockWebServer().use { server ->
+      val session =
+        """{"event":"paired","machine_id":"%s","protocol":1,"plugin":"cappuccino-bridge","capabilities":{%s}}"""
+      val machine = UUID.randomUUID()
+      server.enqueue(MockResponse.Builder().body(session.format(machine, "")).build())
+      server.enqueue(
+        MockResponse.Builder().body(session.format(machine, """"agent_control":true""")).build()
+      )
+      server.enqueue(MockResponse.Builder().body("""{"event":"control_sent"}""").build())
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+
+      client.verify()
+      try {
+        client.controlAgent("s-1", "interrupt")
+        fail("an old bridge must not receive controls")
+      } catch (_: ProtocolException) {}
+      server.takeRequest()
+
+      client.verify()
+      server.takeRequest()
+      client.controlAgent("s-1", "interrupt")
+      val req = server.takeRequest()
+      assertEquals("/api/agents/s-1/control", req.url.encodedPath)
+      assertEquals("POST", req.method)
+      assertEquals("""{"action":"interrupt"}""", req.body?.utf8())
+    }
+  }
 }

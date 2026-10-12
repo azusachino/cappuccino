@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -74,6 +75,77 @@ class CappuccinoShellTest {
     compose
       .onNodeWithText("Select or add a bridge in Machines to discover agents.")
       .assertIsDisplayed()
+  }
+
+  @Test
+  fun stopWhileWorkingAndNewSessionOnlyWhenIdle() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile(
+        "synthetic",
+        "Synthetic machine",
+        Endpoint.parse("https://bridge.example"),
+        machine,
+      )
+    val agent =
+      AgentRow(machine, "synthetic-session", "pane-1", "claude", "claude", "working", false, "main")
+    val state =
+      mutableStateOf(
+        ConnectedUiState(
+          profiles = listOf(profile),
+          activeProfileId = profile.id,
+          agents = listOf(agent),
+          selectedAgent = agent,
+          connection = ConnectionState.Connected,
+          bridgeDetails =
+            mapOf(
+              profile.id to
+                com.azusachino.cappuccino.io.BridgeDetails(
+                  machine,
+                  "0.1.0",
+                  1,
+                  mapOf("prompt_input" to true, "agent_control" to true),
+                )
+            ),
+          sessionStats =
+            com.azusachino.cappuccino.io.SessionStats(
+              "claude-opus-5-5",
+              "high",
+              76_000,
+              200_000,
+              90,
+            ),
+        )
+      )
+    val actions = StateActions(state)
+    compose.activity.runOnUiThread {
+      compose.activity.setContent {
+        CappuccinoTheme {
+          val s by state
+          CappuccinoScreen(s, actions) { _, _ -> }
+        }
+      }
+    }
+
+    compose.onNodeWithText("opus 5.5 · high").assertIsDisplayed()
+    compose.onNodeWithText("38%").assertIsDisplayed()
+    compose.onNodeWithText("cache 90%").assertIsDisplayed()
+    compose.onNodeWithContentDescription("Stop").performClick()
+    compose.onNodeWithContentDescription("Commands").performClick()
+    compose.onNodeWithText("New session").assertIsNotEnabled()
+    compose.onNodeWithText("New session").performClick()
+    assertEquals(listOf("interrupt"), actions.controls)
+
+    compose.activity.runOnUiThread {
+      state.value = state.value.copy(selectedAgent = agent.copy(status = "idle"))
+    }
+    compose.waitForIdle()
+    compose.onNodeWithContentDescription("Stop").assertDoesNotExist()
+    // The menu stayed open; the same item is now enabled.
+    compose.onNodeWithText("New session").performClick()
+    compose.onNodeWithText("Start a new session?").assertIsDisplayed()
+    compose.onNode(hasText("New session") and hasClickAction()).performClick()
+    assertEquals(listOf("interrupt", "new_session"), actions.controls)
   }
 
   @Test
@@ -447,6 +519,12 @@ class CappuccinoShellTest {
       .use { it.readText() }
 
   private class StateActions(private val state: MutableState<ConnectedUiState>) : ConnectedActions {
+    val controls = mutableListOf<String>()
+
+    override fun controlAgent(action: String) {
+      controls += action
+    }
+
     override fun addMachine(label: String, url: String) = Unit
 
     override fun renameProfile(id: String, label: String) {

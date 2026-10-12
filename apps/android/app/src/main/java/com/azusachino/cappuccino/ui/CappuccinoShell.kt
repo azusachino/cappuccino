@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -86,6 +87,7 @@ import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ConnectionState
+import com.azusachino.cappuccino.io.SessionStats
 import com.azusachino.cappuccino.io.machineConnection
 import java.time.ZoneId
 import kotlinx.coroutines.launch
@@ -170,6 +172,7 @@ fun CappuccinoScreen(
   val composerState = rememberSaveableStateHolder()
   val readerState = rememberSaveableStateHolder()
   var machineMenuId by remember { mutableStateOf<String?>(null) }
+  var confirmingNewSession by rememberSaveable { mutableStateOf(false) }
   var showingConnection by rememberSaveable { mutableStateOf(false) }
   var showingTechnical by rememberSaveable { mutableStateOf(false) }
   var detailsProfileId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -181,6 +184,14 @@ fun CappuccinoScreen(
   var previousProfileIds by rememberSaveable { mutableStateOf("") }
   val selected = state.selectedAgent
   val selectedProfile = state.profiles.firstOrNull { it.id == state.activeProfileId }
+  val selectedStatus =
+    if (state.stream.pendingPrompt != null) "blocked"
+    else (state.stream.agentStatus ?: selected?.status)?.lowercase()
+  val selectedIdle = selectedStatus !in setOf("working", "blocked")
+  val agentControl =
+    state.offlineSavedAt == null &&
+      state.connection == ConnectionState.Connected &&
+      state.bridgeDetails[state.activeProfileId]?.capabilities?.get("agent_control") == true
   val detailsProfile =
     if (detailsProfileId == null) selectedProfile
     else state.profiles.firstOrNull { it.id == detailsProfileId }
@@ -357,6 +368,31 @@ fun CappuccinoScreen(
         }
       },
       dismissButton = { TextButton(onClick = { namingMachine = false }) { Text("Cancel") } },
+    )
+  }
+
+  if (confirmingNewSession && selected != null) {
+    AlertDialog(
+      onDismissRequest = { confirmingNewSession = false },
+      title = { Text("Start a new session?") },
+      text = {
+        Text(
+          "${selected.agent.replaceFirstChar { it.uppercase() }} starts a fresh conversation in " +
+            "the same terminal."
+        )
+      },
+      confirmButton = {
+        TextButton(
+          enabled = agentControl && selectedIdle,
+          onClick = {
+            actions.controlAgent("new_session")
+            confirmingNewSession = false
+          },
+        ) {
+          Text("New session")
+        }
+      },
+      dismissButton = { TextButton(onClick = { confirmingNewSession = false }) { Text("Cancel") } },
     )
   }
 
@@ -689,6 +725,17 @@ fun CappuccinoScreen(
                 composerState.SaveableStateProvider(conversationKey) {
                   PromptInputBar(
                     onSend = { text -> actions.submitPrompt(text) },
+                    onStop =
+                      if (agentControl && selectedStatus == "working") {
+                        { actions.controlAgent("interrupt") }
+                      } else null,
+                    onNewSession =
+                      if (agentControl) {
+                        { confirmingNewSession = true }
+                      } else null,
+                    newSessionEnabled = selectedIdle,
+                    model = state.sessionStats?.model,
+                    thinkingLevel = state.sessionStats?.thinkingLevel,
                     placeholder = "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
                     enabled =
                       state.connection == ConnectionState.Connected &&
@@ -696,6 +743,7 @@ fun CappuccinoScreen(
                           ?.capabilities
                           ?.get("prompt_input") != false,
                   )
+                  state.sessionStats?.let { SessionStatusLine(it) }
                 }
             }
           }
@@ -1309,8 +1357,14 @@ fun PromptInputBar(
   enabled: Boolean,
   modifier: Modifier = Modifier,
   placeholder: String = "Message agent…",
+  onStop: (() -> Unit)? = null,
+  onNewSession: (() -> Unit)? = null,
+  newSessionEnabled: Boolean = true,
+  model: String? = null,
+  thinkingLevel: String? = null,
 ) {
   var input by rememberSaveable { mutableStateOf("") }
+  var commandsOpen by remember { mutableStateOf(false) }
   val colors = MaterialTheme.appColors
   val canSend = enabled && input.isNotBlank()
   Column(
@@ -1347,7 +1401,49 @@ fun PromptInputBar(
       Modifier.fillMaxWidth().padding(start = 4.dp, end = 6.dp, bottom = 6.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
+      // Commands sit at the left under the input, where a thumb reaches, as in pi-pocket.
+      if (onNewSession != null)
+        Box {
+          IconButton(onClick = { commandsOpen = true }, modifier = Modifier.size(40.dp)) {
+            Icon(
+              painterResource(com.azusachino.cappuccino.R.drawable.ic_grid),
+              contentDescription = "Commands",
+              modifier = Modifier.size(18.dp),
+              tint = colors.muted,
+            )
+          }
+          DropdownMenu(expanded = commandsOpen, onDismissRequest = { commandsOpen = false }) {
+            // A new session replaces the conversation, so only between runs.
+            DropdownMenuItem(
+              text = { Text("New session") },
+              enabled = newSessionEnabled,
+              onClick = {
+                commandsOpen = false
+                onNewSession()
+              },
+            )
+          }
+        }
+      if (model != null)
+        Text(
+          listOfNotNull(shortModel(model), thinkingLevel).joinToString(" · "),
+          Modifier.padding(horizontal = 6.dp).weight(1f, fill = false),
+          style = MaterialTheme.typography.labelSmall,
+          color = colors.muted,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
       Spacer(Modifier.weight(1f))
+      if (onStop != null)
+        IconButton(onClick = onStop, modifier = Modifier.size(40.dp).testTag("stopAgent")) {
+          Box(Modifier.size(32.dp).border(1.dp, colors.line), contentAlignment = Alignment.Center) {
+            Box(
+              Modifier.size(12.dp).background(MaterialTheme.colorScheme.error).semantics {
+                contentDescription = "Stop"
+              }
+            )
+          }
+        }
       IconButton(
         onClick = {
           if (input.isNotBlank()) {
@@ -1373,6 +1469,50 @@ fun PromptInputBar(
     }
   }
 }
+
+/** A model id as people say it: "opus 5.5" for `claude-opus-5-5`. */
+internal fun shortModel(model: String): String =
+  model.removePrefix("claude-").replace(Regex("-(\\d+)-(\\d+)$"), " $1.$2")
+
+/** Under the message box: how full the context is and how much came from the cache. */
+@Composable
+internal fun SessionStatusLine(stats: SessionStats) {
+  val tokens = stats.contextTokens ?: return
+  val colors = MaterialTheme.appColors
+  val window = stats.contextWindow
+  val percent = window?.let { (tokens * 100 / it).coerceIn(0, 100).toInt() }
+  Row(
+    Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    Text("context", style = MaterialTheme.typography.labelSmall, color = colors.muted)
+    if (percent != null)
+      Box(Modifier.size(width = 48.dp, height = 4.dp).background(colors.card2)) {
+        Box(
+          Modifier.fillMaxHeight()
+            .fillMaxWidth(percent / 100f)
+            .background(if (percent >= 80) colors.warn else colors.accent)
+        )
+      }
+    Text(
+      if (percent != null) "$percent%" else formatTokens(tokens),
+      style = MaterialTheme.typography.labelSmall,
+      color = colors.muted,
+    )
+    stats.cachePercent?.let {
+      Text("cache $it%", style = MaterialTheme.typography.labelSmall, color = colors.muted)
+    }
+  }
+}
+
+/** 1234 as "1.2K", 1234567 as "1.2M". */
+internal fun formatTokens(count: Long): String =
+  when {
+    count >= 1_000_000 -> String.format(java.util.Locale.ROOT, "%.1fM", count / 1_000_000.0)
+    count >= 1_000 -> String.format(java.util.Locale.ROOT, "%.1fK", count / 1_000.0)
+    else -> count.toString()
+  }
 
 @Composable
 fun ConversationTurnRow(

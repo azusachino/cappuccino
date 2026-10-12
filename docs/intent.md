@@ -6,7 +6,7 @@ Confirmed by the owner on 2026-10-05 after grilling; repository skeleton initial
 
 Attach a native app to long-running agents already hosted by remote Herdr machines. Catch up with their conversations, reply and resolve tool approvals without using a terminal UI.
 
-Herdr and Pi own process/session lifetime. Opening the app never launches, replaces or restarts an agent; closing it or losing connectivity never terminates one. Reattachment recovers the same session's active branch and pending requests. Trusted Pi integration setup may use an explicit idle `/reload` once; reloading is not part of normal app attachment.
+Herdr and Pi own process/session lifetime. Opening the app never launches, replaces or restarts an agent; closing it or losing connectivity never terminates one. The owner may explicitly Stop a run (Esc) or start a new session with the agent's own command (`/new` for Pi, `/clear` for Claude and Agy) from the phone; the app never does either on its own, and New session is offered only between runs (owner decision 2026-10-12). Reattachment recovers the same session's active branch and pending requests. Trusted Pi integration setup may use an explicit idle `/reload` once; reloading is not part of normal app attachment.
 
 ## First prototype
 

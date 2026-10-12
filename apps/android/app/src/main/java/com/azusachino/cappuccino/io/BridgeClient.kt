@@ -31,6 +31,16 @@ data class ConversationSnapshot(
   val source: String,
   val conversationId: String? = null,
   val machineId: UUID? = null,
+  val stats: SessionStats? = null,
+)
+
+/** The session's model and context use; the window is known only for some models. */
+data class SessionStats(
+  val model: String?,
+  val thinkingLevel: String?,
+  val contextTokens: Long?,
+  val contextWindow: Long?,
+  val cachePercent: Long?,
 )
 
 interface BridgeTransport {
@@ -52,6 +62,9 @@ interface BridgeTransport {
     ConversationSnapshot(conversation(sessionId), "canonical_log")
 
   suspend fun submitPrompt(sessionId: String, text: String) {}
+
+  /** Owner control over a running agent: `interrupt` (Stop) or `new_session`. */
+  suspend fun controlAgent(sessionId: String, action: String) {}
 
   suspend fun answerPrompt(
     sessionId: String,
@@ -103,7 +116,17 @@ class BridgeClient(
           (source != "canonical_log" || machine == null || !isCanonicalConversationId(identity))
       )
         throw ProtocolException("Invalid canonical conversation identity")
-      ConversationSnapshot(parseConversationResponse(json), source, identity, machine)
+      val stats =
+        json.optionalObject("stats")?.let {
+          SessionStats(
+            it.optionalString("model"),
+            it.optionalString("thinking_level"),
+            it.optionalLong("context_tokens"),
+            it.optionalLong("context_window"),
+            it.optionalLong("cache_percent"),
+          )
+        }
+      ConversationSnapshot(parseConversationResponse(json), source, identity, machine, stats)
     }
 
   override suspend fun submitPrompt(sessionId: String, text: String): Unit =
@@ -113,6 +136,14 @@ class BridgeClient(
       val escapedText = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
       val body = """{"type":"prompt","text":"$escapedText"}"""
       post("api/agents/$sessionId/prompt", body)
+    }
+
+  override suspend fun controlAgent(sessionId: String, action: String): Unit =
+    withContext(Dispatchers.IO) {
+      // Older bridges have no control route; only an advertised capability is used.
+      if (bridgeDetails?.capabilities?.get("agent_control") != true)
+        throw ProtocolException("Agent controls unsupported by this bridge")
+      post("api/agents/$sessionId/control", """{"action":"$action"}""")
     }
 
   override suspend fun answerPrompt(
