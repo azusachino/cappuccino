@@ -99,6 +99,12 @@ pub fn session_stats(kind: Kind, content: &str) -> Option<SessionStats> {
                     number(usage, "input_tokens") + number(usage, "cache_creation_input_tokens"),
                     number(usage, "cache_read_input_tokens"),
                 );
+                // Claude Code records the effort each call ran at beside the message.
+                if let Some(effort) =
+                    text(&entry, "perTurnEffort").or_else(|| text(&entry, "effort"))
+                {
+                    stats.thinking_level = Some(effort);
+                }
                 stats.model = text(message, "model");
                 stats.context_tokens = Some(input + cached + number(usage, "output_tokens"));
                 stats.cache_percent = cache_percent(cached, input + cached);
@@ -177,11 +183,12 @@ mod tests {
 
     #[test]
     fn claude_skips_synthetic_and_sidechain_calls_and_infers_the_window() {
-        let jsonl = r#"{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_creation_input_tokens":90,"cache_read_input_tokens":900,"output_tokens":50}}}
+        let jsonl = r#"{"type":"assistant","effort":"high","perTurnEffort":"medium","message":{"model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_creation_input_tokens":90,"cache_read_input_tokens":900,"output_tokens":50}}}
 {"type":"assistant","isSidechain":true,"message":{"model":"claude-haiku-5-5","usage":{"input_tokens":5,"output_tokens":5}}}
 {"type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0}}}"#;
         let stats = session_stats(Kind::Claude, jsonl).unwrap();
         assert_eq!(stats.model.as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(stats.thinking_level.as_deref(), Some("medium"));
         assert_eq!(stats.context_tokens, Some(1050));
         assert_eq!(stats.cache_percent, Some(90));
         assert_eq!(stats.context_window, Some(200_000));
