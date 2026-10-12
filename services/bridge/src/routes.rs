@@ -166,7 +166,6 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
     let mut generation = ring.generation;
     let mut last_status: Option<(String, Option<String>)> = None;
     let mut last_prompt_id: Option<String> = None;
-    let mut last_question: Option<prompt::PromptCard> = None;
 
     if socket
         .send(Message::Text(
@@ -236,24 +235,8 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
                 .await;
         }
 
-        // Check for active interactive prompt (tool approval or ask_question). Claude's
-        // AskUserQuestion form comes from the transcript; the screen read would mistake it.
-        let active_prompt = if questions::on_screen(&text) {
-            let shown = last_question.as_ref().is_some_and(|card| {
-                card.questions
-                    .iter()
-                    .any(|question| text.contains(question.question.as_str()))
-            });
-            if !shown {
-                last_question = pending_question(&session)
-                    .await
-                    .map(|(id, questions)| questions::card(&id, questions));
-            }
-            last_question.clone()
-        } else {
-            last_question = None;
-            prompt::parse_prompt_from_screen(&text)
-        };
+        // Check for active interactive prompt (tool approval or a question).
+        let active_prompt = prompt::screen_card(&text);
         if let Some(card) = &active_prompt {
             if last_prompt_id.as_deref() != Some(&card.prompt_id) {
                 last_prompt_id = Some(card.prompt_id.clone());
@@ -316,42 +299,25 @@ async fn resolve_pane(state: &Arc<BridgeState>, session: &str) -> Option<String>
         .map(|row| row.pane_id)
 }
 
-/// The AskUserQuestion call a Claude session is waiting on, from its own transcript.
-async fn pending_question(session: &str) -> Option<(String, Vec<questions::Question>)> {
-    let resolved = transcript::resolve_session_transcript(session)
-        .await
-        .ok()??;
-    if !matches!(resolved, transcript::ResolvedTranscript::Claude(_)) {
-        return None;
-    }
-    let (content, _) =
-        conversation::read_canonical_tail(&resolved, conversation::TRANSCRIPT_TAIL_BYTES).ok()?;
-    questions::pending(&content)
-}
-
-/// The open AskUserQuestion form when `prompt_id` names it and nothing on it is answered yet.
-async fn question_at_start(
-    session: &str,
-    pane_id: &str,
-    prompt_id: &str,
-) -> Result<Vec<questions::Question>, Response> {
+/// The question form on screen while `prompt_id` still names it, untouched by the terminal.
+async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form, Response> {
     let stale = |message: &str| error_response(StatusCode::CONFLICT, "stale_prompt", message);
-    let Some((id, pending)) = pending_question(session).await else {
-        return Err(stale("no question is waiting for an answer"));
-    };
-    if prompt_id != format!("q-{id}") {
-        return Err(stale("a different question is waiting now"));
-    }
     let screen = herdr::pane_read_recent(pane_id, 40)
         .await
         .map_err(|err| error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string()))?;
-    // Keys only fit a form nobody has started; a half-answered one is finished in the terminal.
-    if !questions::at_start(&screen, &pending) {
+    let Some(form) = questions::form(&screen) else {
+        return Err(stale("the question is no longer shown"));
+    };
+    if questions::card(&form).prompt_id != prompt_id {
+        return Err(stale("the question on screen has changed"));
+    }
+    // Toggles are relative: ticks made in the terminal would be undone.
+    if form.ticked {
         return Err(stale(
-            "the question is no longer at its start; answer it in the terminal",
+            "this question was started in the terminal; finish it there",
         ));
     }
-    Ok(pending)
+    Ok(form)
 }
 
 /// GET /api/agents/{sessionId}/conversation
@@ -585,41 +551,7 @@ pub async fn submit_agent_prompt(
             option_index,
             option_id,
         } => {
-            if prompt_id.starts_with("q-") {
-                if action.as_deref() != Some("cancel") {
-                    return error_response(
-                        StatusCode::BAD_REQUEST,
-                        "bad_request",
-                        "answer a question card with answer_question",
-                    );
-                }
-                let same = pending_question(&session_id)
-                    .await
-                    .is_some_and(|(id, _)| prompt_id == format!("q-{id}"));
-                let shown = herdr::pane_read_recent(&pane_id, 40)
-                    .await
-                    .is_ok_and(|screen| questions::on_screen(&screen));
-                if !same || !shown {
-                    return error_response(
-                        StatusCode::CONFLICT,
-                        "stale_prompt",
-                        "the question is no longer waiting",
-                    );
-                }
-                return match herdr::pane_send_keys(&pane_id, &["esc"]).await {
-                    Ok(_) => (
-                        StatusCode::OK,
-                        [(header::CONTENT_TYPE, "application/json")],
-                        json!({"event": "prompt_answered", "action": "canceled", "prompt_id": prompt_id})
-                            .to_string(),
-                    )
-                        .into_response(),
-                    Err(err) => {
-                        error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string())
-                    }
-                };
-            }
-            let active_screen = match herdr::pane_read_recent(&pane_id, 30).await {
+            let active_screen = match herdr::pane_read_recent(&pane_id, 40).await {
                 Ok(text) => text,
                 Err(err) => {
                     return error_response(
@@ -630,7 +562,7 @@ pub async fn submit_agent_prompt(
                 }
             };
 
-            let Some(card) = prompt::parse_prompt_from_screen(&active_screen) else {
+            let Some(card) = prompt::screen_card(&active_screen) else {
                 return error_response(
                     StatusCode::CONFLICT,
                     "stale_prompt",
@@ -649,9 +581,21 @@ pub async fn submit_agent_prompt(
                 );
             }
 
-            // Determine key to send
+            if card.card_type == questions::QUESTION && action.as_deref() != Some("cancel") {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    "answer a question card with answer_question",
+                );
+            }
+            // Determine key to send. The review's own Cancel row stops the whole form.
             if action.as_deref() == Some("cancel") {
-                let _ = herdr::pane_send_keys(&pane_id, &["esc"]).await;
+                let key = if card.card_type == questions::REVIEW {
+                    "2"
+                } else {
+                    "esc"
+                };
+                let _ = herdr::pane_send_keys(&pane_id, &[key]).await;
                 return (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "application/json")],
@@ -668,9 +612,15 @@ pub async fn submit_agent_prompt(
                 0
             };
 
-            // If numbered choice (1, 2, 3), press digit + enter
+            // If numbered choice (1, 2, 3), press digit + enter. The review acts on the digit
+            // alone; a following enter would land in the agent's input.
             let key_digit = format!("{}", opt_idx + 1);
-            let send_res = herdr::pane_send_keys(&pane_id, &[&key_digit, "enter"]).await;
+            let keys: &[&str] = if card.card_type == questions::REVIEW {
+                &[&key_digit]
+            } else {
+                &[&key_digit, "enter"]
+            };
+            let send_res = herdr::pane_send_keys(&pane_id, keys).await;
             match send_res {
                 Ok(_) => (
                     StatusCode::OK,
@@ -691,11 +641,19 @@ pub async fn submit_agent_prompt(
             }
         }
         prompt::PromptSubmission::AnswerQuestion { prompt_id, answers } => {
-            let pending = match question_at_start(&session_id, &pane_id, &prompt_id).await {
-                Ok(pending) => pending,
+            let form = match current_form(&pane_id, &prompt_id).await {
+                Ok(form) => form,
                 Err(response) => return response,
             };
-            let steps = match questions::answer_steps(&pending, &answers) {
+            // One card is one question: the form shows the next once this one is answered.
+            let [answer] = answers.as_slice() else {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "bad_answer",
+                    "answer the question on screen",
+                );
+            };
+            let steps = match questions::answer_steps(&form, answer) {
                 Ok(steps) => steps,
                 Err(message) => {
                     return error_response(StatusCode::BAD_REQUEST, "bad_answer", &message)

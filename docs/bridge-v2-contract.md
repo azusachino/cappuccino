@@ -305,16 +305,17 @@ Before low-effort sub-agents implement these features, the exact behavior across
 
 ### 6.1 Flow 1: Claude Code `AskUserQuestion` (`ask_user_question`)
 
-When Claude Code asks the owner a question through its `AskUserQuestion` tool:
+When Claude Code asks the owner a question through its `AskUserQuestion` tool. Claude Code writes the tool call to its transcript only after it is answered, so the visible form is the only source while it waits.
 
-- **Detection**: the pane shows the question form (its footer has `Chat about this` and `Enter to select`). The bridge then reads the session's transcript for the newest main-session `AskUserQuestion` tool call without a `tool_result`; that call supplies the exact questions, options and descriptions. No pending call means no card: the owner answers in the terminal. Other choice menus keep the screen-read `ask_question` card.
-- **Card Schema** (`prompt_id` names the tool call):
+- **Detection**: the pane shows the form (footer `Enter to select`, a `Chat about this` row). The bridge reads the question on screen: its text, the options with their descriptions (the form's own "Type something" and "Chat about this" rows are not options), checkboxes for a multi-select, and the tab row's headers with their answered marks. One card is one question; as the form moves on, the next question becomes a new card. The final review becomes an `ask_user_question_review` card. Other choice menus keep the screen-read `ask_question` card.
+- **Card Schema** (`prompt_id` hashes what is on screen):
 
   ```json
   {
     "type": "ask_user_question",
-    "prompt_id": "q-toolu_01ABC",
+    "prompt_id": "p-918ff1b95c4e",
     "title": "Pick a color?",
+    "message": "Question 1 of 2",
     "tool_name": "AskUserQuestion",
     "options": [],
     "selected_index": 0,
@@ -329,13 +330,15 @@ When Claude Code asks the owner a question through its `AskUserQuestion` tool:
   }
   ```
 
+  The review card has `type: "ask_user_question_review"`, the chosen answers as its `message`, and the options `Submit answers` and `Cancel`.
 - **Resolution**:
-  - `POST /api/agents/:sessionId/prompt` with one answer per question, in order: option indexes and/or one line of free text (the form's "Type something"):
-    `{"type": "answer_question", "prompt_id": "q-toolu_01ABC", "answers": [{"selected": [0]}, {"selected": [0, 2], "other": "a bird"}]}`
-  - A single-select takes exactly one of an index or text; a multi-select takes at least one.
-  - The bridge answers only an untouched form: the same tool call must still be pending and the screen must show its first question with nothing ticked; otherwise `409 stale_prompt`. Answers that do not fit the questions are `400 bad_answer`.
-  - Keys, sent with a short pause between steps: single-select digit (or the "Type something" digit, the text, enter); multi-select digits toggle, free text goes on its row, then tab to the next question or, alone, its Submit row; several questions or a lone multi-select end with `1` on the review.
-  - Cancel is `answer_prompt` with `action: "cancel"` and the card's `prompt_id`: it presses Esc while the same question is still shown.
+  - `POST /api/agents/:sessionId/prompt` with the one question's answer: option indexes and/or one line of free text (the form's "Type something"):
+    `{"type": "answer_question", "prompt_id": "p-918ff1b95c4e", "answers": [{"selected": [0, 2], "other": "a bird"}]}`
+  - A single-select takes exactly one of an index or text; a multi-select takes at least one. Answers that do not fit are `400 bad_answer`.
+  - The bridge re-reads the screen first: the same question must still show, with nothing ticked in the terminal; otherwise `409 stale_prompt`, and the owner finishes it in the terminal.
+  - Keys, with a short pause between steps (checked against Claude Code 2.1 in a Herdr pane): single-select digit, or the "Type something" digit, the text and enter; multi-select digits toggle, free text goes on its row (reached from the `❯` cursor), then the Submit row and enter.
+  - The review is answered with `answer_prompt`: `select_option` presses its digit alone (`1` submits, `2` cancels).
+  - Cancel is `answer_prompt` with `action: "cancel"`: Esc on a question, `2` on the review.
 
 ### 6.2 Flow 2: Tool Permission Approval (`tool_approval`)
 

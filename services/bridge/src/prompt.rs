@@ -72,6 +72,28 @@ mod hex {
     }
 }
 
+/// The card for whatever prompt the screen shows. Claude's question form has its own reader: the
+/// generic menu reader would take its "Type something" and "Chat about this" rows for answers.
+pub fn screen_card(screen: &str) -> Option<PromptCard> {
+    // Scrollback can still hold the form above its review; the later one is what shows.
+    let review_last =
+        screen.rfind("Ready to submit your answers?") > screen.rfind("Enter to select");
+    let review = || crate::questions::review(screen);
+    let form = || crate::questions::form(screen).map(|form| crate::questions::card(&form));
+    let card = if review_last {
+        review().or_else(form)
+    } else {
+        form().or_else(review)
+    };
+    if card.is_some() {
+        return card;
+    }
+    if crate::questions::on_screen(screen) {
+        return None;
+    }
+    parse_prompt_from_screen(screen)
+}
+
 /// Detects if the visible screen is presenting an interactive prompt.
 pub fn parse_prompt_from_screen(screen_text: &str) -> Option<PromptCard> {
     let lines: Vec<&str> = screen_text.lines().map(str::trim).collect();
