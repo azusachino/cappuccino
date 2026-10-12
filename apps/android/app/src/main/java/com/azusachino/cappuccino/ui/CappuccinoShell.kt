@@ -259,6 +259,9 @@ fun CappuccinoScreen(
     followModes = followModes + (conversationKey to followingOutput)
   }
   var automaticScroll by remember(outputIdentity) { mutableStateOf(false) }
+  var textLayoutRevision by remember(outputIdentity) { mutableStateOf(0) }
+  val onTextLayoutChanged: () -> Unit = remember(outputIdentity) { { textLayoutRevision += 1 } }
+  var observedFollowContent by remember(outputIdentity) { mutableStateOf<List<*>?>(null) }
   val outputScope = rememberCoroutineScope()
 
   LaunchedEffect(outputListState, followEnabled) {
@@ -277,7 +280,15 @@ fun CappuccinoScreen(
         }
       }
   }
-  LaunchedEffect(followContent, outputIdentity, followingOutput, followEnabled) {
+  LaunchedEffect(
+    followContent,
+    textLayoutRevision,
+    outputIdentity,
+    followingOutput,
+    followEnabled,
+  ) {
+    val newContent = observedFollowContent != followContent
+    observedFollowContent = followContent
     if (selected != null && followContent.isNotEmpty()) {
       if (followingOutput && followEnabled) {
         automaticScroll = true
@@ -288,7 +299,7 @@ fun CappuccinoScreen(
         } finally {
           automaticScroll = false
         }
-      } else {
+      } else if (newContent) {
         hasNewOutput = true
       }
     }
@@ -616,6 +627,7 @@ fun CappuccinoScreen(
                           assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
                           onInspect = { followingOutput = false },
                           showToolsInline = false,
+                          onTextSizeChanged = onTextLayoutChanged,
                         )
                       }
                       item(key = "conversation-bottom") {
@@ -1384,7 +1396,12 @@ fun ConversationTurnRow(
   assistantLabel: String = "Assistant",
   onInspect: () -> Unit = {},
   showToolsInline: Boolean = true,
+  onTextSizeChanged: (() -> Unit)? = null,
 ) {
+  val textModifier =
+    remember(onTextSizeChanged) {
+      if (onTextSizeChanged == null) Modifier else Modifier.onSizeChanged { onTextSizeChanged() }
+    }
   val isUser = turn.role.lowercase() == "user"
   val parts = buildList {
     turn.text?.takeIf { it.isNotBlank() }?.let { add(ConversationPart.Text(it)) }
@@ -1424,7 +1441,8 @@ fun ConversationTurnRow(
           ) {
             visibleParts.forEachIndexed { index, part ->
               key(turn.id, index) {
-                if (part is ConversationPart.Text) MessageBody(part.text, onInspect = onInspect)
+                if (part is ConversationPart.Text)
+                  MessageBody(part.text, onInspect = onInspect, modifier = textModifier)
                 else ConversationDetails(part, onInspect)
               }
             }

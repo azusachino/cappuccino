@@ -6,10 +6,13 @@ val ConversationPart.visibleInChat: Boolean
       !(this is ConversationPart.ResponseStatus && status == "failed")
 
 fun conversationFollowContent(turns: List<ConversationTurn>): List<ConversationTurn> =
-  turns.mapNotNull { turn ->
-    val visible = turn.parts.filter { it.visibleInChat }
-    if (turn.text.isNullOrBlank() && visible.isEmpty()) null else turn.copy(parts = visible)
-  }
+  turns
+    .mapNotNull { turn ->
+      // Reasoning stays inspectable, but isn't a new chat answer to follow.
+      val visible = turn.parts.filter { it.visibleInChat && it !is ConversationPart.Thinking }
+      if (turn.text.isNullOrBlank() && visible.isEmpty()) null else turn.copy(parts = visible)
+    }
+    .takeLast(1) // Older-window eviction is not a new answer to follow.
 
 const val MAX_RECENT_MESSAGES = 200
 const val MAX_RECENT_TOOLS = 100

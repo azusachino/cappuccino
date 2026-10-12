@@ -69,6 +69,37 @@ class RecentHistoryTest {
   }
 
   @Test
+  fun trimmingOlderHistoryDoesNotLookLikeANewAnswer() {
+    val older = ConversationTurn("older", "agent", null, "Older answer", emptyList())
+    val latest = ConversationTurn("latest", "agent", null, "Last answer", emptyList())
+    assertEquals(
+      conversationFollowContent(listOf(older, latest)),
+      conversationFollowContent(listOf(latest)),
+    )
+  }
+
+  @Test
+  fun reasoningWithToolsDoesNotTriggerFollowingWithoutAnAnswer() {
+    val reply = ConversationTurn("reply", "agent", null, "Last answer", emptyList())
+    val reasoning =
+      ConversationTurn(
+        "tool-step",
+        "agent",
+        null,
+        null,
+        listOf(
+          ConversationPart.Thinking("Inspecting the next file"),
+          ConversationPart.ToolCall("bash", "pwd", null),
+        ),
+      )
+    assertEquals(
+      conversationFollowContent(listOf(reply)),
+      conversationFollowContent(listOf(reply, reasoning)),
+    )
+    assertTrue(conversationFollowContent(listOf(reasoning)).isEmpty())
+  }
+
+  @Test
   fun responseFailuresRemainRecordedButDoNotChangeChatFollowing() {
     val reply = ConversationTurn("t", "agent", null, "Partial reply", emptyList())
     val failed = reply.copy(parts = listOf(ConversationPart.ResponseStatus("failed", "terminated")))

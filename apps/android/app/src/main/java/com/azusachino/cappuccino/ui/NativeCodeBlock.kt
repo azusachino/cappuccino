@@ -1,23 +1,31 @@
 package com.azusachino.cappuccino.ui
 
+import android.content.ClipData
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import com.mikepenz.markdown.compose.elements.MarkdownCodeBackground
 import dev.textmate.grammar.Grammar
 import dev.textmate.grammar.raw.GrammarReader
 import dev.textmate.grammar.tokenize.StateStack
@@ -26,6 +34,7 @@ import java.io.InputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -228,19 +237,40 @@ internal fun NativeCodeBlock(code: String, language: String?, modifier: Modifier
     highlighted?.takeIf { it.source == code && it.language == canonical && it.dark == dark }?.text
       ?: AnnotatedString(code)
   val label = language?.trim()?.takeIf { it.isNotEmpty() } ?: "Code"
-  MarkdownCodeBackground(
+  val clipboard = LocalClipboard.current
+  val scope = rememberCoroutineScope()
+  // Tool readers are outside Markdown's composition-local providers.
+  Surface(
     color = codeCanvas(dark),
+    shape = MaterialTheme.shapes.small,
     modifier = modifier.fillMaxWidth().padding(vertical = 8.dp),
-    showHeader = true,
-    language = label,
-    code = code,
   ) {
-    Text(
-      rendered,
-      Modifier.horizontalScroll(rememberScrollState()).padding(12.dp),
-      color = codeScopeColor(emptyList(), dark),
-      fontFamily = FontFamily.Monospace,
-      style = MaterialTheme.typography.bodySmall,
-    )
+    Column {
+      Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          label,
+          Modifier.weight(1f),
+          color = codeScopeColor(emptyList(), dark),
+          style = MaterialTheme.typography.labelSmall,
+        )
+        TextButton(
+          onClick = {
+            scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(label, code))) }
+          }
+        ) {
+          Text("Copy code", color = codeScopeColor(emptyList(), dark))
+        }
+      }
+      Text(
+        rendered,
+        Modifier.horizontalScroll(rememberScrollState()).padding(12.dp),
+        color = codeScopeColor(emptyList(), dark),
+        fontFamily = FontFamily.Monospace,
+        style = MaterialTheme.typography.bodySmall,
+      )
+    }
   }
 }

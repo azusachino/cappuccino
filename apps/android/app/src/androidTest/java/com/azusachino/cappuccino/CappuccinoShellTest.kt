@@ -154,6 +154,112 @@ class CappuccinoShellTest {
   }
 
   @Test
+  fun toolOnlyReasoningUpdatePreservesChatViewport() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile("tool-only", "Synthetic", Endpoint.parse("https://bridge.example"), machine)
+    val agent = AgentRow(machine, "synthetic-session", "pane", "pi", "pi", "idle", false, "main")
+    val tool = ConversationPart.ToolCall("bash", "pwd", null)
+    val replies =
+      (1..30).map {
+        ConversationTurn("reply-$it", "agent", null, "Reply paragraph $it", emptyList())
+      }
+    val state =
+      mutableStateOf(
+        ConnectedUiState(
+          profiles = listOf(profile),
+          activeProfileId = profile.id,
+          selectedAgent = agent,
+          conversationTurns =
+            replies + ConversationTurn("reply", "agent", null, "ANCHOR REPLY", listOf(tool)),
+          connection = ConnectionState.Connected,
+          conversationSource = "canonical_log",
+        )
+      )
+    compose.activity.runOnUiThread {
+      compose.activity.setContent {
+        CappuccinoTheme {
+          val s by state
+          CappuccinoScreen(s, StateActions(state)) { _, _ -> }
+        }
+      }
+    }
+    // Establish a loaded reader using short messages that are not hidden by preview truncation.
+    compose.onNodeWithContentDescription("Follow live output").performClick()
+    compose.onNodeWithContentDescription("Follow live output").performClick()
+    capture("ToolOnlyBefore")
+    compose.onNodeWithText("ANCHOR REPLY").assertIsDisplayed()
+    compose.waitForIdle()
+    val before = compose.onNodeWithText("ANCHOR REPLY").fetchSemanticsNode().boundsInRoot.top
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          conversationTurns =
+            state.value.conversationTurns +
+              ConversationTurn(
+                "tool-step",
+                "agent",
+                null,
+                null,
+                listOf(ConversationPart.Thinking("Inspecting another file"), tool),
+              )
+        )
+    }
+    compose.waitForIdle()
+    compose.onNodeWithText("ANCHOR REPLY").assertIsDisplayed()
+    val after = compose.onNodeWithText("ANCHOR REPLY").fetchSemanticsNode().boundsInRoot.top
+    assertEquals(before, after, 0.5f)
+    compose.onNodeWithText("Jump to latest").assertDoesNotExist()
+    capture("ToolOnlyAfter")
+
+    compose.onNodeWithTag("recentOutputList").performTouchInput { swipeDown() }
+    compose.waitForIdle()
+    val readingBefore =
+      compose
+        .onNodeWithTag("recentOutputList")
+        .fetchSemanticsNode()
+        .config[SemanticsProperties.VerticalScrollAxisRange]
+        .value()
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          conversationTurns =
+            state.value.conversationTurns.dropLast(1) +
+              state.value.conversationTurns
+                .last()
+                .copy(
+                  parts =
+                    listOf(
+                      ConversationPart.Thinking("Still inspecting"),
+                      tool.copy(output = "done"),
+                    )
+                )
+        )
+    }
+    compose.waitForIdle()
+    val readingAfter =
+      compose
+        .onNodeWithTag("recentOutputList")
+        .fetchSemanticsNode()
+        .config[SemanticsProperties.VerticalScrollAxisRange]
+        .value()
+    assertEquals(readingBefore, readingAfter, 0.01f)
+    compose.onNodeWithText("Jump to latest").assertDoesNotExist()
+
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          conversationTurns =
+            state.value.conversationTurns +
+              ConversationTurn("new-answer", "agent", null, "NEW ANSWER", emptyList())
+        )
+    }
+    awaitJumpAffordance()
+    compose.onNodeWithText("Jump to latest").performClick()
+    compose.onNodeWithText("NEW ANSWER").assertIsDisplayed()
+  }
+
+  @Test
   fun structuredConversationFollowsGrowthButPreservesReadingPositionAndMachineIdentity() {
     val machine = UUID.randomUUID()
     val profile =

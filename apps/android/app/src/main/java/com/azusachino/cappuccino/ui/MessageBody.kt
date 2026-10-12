@@ -21,10 +21,15 @@ internal fun messagePreview(text: String): String {
 }
 
 @Composable
-internal fun MessageBody(text: String, markdown: Boolean = true, onInspect: () -> Unit = {}) {
+internal fun MessageBody(
+  text: String,
+  modifier: Modifier = Modifier,
+  markdown: Boolean = true,
+  onInspect: () -> Unit = {},
+) {
   val preview = remember(text) { messagePreview(text) }
   var full by rememberSaveable { mutableStateOf(false) }
-  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+  Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
     if (markdown) MarkdownText(preview, compact = true)
     else Text(preview, style = MaterialTheme.typography.bodyMedium)
     if (preview != text)
