@@ -60,7 +60,10 @@ pub fn session_stats(kind: Kind, content: &str) -> Option<SessionStats> {
                 Some("thinking_level_change") => {
                     stats.thinking_level = text(&entry, "thinkingLevel");
                 }
-                Some("compaction") => stats.context_tokens = None,
+                Some("compaction") => {
+                    stats.context_tokens = None;
+                    stats.cache_percent = None;
+                }
                 Some("message") => {
                     let message = &entry["message"];
                     let usage = &message["usage"];
@@ -83,6 +86,7 @@ pub fn session_stats(kind: Kind, content: &str) -> Option<SessionStats> {
             Kind::Claude => {
                 if entry["type"] == "system" && entry["subtype"] == "compact_boundary" {
                     stats.context_tokens = None;
+                    stats.cache_percent = None;
                     continue;
                 }
                 let message = &entry["message"];
@@ -143,6 +147,47 @@ fn claude_window(tokens: Option<u64>) -> Option<u64> {
     })
 }
 
+/// The latest thinking level anywhere in a Pi session. A long session may set it well before the
+/// tail the conversation reads, so the file is scanned once and afterwards only what it grew by.
+pub fn pi_thinking_level(transcript: &Path) -> Option<String> {
+    use std::collections::HashMap;
+    use std::io::{BufRead, BufReader, Seek, SeekFrom};
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+    static SCANNED: OnceLock<Mutex<HashMap<PathBuf, (u64, Option<String>)>>> = OnceLock::new();
+
+    let mut scanned = SCANNED.get_or_init(Default::default).lock().ok()?;
+    let len = std::fs::metadata(transcript).ok()?.len();
+    // A shorter file is a replaced one: start over.
+    let (mut offset, mut level) = scanned
+        .get(transcript)
+        .filter(|(offset, _)| *offset <= len)
+        .cloned()
+        .unwrap_or((0, None));
+    let mut file = std::fs::File::open(transcript).ok()?;
+    file.seek(SeekFrom::Start(offset)).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let read = reader.read_until(b'\n', &mut line).ok()?;
+        // Stop before a line still being written; it is read whole next time.
+        if read == 0 || line.last() != Some(&b'\n') {
+            break;
+        }
+        offset += read as u64;
+        if line.windows(21).any(|w| w == b"thinking_level_change") {
+            if let Ok(entry) = serde_json::from_slice::<Value>(&line) {
+                if entry["type"] == "thinking_level_change" {
+                    level = text(&entry, "thinkingLevel").or(level);
+                }
+            }
+        }
+    }
+    scanned.insert(transcript.to_path_buf(), (offset, level.clone()));
+    level
+}
+
 /// A Pi model's window from the `models.json` beside its `sessions` store.
 pub fn pi_context_window(transcript: &Path, provider: &str, model: &str) -> Option<u64> {
     let agent_dir = transcript
@@ -178,6 +223,7 @@ mod tests {
         let compacted = format!("{jsonl}\n{{\"type\":\"compaction\"}}");
         let stats = session_stats(Kind::Pi, &compacted).unwrap();
         assert_eq!(stats.context_tokens, None);
+        assert_eq!(stats.cache_percent, None);
         assert_eq!(stats.model.as_deref(), Some("glm"));
     }
 
@@ -210,6 +256,26 @@ mod tests {
         assert_eq!(stats.context_tokens, Some(10_100));
         assert_eq!(stats.cache_percent, Some(80));
         assert_eq!(stats.context_window, None);
+    }
+
+    #[test]
+    fn pi_thinking_level_survives_a_long_session_and_follows_growth() {
+        let path =
+            std::env::temp_dir().join(format!("cappuccino-level-{}.jsonl", std::process::id()));
+        let early = "{\"type\":\"thinking_level_change\",\"thinkingLevel\":\"high\"}\n";
+        let filler = "{\"type\":\"message\",\"message\":{\"role\":\"user\"}}\n".repeat(50);
+        std::fs::write(&path, format!("{early}{filler}")).unwrap();
+        assert_eq!(pi_thinking_level(&path).as_deref(), Some("high"));
+        // A half-written line is left for the next read.
+        let mut grown = format!(
+            "{early}{filler}{{\"type\":\"thinking_level_change\",\"thinkingLevel\":\"low\"}}"
+        );
+        std::fs::write(&path, &grown).unwrap();
+        assert_eq!(pi_thinking_level(&path).as_deref(), Some("high"));
+        grown.push('\n');
+        std::fs::write(&path, &grown).unwrap();
+        assert_eq!(pi_thinking_level(&path).as_deref(), Some("low"));
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

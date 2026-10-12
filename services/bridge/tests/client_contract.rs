@@ -63,10 +63,27 @@ impl TempRoot {
 // stop; the socket path and the agent cwd are switchable for reset scenarios.
 // ---------------------------------------------------------------------------
 
+struct MockAgent {
+    kind: String,
+    status: String,
+    requests: Vec<Value>,
+}
+
+impl Default for MockAgent {
+    fn default() -> Self {
+        Self {
+            kind: "pi".to_string(),
+            status: "idle".to_string(),
+            requests: Vec::new(),
+        }
+    }
+}
+
 struct MockHerdr {
     socket_path: PathBuf,
     cwd: Arc<Mutex<Option<PathBuf>>>,
     agent_session: Arc<Mutex<Option<String>>>,
+    agent: Arc<Mutex<MockAgent>>,
     connections: Arc<std::sync::atomic::AtomicUsize>,
     listener_task: tokio::task::JoinHandle<()>,
 }
@@ -77,6 +94,8 @@ impl MockHerdr {
         let listener = tokio::net::UnixListener::bind(&socket_path).expect("bind mock herdr");
         let cwd: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
         let agent_session: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let agent = Arc::new(Mutex::new(MockAgent::default()));
+        let agent_task = Arc::clone(&agent);
         let cwd_task = Arc::clone(&cwd);
         let session_task = Arc::clone(&agent_session);
         let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -90,9 +109,10 @@ impl MockHerdr {
                             let guard = RunningGuard::new(Arc::clone(&connections_counter));
                             let cwd = Arc::clone(&cwd_task);
                             let session = Arc::clone(&session_task);
+                            let mock_agent = Arc::clone(&agent_task);
                             connections.push(async move {
                                 let _guard = guard;
-                                handle_mock_connection(stream, cwd, session).await;
+                                handle_mock_connection(stream, cwd, session, mock_agent).await;
                             });
                         },
                         Err(_) => return,
@@ -105,9 +125,27 @@ impl MockHerdr {
             socket_path,
             cwd,
             agent_session,
+            agent,
             connections: active,
             listener_task,
         }
+    }
+
+    /// The agent the mock reports in `agent.list`, and every request it received.
+    fn set_agent(&self, kind: &str, status: &str) {
+        let mut agent = self.agent.lock().unwrap();
+        agent.kind = kind.to_string();
+        agent.status = status.to_string();
+    }
+
+    fn requests(&self, method: &str) -> Vec<Value> {
+        let agent = self.agent.lock().unwrap();
+        agent
+            .requests
+            .iter()
+            .filter(|r| r["method"] == method)
+            .cloned()
+            .collect()
     }
 
     /// Sets the agent cwd returned by agent.list / agent.get (for branch
@@ -138,6 +176,7 @@ async fn handle_mock_connection(
     stream: tokio::net::UnixStream,
     cwd: Arc<Mutex<Option<PathBuf>>>,
     agent_session: Arc<Mutex<Option<String>>>,
+    agent: Arc<Mutex<MockAgent>>,
 ) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
     let (reader, mut writer) = stream.into_split();
@@ -154,6 +193,11 @@ async fn handle_mock_connection(
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_default();
     let session_value = agent_session.lock().unwrap().clone();
+    let (kind, status) = {
+        let mut agent = agent.lock().unwrap();
+        agent.requests.push(request.clone());
+        (agent.kind.clone(), agent.status.clone())
+    };
     let agent_session_json = match session_value {
         Some(value) => json!({"kind": "path", "value": value}),
         None => json!(null),
@@ -163,8 +207,8 @@ async fn handle_mock_connection(
             "agents": [{
                 "name": "s-probe",
                 "pane_id": "w1:a",
-                "agent": "pi",
-                "agent_status": "idle",
+                "agent": kind,
+                "agent_status": status,
                 "cwd": cwd_text,
             }]
         }),
@@ -605,6 +649,66 @@ async fn submit_agent_prompt_delivers_input() {
     .expect("empty prompt request");
 
     assert_eq!(err_exchange.status, 400);
+
+    bridge.stop().expect("bridge stop");
+    herdr.stop().await;
+    root.remove();
+}
+
+#[tokio::test]
+async fn control_route_sends_each_agents_own_keys_and_refuses_busy_new_sessions() {
+    let root = TempRoot::new("control-test");
+    let herdr = MockHerdr::start(&root);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+    let options = probe_options(&bridge.base_url());
+    let control = |session: &'static str, action: &'static str| {
+        let options = options.clone();
+        async move {
+            probe::post_json(
+                &options,
+                &format!("/api/agents/{session}/control"),
+                &json!({"action": action}),
+            )
+            .await
+            .expect("control request")
+        }
+    };
+
+    let unknown = control("s-probe", "reboot").await;
+    assert_eq!(unknown.status, 400, "payload: {}", unknown.body);
+    let missing = control("s-missing", "interrupt").await;
+    assert_eq!(missing.status, 404, "payload: {}", missing.body);
+
+    // Stop presses Esc in the agent's pane, whatever it is doing.
+    herdr.set_agent("claude", "working");
+    let stop = control("s-probe", "interrupt").await;
+    assert_eq!(stop.status, 200, "payload: {}", stop.body);
+    let keys = herdr.requests("pane.send_keys");
+    assert_eq!(
+        keys.last().unwrap()["params"],
+        json!({"pane_id": "w1:a", "keys": ["esc"]})
+    );
+
+    // A command typed into a running turn would become its input.
+    let busy = control("s-probe", "new_session").await;
+    assert_eq!(busy.status, 409, "payload: {}", busy.body);
+    assert_eq!(busy.body["code"], "agent_busy");
+    herdr.set_agent("claude", "blocked");
+    assert_eq!(control("s-probe", "new_session").await.status, 409);
+    assert!(herdr.requests("agent.prompt").is_empty());
+
+    for (kind, command) in [("claude", "/clear"), ("pi", "/new"), ("agy", "/clear")] {
+        herdr.set_agent(kind, "idle");
+        let fresh = control("s-probe", "new_session").await;
+        assert_eq!(fresh.status, 200, "{kind}: {}", fresh.body);
+        let prompts = herdr.requests("agent.prompt");
+        assert_eq!(
+            prompts.last().unwrap()["params"],
+            json!({"target": "w1:a", "text": command})
+        );
+    }
+    herdr.set_agent("codex", "idle");
+    assert_eq!(control("s-probe", "new_session").await.status, 400);
 
     bridge.stop().expect("bridge stop");
     herdr.stop().await;

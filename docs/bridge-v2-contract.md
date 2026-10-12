@@ -303,34 +303,39 @@ Before low-effort sub-agents implement these features, the exact behavior across
 └───────────────────┴──────────────────────────────┴─────────────────────┘
 ```
 
-### 6.1 Flow 1: `ask_user_question` / `ask_question`
+### 6.1 Flow 1: Claude Code `AskUserQuestion` (`ask_user_question`)
 
-When an agent (like `agy` or `omo`) pauses execution to elicit user clarification:
+When Claude Code asks the owner a question through its `AskUserQuestion` tool:
 
-- **Detection**:
-  - *From session log*: Assistant tool call with `name: "ask_question"` or `"ask_user_question"` containing `questions: [{ question, options, is_multi_select }]`, with no corresponding `toolResult` yet.
-  - *From screen*: Live TUI form showing question title, radio/checkbox options, and hint `enter select / tab next`.
-- **Card Schema**:
+- **Detection**: the pane shows the question form (its footer has `Chat about this` and `Enter to select`). The bridge then reads the session's transcript for the newest main-session `AskUserQuestion` tool call without a `tool_result`; that call supplies the exact questions, options and descriptions. No pending call means no card: the owner answers in the terminal. Other choice menus keep the screen-read `ask_question` card.
+- **Card Schema** (`prompt_id` names the tool call):
 
   ```json
   {
-    "type": "ask_question",
-    "prompt_id": "step-2640-ask",
+    "type": "ask_user_question",
+    "prompt_id": "q-toolu_01ABC",
+    "title": "Pick a color?",
+    "tool_name": "AskUserQuestion",
+    "options": [],
+    "selected_index": 0,
     "questions": [
       {
-        "id": "q1",
-        "question": "Which backend framework should we use?",
-        "is_multi_select": false,
-        "options": ["Axum (Recommended)", "Actix-web"]
+        "header": "Color",
+        "question": "Pick a color?",
+        "multi_select": false,
+        "options": [{"id": "opt-0", "label": "Red", "description": "warm"}]
       }
     ]
   }
   ```
 
 - **Resolution**:
-  - Client answers via `POST /api/agents/:sessionId/prompt`:
-    `{"type": "answer_question", "prompt_id": "step-2640-ask", "answers": {"q1": "Axum (Recommended)"}}`
-  - Bridge sends the response back to the waiting agent via `pane.send-keys` (selecting the options) or via the agent's interactive stdin.
+  - `POST /api/agents/:sessionId/prompt` with one answer per question, in order: option indexes and/or one line of free text (the form's "Type something"):
+    `{"type": "answer_question", "prompt_id": "q-toolu_01ABC", "answers": [{"selected": [0]}, {"selected": [0, 2], "other": "a bird"}]}`
+  - A single-select takes exactly one of an index or text; a multi-select takes at least one.
+  - The bridge answers only an untouched form: the same tool call must still be pending and the screen must show its first question with nothing ticked; otherwise `409 stale_prompt`. Answers that do not fit the questions are `400 bad_answer`.
+  - Keys, sent with a short pause between steps: single-select digit (or the "Type something" digit, the text, enter); multi-select digits toggle, free text goes on its row, then tab to the next question or, alone, its Submit row; several questions or a lone multi-select end with `1` on the review.
+  - Cancel is `answer_prompt` with `action: "cancel"` and the card's `prompt_id`: it presses Esc while the same question is still shown.
 
 ### 6.2 Flow 2: Tool Permission Approval (`tool_approval`)
 

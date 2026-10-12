@@ -587,6 +587,11 @@ fn claude_tool_result_text(content: &Value) -> String {
     }
 }
 
+/// Claude Code writes harness notices (a background task finishing) as user text; nobody typed them.
+fn is_harness_notice(text: &str) -> bool {
+    text.trim_start().starts_with("<task-notification>")
+}
+
 /// Parse a Claude Code session (`<config>/projects/<project>/<session>.jsonl`).
 /// One agent turn spans everything between a person's messages; subagent sidechains,
 /// meta records and hook bookkeeping are skipped.
@@ -624,15 +629,16 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
                     && attachment["humanTurn"].as_bool() == Some(true)
                 {
                     let text = attachment["prompt"].as_str().unwrap_or("").to_string();
-                    push_user(&mut turns, text, timestamp);
+                    if !is_harness_notice(&text) {
+                        push_user(&mut turns, text, timestamp);
+                    }
                 }
             }
-            // Harness notices (a background task finishing) are written as user text; nobody typed them.
             "user"
                 if v["origin"]["kind"].as_str() == Some("task-notification")
-                    || v["message"]["content"].as_str().is_some_and(|text| {
-                        text.trim_start().starts_with("<task-notification>")
-                    }) => {}
+                    || v["message"]["content"]
+                        .as_str()
+                        .is_some_and(is_harness_notice) => {}
             "user" => match &v["message"]["content"] {
                 Value::String(text) => {
                     let text = claude_command_text(text).unwrap_or_else(|| text.clone());
@@ -643,6 +649,7 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
                         .iter()
                         .filter(|block| block["type"].as_str() == Some("text"))
                         .filter_map(|block| block["text"].as_str())
+                        .filter(|text| !is_harness_notice(text))
                         .collect::<Vec<_>>()
                         .join("\n");
                     push_user(&mut turns, text, timestamp.clone());
@@ -1157,5 +1164,18 @@ mod tests {
         assert!(capped.contains("late answer") && !capped.contains("early question"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn claude_harness_notices_never_become_owner_messages() {
+        let jsonl = r#"{"type":"attachment","attachment":{"type":"queued_command","humanTurn":true,"prompt":"<task-notification>done</task-notification>"}}
+{"type":"user","message":{"content":[{"type":"text","text":"<task-notification>done</task-notification>"}]}}
+{"type":"attachment","attachment":{"type":"queued_command","humanTurn":true,"prompt":"real follow-up"}}"#;
+        let turns = parse_claude_transcript(jsonl);
+        let texts: Vec<_> = turns
+            .iter()
+            .filter_map(|turn| turn.text.as_deref())
+            .collect();
+        assert_eq!(texts, vec!["real follow-up"]);
     }
 }

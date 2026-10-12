@@ -2,7 +2,7 @@
 //! `pane.read` and emits wire-v0-shaped events with the slice-A
 //! reconciliation semantics.
 
-use crate::{agents, conversation, herdr, prompt, reconcile, stats, transcript};
+use crate::{agents, conversation, herdr, prompt, questions, reconcile, stats, transcript};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Json, Path as AxumPath, Query, State};
 use axum::http::{header, StatusCode};
@@ -166,6 +166,7 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
     let mut generation = ring.generation;
     let mut last_status: Option<(String, Option<String>)> = None;
     let mut last_prompt_id: Option<String> = None;
+    let mut last_question: Option<prompt::PromptCard> = None;
 
     if socket
         .send(Message::Text(
@@ -235,8 +236,24 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
                 .await;
         }
 
-        // Check for active interactive prompt (tool approval or ask_question)
-        let active_prompt = prompt::parse_prompt_from_screen(&text);
+        // Check for active interactive prompt (tool approval or ask_question). Claude's
+        // AskUserQuestion form comes from the transcript; the screen read would mistake it.
+        let active_prompt = if questions::on_screen(&text) {
+            let shown = last_question.as_ref().is_some_and(|card| {
+                card.questions
+                    .iter()
+                    .any(|question| text.contains(question.question.as_str()))
+            });
+            if !shown {
+                last_question = pending_question(&session)
+                    .await
+                    .map(|(id, questions)| questions::card(&id, questions));
+            }
+            last_question.clone()
+        } else {
+            last_question = None;
+            prompt::parse_prompt_from_screen(&text)
+        };
         if let Some(card) = &active_prompt {
             if last_prompt_id.as_deref() != Some(&card.prompt_id) {
                 last_prompt_id = Some(card.prompt_id.clone());
@@ -299,6 +316,44 @@ async fn resolve_pane(state: &Arc<BridgeState>, session: &str) -> Option<String>
         .map(|row| row.pane_id)
 }
 
+/// The AskUserQuestion call a Claude session is waiting on, from its own transcript.
+async fn pending_question(session: &str) -> Option<(String, Vec<questions::Question>)> {
+    let resolved = transcript::resolve_session_transcript(session)
+        .await
+        .ok()??;
+    if !matches!(resolved, transcript::ResolvedTranscript::Claude(_)) {
+        return None;
+    }
+    let (content, _) =
+        conversation::read_canonical_tail(&resolved, conversation::TRANSCRIPT_TAIL_BYTES).ok()?;
+    questions::pending(&content)
+}
+
+/// The open AskUserQuestion form when `prompt_id` names it and nothing on it is answered yet.
+async fn question_at_start(
+    session: &str,
+    pane_id: &str,
+    prompt_id: &str,
+) -> Result<Vec<questions::Question>, Response> {
+    let stale = |message: &str| error_response(StatusCode::CONFLICT, "stale_prompt", message);
+    let Some((id, pending)) = pending_question(session).await else {
+        return Err(stale("no question is waiting for an answer"));
+    };
+    if prompt_id != format!("q-{id}") {
+        return Err(stale("a different question is waiting now"));
+    }
+    let screen = herdr::pane_read_recent(pane_id, 40)
+        .await
+        .map_err(|err| error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string()))?;
+    // Keys only fit a form nobody has started; a half-answered one is finished in the terminal.
+    if !questions::at_start(&screen, &pending) {
+        return Err(stale(
+            "the question is no longer at its start; answer it in the terminal",
+        ));
+    }
+    Ok(pending)
+}
+
 /// GET /api/agents/{sessionId}/conversation
 pub async fn agent_conversation(
     State(state): State<Arc<BridgeState>>,
@@ -336,6 +391,9 @@ pub async fn agent_conversation(
                         if let (Some(provider), Some(model)) = (&found.provider, &found.model) {
                             found.context_window =
                                 stats::pi_context_window(resolved.path(), provider, model);
+                        }
+                        if found.thinking_level.is_none() {
+                            found.thinking_level = stats::pi_thinking_level(resolved.path());
                         }
                     }
                     let payload = conversation::ConversationResponse {
@@ -443,6 +501,19 @@ pub async fn control_agent(
             &format!("no agent with session_id {session_id}"),
         );
     };
+    // Typed into a running turn or an open question, the command would become its input.
+    if request.action == "new_session"
+        && (row.working || matches!(row.status.as_str(), "working" | "blocked"))
+    {
+        return error_response(
+            StatusCode::CONFLICT,
+            "agent_busy",
+            &format!(
+                "{} is {}; stop it before starting a new session",
+                row.agent, row.status
+            ),
+        );
+    }
     let sent = match request.action.as_str() {
         "interrupt" => herdr::pane_send_keys(&row.pane_id, &["esc"]).await,
         _ => match new_session_command(&row.agent) {
@@ -514,6 +585,40 @@ pub async fn submit_agent_prompt(
             option_index,
             option_id,
         } => {
+            if prompt_id.starts_with("q-") {
+                if action.as_deref() != Some("cancel") {
+                    return error_response(
+                        StatusCode::BAD_REQUEST,
+                        "bad_request",
+                        "answer a question card with answer_question",
+                    );
+                }
+                let same = pending_question(&session_id)
+                    .await
+                    .is_some_and(|(id, _)| prompt_id == format!("q-{id}"));
+                let shown = herdr::pane_read_recent(&pane_id, 40)
+                    .await
+                    .is_ok_and(|screen| questions::on_screen(&screen));
+                if !same || !shown {
+                    return error_response(
+                        StatusCode::CONFLICT,
+                        "stale_prompt",
+                        "the question is no longer waiting",
+                    );
+                }
+                return match herdr::pane_send_keys(&pane_id, &["esc"]).await {
+                    Ok(_) => (
+                        StatusCode::OK,
+                        [(header::CONTENT_TYPE, "application/json")],
+                        json!({"event": "prompt_answered", "action": "canceled", "prompt_id": prompt_id})
+                            .to_string(),
+                    )
+                        .into_response(),
+                    Err(err) => {
+                        error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string())
+                    }
+                };
+            }
             let active_screen = match herdr::pane_read_recent(&pane_id, 30).await {
                 Ok(text) => text,
                 Err(err) => {
@@ -586,25 +691,40 @@ pub async fn submit_agent_prompt(
             }
         }
         prompt::PromptSubmission::AnswerQuestion { prompt_id, answers } => {
-            // For ask_question answers submitted as structured JSON or text
-            let answer_text = if let Some(s) = answers.as_str() {
-                s.to_string()
-            } else {
-                answers.to_string()
+            let pending = match question_at_start(&session_id, &pane_id, &prompt_id).await {
+                Ok(pending) => pending,
+                Err(response) => return response,
             };
-            match herdr::pane_send_text(&pane_id, &format!("{answer_text}\n")).await {
-                Ok(_) => (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "application/json")],
-                    json!({"event": "question_answered", "prompt_id": prompt_id}).to_string(),
-                )
-                    .into_response(),
-                Err(err) => error_response(
-                    StatusCode::BAD_GATEWAY,
-                    "herdr_error",
-                    &format!("cannot send answer: {err}"),
-                ),
+            let steps = match questions::answer_steps(&pending, &answers) {
+                Ok(steps) => steps,
+                Err(message) => {
+                    return error_response(StatusCode::BAD_REQUEST, "bad_answer", &message)
+                }
+            };
+            for step in steps {
+                let sent = match &step {
+                    questions::Step::Keys(keys) => {
+                        let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+                        herdr::pane_send_keys(&pane_id, &keys).await
+                    }
+                    questions::Step::Text(text) => herdr::pane_send_text(&pane_id, text).await,
+                };
+                if let Err(err) = sent {
+                    return error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "herdr_error",
+                        &format!("cannot send answer: {err}"),
+                    );
+                }
+                // The form redraws between keys; faster input lands on the previous step.
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             }
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/json")],
+                json!({"event": "question_answered", "prompt_id": prompt_id}).to_string(),
+            )
+                .into_response()
         }
     }
 }
