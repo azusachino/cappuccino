@@ -441,11 +441,13 @@ class CappuccinoShellTest {
             selectedAgent = agent,
             conversationTurns =
               listOf(
+                // Only the person's prompts carry a time: HH:mm, the full local time as its
+                // description.
                 ConversationTurn(
                   "tz-turn",
-                  "assistant",
+                  "user",
                   "2026-10-07T16:02:03Z",
-                  "Timezone reply",
+                  "Timezone prompt",
                   emptyList(),
                 )
               ),
@@ -463,13 +465,15 @@ class CappuccinoShellTest {
           }
         }
       }
-      compose.onNodeWithText("2026-10-07 16:02:03").assertIsDisplayed()
+      compose.onNodeWithText("16:02").assertIsDisplayed()
+      compose.onNodeWithContentDescription("2026-10-07 16:02:03").assertExists()
       setZone("Asia/Tokyo")
       compose.waitUntil(timeoutMillis = 5000) {
-        compose.onAllNodesWithText("2026-10-08 01:02:03").fetchSemanticsNodes().isNotEmpty()
+        compose.onAllNodesWithText("01:02").fetchSemanticsNodes().isNotEmpty()
       }
-      compose.onNodeWithText("2026-10-08 01:02:03").assertIsDisplayed()
-      compose.onNodeWithText("Timezone reply").assertIsDisplayed()
+      compose.onNodeWithText("01:02").assertIsDisplayed()
+      compose.onNodeWithContentDescription("2026-10-08 01:02:03").assertExists()
+      compose.onNodeWithText("Timezone prompt").assertIsDisplayed()
       capture("DeviceTimezoneChanged")
     } finally {
       setZone(originalZone)
