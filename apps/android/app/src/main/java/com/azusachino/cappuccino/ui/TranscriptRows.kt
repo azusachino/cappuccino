@@ -1,6 +1,7 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -270,4 +272,27 @@ internal fun LiveStatusLine(label: String, color: Color, detail: String? = null)
 @Composable
 internal fun StatusSquare(color: Color, modifier: Modifier = Modifier) {
   Box(modifier.size(8.dp).background(color).clearAndSetSemantics {})
+}
+
+/** The way back to the newest output, shown only away from the bottom (pi-pocket's `.jump`). */
+@Composable
+internal fun JumpToLatest(newOutput: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+  val colors = MaterialTheme.appColors
+  Box(
+    modifier
+      .size(40.dp)
+      .background(MaterialTheme.colorScheme.background)
+      .border(2.dp, if (newOutput) colors.accent else colors.lineStrong)
+      .clickable(role = Role.Button, onClick = onClick)
+      .semantics { contentDescription = if (newOutput) "Jump to new output" else "Jump to latest" }
+      .testTag("jumpToLatest"),
+    contentAlignment = Alignment.Center,
+  ) {
+    Icon(
+      painterResource(R.drawable.ic_arrow_downward),
+      contentDescription = null,
+      modifier = Modifier.size(20.dp),
+      tint = if (newOutput) colors.accent else colors.body,
+    )
+  }
 }

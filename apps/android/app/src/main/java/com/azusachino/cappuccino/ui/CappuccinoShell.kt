@@ -57,7 +57,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onSizeChanged
@@ -213,42 +212,35 @@ fun CappuccinoScreen(
       mutableMapOf<String, LazyListState>()
     }
   val outputListState = outputStates.getOrPut(conversationKey) { LazyListState() }
-  val atSessionBottom by
-    remember(outputListState) { derivedStateOf { !outputListState.canScrollForward } }
+  // Following is being near the bottom, as in pi-pocket: no separate switch to keep in sync.
+  val followSlack = with(androidx.compose.ui.platform.LocalDensity.current) { 60.dp.toPx() }
+  val nearBottom by
+    remember(outputListState, followSlack) {
+      derivedStateOf {
+        val layout = outputListState.layoutInfo
+        val last = layout.visibleItemsInfo.lastOrNull()
+        !outputListState.canScrollForward ||
+          (last != null &&
+            last.index == layout.totalItemsCount - 1 &&
+            last.offset + last.size - layout.viewportEndOffset <= followSlack)
+      }
+    }
   val restoringReadingPosition =
     remember(outputIdentity) {
       outputListState.firstVisibleItemIndex > 0 || outputListState.firstVisibleItemScrollOffset > 0
     }
   var followModes by rememberSaveable { mutableStateOf(emptyMap<String, Boolean>()) }
   val turns = state.conversationTurns
-  val toolActivities = remember(turns) { toolActivityEntries(turns) }
   val chatTurns =
     remember(turns) {
       turns.filter { turn -> !turn.text.isNullOrBlank() || turn.parts.isNotEmpty() }
     }
-  var sessionTab by rememberSaveable(conversationKey) { mutableStateOf(SessionTab.TRANSCRIPT) }
-  var toolUpdates by remember(outputIdentity) { mutableStateOf(ToolUpdates()) }
-  var toolsAtLatest by remember(outputIdentity) { mutableStateOf(false) }
-  LaunchedEffect(
-    toolActivities,
-    sessionTab,
-    toolsAtLatest,
-    state.conversationSource,
-    state.offlineSavedAt,
-  ) {
-    if (selected != null && state.conversationSource != null && state.offlineSavedAt == null) {
-      toolUpdates =
-        toolUpdates.observe(toolActivities, sessionTab == SessionTab.TOOLS && toolsAtLatest)
-    }
-  }
   val rows = state.stream.rows()
   val collapsedRows = remember(rows) { collapseOutputRows(rows) }
   val displayedContent: List<*> = if (turns.isNotEmpty()) chatTurns else collapsedRows
   val followContent: List<*> =
     if (turns.isNotEmpty()) com.azusachino.cappuccino.core.conversationFollowContent(turns)
     else collapsedRows
-  var followPreferences by rememberSaveable { mutableStateOf(emptyMap<String, Boolean>()) }
-  val followEnabled = followPreferences[conversationKey] ?: true
   var hasNewOutput by remember(outputIdentity) { mutableStateOf(false) }
   var followingOutput by
     remember(outputIdentity) { mutableStateOf(followModes[conversationKey] ?: true) }
@@ -261,33 +253,26 @@ fun CappuccinoScreen(
   var observedFollowContent by remember(outputIdentity) { mutableStateOf<List<*>?>(null) }
   val outputScope = rememberCoroutineScope()
 
-  LaunchedEffect(outputListState, followEnabled) {
+  // A finger or fling owns the position; following is decided only once it settles.
+  LaunchedEffect(outputListState) {
     var observedManualScroll = false
-    snapshotFlow {
-      Triple(outputListState.isScrollInProgress, !outputListState.canScrollForward, automaticScroll)
-    }
+    snapshotFlow { Triple(outputListState.isScrollInProgress, nearBottom, automaticScroll) }
       .collect { (scrolling, atEnd, automatic) ->
         if (scrolling && !automatic) {
           observedManualScroll = true
           followingOutput = false
         } else if (!scrolling && !automatic && observedManualScroll) {
           observedManualScroll = false
-          followingOutput = atEnd && followEnabled
+          followingOutput = atEnd
           if (atEnd) hasNewOutput = false
         }
       }
   }
-  LaunchedEffect(
-    followContent,
-    textLayoutRevision,
-    outputIdentity,
-    followingOutput,
-    followEnabled,
-  ) {
+  LaunchedEffect(followContent, textLayoutRevision, outputIdentity, followingOutput) {
     val newContent = observedFollowContent != followContent
     observedFollowContent = followContent
     if (selected != null && followContent.isNotEmpty()) {
-      if (followingOutput && followEnabled) {
+      if (followingOutput) {
         automaticScroll = true
         try {
           // A bottom marker handles tall last turns and collapsed stream rows alike.
@@ -319,10 +304,7 @@ fun CappuccinoScreen(
   BackHandler(enabled = selected == null && destination == Destination.APPEARANCE) {
     destination = Destination.SETTINGS
   }
-  BackHandler(enabled = selected != null && !showingConnection) {
-    if (sessionTab != SessionTab.TRANSCRIPT) sessionTab = SessionTab.TRANSCRIPT
-    else actions.selectAgent(null)
-  }
+  BackHandler(enabled = selected != null && !showingConnection) { actions.selectAgent(null) }
   if (showingConnection && detailsProfile != null) {
     if (showingTechnical) {
       TechnicalConnectionScreen(detailsProfile, state, onBack = { showingTechnical = false })
@@ -580,170 +562,134 @@ fun CappuccinoScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
-            NativeSessionTabs(
-              sessionTab,
-              toolActivities.size,
-              state.omittedToolOperations,
-              toolUpdates.unseen,
-            ) { tab ->
-              sessionTab = tab
-            }
-            // Keep the reader AND composer measured at their original size while Tools covers them.
-            // Removing the LazyColumn reparses Markdown and clamps its saved anchor during
-            // re-entry.
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-              Column(
-                Modifier.fillMaxSize()
-                  .then(
-                    if (sessionTab == SessionTab.TOOLS) Modifier.alpha(0f).clearAndSetSemantics {}
-                    else Modifier
-                  )
-              ) {
-                readerState.SaveableStateProvider(conversationKey) {
-                  val historyOmitted =
-                    state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
-                  Box(Modifier.weight(1f).fillMaxWidth()) {
-                    SelectionContainer(Modifier.fillMaxSize()) {
-                      if (
-                        turns.isEmpty() &&
-                          state.conversationSource == null &&
-                          restoringReadingPosition
+            Column(Modifier.weight(1f).fillMaxWidth()) {
+              readerState.SaveableStateProvider(conversationKey) {
+                val historyOmitted =
+                  state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                  SelectionContainer(Modifier.fillMaxSize()) {
+                    if (
+                      turns.isEmpty() &&
+                        state.conversationSource == null &&
+                        restoringReadingPosition
+                    ) {
+                      Box(Modifier.fillMaxSize()) {
+                        Text("Loading history…", Modifier.padding(16.dp))
+                      }
+                    } else if (turns.isNotEmpty()) {
+                      LazyColumn(
+                        state = outputListState,
+                        modifier =
+                          Modifier.fillMaxSize()
+                            .padding(horizontal = 16.dp)
+                            .testTag("recentOutputList"),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
                       ) {
-                        Box(Modifier.fillMaxSize()) {
-                          Text("Loading history…", Modifier.padding(16.dp))
-                        }
-                      } else if (turns.isNotEmpty()) {
-                        LazyColumn(
-                          state = outputListState,
-                          modifier =
-                            Modifier.fillMaxSize()
-                              .padding(horizontal = 16.dp)
-                              .testTag("recentOutputList"),
-                          verticalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
-                          items(
-                            chatTurns,
-                            key = {
-                              "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
-                            },
-                          ) { turn ->
-                            if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
-                              Text(
-                                "Older messages aren't loaded.",
-                                Modifier.padding(vertical = 12.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                              )
-                            }
-                            ConversationTurnRow(
-                              turn,
-                              timeZone = timeZone,
-                              assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
-                              onInspect = { followingOutput = false },
-                              showToolsInline = true,
-                              onTextSizeChanged = onTextLayoutChanged,
+                        items(
+                          chatTurns,
+                          key = {
+                            "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
+                          },
+                        ) { turn ->
+                          if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
+                            Text(
+                              "Older messages aren't loaded.",
+                              Modifier.padding(vertical = 12.dp),
+                              style = MaterialTheme.typography.bodySmall,
+                              color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                           }
-                          // The live line lives in the bottom marker so follow targets stay put.
-                          item(key = "conversation-bottom") {
-                            Column {
-                              val liveStatus =
-                                if (state.stream.pendingPrompt != null) "blocked"
-                                else (state.stream.agentStatus ?: selected.status).lowercase()
-                              if (
-                                state.offlineSavedAt == null &&
-                                  liveStatus in setOf("working", "blocked")
+                          ConversationTurnRow(
+                            turn,
+                            timeZone = timeZone,
+                            assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
+                            onInspect = { followingOutput = false },
+                            showToolsInline = true,
+                            onTextSizeChanged = onTextLayoutChanged,
+                          )
+                        }
+                        // The live line lives in the bottom marker so follow targets stay put.
+                        item(key = "conversation-bottom") {
+                          Column {
+                            val liveStatus =
+                              if (state.stream.pendingPrompt != null) "blocked"
+                              else (state.stream.agentStatus ?: selected.status).lowercase()
+                            if (
+                              state.offlineSavedAt == null &&
+                                liveStatus in setOf("working", "blocked")
+                            )
+                              LiveStatusLine(
+                                if (liveStatus == "working") "Working"
+                                else "Waiting for your answer",
+                                if (liveStatus == "working") MaterialTheme.appColors.working
+                                else MaterialTheme.appColors.warn,
+                                state.stream.agentStatusDetail,
                               )
-                                LiveStatusLine(
-                                  if (liveStatus == "working") "Working"
-                                  else "Waiting for your answer",
-                                  if (liveStatus == "working") MaterialTheme.appColors.working
-                                  else MaterialTheme.appColors.warn,
-                                  state.stream.agentStatusDetail,
-                                )
-                              Spacer(Modifier.height(8.dp))
-                            }
+                            Spacer(Modifier.height(8.dp))
                           }
                         }
-                      } else {
-                        LazyColumn(
-                          state = outputListState,
-                          modifier =
-                            Modifier.fillMaxSize()
-                              .padding(horizontal = 16.dp)
-                              .testTag("recentOutputList"),
-                          verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                          items(collapsedRows, key = { "row:${it.key}" }) { row ->
-                            OutputItemRow(row, onInspect = { followingOutput = false })
-                          }
-                          item(key = "stream-bottom") { Spacer(Modifier.height(8.dp)) }
+                      }
+                    } else {
+                      LazyColumn(
+                        state = outputListState,
+                        modifier =
+                          Modifier.fillMaxSize()
+                            .padding(horizontal = 16.dp)
+                            .testTag("recentOutputList"),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                      ) {
+                        items(collapsedRows, key = { "row:${it.key}" }) { row ->
+                          OutputItemRow(row, onInspect = { followingOutput = false })
                         }
+                        item(key = "stream-bottom") { Spacer(Modifier.height(8.dp)) }
                       }
                     }
                   }
-                }
-                if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty())
-                  Text(
-                    "No recent output received.",
-                    Modifier.padding(16.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
-
-                // Existing live prompt route; saved readers remain read-only.
-                if (
-                  state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") ==
-                    false
-                ) {
-                  Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
-                }
-                if (state.offlineSavedAt == null)
-                  composerState.SaveableStateProvider(conversationKey) {
-                    PromptInputBar(
-                      onSend = { text -> actions.submitPrompt(text) },
-                      placeholder =
-                        "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
-                      enabled =
-                        state.connection == ConnectionState.Connected &&
-                          state.bridgeDetails[state.activeProfileId]
-                            ?.capabilities
-                            ?.get("prompt_input") != false,
-                      controls = {
-                        if (!atSessionBottom)
-                          NativeSessionFollowBar(
-                            followEnabled && followingOutput,
-                            hasNewOutput,
-                            onFollow = { enabled ->
-                              followPreferences = followPreferences + (conversationKey to enabled)
-                              followingOutput = enabled
-                            },
-                            onLatest = {
-                              outputScope.launch {
-                                followingOutput = followEnabled
-                                automaticScroll = true
-                                try {
-                                  outputListState.animateScrollToItem(displayedContent.size)
-                                  hasNewOutput = false
-                                } finally {
-                                  automaticScroll = false
-                                }
-                              }
-                            },
-                          )
+                  if (!nearBottom && displayedContent.isNotEmpty())
+                    JumpToLatest(
+                      newOutput = hasNewOutput,
+                      modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                      onClick = {
+                        outputScope.launch {
+                          followingOutput = true
+                          automaticScroll = true
+                          try {
+                            outputListState.scrollToItem(displayedContent.size)
+                            hasNewOutput = false
+                          } finally {
+                            automaticScroll = false
+                          }
+                        }
                       },
                     )
-                  }
-              }
-              if (sessionTab == SessionTab.TOOLS) {
-                readerState.SaveableStateProvider("$conversationKey|tools") {
-                  ToolHistoryPanel(
-                    toolActivities,
-                    state.omittedToolOperations,
-                    Modifier.fillMaxSize(),
-                    onAtLatest = { toolsAtLatest = it },
-                  )
                 }
               }
+              if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty())
+                Text(
+                  "No recent output received.",
+                  Modifier.padding(16.dp),
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+              // Existing live prompt route; saved readers remain read-only.
+              if (
+                state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") ==
+                  false
+              ) {
+                Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
+              }
+              if (state.offlineSavedAt == null)
+                composerState.SaveableStateProvider(conversationKey) {
+                  PromptInputBar(
+                    onSend = { text -> actions.submitPrompt(text) },
+                    placeholder = "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
+                    enabled =
+                      state.connection == ConnectionState.Connected &&
+                        state.bridgeDetails[state.activeProfileId]
+                          ?.capabilities
+                          ?.get("prompt_input") != false,
+                  )
+                }
             }
           }
           destination == Destination.APPEARANCE -> {
@@ -1356,7 +1302,6 @@ fun PromptInputBar(
   enabled: Boolean,
   modifier: Modifier = Modifier,
   placeholder: String = "Message agent…",
-  controls: @Composable () -> Unit = {},
 ) {
   var input by rememberSaveable { mutableStateOf("") }
   val colors = MaterialTheme.appColors
@@ -1395,7 +1340,7 @@ fun PromptInputBar(
       Modifier.fillMaxWidth().padding(start = 4.dp, end = 6.dp, bottom = 6.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Box(Modifier.weight(1f)) { controls() }
+      Spacer(Modifier.weight(1f))
       IconButton(
         onClick = {
           if (input.isNotBlank()) {

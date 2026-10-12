@@ -42,53 +42,6 @@ class ConversationActivityStyleTest {
   }
 
   @Test
-  fun markerOpensToolSheetWithoutPuttingResultsInChat() {
-    val turns =
-      listOf(
-        ConversationTurn(
-          "tools",
-          "agent",
-          null,
-          null,
-          listOf(ConversationPart.ToolCall("bash", "pwd", "literal result", false)),
-        )
-      )
-    compose.activity.setContent {
-      var open by
-        androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-      CappuccinoTheme {
-        ConversationTurnRow(turns.single(), showToolsInline = false)
-        ReaderFloatingControls(
-          toolActivityEntries(turns),
-          false,
-          onTools = { open = true },
-          onLatest = { error("Unexpected latest action") },
-        )
-        if (open)
-          ToolActivitySheet(toolActivityEntries(turns), "tools", onDismiss = { open = false })
-      }
-    }
-    compose.onNodeWithText("literal result").assertDoesNotExist()
-    compose.onNodeWithText("Tools · 1").performClick()
-    compose.onNodeWithText("Tool activity").assertIsDisplayed()
-    compose.onNodeWithText("literal result").assertIsDisplayed()
-    compose.onNodeWithContentDescription("Close tool activity").performClick()
-    compose.onNodeWithText("literal result").assertDoesNotExist()
-  }
-
-  @Test
-  fun toolsAndLatestShareTheSameFloatingRow() {
-    val entries =
-      listOf(ToolActivityEntry("t", 0, ConversationPart.ToolCall("read", "file", "result")))
-    compose.activity.setContent {
-      CappuccinoTheme { ReaderFloatingControls(entries, true, onTools = {}, onLatest = {}) }
-    }
-    val tools = compose.onNodeWithText("Tools · 1").fetchSemanticsNode().boundsInRoot
-    val latest = compose.onNodeWithText("Jump to latest").fetchSemanticsNode().boundsInRoot
-    org.junit.Assert.assertEquals(tools.center.y, latest.center.y, 1f)
-  }
-
-  @Test
   fun paragraphsAndTimestampShareOneMessageBlock() {
     val timestamp = "2026-10-10T01:00:00Z"
     val turn =
