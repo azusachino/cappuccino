@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuites tests="13" failures="0" errors="0" skipped="0" time="0.000" timestamp="2026-10-10T05:18:12" hostname="localhost">
+  <testsuite name="com.azusachino.cappuccino.prototype.StepCJourneyTest" tests="13" failures="0" errors="0" skipped="0" time="25.589" timestamp="2026-10-10T05:18:12" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5560" />
+    </properties>
+    <testcase name="a_roster_shows_groups_identity_job_session_status" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="1.513" />
+    <testcase name="b_select_back_and_reselect_presets" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="1.873" />
+    <testcase name="c_cross_session_state_reset" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="3.167" />
+    <testcase name="d_connected_composer_ime_visible" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="1.973" />
+    <testcase name="e_all_unavailable_actions_with_visible_reasons_reachable" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="1.577" />
+    <testcase name="f_stream_delta_then_authoritative_replacement_and_reset" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="2.450" />
+    <testcase name="g2_reset_during_generation0_clears_stream_body" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="1.373" />
+    <testcase name="g3_size_growth_during_jump_is_not_dropped" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="2.525" />
+    <testcase name="g_drag_from_tail_disables_follow_jump_resumes" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="2.697" />
+    <testcase name="h_passive_uris_zero_external_launches" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="1.796" />
+    <testcase name="i_workspace_transcript_viewport_nonzero_and_first_turn_visible" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="0.864" />
+    <testcase name="j_native_profile_density_and_bar_appearance_match_run_args" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="0.805" />
+    <testcase name="s_streaming_structured_authoritative_rendered_passive" classname="com.azusachino.cappuccino.prototype.StepCJourneyTest" time="2.976" />
+  </testsuite>
+</testsuites>
