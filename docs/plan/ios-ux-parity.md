@@ -136,4 +136,5 @@ Each slice is one commit (or a few) on `feat/ios-liquid-glass`. It ends green on
 Record each slice's commit and gate results here, one line per slice.
 
 - Slice 0 (retire macOS): commit b974695. Gates `make check-apple` and `make build-ios` with scoped Xcode: exit 0, `BUILD SUCCEEDED`. Removed `apps/macos/`, `CappuccinoMac` target/scheme, macOS deployment target, Makefile `build-macos`, CI path filter and job name.
-- Slice 1 (typed core): commit hash to be filled in by the slice 2 progress note. Gates `make check-apple` (65 tests, incl. 15 new in BridgeWireTests) and `make build-ios` with scoped Xcode: exit 0. Reducer/stream parsing (BridgeProtocolTest reducer cases) moves to slice 4 with the state model.
+- Slice 1 (typed core): commit 6c11ea5. Gates `make check-apple` (65 tests, incl. 15 new in BridgeWireTests) and `make build-ios` with scoped Xcode: exit 0. Reducer/stream parsing (BridgeProtocolTest reducer cases) moves to slice 4 with the state model.
+- Slice 2 (bridge client calls): this commit. Gates `make check-apple` (73 tests: 8 new in BridgeConversationClientTests, incl. colon-locator encoding, control capability gate, envelope refusal reason) and `make build-ios` with scoped Xcode: exit 0. `controlAgent` takes the verified capabilities; the other actions keep their existing guards and get the view-model check in slice 4.

@@ -90,13 +90,13 @@ public struct BridgeClient: DaemonServing {
 
   /// Fetches structured conversation turns for an agent session
   public func fetchConversation(base url: URL, session: String) async throws -> [String: Any] {
-    let endpoint = url.appendingPathComponent("/api/agents/\(session)/conversation")
+    let endpoint = agentURL(url, session: session, "conversation")
     return try await get(endpoint)
   }
 
   /// Sends a user prompt to an agent session via Bridge V2
   public func submitPrompt(base url: URL, session: String, text: String) async throws {
-    let endpoint = url.appendingPathComponent("/api/agents/\(session)/prompt")
+    let endpoint = agentURL(url, session: session, "prompt")
     let body: [String: Any] = ["type": "prompt", "text": text]
     _ = try await post(endpoint, body: body)
   }
@@ -110,7 +110,7 @@ public struct BridgeClient: DaemonServing {
     optionID: String? = nil,
     action: String? = nil
   ) async throws {
-    let endpoint = url.appendingPathComponent("/api/agents/\(session)/prompt")
+    let endpoint = agentURL(url, session: session, "prompt")
     var body: [String: Any] = [
       "type": "answer_prompt",
       "prompt_id": promptID,
@@ -181,4 +181,95 @@ public struct BridgeClient: DaemonServing {
       throw DaemonClientError.protocolError(message)
     }
   }
+}
+
+/// One conversation response: its turns plus the canonical identity and session stats
+/// that Android's ConversationSnapshot carries.
+public struct ConversationSnapshot: Equatable, Sendable {
+  public let turns: [ConversationTurn]
+  public let source: String
+  public let conversationID: String?
+  public let machineID: UUID?
+  public let stats: SessionStats?
+}
+
+extension BridgeClient {
+  /// Typed conversation fetch. Ownership and identity fail closed (BridgeClient.kt):
+  /// the locator must echo back, and a canonical identity needs its canonical_log
+  /// source, a machine and, when `agent` is known, that agent's provider prefix.
+  public func conversationSnapshot(
+    base url: URL, session: String, agent: String? = nil
+  ) async throws -> ConversationSnapshot {
+    let json = BridgeJSON(try await get(agentURL(url, session: session, "conversation")))
+    guard try json.string("session_id") == session else {
+      throw DaemonClientError.protocolError("Conversation belongs to a different locator")
+    }
+    let source = try json.string("source")
+    let identity = try json.optionalString("conversation_id")
+    let machineID = try json.optionalString("machine_id").map { raw in
+      guard let id = UUID(uuidString: raw) else {
+        throw DaemonClientError.protocolError("Invalid machine identity")
+      }
+      return id
+    }
+    if let identity {
+      let canonical =
+        agent.map { CanonicalConversationID.isCanonical(identity, agent: $0) }
+        ?? CanonicalConversationID.isCanonical(identity)
+      guard source == "canonical_log", machineID != nil, canonical else {
+        throw DaemonClientError.protocolError("Invalid canonical conversation identity")
+      }
+    }
+    let stats: SessionStats?
+    if let raw = json.optionalObject("stats") {
+      stats = SessionStats(
+        model: try raw.optionalString("model"),
+        thinkingLevel: try raw.optionalString("thinking_level"),
+        contextTokens: try raw.optionalLong("context_tokens"),
+        contextWindow: try raw.optionalLong("context_window"),
+        cachePercent: try raw.optionalLong("cache_percent"))
+    } else {
+      stats = nil
+    }
+    return ConversationSnapshot(
+      turns: try parseConversationTurns(json), source: source, conversationID: identity,
+      machineID: machineID, stats: stats)
+  }
+
+  /// Owner control (`interrupt` or `new_session`). A bridge that advertises
+  /// `agent_control: false` never receives it.
+  public func controlAgent(
+    base url: URL, session: String, action: String, capabilities: [String: Bool]? = nil
+  ) async throws {
+    guard capabilities?["agent_control"] != false else {
+      throw DaemonClientError.protocolError("Agent controls unsupported by this bridge")
+    }
+    _ = try await post(
+      agentURL(url, session: session, "control"), body: ["action": action])
+  }
+
+  /// Answers every question of an AskUserQuestion card in one structured submission.
+  public func answerQuestions(
+    base url: URL, session: String, promptID: String, answers: [QuestionAnswer]
+  ) async throws {
+    let rows: [[String: Any]] = answers.map { answer in
+      var row: [String: Any] = ["selected": answer.selected]
+      if let other = answer.other { row["other"] = other }
+      return row
+    }
+    _ = try await post(
+      agentURL(url, session: session, "prompt"),
+      body: ["type": "answer_question", "prompt_id": promptID, "answers": rows])
+  }
+
+  /// Locators such as `w1:p3K` are one path component. Percent-encoding keeps a
+  /// colon or reserved character from changing the route.
+  func agentURL(_ base: URL, session: String, _ leaf: String) -> URL {
+    let component =
+      session.addingPercentEncoding(withAllowedCharacters: Self.locatorCharacters) ?? session
+    return URL(string: "/api/agents/\(component)/\(leaf)", relativeTo: base)!.absoluteURL
+  }
+
+  private static let locatorCharacters = CharacterSet.alphanumerics.union(
+    CharacterSet(charactersIn: "-._~"))
 }
