@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -41,6 +42,17 @@ class MainActivity : ComponentActivity() {
             .getOrElse { ZoneId.systemDefault() }
       }
     }
+
+  // Platform window logic is activity-owned (android-material3.md repair ledger): system
+  // bars follow the app's actually resolved theme, not the system mode, so an in-app DARK
+  // preference while the system is light draws light status/navigation icons on the dark
+  // surface. enableEdgeToEdge() in onCreate stays the one edge-to-edge enabler; this sync
+  // corrects only the icon appearance on top of it.
+  internal fun applySystemBarAppearance(isDark: Boolean) {
+    val controller = WindowCompat.getInsetsController(window, window.decorView)
+    controller.isAppearanceLightStatusBars = !isDark
+    controller.isAppearanceLightNavigationBars = !isDark
+  }
 
   override fun onStart() {
     super.onStart()
@@ -107,7 +119,10 @@ class MainActivity : ComponentActivity() {
         onDispose { owner.lifecycle.removeObserver(observer) }
       }
       val state by vm.state.collectAsStateWithLifecycle()
-      CappuccinoTheme(themeMode = state.themeMode) {
+      CappuccinoTheme(
+        themeMode = state.themeMode,
+        onResolvedDarkChanged = ::applySystemBarAppearance,
+      ) {
         CappuccinoShell(vm, timeZone = deviceTimeZone) { label, url ->
           if (
             Build.VERSION.SDK_INT >= 37 &&

@@ -472,3 +472,170 @@ Limits: synthetic UI/controller fixtures on API 35 only, not live canonical
 Pi/active-branch parity, physical devices, minimum-OS coverage or deployment.
 Owner phone, Pixel emulator, running bridge/agents and Tailscale were unchanged.
 Hosted CI and global issue #12 acceptance remain separate.
+
+## Native Material 3 conversation slice checkpoint
+
+Accepted 2026-10-08 for the [native Material 3 conversation slice](design/android-material3.md)
+([issue #12](https://github.com/azusachino/cappuccino/issues/12) scope only) on branch
+`feat/android-material3-redesign`, base `36f3afe` (merged PR #28), verified content
+committed unchanged as `cc898ef`. The owner explicitly approved the 7-capture
+preview set of real screenshots — **the conversation slice's app appearance only**;
+no broader redesign, merge, deployment or live/physical acceptance is granted.
+
+Slice delivered: stock M3 color schemes replacing the hand-mixed palette, tonal
+cardless reader rows and disclosures, native app bar / navigation / composer
+components, `primaryContainer` user bubble, and the follow-latest extended FAB —
+with all pre-existing behavior preserved. An independent review found two real
+deviations (jump FAB rendered at the top of the column instead of bottom-end above
+the composer; dark in-app theme drew dark status icons on the near-black surface
+under a light system). Both were repaired surgically (in-flow FAB placement with
+bounds-based geometry assertions; theme→system-bar appearance sync through the
+production composition, `enableEdgeToEdge()` still the single enabler) with no
+assertion weakened.
+
+A fresh independent reviewer (GLM flash, low reasoning, no implementation context)
+rechecked the frozen tree: tracked working diff SHA-256
+`d930c1f97b4e96da9e0094fb63f2b96528098367d2c46ff56ed2b1d1631cb7f8` at start, end and
+after gates, with a whole-tree 12-path manifest (7 tracked-modified + 5 untracked)
+identical before and after. Note: the working-patch hash covers tracked files only;
+the untracked files of the reviewed state are pinned by the manifest itself, and the
+state was committed unchanged as `cc898ef` afterwards. All gates exit 0 at the exact
+final source: `make validate-android`, forced `:app:testDebugUnitTest --rerun-tasks`
+(63 tests), full `make ui-test-android` (21 tests) — zero failures, errors, skips —
+plus `make md-check` and `git diff --check`. Both findings verified FIXED on source,
+tests and the reviewer's own runtime captures. A low-severity bookkeeping defect in
+the implementation writer's scratch after-manifest (10 of 12 paths listed) was
+corrected against the stable reviewed record; the source was never affected.
+
+Accepted evidence: 7 synthetic full-frame captures (1080 × 2340, byte-identical
+originals) in [`evidence/android-material3/`](evidence/android-material3/README.md),
+covering 393/320 dp light/dark, collapsed and expanded disclosures, markdown +
+user bubble, bottom-end FAB, a genuine visible-Gboard IME frame at 320 dp, and the
+production Settings status path (incidental shared-palette evidence only, not a
+Settings redesign). Privacy: synthetic fixtures throughout; no owner sessions,
+tokens or private addresses.
+
+Limits: emulator fixtures on API 35 only — no live Pi/active-branch parity, no
+physical device, no deployment, no merge; some compact IME frames show insets
+asserted without a visible keyboard and are excluded (the included 320 dp frame is
+the genuine IME evidence); static screenshots do not replace dynamic tests; other
+screens changed color only via the shared tokens, their layouts are not restyled.
+No public PR exists at this checkpoint; broader rollout remains an owner decision.
+
+## CI freshness repair checkpoint — compose compiler 2.4.21 (locally verified; hosted re-run pending)
+
+Hosted CI run 37756325936 on `feat/android-material3-redesign` (PR #29) failed
+`:app:lintDebug` — this is the recorded historical trigger of this repair, not a
+standing status; the branch's current hosted truth is PR #29's checks
+(<https://github.com/azusachino/cappuccino/pull/29>/checks), which the next
+delivery push must turn green.
+(`NewerVersionAvailable`: org.jetbrains.kotlin.plugin.compose 2.4.20 → 2.4.21).
+Repair: single catalog line `kotlin = "2.4.20"` → `"2.4.21"` in
+`apps/android/gradle/libs.versions.toml` (feeds both `kotlin-gradle-plugin` and the
+compose compiler plugin, which are version-locked). No other source, test, UI, gate
+or workflow change. Version availability verified against official artifacts:
+Gradle Plugin Portal marker POM
+`org.jetbrains.kotlin.plugin.compose/org.jetbrains.kotlin.plugin.compose.gradle.plugin/2.4.21`
+and Maven Central
+`org.jetbrains.kotlin/compose-compiler-gradle-plugin/2.4.21` both resolve (HTTP 200).
+
+Local gates at this checkpoint (working tree, uncommitted): pre-patch fresh
+`:app:lintDebug --rerun-tasks --refresh-dependencies` exit 0 (cached-green, CI red
+remains the authoritative failure signal); post-patch fresh lint exit 0, 29/29
+executed; `make check-android` exit 0; `make validate-android` exit 0 (71 tasks);
+forced `:app:testDebugUnitTest --rerun-tasks` exit 0, 63 tests / 0 failures /
+0 errors / 0 skips; full `make ui-test-android` (`ANDROID_SERIAL=emulator-5560`)
+exit 0, 21 tests / 0 failures / 0 errors / 0 skips on the new task-owned AVD
+`cappuccino-material3-ci-api35` (API 35 google_apis arm64-v8a, serial
+emulator-5560, launcher PID recorded in task scratch). Fresh runtime captures at
+compose compiler 2.4.21 (12 PNGs, normal 448 dp + compact 320 dp density override,
+restored and verified) show no material appearance change versus the accepted
+7-image set; the accepted PNGs remain historical 2.4.20 evidence and are not
+replaced. Capture-width reconciliation: the first compact attempt (density 540)
+rendered 398 dp frames, not contract compact; a corrective density-672 run
+produced the true-320 dp set (1344 px ÷ (672/160) = 320 dp). Both overrides were
+reset and verified; only the 672 run is compact-contract evidence.
+
+Fresh independent verification (GLM Flash, LOW reasoning, separate session,
+read-only, source frozen) PASSED the local repair: independently reran fresh
+lint (exit 0, 29/29), `make validate-android` (exit 0, 71 tasks), forced JVM
+tests 63/0/0/0, full UI suite 21/0/0/0, plus a focused true-320 dp preview run
+5/0/0/0 — and confirmed no material appearance change at 320 dp (bottom-end FAB,
+genuine in-frame Gboard, identical tokens), so no owner re-approval is needed.
+The 2.4.21 catalog line (`f06fd72b…`) and all 7 approved PNG assets were
+whole-file SHA-256 stable before and after verification, unchanged from HEAD.
+
+Status: the local repair is accepted at this checkpoint; hosted CI has not yet
+re-run. The historical run 37756325936 remains FAILED as a record; subsequent
+delivery (lead commit + push) must produce a green hosted run on PR #29 before
+any DONE/merge claim — no hosted-green claim is made here.
+
+## Short-CI geometry failure (run 37761436036) — test visibility-precondition repair, reviewed local checkpoint
+
+Hosted CI run 37761436036 (API 35 ARM, AVD frame 320x640 @ density 160) failed
+`ConversationPreviewScreenshotTest.captureConversationExpandedDark` at line 203:
+`No node found that matches ... contains '63 passed · 0 failed' ... Tag:
+'recentOutputList'` with scroll pinned at `value=maxValue=993.0`. Read-only
+diagnosis (separate session, scratch `ci-ui-diag/`) reproduced the same
+deterministic red on a local task-owned AVD at the exact CI frame and identified
+a test-fixture assumption bug, not a production failure: at the 316 px viewport
+the `Tool: bash · Result available` row sits below the fold after the
+bottom-pinning scroll to the Thinking detail, and the test clicked it with no
+`assertIsDisplayed()` guard, so the click landed on a clipped node and the
+disclosure never expanded. This short-viewport behavior has no counterpart in
+the prior tall local AVDs where the whole history fit on screen; production
+one-click expansion is unchanged and correct (the sibling click test passes on
+CI and locally).
+
+Minimal test-only repair (this writer, sole file changed): before the single
+expand click, `performScrollToNode(hasText("Tool: bash · Result available"))` on
+`recentOutputList` plus `assertIsDisplayed()` on the row — mirroring the
+existing Thinking-row pattern. The single click, expanded-state assertions,
+exact full tool input (`bun run test --filter android`) and exact output
+(`63 passed · 0 failed`) with `assertIsDisplayed` are all preserved; no skip,
+relaxation, retry, sleep or production/style/catalog change.
+
+Local proof on the task-owned AVD `cappuccino-material3-ci-shape-api35`
+(explicit `-port 5560`, exact CI frame 320x640 @ 160, ARM API 35), max three UI
+runs: (1) focused pre-patch run RED — 1 test / 1 failure, byte-identical failure
+semantics to CI (same assertion text, list bounds, scroll range); (2) focused
+post-patch run GREEN — 1/1, exit 0; (3) full `make ui-test-android` exit 0 —
+21 tests / 0 failures / 0 errors / 0 skips. The fresh 320x640 capture
+`Conversation320DarkExpanded.png` (whole-file SHA-256
+`37e3bf708bac0295c18c9cbee8148309397f950362c6b6d744757b3c3c195c1a`) shows both
+disclosures expanded with the exact input and output visible in frame. Other
+gates: `make fmt-check` exit 0; `make check-android` exit 0; forced
+`:app:testDebugUnitTest --rerun` exit 0, 63 tests / 0 failures / 0 errors / 0
+skips; `make validate-android` exit 0; `make md-check` exit 0. `make validate`
+(full) exit 2: the Apple half fails to build on this host (`TestingMacros`
+SourceLocationMacro plugin not found under CommandLineTools) in untouched
+`packages/apple` files — a host toolchain limitation unrelated to this
+Android-only change, reported as a gate blocker rather than substituted.
+
+Whole-tree identity (175 tracked files, SHA-256 per file, same method as the
+diagnosis): exactly one file differs from the frozen diagnosis before-tree —
+`ConversationPreviewScreenshotTest.kt`
+(`5e691cbe…` → `edbed781…`). Production source, theme, catalog and all approved
+historical PNG assets are unchanged from base 340bd37fe (HEAD, clean at start).
+
+Fresh independent verification (separate LOW session, read-only, scratch
+`ci-ui-verify/report.md`) PASSED all criteria: device identity guarded to the
+task-owned `emulator-5560`/PID 69136 before every action; the diff reviewed as
+a minimal single-click visibility precondition with no weakening; independent
+focused rerun 1/0/0/0 and full `make ui-test-android` **21/0/0/0** at the exact
+320x640 @ 160 frame with verified 320x640 captures; forced JVM tests
+**63/0/0/0**; `make md-check` clean; manifest stable (175 files) across all
+gates; and the full gate rerun as `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+make validate` → **exit 0 under Xcode 27.0**, resolving the earlier host
+CommandLineTools Swift-macro build failure by toolchain selection only — no
+waiver, suppression or easier check. The earlier `make validate` exit-2 record
+above stands as the historical CLT-toolchain observation; the reviewed local
+state is accepted at base HEAD `340bd37fe` plus exactly this two-file working
+diff (test fixture + this section).
+
+Status: hosted CI run 37761436036 remains FAILED as the historical red that
+motivated this repair. Local gates are reviewed and accepted; hosted green is
+not claimed — the lead must commit/push this diff and a NEW hosted CI run on
+PR #29 must pass before any DONE/merge claim. The port incident from the
+diagnosis session (unowned use of reserved 5554, PID 68428, terminated and
+observed gone) is recorded in task scratch, not in this public project document.
