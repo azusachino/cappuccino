@@ -36,11 +36,18 @@ internal fun SettingsScreen(
   onReloadMachines: () -> Unit,
   connections: List<SettingsConnection>,
   onConnectionDetails: (String) -> Unit,
+  savedConversations: List<com.azusachino.cappuccino.io.SavedConversationInfo> = emptyList(),
+  savedMachineNames: Map<java.util.UUID, String> = emptyMap(),
+  offlineBytes: Long? = null,
+  offlineProblem: String? = null,
+  onOpenSaved: ((java.util.UUID, String) -> Unit)? = null,
+  timeZone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
 ) {
   val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }
   var choosingTheme by rememberSaveable { mutableStateOf(false) }
   var confirmingClear by rememberSaveable { mutableStateOf(false) }
+  var choosingSaved by rememberSaveable { mutableStateOf(false) }
   var clearing by androidx.compose.runtime.remember { mutableStateOf(false) }
   var cacheBytes by androidx.compose.runtime.remember { mutableStateOf<Long?>(null) }
   var cacheResult by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
@@ -63,6 +70,24 @@ internal fun SettingsScreen(
       choosingTheme = true
     }
     SettingsHeading("Storage")
+    PreferenceRow(
+      "Saved conversations",
+      offlineBytes?.let {
+        "${android.text.format.Formatter.formatShortFileSize(context, it)} on this device · ${savedConversations.size} conversations"
+      } ?: "Checking saved storage…",
+      R.drawable.ic_chat,
+      if (savedConversations.isNotEmpty() && onOpenSaved != null) ({ choosingSaved = true })
+      else null,
+    )
+    Text(
+      "Up to 20 recent conversations, limited to 32 MiB. Saved history is read-only and separate from temporary cache.",
+      Modifier.padding(horizontal = 16.dp),
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    offlineProblem?.let {
+      Text(it, Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
+    }
     PreferenceRow(
       "Clear cache",
       if (clearing) "Clearing temporary files…"
@@ -118,13 +143,34 @@ internal fun SettingsScreen(
     }
     helpError?.let { Text(it, Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall) }
   }
+  if (choosingSaved && onOpenSaved != null) {
+    AlertDialog(
+      onDismissRequest = { choosingSaved = false },
+      title = { Text("Saved conversations") },
+      text = {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+          savedConversations.forEach { saved ->
+            PreferenceRow(
+              saved.agent.label,
+              "${savedMachineNames[saved.agent.machineId] ?: saved.agent.agent} · Saved ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(saved.savedAt).toString(), timeZone)}",
+              R.drawable.ic_chat,
+            ) {
+              choosingSaved = false
+              onOpenSaved(saved.agent.machineId, saved.conversationId)
+            }
+          }
+        }
+      },
+      confirmButton = { TextButton(onClick = { choosingSaved = false }) { Text("Close") } },
+    )
+  }
   if (confirmingClear) {
     AlertDialog(
       onDismissRequest = { confirmingClear = false },
       title = { Text("Clear temporary cache?") },
       text = {
         Text(
-          "Delete temporary files and refresh machine lists? Saved machines, drafts and reading preferences stay. Remote sessions are unchanged. Conversation history stays in memory; it isn't part of this cache."
+          "Delete temporary files and refresh machine lists? Saved conversations, machines, drafts and reading preferences stay. Remote sessions are unchanged."
         )
       },
       confirmButton = {

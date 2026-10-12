@@ -293,6 +293,50 @@ class BridgeClientTest {
   }
 
   @Test
+  fun fetchesCanonicalIdentityWithoutTreatingLocatorAsIdentity() = runBlocking {
+    MockWebServer().use { server ->
+      val id = "pi:${"a".repeat(64)}"
+      server.enqueue(
+        MockResponse.Builder()
+          .body(
+            """{"session_id":"chosen","source":"canonical_log","machine_id":"11111111-1111-4111-8111-111111111111","conversation_id":"$id","turns":[]}"""
+          )
+          .build()
+      )
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      val snapshot = client.conversationSnapshot("chosen")
+      assertEquals(id, snapshot.conversationId)
+      assertEquals("canonical_log", snapshot.source)
+      assertEquals("/api/agents/chosen/conversation", server.takeRequest().url.encodedPath)
+    }
+  }
+
+  @Test
+  fun rejectsWrongLocatorMalformedIdentityAndScrollbackIdentityClaims() = runBlocking {
+    MockWebServer().use { server ->
+      val id = "pi:${"a".repeat(64)}"
+      val bodies =
+        listOf(
+          """{"session_id":"other","source":"canonical_log","machine_id":"11111111-1111-4111-8111-111111111111","conversation_id":"$id","turns":[]}""",
+          """{"session_id":"chosen","source":"canonical_log","conversation_id":"$id","turns":[]}""",
+          """{"session_id":"chosen","source":"canonical_log","machine_id":"11111111-1111-4111-8111-111111111111","conversation_id":"pane","turns":[]}""",
+          """{"session_id":"chosen","source":"scrollback","machine_id":"11111111-1111-4111-8111-111111111111","conversation_id":"$id","turns":[]}""",
+          """{"session_id":"chosen","source":"canonical_log","machine_id":"11111111-1111-4111-8111-111111111111","conversation_id":123,"turns":[]}""",
+        )
+      bodies.forEach { server.enqueue(MockResponse.Builder().body(it).build()) }
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      bodies.forEach { _ ->
+        try {
+          client.conversationSnapshot("chosen")
+          fail("Invalid ownership/identity must fail closed")
+        } catch (_: ProtocolException) {}
+      }
+    }
+  }
+
+  @Test
   fun fetchesConversationTurns() = runBlocking {
     MockWebServer().use { server ->
       server.enqueue(

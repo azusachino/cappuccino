@@ -100,6 +100,9 @@ class MainActivity : ComponentActivity() {
                   { endpoint -> com.azusachino.cappuccino.io.BridgeClient(endpoint) },
                   { kotlinx.coroutines.delay(it) },
                   createSavedStateHandle(),
+                  com.azusachino.cappuccino.io.OfflineConversations(
+                    java.io.File(application.filesDir, "offline-conversations")
+                  ),
                 )
               }
             }

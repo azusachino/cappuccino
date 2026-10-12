@@ -26,7 +26,12 @@ class BridgeWebSocketClosedException(val code: Int, val reason: String) :
     "Bridge stream closed (code=$code${if (reason.isEmpty()) "" else ", reason=$reason"})"
   )
 
-data class ConversationSnapshot(val turns: List<ConversationTurn>, val source: String)
+data class ConversationSnapshot(
+  val turns: List<ConversationTurn>,
+  val source: String,
+  val conversationId: String? = null,
+  val machineId: UUID? = null,
+)
 
 interface BridgeTransport {
   val bridgeDetails: BridgeDetails?
@@ -88,7 +93,17 @@ class BridgeClient(
   override suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
     withContext(Dispatchers.IO) {
       val json = parseJsonObject(get("api/agents/$sessionId/conversation"))
-      ConversationSnapshot(parseConversationResponse(json), json.string("source"))
+      if (json.string("session_id") != sessionId)
+        throw ProtocolException("Conversation belongs to a different locator")
+      val source = json.string("source")
+      val identity = json.optionalString("conversation_id")
+      val machine = json.optionalString("machine_id")?.let(::uuid)
+      if (
+        identity != null &&
+          (source != "canonical_log" || machine == null || !isCanonicalConversationId(identity))
+      )
+        throw ProtocolException("Invalid canonical conversation identity")
+      ConversationSnapshot(parseConversationResponse(json), source, identity, machine)
     }
 
   override suspend fun submitPrompt(sessionId: String, text: String): Unit =

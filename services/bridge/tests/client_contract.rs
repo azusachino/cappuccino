@@ -220,7 +220,7 @@ fn spawn_bridge_once(
         .env("CAPP_BRIDGE_PORT", port.to_string())
         .env("CAPP_BRIDGE_SERVE_AUTO_APPLY", "0")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .current_dir(&root.path);
     match herdr_socket {
         Some(socket) => {
@@ -260,11 +260,26 @@ async fn spawn_bridge_with(
             if let Ok(Some(_status)) = bridge.child.try_wait() {
                 break; // bind failure or crash: retry on a new port
             }
-            if tokio::net::TcpStream::connect(("127.0.0.1", port))
-                .await
-                .is_ok()
-            {
-                return bridge;
+            // A parallel child can win the released port while this child is
+            // still starting. TCP readiness alone may borrow that other server.
+            let identity_path = root
+                .path
+                .join("home/Library/Application Support/cappuccino-spike/machine-id");
+            if let Ok(expected) = std::fs::read_to_string(identity_path) {
+                if let Ok(exchange) =
+                    probe::get(&probe_options(&bridge.base_url()), "/api/session").await
+                {
+                    if exchange.status == 200
+                        && exchange.body["machine_id"].as_str() == Some(expected.trim())
+                        && bridge
+                            .child
+                            .try_wait()
+                            .expect("inspect bridge child")
+                            .is_none()
+                    {
+                        return bridge;
+                    }
+                }
             }
             if tokio::time::Instant::now() > deadline {
                 break;
@@ -505,6 +520,28 @@ async fn agent_conversation_returns_structured_turns() {
     assert_eq!(exchange.status, 200, "payload: {}", exchange.body);
     assert_eq!(exchange.body["source"], "canonical_log");
     assert_eq!(exchange.body["session_id"], "s-probe");
+    let paired = probe::get(&probe_options(&bridge.base_url()), "/api/session")
+        .await
+        .unwrap();
+    assert_eq!(exchange.body["machine_id"], paired.body["machine_id"]);
+    assert!(exchange.body.get("conversation_id").is_none());
+    std::fs::write(
+        &transcript,
+        format!("{{\"type\":\"session\",\"id\":\"fixture-session\"}}\n{jsonl}"),
+    )
+    .unwrap();
+    let modern = probe::get(
+        &probe_options(&bridge.base_url()),
+        "/api/agents/s-probe/conversation",
+    )
+    .await
+    .unwrap();
+    assert_eq!(modern.status, 200);
+    assert_eq!(modern.body["machine_id"], paired.body["machine_id"]);
+    let canonical = modern.body["conversation_id"].as_str().unwrap();
+    assert!(canonical.starts_with("pi:"));
+    assert_eq!(canonical.len(), 67);
+    assert_eq!(modern.body["turns"], exchange.body["turns"]);
 
     let turns = exchange.body["turns"].as_array().expect("turns array");
     assert_eq!(turns.len(), 3);

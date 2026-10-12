@@ -7,12 +7,14 @@ import com.azusachino.cappuccino.BuildConfig
 import com.azusachino.cappuccino.core.*
 import java.util.UUID
 import javax.net.ssl.SSLException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private class BridgeStreamError(message: String) : Exception(message)
 
@@ -54,6 +56,11 @@ data class ConnectedUiState(
   val omittedConversationTurns: Int = 0,
   val omittedToolOperations: Int = 0,
   val conversationSource: String? = null,
+  val savedConversations: List<SavedConversationInfo> = emptyList(),
+  val offlineBytes: Long? = null,
+  val offlineProblem: String? = null,
+  val offlineSavedAt: Long? = null,
+  val conversationId: String? = null,
   val connection: ConnectionState = ConnectionState.Disconnected,
   val busy: Boolean = false,
   val themeMode: com.azusachino.cappuccino.ui.ThemeMode =
@@ -98,6 +105,8 @@ internal constructor(
   private val bridgeFor: (Endpoint) -> BridgeTransport,
   private val retryPause: suspend (Long) -> Unit,
   private val savedStateHandle: SavedStateHandle,
+  private val offlineHistory: OfflineConversations? = null,
+  private val offlineDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel(), ConnectedActions {
   private val mutableState =
     MutableStateFlow(
@@ -119,6 +128,78 @@ internal constructor(
   private var foreground = false
   private var epoch = 0L
   private var pendingRestore = savedStateHandle.get<String>(SELECTED_PROFILE) != null
+
+  private var offlineIndexJob: Job? = null
+
+  init {
+    reloadSavedHistory()
+  }
+
+  private fun reloadSavedHistory() {
+    val history = offlineHistory ?: return
+    offlineIndexJob?.cancel()
+    offlineIndexJob = viewModelScope.launch {
+      val machines = mutableState.value.profiles.map { it.machineId }.toSet()
+      try {
+        val (saved, bytes) =
+          withContext(offlineDispatcher) {
+            history.list(machines).map {
+              SavedConversationInfo(it.agent, it.savedAt, it.history.turns.size, it.conversationId)
+            } to history.bytes()
+          }
+        val currentMachines = mutableState.value.profiles.map { it.machineId }.toSet()
+        mutableState.value =
+          mutableState.value.copy(
+            savedConversations = saved.filter { it.agent.machineId in currentMachines },
+            offlineBytes = bytes,
+            offlineProblem = null,
+          )
+      } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        mutableState.value =
+          mutableState.value.copy(offlineProblem = "Couldn't load saved conversations.")
+      }
+    }
+  }
+
+  fun openSavedConversation(machineId: UUID, conversationId: String) {
+    val history = offlineHistory ?: return
+    val profile = mutableState.value.profiles.firstOrNull { it.machineId == machineId } ?: return
+    cancelOwnedWork()
+    clearSavedSelection()
+    val token = epoch
+    operation = viewModelScope.launch {
+      try {
+        val saved =
+          withContext(offlineDispatcher) { history.read(machineId, conversationId) }
+            ?: return@launch
+        if (
+          token != epoch ||
+            mutableState.value.profiles.none { it.id == profile.id && it.machineId == machineId }
+        )
+          return@launch
+        mutableState.value =
+          mutableState.value.copy(
+            activeProfileId = profile.id,
+            selectedAgent = saved.agent,
+            stream = StreamState(),
+            conversationTurns = saved.history.turns,
+            omittedConversationTurns = saved.history.omittedMessages,
+            omittedToolOperations = saved.history.omittedTools,
+            conversationSource = "offline_snapshot",
+            conversationId = saved.conversationId,
+            offlineSavedAt = saved.savedAt,
+            connection = ConnectionState.Disconnected,
+            busy = false,
+          )
+      } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        if (token == epoch)
+          mutableState.value =
+            mutableState.value.copy(offlineProblem = "Couldn't open this saved conversation.")
+      }
+    }
+  }
 
   override fun renameProfile(id: String, label: String) {
     val name = label.trim().takeIf { it.isNotEmpty() } ?: return
@@ -196,6 +277,7 @@ internal constructor(
   }
 
   override fun selectProfile(id: String) {
+    mutableState.value = mutableState.value.copy(offlineSavedAt = null, conversationId = null)
     cancelOwnedWork()
     clearSavedSelection()
     val profile = mutableState.value.profiles.firstOrNull { it.id == id } ?: return
@@ -301,7 +383,12 @@ internal constructor(
             mutableState.value.machines +
               (profile.id to MachineConnection(ConnectionState.Connected, agents))
         )
-      if (token != epoch || mutableState.value.activeProfileId != profile.id) return
+      if (
+        token != epoch ||
+          mutableState.value.activeProfileId != profile.id ||
+          mutableState.value.offlineSavedAt != null
+      )
+        return
       val selected =
         mutableState.value.selectedAgent?.let { old ->
           agents.firstOrNull { it.machineId == old.machineId && it.sessionId == old.sessionId }
@@ -329,6 +416,7 @@ internal constructor(
   }
 
   override fun selectAgent(agent: AgentRow?) {
+    mutableState.value = mutableState.value.copy(offlineSavedAt = null, conversationId = null)
     cancelOwnedWork()
     val profile = activeProfile()
     if (agent != null && profile?.machineId != agent.machineId) {
@@ -363,6 +451,7 @@ internal constructor(
   }
 
   override fun loadConversation() {
+    if (mutableState.value.offlineSavedAt != null) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
     if (!foreground) return
@@ -374,7 +463,14 @@ internal constructor(
       do {
         conversationRequested = false
         try {
+          if (offlineHistory != null && client.verify(profile.machineId) != profile.machineId)
+            throw ProtocolException("Machine identity changed")
           val snapshot = client.conversationSnapshot(agent.sessionId)
+          if (
+            (snapshot.machineId != null && snapshot.machineId != profile.machineId) ||
+              (snapshot.conversationId != null && snapshot.machineId != profile.machineId)
+          )
+            throw ProtocolException("Conversation machine identity changed")
           val current = mutableState.value
           if (
             token != epoch ||
@@ -386,6 +482,12 @@ internal constructor(
             return@launch
           // Terminal snapshots already arrive through the stream. Reconstructing a
           // second, unstable Markdown history from them flashes/rekeys the screen.
+          if (
+            snapshot.conversationId != null &&
+              (!isCanonicalConversationId(snapshot.conversationId) ||
+                !snapshot.conversationId.startsWith("${agent.agent}:"))
+          )
+            throw ProtocolException("Canonical conversation provider mismatch")
           val recent =
             com.azusachino.cappuccino.core.boundedConversation(
               if (snapshot.source == "canonical_log") snapshot.turns else emptyList()
@@ -396,7 +498,36 @@ internal constructor(
               omittedConversationTurns = recent.omittedMessages,
               omittedToolOperations = recent.omittedTools,
               conversationSource = snapshot.source,
+              conversationId = snapshot.conversationId,
+              offlineSavedAt = null,
             )
+          if (
+            snapshot.source == "canonical_log" &&
+              offlineHistory != null &&
+              snapshot.conversationId == null
+          ) {
+            mutableState.value =
+              mutableState.value.copy(
+                offlineProblem =
+                  "This bridge/session doesn't provide a canonical conversation ID. Offline history wasn't saved."
+              )
+          }
+          if (
+            snapshot.source == "canonical_log" &&
+              offlineHistory != null &&
+              snapshot.conversationId != null
+          ) {
+            try {
+              withContext(offlineDispatcher) {
+                offlineHistory.save(profile.machineId, agent, recent, snapshot.conversationId)
+              }
+              reloadSavedHistory()
+            } catch (error: Exception) {
+              if (error is kotlinx.coroutines.CancellationException) throw error
+              mutableState.value =
+                mutableState.value.copy(offlineProblem = "Couldn't save this conversation offline.")
+            }
+          }
         } catch (error: Exception) {
           if (error is kotlinx.coroutines.CancellationException) throw error
           // Keep earlier turns; on a newly opened view allow verified stream scrollback
@@ -418,6 +549,7 @@ internal constructor(
   }
 
   override fun submitPrompt(text: String) {
+    if (mutableState.value.offlineSavedAt != null) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
     val client = bridgeFor(profile.endpoint)
@@ -442,6 +574,7 @@ internal constructor(
     optionId: String?,
     action: String?,
   ) {
+    if (mutableState.value.offlineSavedAt != null) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
     val client = bridgeFor(profile.endpoint)
@@ -500,10 +633,15 @@ internal constructor(
         machines = current.machines - id,
         bridgeDetails = current.bridgeDetails - id,
         activeProfileId = current.activeProfileId.takeUnless { it == id },
+        savedConversations =
+          current.savedConversations.filter { row ->
+            row.agent.machineId in store.read().map { it.machineId }
+          },
       )
   }
 
   override fun retry() {
+    if (mutableState.value.offlineSavedAt != null) return
     if (savedStateHandle.get<String>(SELECTED_PROFILE) != null && foreground) {
       cancelOwnedWork()
       pendingRestore = true

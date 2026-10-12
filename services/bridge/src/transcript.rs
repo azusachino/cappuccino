@@ -93,12 +93,47 @@ impl ResolvedTranscript {
         }
     }
 
-    #[allow(dead_code)]
     pub fn agent_type(&self) -> &'static str {
         match self {
             ResolvedTranscript::Pi(_) => "pi",
             ResolvedTranscript::Agy(_) => "agy",
         }
+    }
+
+    /// Identity of the resolved canonical session, never its reusable pane locator.
+    /// Pi supplies its session-header ID; Agy's process-bound presence lock selected
+    /// this exact brain session directory. Hashing keeps raw IDs/paths off the wire.
+    pub fn conversation_id(&self, pi_header: Option<&str>) -> Option<String> {
+        let header;
+        let session = match self {
+            Self::Pi(_) => {
+                header = serde_json::from_str::<Value>(pi_header?).ok()?;
+                if header["type"].as_str()? != "session" {
+                    return None;
+                }
+                header["id"].as_str()?
+            }
+            Self::Agy(path) => {
+                if !path.ends_with(".system_generated/logs/transcript.jsonl") {
+                    return None;
+                }
+                path.parent()?.parent()?.parent()?.file_name()?.to_str()?
+            }
+        };
+        if session.is_empty()
+            || session.len() > 256
+            || session.trim() != session
+            || session.chars().any(char::is_control)
+        {
+            return None;
+        }
+        use sha2::{Digest, Sha256};
+        let mut digest = Sha256::new();
+        digest.update(b"cappuccino:canonical-conversation:v1\0");
+        digest.update(self.agent_type().as_bytes());
+        digest.update([0]);
+        digest.update(session.as_bytes());
+        Some(format!("{}:{:x}", self.agent_type(), digest.finalize()))
     }
 }
 

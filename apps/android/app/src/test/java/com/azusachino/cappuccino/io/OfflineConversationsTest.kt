@@ -11,6 +11,8 @@ class OfflineConversationsTest {
   private val machine = UUID.fromString("11111111-1111-4111-8111-111111111111")
   private val other = UUID.fromString("22222222-2222-4222-8222-222222222222")
 
+  private fun identity(digit: Char = 'a') = "pi:${digit.toString().repeat(64)}"
+
   private fun agent(locator: String = "w1:p1", id: UUID = machine) =
     AgentRow(id, locator, "p1", "Saved agent", "pi", "working", true, "feature", "/project")
 
@@ -48,15 +50,15 @@ class OfflineConversationsTest {
     val root = Files.createTempDirectory("offline-history").toFile()
     try {
       val folder = File(root, "offline")
-      val saved = OfflineConversations(folder).save(machine, agent(), history())
-      val reopened = requireNotNull(OfflineConversations(folder).read(machine, "w1:p1"))
+      val saved = OfflineConversations(folder).save(machine, agent(), history(), identity())
+      val reopened = requireNotNull(OfflineConversations(folder).read(machine, identity()))
       assertEquals(saved, reopened)
       assertEquals(history(), reopened.history)
       assertEquals("unknown", reopened.agent.status)
       assertFalse(reopened.agent.working)
       assertTrue(reopened.savedAt > 0)
       assertTrue(OfflineConversations(folder).bytes() > 0)
-      assertNull(OfflineConversations(folder).read(other, "w1:p1"))
+      assertNull(OfflineConversations(folder).read(other, identity()))
     } finally {
       root.deleteRecursively()
     }
@@ -67,17 +69,44 @@ class OfflineConversationsTest {
     val root = Files.createTempDirectory("offline-identities").toFile()
     try {
       val store = OfflineConversations(File(root, "offline"))
-      store.save(machine, agent("../../draft"), history())
-      store.save(other, agent("../../draft", other), history())
-      assertEquals(machine, store.read(machine, "../../draft")?.agent?.machineId)
-      assertEquals(other, store.read(other, "../../draft")?.agent?.machineId)
+      store.save(machine, agent("../../draft"), history(), identity())
+      store.save(other, agent("../../draft", other), history(), identity())
+      assertEquals(machine, store.read(machine, identity())?.agent?.machineId)
+      assertEquals(other, store.read(other, identity())?.agent?.machineId)
       assertEquals(2, store.list(setOf(machine, other)).size)
       assertEquals(1, store.list(setOf(machine)).size)
       assertFalse(File(root, "draft").exists())
       assertTrue(
         File(root, "offline").listFiles()!!.all { it.name.matches(Regex("[a-f0-9]{64}\\.json")) }
       )
-      assertThrows(IllegalArgumentException::class.java) { store.save(other, agent(), history()) }
+      assertThrows(IllegalArgumentException::class.java) {
+        store.save(other, agent(), history(), identity())
+      }
+      assertThrows(IllegalArgumentException::class.java) { store.read(machine, "../../draft") }
+    } finally {
+      root.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun reusedPaneKeepsDistinctCanonicalConversationsAndMovedPaneUpdatesSameConversation() {
+    val root = Files.createTempDirectory("offline-generations").toFile()
+    try {
+      val store = OfflineConversations(root)
+      store.save(machine, agent(), history(), identity('a'))
+      val newHistory =
+        RecentConversation(
+          listOf(ConversationTurn("new", "agent", null, "New conversation", emptyList())),
+          0,
+          0,
+        )
+      store.save(machine, agent(), newHistory, identity('b'))
+      assertEquals(history(), store.read(machine, identity('a'))?.history)
+      assertEquals(newHistory, store.read(machine, identity('b'))?.history)
+      assertEquals(2, store.list(setOf(machine)).size)
+      store.save(machine, agent("different-pane"), newHistory, identity('a'))
+      assertEquals("different-pane", store.read(machine, identity('a'))?.agent?.sessionId)
+      assertEquals(2, store.list(setOf(machine)).size)
     } finally {
       root.deleteRecursively()
     }
@@ -91,14 +120,14 @@ class OfflineConversationsTest {
       val cache = File(root, "cache").also { it.mkdir() }
       File(cache, "temporary").writeText("temporary")
       val store = OfflineConversations(File(root, "offline"), maxEntries = 2)
-      store.save(machine, agent("first"), history())
-      store.save(machine, agent("second"), history())
-      store.save(machine, agent("third"), history())
+      store.save(machine, agent("first"), history(), identity('a'))
+      store.save(machine, agent("second"), history(), identity('b'))
+      store.save(machine, agent("third"), history(), identity('c'))
       assertEquals(2, store.list(setOf(machine)).size)
-      assertNotNull(store.read(machine, "third"))
+      assertNotNull(store.read(machine, identity('c')))
       temporaryCacheBytes(cache, clear = true)
       assertEquals("preserve draft", draft.readText())
-      assertNotNull(store.read(machine, "third"))
+      assertNotNull(store.read(machine, identity('c')))
       assertEquals(2, store.list(setOf(machine)).size)
     } finally {
       root.deleteRecursively()
@@ -113,17 +142,33 @@ class OfflineConversationsTest {
       val linked = File(root, "linked")
       Files.createSymbolicLink(linked.toPath(), outside.toPath())
       assertThrows(IllegalArgumentException::class.java) {
-        OfflineConversations(linked).save(machine, agent(), history())
+        OfflineConversations(linked).save(machine, agent(), history(), identity())
       }
       val folder = File(root, "offline")
       val store = OfflineConversations(folder)
-      store.save(machine, agent(), history())
+      store.save(machine, agent(), history(), identity())
       val file = folder.listFiles()!!.single()
-      file.writeText(file.readText().replace("\"schema\":1", "\"schema\":2"))
-      assertThrows(IllegalArgumentException::class.java) { store.read(machine, "w1:p1") }
+      file.writeText(file.readText().replace("\"schema\":2", "\"schema\":1"))
+      assertThrows(IllegalArgumentException::class.java) { store.read(machine, identity()) }
       file.writeText("not JSON")
-      assertThrows(Exception::class.java) { store.read(machine, "w1:p1") }
+      assertThrows(Exception::class.java) { store.read(machine, identity()) }
       assertTrue(outside.listFiles()!!.isEmpty())
+    } finally {
+      root.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun invalidOrWrongProviderIdentityCannotBeSaved() {
+    val root = Files.createTempDirectory("offline-provider").toFile()
+    try {
+      val store = OfflineConversations(root)
+      for (id in listOf("w1:p1", "", "pi:short", "agy:${"a".repeat(64)}")) {
+        assertThrows(IllegalArgumentException::class.java) {
+          store.save(machine, agent(), history(), id)
+        }
+      }
+      assertEquals(0, store.bytes())
     } finally {
       root.deleteRecursively()
     }
@@ -134,14 +179,16 @@ class OfflineConversationsTest {
     val root = Files.createTempDirectory("offline-atomic").toFile()
     try {
       val store = OfflineConversations(root, maxEntryBytes = 2048, maxBytes = 4096)
-      val original = store.save(machine, agent(), history())
+      val original = store.save(machine, agent(), history(), identity())
       val tooLarge =
         RecentConversation(
           listOf(ConversationTurn("large", "agent", null, "x".repeat(5000), emptyList())),
           0,
           0,
         )
-      assertThrows(IllegalArgumentException::class.java) { store.save(machine, agent(), tooLarge) }
+      assertThrows(IllegalArgumentException::class.java) {
+        store.save(machine, agent(), tooLarge, identity())
+      }
       val tooMany =
         RecentConversation(
           (0..200).map { ConversationTurn("t$it", "agent", null, null, emptyList()) },
@@ -149,9 +196,9 @@ class OfflineConversationsTest {
           0,
         )
       assertThrows(IllegalArgumentException::class.java) {
-        OfflineConversations(root).save(machine, agent(), tooMany)
+        OfflineConversations(root).save(machine, agent(), tooMany, identity())
       }
-      assertEquals(original, store.read(machine, "w1:p1"))
+      assertEquals(original, store.read(machine, identity()))
       assertFalse(root.listFiles()!!.any { it.name.endsWith(".tmp") })
     } finally {
       root.deleteRecursively()

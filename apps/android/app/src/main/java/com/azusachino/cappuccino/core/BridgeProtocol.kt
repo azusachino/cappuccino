@@ -435,7 +435,7 @@ fun reduce(state: StreamState, event: StreamEvent, selectedSession: String): Str
     }
   }
 
-private fun uuid(value: String): UUID =
+internal fun uuid(value: String): UUID =
   try {
     UUID.fromString(value)
   } catch (_: Exception) {

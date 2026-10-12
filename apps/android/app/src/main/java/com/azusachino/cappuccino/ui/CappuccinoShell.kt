@@ -132,7 +132,13 @@ fun CappuccinoShell(
   requestConnect: (String, String) -> Unit,
 ) {
   val state by viewModel.state.collectAsStateWithLifecycle()
-  CappuccinoScreen(state, viewModel, timeZone, requestConnect)
+  CappuccinoScreen(
+    state,
+    viewModel,
+    timeZone,
+    savedHistoryAction = viewModel::openSavedConversation,
+    requestConnect = requestConnect,
+  )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -141,6 +147,7 @@ fun CappuccinoScreen(
   state: ConnectedUiState,
   actions: ConnectedActions,
   timeZone: ZoneId = ZoneId.systemDefault(),
+  savedHistoryAction: ((java.util.UUID, String) -> Unit)? = null,
   requestConnect: (String, String) -> Unit,
 ) {
   var destination by rememberSaveable { mutableStateOf(Destination.MACHINES) }
@@ -175,8 +182,9 @@ fun CappuccinoScreen(
   val namingProfile = state.profiles.firstOrNull { it.id == namingProfileId } ?: selectedProfile
   var namingMachine by rememberSaveable { mutableStateOf(false) }
   var machineNameDraft by rememberSaveable { mutableStateOf("") }
-  val outputIdentity = Triple(state.activeProfileId, selected?.machineId, selected?.sessionId)
-  val conversationKey = "${state.activeProfileId}|${selected?.machineId}|${selected?.sessionId}"
+  val scopedConversation = selected?.let { state.conversationId ?: it.sessionId }
+  val outputIdentity = Triple(state.activeProfileId, selected?.machineId, scopedConversation)
+  val conversationKey = "${state.activeProfileId}|${selected?.machineId}|$scopedConversation"
   val outputStates =
     rememberSaveable(
       saver =
@@ -453,6 +461,14 @@ fun CappuccinoScreen(
       ) {
         when {
           selected != null -> {
+            state.offlineSavedAt?.let { savedAt ->
+              Text(
+                "Saved on this device · ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(savedAt).toString(), timeZone)} · Read-only",
+                Modifier.padding(horizontal = 16.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
             // Transcript metadata as plain text lines under the app bar; cardless
             // (android-material3.md region 2).
             Column(
@@ -537,28 +553,29 @@ fun CappuccinoScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
-            Row(
-              Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-              verticalAlignment = Alignment.CenterVertically,
-            ) {
-              Column(Modifier.weight(1f)) {
-                Text("Follow live output", style = MaterialTheme.typography.bodyMedium)
-                if (followEnabled && !followingOutput)
-                  Text(
-                    "Paused while reading",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
+            if (state.offlineSavedAt == null)
+              Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Column(Modifier.weight(1f)) {
+                  Text("Follow live output", style = MaterialTheme.typography.bodyMedium)
+                  if (followEnabled && !followingOutput)
+                    Text(
+                      "Paused while reading",
+                      style = MaterialTheme.typography.bodySmall,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                androidx.compose.material3.Switch(
+                  modifier = Modifier.semantics { contentDescription = "Follow live output" },
+                  checked = followEnabled,
+                  onCheckedChange = { enabled ->
+                    followPreferences = followPreferences + (conversationKey to enabled)
+                    followingOutput = enabled
+                  },
+                )
               }
-              androidx.compose.material3.Switch(
-                modifier = Modifier.semantics { contentDescription = "Follow live output" },
-                checked = followEnabled,
-                onCheckedChange = { enabled ->
-                  followPreferences = followPreferences + (conversationKey to enabled)
-                  followingOutput = enabled
-                },
-              )
-            }
             readerState.SaveableStateProvider(conversationKey) {
               val historyOmitted =
                 state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
@@ -669,7 +686,8 @@ fun CappuccinoScreen(
               PromptInputBar(
                 onSend = { text -> actions.submitPrompt(text) },
                 enabled =
-                  state.connection == ConnectionState.Connected &&
+                  state.offlineSavedAt == null &&
+                    state.connection == ConnectionState.Connected &&
                     state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") !=
                       false,
               )
@@ -720,6 +738,12 @@ fun CappuccinoScreen(
               themeMode = state.themeMode,
               onSelectTheme = actions::setThemeMode,
               onReloadMachines = actions::refreshAll,
+              savedConversations = state.savedConversations,
+              savedMachineNames = state.profiles.associate { it.machineId to it.label },
+              offlineBytes = state.offlineBytes,
+              offlineProblem = state.offlineProblem,
+              onOpenSaved = savedHistoryAction,
+              timeZone = timeZone,
               connections =
                 state.profiles.map { profile ->
                   SettingsConnection(

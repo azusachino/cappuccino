@@ -310,9 +310,9 @@ pub async fn agent_conversation(
 
     match transcript::resolve_session_transcript(&session_id).await {
         Ok(Some(resolved)) => {
-            let path = resolved.path();
-            match conversation::read_tail_lines(path, conversation::TRANSCRIPT_TAIL_BYTES) {
-                Ok(content) => {
+            match conversation::read_canonical_tail(&resolved, conversation::TRANSCRIPT_TAIL_BYTES)
+            {
+                Ok((content, conversation_id)) => {
                     let turns = match resolved {
                         transcript::ResolvedTranscript::Agy(_) => {
                             conversation::parse_agy_transcript(&content)
@@ -324,6 +324,8 @@ pub async fn agent_conversation(
                     let payload = conversation::ConversationResponse {
                         session_id,
                         source: "canonical_log".to_string(),
+                        machine_id: Some(state.machine_id.clone()),
+                        conversation_id,
                         turns,
                     };
                     (
@@ -350,6 +352,8 @@ pub async fn agent_conversation(
                         let payload = conversation::ConversationResponse {
                             session_id,
                             source: "scrollback".to_string(),
+                            machine_id: Some(state.machine_id.clone()),
+                            conversation_id: None,
                             turns,
                         };
                         (

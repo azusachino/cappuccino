@@ -33,9 +33,11 @@ class ConnectedViewModelTest {
   private val profile =
     MachineProfile("p", "Machine", Endpoint.parse("https://bridge.example"), machine)
   private val agent = AgentRow(machine, "locator", "pane", "Agent", "pi", "idle", false, null)
+  private val savedId = "pi:${"a".repeat(64)}"
   private val store = MemoryProfiles(profile)
   private val dispatcher = StandardTestDispatcher()
   private lateinit var viewModel: ConnectedViewModel
+  @org.junit.Rule @JvmField val offlineFolder = org.junit.rules.TemporaryFolder()
 
   @Before
   fun setup() {
@@ -736,11 +738,198 @@ class ConnectedViewModelTest {
       assertEquals("New reply", viewModel.state.value.conversationTurns.single().text)
     }
 
+  @Test
+  fun savedHistorySurvivesModelReconstructionWithoutBecomingLive() =
+    runTest(dispatcher) {
+      val directory = offlineFolder.newFolder("history")
+      val cache = OfflineConversations(directory)
+      val turn = ConversationTurn("saved", "assistant", null, "Saved prose", emptyList())
+      cache.save(
+        machine,
+        agent.copy(status = "working", working = true),
+        com.azusachino.cappuccino.core.boundedConversation(listOf(turn)),
+        savedId,
+      )
+      viewModel = offlineViewModel(cache)
+      advanceUntilIdle()
+      assertEquals(1, viewModel.state.value.savedConversations.size)
+      viewModel.setForeground(false)
+      viewModel = offlineViewModel(OfflineConversations(directory))
+      viewModel.openSavedConversation(machine, savedId)
+      advanceUntilIdle()
+      val saved = viewModel.state.value
+      assertEquals(listOf(turn), saved.conversationTurns)
+      assertEquals("offline_snapshot", saved.conversationSource)
+      assertEquals("unknown", saved.selectedAgent?.status)
+      assertEquals(false, saved.selectedAgent?.working)
+      assertNotNull(saved.offlineSavedAt)
+      assertEquals(ConnectionState.Disconnected, saved.connection)
+      assertNull(saved.stream.pendingPrompt)
+      assertTrue(requireNotNull(saved.offlineBytes) > 0)
+    }
+
+  @Test
+  fun savedReaderCannotSendAnswerRetryOrReloadFromRemote() =
+    runTest(dispatcher) {
+      val cache = OfflineConversations(offlineFolder.newFolder("read-only"))
+      cache.save(
+        machine,
+        agent,
+        com.azusachino.cappuccino.core.boundedConversation(emptyList()),
+        savedId,
+      )
+      viewModel = offlineViewModel(cache)
+      viewModel.openSavedConversation(machine, savedId)
+      advanceUntilIdle()
+      val before = viewModel.state.value
+      viewModel.submitPrompt("Never send this")
+      viewModel.answerPrompt("not-live", 0, null, null)
+      viewModel.retry()
+      viewModel.loadConversation()
+      advanceUntilIdle()
+      assertEquals(before, viewModel.state.value)
+    }
+
+  @Test
+  fun savedReaderRejectsForeignMachineAndCancelledSelection() =
+    runTest(dispatcher) {
+      val foreign = profile.copy(id = "other", machineId = UUID.randomUUID())
+      store.save(foreign)
+      val cache = OfflineConversations(offlineFolder.newFolder("ownership"))
+      cache.save(
+        machine,
+        agent,
+        com.azusachino.cappuccino.core.boundedConversation(emptyList()),
+        savedId,
+      )
+      viewModel = offlineViewModel(cache)
+      advanceUntilIdle()
+      viewModel.openSavedConversation(foreign.machineId, savedId)
+      advanceUntilIdle()
+      assertNull(viewModel.state.value.selectedAgent)
+      viewModel.openSavedConversation(machine, savedId)
+      viewModel.selectAgent(null)
+      advanceUntilIdle()
+      assertNull(viewModel.state.value.selectedAgent)
+      assertNull(viewModel.state.value.offlineSavedAt)
+      assertNull(viewModel.state.value.conversationSource)
+    }
+
+  @Test
+  fun discoveryCannotReplaceSavedReaderWithLiveAgentState() =
+    runTest(dispatcher) {
+      val cache = OfflineConversations(offlineFolder.newFolder("discovery"))
+      val turn = ConversationTurn("saved", "assistant", null, "Offline only", emptyList())
+      cache.save(
+        machine,
+        agent,
+        com.azusachino.cappuccino.core.boundedConversation(listOf(turn)),
+        savedId,
+      )
+      viewModel =
+        createViewModel({}, offlineHistory = cache) {
+          throw AssertionError("Saved history must not open a live stream")
+        }
+      viewModel.openSavedConversation(machine, savedId)
+      advanceUntilIdle()
+      val savedAt = viewModel.state.value.offlineSavedAt
+      viewModel.setForeground(true)
+      advanceUntilIdle()
+      assertEquals("unknown", viewModel.state.value.selectedAgent?.status)
+      assertEquals(listOf(turn), viewModel.state.value.conversationTurns)
+      assertEquals(savedAt, viewModel.state.value.offlineSavedAt)
+      viewModel.setForeground(false)
+      viewModel.setForeground(true)
+      advanceUntilIdle()
+      assertEquals("offline_snapshot", viewModel.state.value.conversationSource)
+      assertEquals(savedAt, viewModel.state.value.offlineSavedAt)
+    }
+
+  @Test
+  fun onlyCanonicalIdentityCanProduceOfflineArchiveWhileLegacyContentStaysReadable() =
+    runTest(dispatcher) {
+      val turn = ConversationTurn("owned", "assistant", null, "Live canonical prose", emptyList())
+      for (identity in listOf(null, savedId)) {
+        val cache =
+          OfflineConversations(
+            offlineFolder.newFolder(if (identity == null) "legacy" else "canonical")
+          )
+        viewModel =
+          createViewModel(
+            {},
+            conversationFactory = { listOf(turn) },
+            offlineHistory = cache,
+            conversationIdentity = identity,
+          ) { session ->
+            flow { emit(StreamEvent.Open(session, 1)) }
+          }
+        viewModel.setForeground(true)
+        advanceUntilIdle()
+        viewModel.selectAgent(agent)
+        advanceUntilIdle()
+        assertEquals(listOf(turn), viewModel.state.value.conversationTurns)
+        if (identity == null) {
+          assertEquals(0, cache.list(setOf(machine)).size)
+          assertTrue(
+            requireNotNull(viewModel.state.value.offlineProblem)
+              .contains("canonical conversation ID")
+          )
+        } else {
+          assertEquals(listOf(turn), cache.read(machine, identity)?.history?.turns)
+          assertEquals(identity, viewModel.state.value.conversationId)
+        }
+        viewModel.setForeground(false)
+      }
+    }
+
+  @Test
+  fun verificationCannotAuthorizeMissingOrForeignSnapshotMachine() =
+    runTest(dispatcher) {
+      val turn = ConversationTurn("foreign", "assistant", null, "Must not archive", emptyList())
+      for (reported in listOf(null, UUID.randomUUID())) {
+        val cache =
+          OfflineConversations(
+            offlineFolder.newFolder(if (reported == null) "missing-machine" else "foreign-machine")
+          )
+        viewModel =
+          createViewModel(
+            {},
+            conversationFactory = { listOf(turn) },
+            offlineHistory = cache,
+            conversationIdentity = savedId,
+            conversationMachine = reported,
+          ) { session ->
+            flow { emit(StreamEvent.Open(session, 1)) }
+          }
+        viewModel.setForeground(true)
+        advanceUntilIdle()
+        viewModel.selectAgent(agent)
+        advanceUntilIdle()
+        assertTrue(cache.list(setOf(machine)).isEmpty())
+        assertTrue(viewModel.state.value.conversationTurns.isEmpty())
+        assertNull(viewModel.state.value.conversationId)
+        viewModel.setForeground(false)
+      }
+    }
+
+  private fun offlineViewModel(cache: OfflineConversations) =
+    ConnectedViewModel(
+      store,
+      { throw AssertionError("Local saved-reader actions must not contact a bridge") },
+      {},
+      SavedStateHandle(),
+      cache,
+      dispatcher,
+    )
+
   private fun createViewModel(
     pause: suspend (Long) -> Unit,
     conversationFactory: suspend (String) -> List<ConversationTurn> = { emptyList() },
     conversationSource: String = "canonical_log",
     reportedMachineName: String? = null,
+    offlineHistory: OfflineConversations? = null,
+    conversationIdentity: String? = null,
+    conversationMachine: UUID? = machine,
     streamFactory: (String) -> Flow<StreamEvent>,
   ): ConnectedViewModel =
     ConnectedViewModel(
@@ -760,7 +949,12 @@ class ConnectedViewModelTest {
           ): List<com.azusachino.cappuccino.core.ConversationTurn> = conversationFactory(sessionId)
 
           override suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
-            ConversationSnapshot(conversationFactory(sessionId), conversationSource)
+            ConversationSnapshot(
+              conversationFactory(sessionId),
+              conversationSource,
+              conversationIdentity,
+              conversationMachine,
+            )
 
           override suspend fun submitPrompt(sessionId: String, text: String) {}
 
@@ -775,6 +969,8 @@ class ConnectedViewModelTest {
       },
       pause,
       SavedStateHandle(),
+      offlineHistory,
+      dispatcher,
     )
 
   private class MemoryProfiles(initial: MachineProfile) : MachineProfileStore {

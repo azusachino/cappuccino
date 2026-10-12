@@ -4,8 +4,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
 /// Bounded window for reading transcripts without loading multi-megabyte files into memory.
 pub const TRANSCRIPT_TAIL_BYTES: u64 = 2 * 1024 * 1024; // 2MB
@@ -14,6 +13,10 @@ pub const TRANSCRIPT_TAIL_BYTES: u64 = 2 * 1024 * 1024; // 2MB
 pub struct ConversationResponse {
     pub session_id: String,
     pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
     pub turns: Vec<ConversationTurn>,
 }
 
@@ -57,10 +60,8 @@ pub enum ConversationPart {
     },
 }
 
-/// Reads the tail window of a file up to `max_bytes`.
-/// If the file is sliced, it drops the first partial line up to the first newline.
-pub fn read_tail_lines(path: &Path, max_bytes: u64) -> std::io::Result<String> {
-    let mut file = File::open(path)?;
+/// If the tail is sliced, discard its first partial line.
+fn read_tail_from(file: &mut File, max_bytes: u64) -> std::io::Result<String> {
     let len = file.metadata()?.len();
     if len == 0 {
         return Ok(String::new());
@@ -84,6 +85,39 @@ pub fn read_tail_lines(path: &Path, max_bytes: u64) -> std::io::Result<String> {
         }
     }
     Ok(s.into_owned())
+}
+
+/// Read identity and content from the same open file. A changed/invalid Pi
+/// header still permits display, but cannot establish an offline archive key.
+/// Call only with a transcript returned by the owned-session resolver.
+pub fn read_canonical_tail(
+    resolved: &crate::transcript::ResolvedTranscript,
+    max_bytes: u64,
+) -> std::io::Result<(String, Option<String>)> {
+    let mut file = File::open(resolved.path())?;
+    let before = read_conversation_id(resolved, &mut file)?;
+    let content = read_tail_from(&mut file, max_bytes)?;
+    let after = read_conversation_id(resolved, &mut file)?;
+    Ok((content, if before == after { before } else { None }))
+}
+
+fn read_conversation_id(
+    resolved: &crate::transcript::ResolvedTranscript,
+    file: &mut File,
+) -> std::io::Result<Option<String>> {
+    if matches!(resolved, crate::transcript::ResolvedTranscript::Agy(_)) {
+        return Ok(resolved.conversation_id(None));
+    }
+    const MAX_HEADER_BYTES: u64 = 16 * 1024;
+    file.seek(SeekFrom::Start(0))?;
+    let mut header = Vec::new();
+    BufReader::new(file.take(MAX_HEADER_BYTES + 1)).read_until(b'\n', &mut header)?;
+    if header.len() as u64 > MAX_HEADER_BYTES {
+        return Ok(None);
+    }
+    Ok(std::str::from_utf8(&header)
+        .ok()
+        .and_then(|line| resolved.conversation_id(Some(line))))
 }
 
 /// Parse agy transcript lines (from `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl`)
@@ -482,6 +516,91 @@ mod tests {
     use super::*;
 
     #[test]
+    fn canonical_identity_is_stable_on_append_but_changes_when_session_is_replaced() {
+        use crate::transcript::ResolvedTranscript;
+        let dir = std::env::temp_dir().join(format!(
+            "cappuccino-identity-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        let first = "{\"type\":\"session\",\"id\":\"session-one\"}\n";
+        std::fs::write(&path, first).unwrap();
+        let resolved = ResolvedTranscript::Pi(path.clone());
+        let (_, initial) = read_canonical_tail(&resolved, 64).unwrap();
+        let initial = initial.unwrap();
+        assert!(initial.starts_with("pi:"));
+        assert_eq!(initial.len(), 67);
+        assert!(!initial.contains("session-one"));
+        assert!(!initial.contains(dir.to_str().unwrap()));
+        std::fs::write(&path, format!("{first}{}\n", "x".repeat(512))).unwrap();
+        assert_eq!(
+            read_canonical_tail(&resolved, 64).unwrap().1,
+            Some(initial.clone())
+        );
+        std::fs::write(&path, "{\"type\":\"session\",\"id\":\"session-two\"}\n").unwrap();
+        assert_ne!(read_canonical_tail(&resolved, 64).unwrap().1, Some(initial));
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"type\":\"session\",\"id\":\"session-three\",\"cwd\":\"{}\"}}\n",
+                "x".repeat(16 * 1024)
+            ),
+        )
+        .unwrap();
+        assert_eq!(read_canonical_tail(&resolved, 64).unwrap().1, None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn canonical_id_requires_real_provider_identity_and_never_a_locator() {
+        use crate::transcript::ResolvedTranscript;
+        let pi = ResolvedTranscript::Pi("/unused/session.jsonl".into());
+        for header in [
+            None,
+            Some("{}"),
+            Some("{\"type\":\"message\",\"id\":\"pane\"}"),
+            Some("{\"type\":\"session\",\"id\":\"\"}"),
+            Some("{\"type\":\"session\",\"id\":\" bad \"}"),
+        ] {
+            assert_eq!(pi.conversation_id(header), None);
+        }
+        let agy = ResolvedTranscript::Agy(
+            "/brain/session-one/.system_generated/logs/transcript.jsonl".into(),
+        );
+        let agy_id = agy.conversation_id(None).unwrap();
+        assert!(agy_id.starts_with("agy:"));
+        assert_ne!(
+            agy_id,
+            pi.conversation_id(Some("{\"type\":\"session\",\"id\":\"session-one\"}"))
+                .unwrap()
+        );
+        assert_eq!(
+            ResolvedTranscript::Agy("/brain/session-one/guessed.jsonl".into())
+                .conversation_id(None),
+            None
+        );
+    }
+
+    #[test]
+    fn legacy_conversation_response_has_no_claimed_canonical_id() {
+        let legacy: ConversationResponse = serde_json::from_str(
+            "{\"session_id\":\"pane\",\"source\":\"scrollback\",\"turns\":[]}",
+        )
+        .unwrap();
+        assert_eq!(legacy.conversation_id, None);
+        assert!(!serde_json::to_value(legacy)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("conversation_id"));
+    }
+
+    #[test]
     fn parses_agy_transcript_into_turns() {
         let jsonl = r#"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-07T08:00:41Z","content":"<USER_REQUEST>\ncheck caccpucino status\n</USER_REQUEST>"}
 {"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-10-07T08:00:41Z","thinking":"Checking repo status","tool_calls":[{"name":"run_command","args":{"CommandLine":"git status"}}]}
@@ -641,7 +760,10 @@ mod tests {
         let long_content = (0..1000).map(|i| format!("line {i}\n")).collect::<String>();
         std::fs::write(&path, long_content).unwrap();
 
-        let tail = read_tail_lines(&path, 50).unwrap();
+        let tail =
+            read_canonical_tail(&crate::transcript::ResolvedTranscript::Pi(path.clone()), 50)
+                .unwrap()
+                .0;
         assert!(tail.contains("line 999"));
         assert!(!tail.contains("line 0"));
 
