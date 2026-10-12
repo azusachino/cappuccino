@@ -477,6 +477,10 @@ class CappuccinoShellTest {
 
     override fun retry() = Unit
 
+    override fun setAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette) {
+      state.value = state.value.copy(appPalette = palette)
+    }
+
     override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
       state.value = state.value.copy(themeMode = mode)
     }

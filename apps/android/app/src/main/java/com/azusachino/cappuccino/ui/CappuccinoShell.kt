@@ -101,6 +101,10 @@ private enum class Destination(val title: Int, val icon: Int) {
     com.azusachino.cappuccino.R.string.machines,
     com.azusachino.cappuccino.R.drawable.ic_machine,
   ),
+  APPEARANCE(
+    com.azusachino.cappuccino.R.string.appearance,
+    com.azusachino.cappuccino.R.drawable.ic_settings,
+  ),
   SETTINGS(
     com.azusachino.cappuccino.R.string.settings,
     com.azusachino.cappuccino.R.drawable.ic_settings,
@@ -223,6 +227,20 @@ fun CappuccinoScreen(
       turns.filter { turn -> !turn.text.isNullOrBlank() || turn.parts.any { it.visibleInChat } }
     }
   var sessionTab by rememberSaveable(conversationKey) { mutableStateOf(SessionTab.TRANSCRIPT) }
+  var toolUpdates by remember(outputIdentity) { mutableStateOf(ToolUpdates()) }
+  var toolsAtLatest by remember(outputIdentity) { mutableStateOf(false) }
+  LaunchedEffect(
+    toolActivities,
+    sessionTab,
+    toolsAtLatest,
+    state.conversationSource,
+    state.offlineSavedAt,
+  ) {
+    if (selected != null && state.conversationSource != null && state.offlineSavedAt == null) {
+      toolUpdates =
+        toolUpdates.observe(toolActivities, sessionTab == SessionTab.TOOLS && toolsAtLatest)
+    }
+  }
   val rows = state.stream.rows()
   val collapsedRows = remember(rows) { collapseOutputRows(rows) }
   val displayedContent: List<*> = if (turns.isNotEmpty()) chatTurns else collapsedRows
@@ -298,6 +316,9 @@ fun CappuccinoScreen(
     }
   }
   LaunchedEffect(showingConnection) { if (showingConnection) followingOutput = false }
+  BackHandler(enabled = selected == null && destination == Destination.APPEARANCE) {
+    destination = Destination.SETTINGS
+  }
   BackHandler(enabled = selected != null && !showingConnection) {
     if (sessionTab != SessionTab.TRANSCRIPT) sessionTab = SessionTab.TRANSCRIPT
     else actions.selectAgent(null)
@@ -385,12 +406,15 @@ fun CappuccinoScreen(
                     state.stream.agentStatus ?: selected.status,
                     MaterialTheme.colorScheme.background.luminance() < 0.5f,
                   )
-                Text(
-                  status.label,
-                  color = status.foreground,
-                  style = MaterialTheme.typography.labelSmall,
-                  fontFamily = FontFamily.Monospace,
-                )
+                Surface(color = status.background, shape = RoundedCornerShape(4.dp)) {
+                  Text(
+                    status.label,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    color = status.foreground,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                  )
+                }
               }
             } else {
               Text(
@@ -400,7 +424,14 @@ fun CappuccinoScreen(
             }
           },
           navigationIcon = {
-            if (selected != null) {
+            if (selected == null && destination == Destination.APPEARANCE) {
+              IconButton(onClick = { destination = Destination.SETTINGS }) {
+                Icon(
+                  painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
+                  contentDescription = "Back to settings",
+                )
+              }
+            } else if (selected != null) {
               IconButton(onClick = { actions.selectAgent(null) }) {
                 Icon(
                   painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
@@ -441,7 +472,9 @@ fun CappuccinoScreen(
             listOf(Destination.MACHINES, Destination.ATTENTION, Destination.SETTINGS).forEach { item
               ->
               NavigationBarItem(
-                selected = destination == item,
+                selected =
+                  destination == item ||
+                    (item == Destination.SETTINGS && destination == Destination.APPEARANCE),
                 onClick = {
                   actions.selectAgent(null)
                   destination = item
@@ -551,7 +584,7 @@ fun CappuccinoScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
-            NativeSessionTabs(sessionTab) { tab ->
+            NativeSessionTabs(sessionTab, toolUpdates.unseen) { tab ->
               sessionTab = tab
               if (tab != SessionTab.TRANSCRIPT) followingOutput = false
             }
@@ -560,6 +593,7 @@ fun CappuccinoScreen(
                 toolActivities,
                 state.omittedToolOperations,
                 Modifier.weight(1f).fillMaxWidth(),
+                onAtLatest = { toolsAtLatest = it },
               )
             } else {
               readerState.SaveableStateProvider(conversationKey) {
@@ -717,9 +751,19 @@ fun CappuccinoScreen(
               }
             }
           }
+          destination == Destination.APPEARANCE -> {
+            AppAppearanceSettings(
+              state.themeMode,
+              state.appPalette,
+              actions::setThemeMode,
+              actions::setAppPalette,
+            )
+          }
           destination == Destination.SETTINGS -> {
             SettingsScreen(
               themeMode = state.themeMode,
+              appPalette = state.appPalette,
+              onOpenAppearance = { destination = Destination.APPEARANCE },
               onSelectTheme = actions::setThemeMode,
               onReloadMachines = actions::refreshAll,
               savedConversations = state.savedConversations,

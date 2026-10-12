@@ -150,31 +150,25 @@ fun CappuccinoTheme(
   themeMode: ThemeMode = ThemeMode.SYSTEM,
   useDynamicColor: Boolean = false,
   onResolvedDarkChanged: ((Boolean) -> Unit)? = null,
+  palette: AppPalette = AppPalette.CATPPUCCIN,
   content: @Composable () -> Unit,
 ) {
   val context = LocalContext.current
   val isDark = resolveIsDark(themeMode, isSystemInDarkTheme())
   val themeSink by rememberUpdatedState(onResolvedDarkChanged)
   LaunchedEffect(isDark) { themeSink?.invoke(isDark) }
+  val selectedPalette = if (useDynamicColor) AppPalette.DYNAMIC else palette
   val dynamicLight =
-    if (useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+    if (selectedPalette == AppPalette.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
       dynamicLightColorScheme(context)
     else FallbackLightColorScheme
   val dynamicDark =
-    if (useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+    if (selectedPalette == AppPalette.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
       dynamicDarkColorScheme(context)
     else FallbackDarkColorScheme
   MaterialTheme(
     colorScheme =
-      selectColorScheme(
-        Build.VERSION.SDK_INT,
-        isDark,
-        dynamicLight,
-        dynamicDark,
-        FallbackLightColorScheme,
-        FallbackDarkColorScheme,
-        useDynamic = useDynamicColor,
-      ),
+      appColorScheme(selectedPalette, isDark, Build.VERSION.SDK_INT, dynamicLight, dynamicDark),
     content = content,
   )
 }

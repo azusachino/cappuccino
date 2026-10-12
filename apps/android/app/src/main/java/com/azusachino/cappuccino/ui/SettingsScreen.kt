@@ -36,6 +36,8 @@ internal fun SettingsScreen(
   onReloadMachines: () -> Unit,
   connections: List<SettingsConnection>,
   onConnectionDetails: (String) -> Unit,
+  appPalette: AppPalette = AppPalette.CATPPUCCIN,
+  onOpenAppearance: (() -> Unit)? = null,
   savedConversations: List<com.azusachino.cappuccino.io.SavedConversationInfo> = emptyList(),
   savedMachineNames: Map<java.util.UUID, String> = emptyMap(),
   offlineBytes: Long? = null,
@@ -64,10 +66,10 @@ internal fun SettingsScreen(
     SettingsHeading("Appearance")
     PreferenceRow(
       "Theme",
-      "Catppuccin · ${themeMode.name.lowercase().replaceFirstChar { it.uppercase() }}",
+      "${appPalette.label} · ${themeMode.name.lowercase().replaceFirstChar { it.uppercase() }}",
       R.drawable.ic_settings,
     ) {
-      choosingTheme = true
+      if (onOpenAppearance != null) onOpenAppearance() else choosingTheme = true
     }
     SettingsHeading("Storage")
     PreferenceRow(

@@ -65,6 +65,8 @@ data class ConnectedUiState(
   val busy: Boolean = false,
   val themeMode: com.azusachino.cappuccino.ui.ThemeMode =
     com.azusachino.cappuccino.ui.ThemeMode.SYSTEM,
+  val appPalette: com.azusachino.cappuccino.ui.AppPalette =
+    com.azusachino.cappuccino.ui.AppPalette.CATPPUCCIN,
 )
 
 interface ConnectedActions {
@@ -92,6 +94,8 @@ interface ConnectedActions {
 
   fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode)
 
+  fun setAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette)
+
   fun submitPrompt(text: String)
 
   fun answerPrompt(promptId: String, optionIndex: Int?, optionId: String?, action: String?)
@@ -113,6 +117,7 @@ internal constructor(
       ConnectedUiState(
         profiles = store.read(),
         themeMode = store.readThemeMode(),
+        appPalette = store.readAppPalette(),
       )
     )
   val state: StateFlow<ConnectedUiState> = mutableState.asStateFlow()
@@ -320,6 +325,11 @@ internal constructor(
     }
     mutableState.value =
       mutableState.value.copy(machines = mutableState.value.machines + (id to MachineConnection()))
+  }
+
+  override fun setAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette) {
+    store.saveAppPalette(palette)
+    mutableState.value = mutableState.value.copy(appPalette = palette)
   }
 
   override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {

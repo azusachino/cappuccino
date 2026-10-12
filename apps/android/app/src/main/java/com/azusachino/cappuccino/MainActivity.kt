@@ -124,6 +124,7 @@ class MainActivity : ComponentActivity() {
       val state by vm.state.collectAsStateWithLifecycle()
       CappuccinoTheme(
         themeMode = state.themeMode,
+        palette = state.appPalette,
         onResolvedDarkChanged = ::applySystemBarAppearance,
       ) {
         CappuccinoShell(vm, timeZone = deviceTimeZone) { label, url ->

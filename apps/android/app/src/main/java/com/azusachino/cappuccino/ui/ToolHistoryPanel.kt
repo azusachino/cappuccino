@@ -28,6 +28,7 @@ internal fun ToolHistoryPanel(
   entries: List<ToolActivityEntry>,
   omitted: Int,
   modifier: Modifier = Modifier,
+  onAtLatest: ((Boolean) -> Unit)? = null,
 ) {
   val newestFirst = remember(entries) { entries.asReversed() }
   val list = rememberLazyListState()
@@ -37,6 +38,7 @@ internal fun ToolHistoryPanel(
     var manualScroll = false
     snapshotFlow { Triple(list.isScrollInProgress, !list.canScrollBackward, automaticScroll) }
       .collect { (scrolling, atTop, automatic) ->
+        onAtLatest?.invoke(atTop)
         if (scrolling && !automatic) {
           manualScroll = true
           followNewest = false

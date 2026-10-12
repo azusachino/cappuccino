@@ -25,10 +25,20 @@ internal enum class SessionTab(val label: String) {
 }
 
 @Composable
-internal fun NativeSessionTabs(selected: SessionTab, onSelect: (SessionTab) -> Unit) {
+internal fun NativeSessionTabs(
+  selected: SessionTab,
+  updates: Int = 0,
+  onSelect: (SessionTab) -> Unit,
+) {
   SecondaryTabRow(selectedTabIndex = selected.ordinal) {
     SessionTab.entries.forEach { tab ->
-      Tab(selected = selected == tab, onClick = { onSelect(tab) }, text = { Text(tab.label) })
+      Tab(
+        selected = selected == tab,
+        onClick = { onSelect(tab) },
+        text = {
+          Text(if (tab == SessionTab.TOOLS && updates > 0) "Tools ($updates)" else tab.label)
+        },
+      )
     }
   }
 }
