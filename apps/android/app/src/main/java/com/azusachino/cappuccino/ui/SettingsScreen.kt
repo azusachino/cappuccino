@@ -1,12 +1,14 @@
 package com.azusachino.cappuccino.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -19,12 +21,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.azusachino.cappuccino.BuildConfig
-import com.azusachino.cappuccino.R
 import kotlinx.coroutines.launch
 
 internal data class SettingsConnection(val id: String, val label: String, val status: String)
@@ -62,90 +62,64 @@ internal fun SettingsScreen(
           .getOrNull()
       }
   }
+  val formatBytes = { bytes: Long ->
+    android.text.format.Formatter.formatShortFileSize(context, bytes)
+  }
   Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
     SettingsHeading("Appearance")
-    PreferenceRow(
+    SettingRow(
       "Theme",
-      "${appPalette.label} · ${themeMode.name.lowercase().replaceFirstChar { it.uppercase() }}",
-      R.drawable.ic_settings,
+      value =
+        "${appPalette.label} · ${themeMode.name.lowercase().replaceFirstChar { it.uppercase() }}",
     ) {
       if (onOpenAppearance != null) onOpenAppearance() else choosingTheme = true
     }
     SettingsHeading("Notifications")
     NotificationSettings()
     SettingsHeading("Storage")
-    PreferenceRow(
+    SettingRow(
       "Saved conversations",
-      offlineBytes?.let {
-        "${android.text.format.Formatter.formatShortFileSize(context, it)} on this device · ${savedConversations.size} conversations"
-      } ?: "Checking saved storage…",
-      R.drawable.ic_chat,
-      if (savedConversations.isNotEmpty() && onOpenSaved != null) ({ choosingSaved = true })
-      else null,
+      value =
+        offlineBytes?.let { "${savedConversations.size} · ${formatBytes(it)}" } ?: "Checking…",
+      onClick =
+        if (savedConversations.isNotEmpty() && onOpenSaved != null) ({ choosingSaved = true })
+        else null,
     )
-    Text(
-      "Up to 20 recent conversations, limited to 32 MiB. Saved history is read-only and separate from temporary cache.",
-      Modifier.padding(horizontal = 16.dp),
-      style = MaterialTheme.typography.bodySmall,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    offlineProblem?.let { SettingNote(it, warning = true) }
+    SettingRow(
+      "Temporary cache",
+      value =
+        when {
+          clearing -> "Clearing…"
+          else -> cacheBytes?.let(formatBytes) ?: "Unavailable"
+        },
+      onClick = if (clearing || cacheBytes == 0L) null else ({ confirmingClear = true }),
     )
-    offlineProblem?.let {
-      Text(it, Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
-    }
-    PreferenceRow(
-      "Clear cache",
-      if (clearing) "Clearing temporary files…"
-      else
-        cacheBytes?.let {
-          "Temporary files · ${android.text.format.Formatter.formatShortFileSize(context, it)}"
-        } ?: "Temporary file size unavailable",
-      R.drawable.ic_settings,
-      if (clearing) null else ({ confirmingClear = true }),
-    )
-    cacheResult?.let {
-      Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
-    }
+    cacheResult?.let { SettingNote(it) }
+    SettingNote("Keeps the 20 most recent conversations, up to 32 MB, read-only.")
     SettingsHeading("Connections")
-    if (connections.isEmpty()) {
-      Text(
-        "No machines added",
-        Modifier.padding(horizontal = 16.dp),
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-      )
-    }
+    if (connections.isEmpty()) SettingNote("No machines added")
     connections.forEach { connection ->
       androidx.compose.runtime.key(connection.id) {
-        PreferenceRow(connection.label, connection.status, R.drawable.ic_machine) {
+        SettingRow(connection.label, value = connection.status) {
           onConnectionDetails(connection.id)
         }
       }
     }
     SettingsHeading("About")
-    PreferenceRow(
-      "Cappuccino",
-      "Read your agents' conversations and tool activity across your machines.",
-      R.drawable.ic_chat,
+    SettingRow(
+      "Version",
+      value = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+      onClick = null,
     )
-    PreferenceRow(
-      "App version",
-      "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.BUILD_TYPE}",
-      R.drawable.ic_chat,
-    )
-    Text(
-      "Your agent sessions stay on your machines.",
-      Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-      style = MaterialTheme.typography.bodySmall,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    PreferenceRow("Setup & troubleshooting", "Open the GitHub guide", R.drawable.ic_chat) {
+    SettingRow("Setup guide", value = "GitHub") {
       helpError =
-        runCatching {
-          uriHandler.openUri("https://github.com/azusachino/cappuccino#readme")
-        }
+        runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
           .exceptionOrNull()
           ?.let { "Couldn't open the guide. Visit github.com/azusachino/cappuccino." }
     }
-    helpError?.let { Text(it, Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall) }
+    helpError?.let { SettingNote(it, warning = true) }
+    SettingNote("Agent sessions stay on your machines; this app only reads and relays them.")
   }
   if (choosingSaved && onOpenSaved != null) {
     AlertDialog(
@@ -154,10 +128,10 @@ internal fun SettingsScreen(
       text = {
         Column(Modifier.verticalScroll(rememberScrollState())) {
           savedConversations.forEach { saved ->
-            PreferenceRow(
+            SettingRow(
               saved.agent.label,
-              "${savedMachineNames[saved.agent.machineId] ?: saved.agent.agent} · Saved ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(saved.savedAt).toString(), timeZone)}",
-              R.drawable.ic_chat,
+              detail =
+                "${savedMachineNames[saved.agent.machineId] ?: saved.agent.agent} · Saved ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(saved.savedAt).toString(), timeZone)}",
             ) {
               choosingSaved = false
               onOpenSaved(saved.agent.machineId, saved.conversationId)
@@ -243,25 +217,66 @@ internal fun SettingsScreen(
 private fun SettingsHeading(title: String) {
   Text(
     title,
-    Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp).semantics { heading() },
-    style = MaterialTheme.typography.labelLarge,
-    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp).semantics {
+      heading()
+    },
+    style = MaterialTheme.typography.labelMedium,
+    color = MaterialTheme.appColors.accent,
   )
 }
 
+/** A short explanation under a group, only where a row needs one. */
 @Composable
-private fun PreferenceRow(
+internal fun SettingNote(text: String, warning: Boolean = false) {
+  Text(
+    text,
+    Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+    style = MaterialTheme.typography.bodySmall,
+    color = if (warning) MaterialTheme.appColors.warn else MaterialTheme.appColors.muted,
+  )
+}
+
+/**
+ * One setting: its name, an optional line about it, and its current value or control at the end.
+ */
+@Composable
+internal fun SettingRow(
   title: String,
-  summary: String,
-  icon: Int,
-  onClick: (() -> Unit)? = null,
+  value: String? = null,
+  detail: String? = null,
+  warning: Boolean = false,
+  trailing: (@Composable () -> Unit)? = null,
+  onClick: (() -> Unit)?,
 ) {
-  val content: @Composable () -> Unit = {
-    ListItem(
-      headlineContent = { Text(title) },
-      supportingContent = { Text(summary) },
-      leadingContent = { Icon(painterResource(icon), contentDescription = null) },
-    )
+  val colors = MaterialTheme.appColors
+  androidx.compose.foundation.layout.Row(
+    Modifier.fillMaxWidth()
+      .heightIn(min = 52.dp)
+      .then(
+        if (onClick != null)
+          Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+        else Modifier
+      )
+      .padding(horizontal = 16.dp, vertical = 10.dp),
+    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+  ) {
+    Column(Modifier.weight(1f)) {
+      Text(title, style = MaterialTheme.typography.bodyMedium, color = colors.text)
+      detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.muted) }
+    }
+    value?.let {
+      Text(
+        it,
+        Modifier.widthIn(max = 200.dp),
+        style = MaterialTheme.typography.bodySmall,
+        color = if (warning) colors.warn else colors.muted,
+        maxLines = 2,
+        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+      )
+    }
+    trailing?.invoke()
+    if (onClick != null && trailing == null)
+      Text("›", style = MaterialTheme.typography.bodyMedium, color = colors.faint)
   }
-  if (onClick != null) Surface(onClick = onClick, content = content) else content()
 }

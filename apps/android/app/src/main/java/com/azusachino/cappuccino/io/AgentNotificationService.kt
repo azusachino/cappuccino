@@ -219,35 +219,6 @@ class AgentNotificationService : Service() {
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
           PackageManager.PERMISSION_GRANTED
 
-    fun sendTest(context: Context) {
-      if (
-        Build.VERSION.SDK_INT >= 33 &&
-          ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-      )
-        return
-      val manager = context.getSystemService(NotificationManager::class.java)
-      manager.createNotificationChannel(
-        NotificationChannel(
-          ALERTS,
-          "Agent completion and input",
-          NotificationManager.IMPORTANCE_DEFAULT,
-        )
-      )
-      manager.notify(
-        "phone-notification-test",
-        3,
-        NotificationCompat.Builder(context, ALERTS)
-          .setSmallIcon(R.drawable.ic_agent_pi)
-          .setContentTitle("Test notification")
-          .setContentText(
-            "Cappuccino phone notifications are available. This is not an agent completion."
-          )
-          .setAutoCancel(true)
-          .build(),
-      )
-    }
-
     fun start(context: Context) {
       if (
         permissionGranted(context) &&

@@ -6,10 +6,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,55 +27,42 @@ internal fun NotificationSettings() {
       granted = it
       if (it && enabled) AgentNotificationService.start(context)
     }
-  ListItem(
-    headlineContent = { Text("System notifications") },
-    supportingContent = {
-      Text(
-        if (!granted) "Android permission required"
-        else "Completion and input requests · background monitoring"
-      )
-    },
-    trailingContent = {
+  fun requestPermission() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      preferences.permissionRequested = true
+      permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+  }
+  SettingRow(
+    "Agent notifications",
+    detail = "When an agent finishes or needs your answer",
+    trailing = {
       Switch(
         checked = enabled,
         onCheckedChange = {
           enabled = it
           preferences.enabled = it
           if (!it) context.stopService(Intent(context, AgentNotificationService::class.java))
-          else if (granted) AgentNotificationService.start(context)
-          else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            preferences.permissionRequested = true
-            permission.launch(Manifest.permission.POST_NOTIFICATIONS)
-          }
+          else if (granted) AgentNotificationService.start(context) else requestPermission()
         },
       )
     },
+    onClick = null,
   )
   if (enabled && !granted)
-    TextButton(
-      onClick = {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-          preferences.permissionRequested = true
-          permission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-      }
-    ) {
-      Text("Allow notifications")
-    }
-  TextButton(
-    enabled = granted && enabled,
-    onClick = { AgentNotificationService.sendTest(context) },
-  ) {
-    Text("Send test notification")
-  }
-  TextButton(
+    SettingRow(
+      "Android permission",
+      value = "Not allowed",
+      warning = true,
+      onClick = ::requestPermission,
+    )
+  SettingRow(
+    "System notification settings",
     onClick = {
       context.startActivity(
         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
           .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
       )
-    }
-  ) {
-    Text("Android notification settings")
-  }
+    },
+  )
 }
