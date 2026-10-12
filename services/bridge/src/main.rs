@@ -14,6 +14,7 @@ mod prompt;
 mod reconcile;
 mod routes;
 mod state;
+mod stats;
 mod transcript;
 
 use axum::routing::get;

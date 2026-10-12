@@ -18,6 +18,8 @@ pub struct ConversationResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
     pub turns: Vec<ConversationTurn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stats: Option<crate::stats::SessionStats>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

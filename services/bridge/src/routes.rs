@@ -2,7 +2,7 @@
 //! `pane.read` and emits wire-v0-shaped events with the slice-A
 //! reconciliation semantics.
 
-use crate::{agents, conversation, herdr, prompt, reconcile, transcript};
+use crate::{agents, conversation, herdr, prompt, reconcile, stats, transcript};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Json, Path as AxumPath, Query, State};
 use axum::http::{header, StatusCode};
@@ -317,23 +317,34 @@ pub async fn agent_conversation(
             match conversation::read_canonical_tail(&resolved, conversation::TRANSCRIPT_TAIL_BYTES)
             {
                 Ok((content, conversation_id)) => {
-                    let turns = match resolved {
+                    let (turns, kind) = match resolved {
                         transcript::ResolvedTranscript::Pi(_) => {
-                            conversation::parse_pi_transcript(&content)
+                            (conversation::parse_pi_transcript(&content), stats::Kind::Pi)
                         }
-                        transcript::ResolvedTranscript::Claude(_) => {
-                            conversation::parse_claude_transcript(&content)
-                        }
-                        transcript::ResolvedTranscript::Agy(_) => {
-                            conversation::parse_agy_transcript(&content)
-                        }
+                        transcript::ResolvedTranscript::Claude(_) => (
+                            conversation::parse_claude_transcript(&content),
+                            stats::Kind::Claude,
+                        ),
+                        transcript::ResolvedTranscript::Agy(_) => (
+                            conversation::parse_agy_transcript(&content),
+                            stats::Kind::Agy,
+                        ),
                     };
+                    let mut session_stats = stats::session_stats(kind, &content);
+                    if let Some(found) = session_stats.as_mut().filter(|_| kind == stats::Kind::Pi)
+                    {
+                        if let (Some(provider), Some(model)) = (&found.provider, &found.model) {
+                            found.context_window =
+                                stats::pi_context_window(resolved.path(), provider, model);
+                        }
+                    }
                     let payload = conversation::ConversationResponse {
                         session_id,
                         source: "canonical_log".to_string(),
                         machine_id: Some(state.machine_id.clone()),
                         conversation_id,
                         turns,
+                        stats: session_stats,
                     };
                     (
                         StatusCode::OK,
@@ -362,6 +373,7 @@ pub async fn agent_conversation(
                             machine_id: Some(state.machine_id.clone()),
                             conversation_id: None,
                             turns,
+                            stats: None,
                         };
                         (
                             StatusCode::OK,
