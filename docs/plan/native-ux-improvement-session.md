@@ -1,6 +1,6 @@
 # Native UX improvement session
 
-Status: owner-approved continuation after the Paseo study. Android has installed theme/highlighting, compact headings and recorded-tool corrections; offline-history wiring is gate-green but uncommitted and uninstalled, with behavioral/device acceptance pending. Apple foundations are gated but its consuming UI remains behind Android. No whole-flow acceptance is claimed.
+Status: owner-approved continuation after the Paseo study. Android has installed theme/highlighting, compact headings and recorded-tool corrections; offline-history/canonical identity is committed and locally gated; Android is reinstalled, with consuming device acceptance and the Mini rollout pending. Apple foundations are gated but its consuming UI remains behind Android. No whole-flow acceptance is claimed.
 
 Tracking: [issue #33](https://github.com/azusachino/cappuccino/issues/33).
 Source studies: [Telegram, Nekogram and Haven](../design/telegram-nekogram-ux-study.md), [native highlighting](../design/native-code-highlighting-research.md), [Paseo](../design/paseo-source-study.md).
@@ -19,7 +19,7 @@ Current working baseline:
 - Machine names are readable and locally editable. UUID/pane/session IDs are not normal user-facing details.
 - Connection metadata exists, but its current alert is too verbose and is not accepted as the intended design.
 
-Current recorded checkout: `feat/native-pi-rendering`, committed checkpoint `350b199`. Android offline wiring is uncommitted in `MainActivity.kt`, `io/ConnectedViewModel.kt`, `io/OfflineConversations.kt`, `ui/CappuccinoShell.kt` and `ui/SettingsScreen.kt`; preserve and revalidate it. Latest installed slice is `8247404` (tool history), not the offline build; its APK hash is not recorded here.
+Current implementation checkpoint: `946e25c` on `feat/native-pi-rendering`, pushed after local bridge/Android/Markdown gates passed. The owner subsequently authorized pushing, updating the Mini bridge and reinstalling Android. The installed offline-build APK SHA256 is `3a752804220093bc2cd940f13a36a839954383de3d64e72558d9f4de99df210b`; `adb install -r` succeeded on the authorized phone and the app was launched, preserving data. This is not an executed native saved-reader journey. Mini's isolated Linux build/gate and rollout remain pending.
 
 The initial plan's `a4c48668b50a43b42ae03496d8d1163ca54d4639` and APK `d583bd28c2e4903a968c153fe1f096d6a889a5b525a0ac4f3f2ed3335d293ca9` are historical entry evidence, not the current baseline. Compare actual Git and artifact identities before resuming.
 
@@ -41,7 +41,7 @@ Owned implementation areas are Android `ui/`, focused core/I/O and tests, activi
 
 The bridge already supplies the metadata needed for the initial machine-information improvement. No bridge change or repeated bridge soak is needed for presentation-only slices. The owner's added requirement to expose tool failures does require preserving Pi's `isError` flag as an optional `is_error` tool-part field; that scoped addition requires the full bridge gate before activation. If a real protocol/backend requirement emerges, stop and re-scope it with its own acceptance and full bridge gates.
 
-No terminal embedding, WebView, library fork, remote session creation/renaming/deletion or SSH fallback. The owner separately authorized native highlighting and bounded offline history with accurate storage controls; the old blanket tokenizer/dependency/settings exclusion no longer blocks those slices. The Android TextMate dependency is already adopted; further tokenizer/runtime adoption needs a scoped license, compatibility and performance decision. No emulator restart, device setting changes, prompt/approval submission, agent session manipulation or proxy/auto-apply changes. Preserve app data and all existing dirty work. Frequent focused green commits are owner-authorized. No pushes, merges, issue closure or other remote writes are authorized by this continuation.
+No terminal embedding, WebView, library fork, remote session creation/renaming/deletion or SSH fallback. The owner separately authorized native highlighting and bounded offline history with accurate storage controls; the old blanket tokenizer/dependency/settings exclusion no longer blocks those slices. The Android TextMate dependency is already adopted; further tokenizer/runtime adoption needs a scoped license, compatibility and performance decision. No emulator restart, device setting changes, prompt/approval submission, agent session manipulation or proxy/auto-apply changes. Preserve app data and all existing dirty work. Frequent focused green commits are owner-authorized. The subsequent owner request authorized pushing the feature branch and updating Mini's bridge; no merge, issue closure, proxy/cluster changes or remote-agent session actions are authorized.
 
 Execution is direct and sequential: no delegated agents or Asobi, per owner instructions. Track progress on issue #33, with this document as the plan; do not create a second task-record system.
 
@@ -64,7 +64,7 @@ The owner approved this order after the Paseo study. The original UX slices belo
 | Native Android highlighting (`fd7fd54`) | Yes, initial language set | Android passed | Installed; native selection/performance journey pending | No complete highlighting acceptance |
 | Compact headings (`6ffa44d`) | Yes | Android passed; native regression compiled | Installed; regression not executed | Compact mobile requirement approved |
 | Recorded tools/results (`8247404`) | Yes | Android passed | Installed; consuming tools journey pending | No live-queue/delivery claim |
-| Offline storage (`4c430fd`) and wiring | Storage committed; wiring uncommitted | Storage and wiring Android gates passed | Not installed; restart/read-only journey pending | Bounded offline history authorized, not accepted as complete |
+| Offline/canonical identity (`4c430fd`, `946e25c`) | Committed and pushed | Local full bridge/Android/Markdown gates passed | Android installed; Linux rollout and native restart/read-only journey pending | Implementation/rollout authorized, not accepted as complete |
 | Apple identity/profiles/connections (`083bea7`, `610eae7`, `cabbc9c`) | Core foundations only | Apple gates passed | Consuming multi-machine UI journey pending | No UI parity acceptance |
 
 ### Next: complete offline-history acceptance
