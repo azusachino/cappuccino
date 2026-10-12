@@ -138,7 +138,8 @@ installed command name (`cappuccino-bridge`), never a checkout's
 The one-shot `[[startup]]` command invokes the installed binary's `start`
 subcommand. It creates a separate server process with redirected logs and an
 owner-only state directory at `HERDR_PLUGIN_STATE_DIR/state`
-(or `~/.local/state/cappuccino-bridge`). If the plugin state root already
+(without it, Herdr's own `${XDG_STATE_HOME:-~/.local/state}/herdr/plugins/cappuccino-bridge`,
+so bare `cappuccino-bridge status` finds the bridge Herdr started). If the plugin state root already
 contains legacy bridge lifecycle files, the binary keeps using that location
 rather than silently abandoning them; the same strict permission checks still
 apply. The private `bridge.control` record
