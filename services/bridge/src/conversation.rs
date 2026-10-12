@@ -625,6 +625,12 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
                     push_user(&mut turns, text, timestamp);
                 }
             }
+            // Harness notices (a background task finishing) are written as user text; nobody typed them.
+            "user"
+                if v["origin"]["kind"].as_str() == Some("task-notification")
+                    || v["message"]["content"].as_str().is_some_and(|text| {
+                        text.trim_start().starts_with("<task-notification>")
+                    }) => {}
             "user" => match &v["message"]["content"] {
                 Value::String(text) => {
                     let text = claude_command_text(text).unwrap_or_else(|| text.clone());

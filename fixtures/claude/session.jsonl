@@ -14,3 +14,4 @@
 {"type":"assistant","isApiErrorMessage":true,"timestamp":"2026-10-12T10:00:14Z","message":{"id":"m4","role":"assistant","content":[{"type":"text","text":"API Error: overloaded"}]}}
 {"type":"system","subtype":"turn_duration","durationMs":11000,"timestamp":"2026-10-12T10:00:15Z"}
 not json
+{"type":"user","origin":{"kind":"task-notification"},"timestamp":"2026-10-12T10:00:16Z","message":{"role":"user","content":"<task-notification>\n<task-id>x</task-id>\n</task-notification>"}}
