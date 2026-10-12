@@ -12,6 +12,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -38,6 +39,7 @@ import java.time.ZoneId
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -48,15 +50,7 @@ class CappuccinoShellTest {
 
   @Test
   fun disconnectedJourneyAndRecreation() {
-    compose
-      .onNodeWithText("Select or add a bridge in Machines to discover agents.")
-      .assertIsDisplayed()
-    compose.onNodeWithText("Not connected · 0 agents").assertIsDisplayed()
-    capture("Chats")
-
-    compose.onNodeWithText("Attention").assertDoesNotExist()
-
-    compose.onNode(hasText("Machines") and hasClickAction()).performClick()
+    // The app opens on Machines; agents are reached through their machine, not a Chats tab.
     compose.onNodeWithText("No machines configured").assertIsDisplayed()
     compose.onNodeWithContentDescription("Add machine").assertIsDisplayed()
     capture("Machines")
@@ -71,10 +65,12 @@ class CappuccinoShellTest {
     compose.activityRule.scenario.recreate()
     compose.waitForIdle()
     compose.onNodeWithText("No machines configured").assertIsDisplayed()
-    compose.onNode(hasText("Chats") and hasClickAction()).performClick()
-    compose
-      .onNodeWithText("Select or add a bridge in Machines to discover agents.")
-      .assertIsDisplayed()
+
+    compose.onNode(hasText("Settings") and hasClickAction()).performClick()
+    compose.onNodeWithText("Theme").assertIsDisplayed()
+    capture("Settings")
+    compose.onNode(hasText("Machines") and hasClickAction()).performClick()
+    compose.onNodeWithText("No machines configured").assertIsDisplayed()
   }
 
   @Test
@@ -202,9 +198,9 @@ class CappuccinoShellTest {
     }
     compose.waitForIdle()
     awaitJumpAffordance()
-    compose.onNodeWithText("Jump to latest").assertIsDisplayed()
+    compose.onNodeWithTag("jumpToLatest").assertIsDisplayed()
     assertJumpAffordanceSitsAboveComposer()
-    compose.onNodeWithText("Jump to latest").performClick()
+    compose.onNodeWithTag("jumpToLatest").performClick()
     compose.onNodeWithText("Synthetic output 31").assertIsDisplayed()
 
     compose.runOnUiThread {
@@ -215,7 +211,8 @@ class CappuccinoShellTest {
     capture("ConnectionError")
     compose.onNodeWithContentDescription("Back").performClick()
     compose.waitForIdle()
-    compose.onNodeWithText("synthetic-session", substring = true).assertIsDisplayed()
+    // Back returns to the machine the agent belongs to.
+    compose.onNodeWithText("Synthetic machine").assertIsDisplayed()
   }
 
   @Test
@@ -249,9 +246,8 @@ class CappuccinoShellTest {
         }
       }
     }
-    // Establish a loaded reader using short messages that are not hidden by preview truncation.
-    compose.onNodeWithContentDescription("Follow live output").performClick()
-    compose.onNodeWithContentDescription("Follow live output").performClick()
+    // The reader opens following the newest message.
+    compose.waitForIdle()
     capture("ToolOnlyBefore")
     compose.onNodeWithText("ANCHOR REPLY").assertIsDisplayed()
     compose.waitForIdle()
@@ -274,7 +270,8 @@ class CappuccinoShellTest {
     compose.onNodeWithText("ANCHOR REPLY").assertIsDisplayed()
     val after = compose.onNodeWithText("ANCHOR REPLY").fetchSemanticsNode().boundsInRoot.top
     assertEquals(before, after, 0.5f)
-    compose.onNodeWithText("Jump to latest").assertDoesNotExist()
+    // Tool-only updates may leave the reader above the bottom, but never flag new output.
+    compose.onNodeWithContentDescription("Jump to new output").assertDoesNotExist()
     capture("ToolOnlyAfter")
 
     compose.onNodeWithTag("recentOutputList").performTouchInput { swipeDown() }
@@ -309,7 +306,8 @@ class CappuccinoShellTest {
         .config[SemanticsProperties.VerticalScrollAxisRange]
         .value()
     assertEquals(readingBefore, readingAfter, 0.01f)
-    compose.onNodeWithText("Jump to latest").assertDoesNotExist()
+    // Tool-only updates may leave the reader above the bottom, but never flag new output.
+    compose.onNodeWithContentDescription("Jump to new output").assertDoesNotExist()
 
     compose.runOnIdle {
       state.value =
@@ -320,7 +318,7 @@ class CappuccinoShellTest {
         )
     }
     awaitJumpAffordance()
-    compose.onNodeWithText("Jump to latest").performClick()
+    compose.onNodeWithTag("jumpToLatest").performClick()
     compose.onNodeWithText("NEW ANSWER").assertIsDisplayed()
   }
 
@@ -371,6 +369,7 @@ class CappuccinoShellTest {
                 .copy(parts = listOf(ConversationPart.Text(tail + "\n\nSame-count update")))
         )
     }
+    compose.waitForIdle()
     compose.onNodeWithText("Same-count update").assertIsDisplayed()
     compose.onNodeWithTag("recentOutputList").performTouchInput { swipeDown() }
     compose.waitForIdle()
@@ -389,7 +388,7 @@ class CappuccinoShellTest {
         )
     }
     awaitJumpAffordance()
-    compose.onNodeWithText("Jump to latest").assertIsDisplayed()
+    compose.onNodeWithTag("jumpToLatest").assertIsDisplayed()
     assertJumpAffordanceSitsAboveComposer()
     val after =
       compose
@@ -398,7 +397,7 @@ class CappuccinoShellTest {
         .config[SemanticsProperties.VerticalScrollAxisRange]
         .value()
     assertEquals(before, after, 0.01f)
-    compose.onNodeWithText("Jump to latest").performClick()
+    compose.onNodeWithTag("jumpToLatest").performClick()
     compose.onNodeWithText("Newest structured response").assertIsDisplayed()
     capture("ConversationLatest")
     compose.runOnIdle {
@@ -414,13 +413,13 @@ class CappuccinoShellTest {
         )
     }
     compose.onNodeWithText("Other machine latest").assertIsDisplayed()
-    compose.onNodeWithText("Jump to latest").assertDoesNotExist()
+    compose.onNodeWithTag("jumpToLatest").assertDoesNotExist()
   }
 
   @Test
   fun visibleTimestampTracksDeviceTimezoneChangesWithoutReloadingConversation() {
-    // This OS-setting journey is emulator-only; never mutate a physical phone's timezone.
-    assertEquals("1", shell("getprop ro.kernel.qemu").trim())
+    // This OS-setting journey is emulator-only; never mutate a physical device's timezone.
+    assumeTrue("needs an emulator", shell("getprop ro.kernel.qemu").trim() == "1")
     val originalZone = ZoneId.of(shell("getprop persist.sys.timezone").trim()).id
     fun setZone(zone: String) {
       require(zone.matches(Regex("[A-Za-z0-9_+/:.-]+")))
@@ -478,34 +477,30 @@ class CappuccinoShellTest {
   }
 
   private fun assertJumpAffordanceSitsAboveComposer() {
-    // Contract geometry, not just text presence (android-material3.md region 8): the
-    // extended FAB must render in flow at the bottom end, between the transcript and the
-    // composer — never back at the top of the transcript column.
-    val decor = compose.activity.window.decorView
-    val fab = compose.onNodeWithText("Jump to latest").fetchSemanticsNode().boundsInRoot
+    // Contract geometry, not just presence: the jump button overlays the transcript's
+    // bottom-end corner (pi-pocket's `.jump`) and never reaches into the composer.
+    val jump = compose.onNodeWithTag("jumpToLatest").fetchSemanticsNode().boundsInRoot
     val composer = compose.onNodeWithTag("promptInput").fetchSemanticsNode().boundsInRoot
     val transcript = compose.onNodeWithTag("recentOutputList").fetchSemanticsNode().boundsInRoot
     assertTrue(
-      "FAB must sit in the bottom half of the screen " +
-        "(bottom=${fab.bottom}, window=${decor.height})",
-      fab.bottom > decor.height / 2f,
+      "Jump must sit inside the transcript's lower half (jump=$jump, transcript=$transcript)",
+      jump.top >= transcript.center.y && jump.bottom <= transcript.bottom,
     )
     assertTrue(
-      "FAB bottom must stay above the composer (fab=$fab, composer=$composer)",
-      fab.bottom <= composer.top,
+      "Jump must sit at the end edge (jump=$jump, transcript=$transcript)",
+      jump.right > transcript.center.x,
     )
     assertTrue(
-      "FAB must not overlap the transcript above it (transcript=$transcript, fab=$fab)",
-      transcript.bottom <= fab.top,
+      "Jump must stay above the composer (jump=$jump, composer=$composer)",
+      jump.bottom <= composer.top,
     )
   }
 
   private fun awaitJumpAffordance() {
-    // The M3 extended FAB animates its width in on appearance; wait (bounded, test
-    // thread) until the affordance has real size, then the unchanged display assertions apply.
+    // Wait (bounded, test thread) until the jump button is laid out with real size.
     compose.waitUntil(timeoutMillis = 5_000) {
-      compose.onAllNodesWithText("Jump to latest").fetchSemanticsNodes().any {
-        it.boundsInRoot.width > 100
+      compose.onAllNodesWithTag("jumpToLatest").fetchSemanticsNodes().any {
+        it.boundsInRoot.width > 0
       }
     }
     compose.waitForIdle()

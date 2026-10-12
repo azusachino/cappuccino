@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -30,6 +31,7 @@ import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.Endpoint
 import com.azusachino.cappuccino.core.StreamEntry
 import com.azusachino.cappuccino.core.StreamState
+import com.azusachino.cappuccino.core.activitySummary
 import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectionState
@@ -143,7 +145,7 @@ class ConversationPreviewScreenshotTest {
       }
     }
     compose.waitForIdle()
-    compose.onNodeWithText("Recent output · History not verified").assertIsDisplayed()
+    compose.onNodeWithTag("recentOutputList").assertIsDisplayed()
   }
 
   @Test
@@ -176,40 +178,21 @@ class ConversationPreviewScreenshotTest {
   fun captureConversationExpandedDark() {
     val state = previewState()
     setContent(state, ThemeMode.DARK)
-    // Physical reader scroll back until the disclosure rows are actually on screen
-    // (off-screen pre-composed nodes exist but are not displayed).
-    repeat(3) {
-      if (!anyDisplayed("Thinking", maxTopFraction = 0.5f)) {
-        compose.onNodeWithTag("recentOutputList").performTouchInput { swipeDown() }
-        compose.waitForIdle()
-      }
-    }
-    compose.onNodeWithText("Thinking").assertIsDisplayed()
-    compose.onNodeWithText("Thinking").performClick()
-    // Reader scroll so the expanded content is actually in view at narrow widths (the single
-    // click already happened; this only brings the disclosed detail into the viewport).
-    compose
-      .onNodeWithTag("recentOutputList")
-      .performScrollToNode(hasText("Hidden thought details: check collapse, contrast and spacing."))
-    // Exact full paragraph text: MarkdownText renders the second thinking paragraph as one Text
-    // node with exactly this content; a shorter exact matcher can never display.
-    compose.waitUntil(timeoutMillis = 5_000) {
-      anyDisplayed("Hidden thought details: check collapse, contrast and spacing.")
-    }
-    compose
-      .onNodeWithText("Hidden thought details: check collapse, contrast and spacing.")
-      .assertIsDisplayed()
-    // At the 320x640@160 CI frame the Tool row sits below the fold after the bottom-pinning
-    // scroll to the Thinking detail; a click injected at its clipped center never lands.
-    // Bring the row into view and prove it is displayed before the single expand click.
-    compose.onNodeWithText("Tools · 1").assertIsDisplayed()
-    compose.onNodeWithText("Tools · 1").performClick()
-    compose.onNodeWithText("Tool activity").assertIsDisplayed()
-    compose.onNodeWithText("bash · Result available").assertIsDisplayed()
-    compose.onNodeWithText("bash · Result available").performClick()
-    compose.onNodeWithTag("toolActivityList").performScrollToNode(hasText("63 passed · 0 failed"))
-    compose.waitUntil(timeoutMillis = 5_000) { anyDisplayed("63 passed · 0 failed") }
-    compose.onNodeWithText("63 passed · 0 failed").assertIsDisplayed()
+    // p1's thinking and tool call are one activity line, closed in an older turn.
+    val summary = activitySummary(previewTurns()[1].parts.filter { it !is ConversationPart.Text })
+    val list = compose.onNodeWithTag("recentOutputList")
+    list.performScrollToNode(hasText(summary))
+    compose.onNodeWithText(summary).performClick()
+    list.performScrollToNode(hasText("Thought"))
+    compose.onNodeWithText("Thought").performClick()
+    list.performScrollToNode(hasText("Hidden thought details", substring = true))
+    compose.onNodeWithText("Hidden thought details", substring = true).assertIsDisplayed()
+    val results = { compose.onAllNodesWithText("63 passed · 0 failed").fetchSemanticsNodes().size }
+    val closed = results()
+    list.performScrollToNode(hasText("bash"))
+    compose.onNodeWithText("bash").performClick()
+    compose.waitUntil(timeoutMillis = 5_000) { results() > closed }
+    list.performScrollToNode(hasText("63 passed · 0 failed"))
     capture("${capturePrefix()}DarkExpanded")
   }
 
@@ -288,7 +271,7 @@ class ConversationPreviewScreenshotTest {
         )
     }
     waitAndAdvanceUntilJumpHasSize()
-    compose.onNodeWithText("Jump to latest").assertIsDisplayed()
+    compose.onNodeWithTag("jumpToLatest").assertIsDisplayed()
     capture("${capturePrefix()}LightFollowLatest")
   }
 
@@ -308,11 +291,10 @@ class ConversationPreviewScreenshotTest {
   }
 
   private fun waitAndAdvanceUntilJumpHasSize() {
-    // The M3 extended FAB animates its width in on appearance; wait (bounded, test
-    // thread) until the affordance has real size before asserting display.
+    // Wait (bounded, test thread) until the jump button is laid out with real size.
     compose.waitUntil(timeoutMillis = 5_000) {
-      compose.onAllNodesWithText("Jump to latest").fetchSemanticsNodes().any {
-        it.boundsInRoot.width > 100
+      compose.onAllNodesWithTag("jumpToLatest").fetchSemanticsNodes().any {
+        it.boundsInRoot.width > 0
       }
     }
     compose.waitForIdle()

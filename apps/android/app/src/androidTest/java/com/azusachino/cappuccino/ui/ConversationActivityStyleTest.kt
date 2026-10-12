@@ -31,28 +31,40 @@ class ConversationActivityStyleTest {
         ),
       )
     compose.activity.setContent { CappuccinoTheme { ConversationTurnRow(turn) } }
-    compose
-      .onNodeWithContentDescription("Assistant", useUnmergedTree = true)
-      .assert(hasAnyDescendant(hasText("Actual reply")))
-    compose
-      .onNodeWithContentDescription("Assistant", useUnmergedTree = true)
-      .assert(hasAnyDescendant(hasText("bash · Result available")).not())
-    compose.onNodeWithText("bash · Result available").assertIsDisplayed()
+    // Prose and the activity line are separate rows: the reply text never wraps tool output.
+    val summary = com.azusachino.cappuccino.core.activitySummary(turn.parts)
+    val reply = compose.onNodeWithText("Actual reply").fetchSemanticsNode().boundsInRoot
+    val activity = compose.onNodeWithText(summary).fetchSemanticsNode().boundsInRoot
+    org.junit.Assert.assertTrue("reply=$reply activity=$activity", reply.bottom <= activity.top)
+    compose.onNodeWithText(summary).performClick()
+    compose.onNodeWithText("bash").performClick()
     compose.onNodeWithText("workspace").assertIsDisplayed()
+    org.junit.Assert.assertTrue(
+      compose.onNodeWithText("workspace").fetchSemanticsNode().boundsInRoot.top >= reply.bottom
+    )
   }
 
   @Test
   fun paragraphsAndTimestampShareOneMessageBlock() {
-    val timestamp = "2026-10-10T01:00:00Z"
     val turn =
       ConversationTurn(
         "block",
         "agent",
-        timestamp,
+        null,
         null,
         listOf(ConversationPart.Text("First paragraph"), ConversationPart.Text("Second paragraph")),
       )
-    compose.activity.setContent { CappuccinoTheme { ConversationTurnRow(turn) } }
+    // Only the person's prompts carry a time; it sits inside that prompt's block.
+    val timestamp = "2026-10-10T01:00:00Z"
+    val prompt = ConversationTurn("prompt", "user", timestamp, "Synthetic prompt", emptyList())
+    compose.activity.setContent {
+      CappuccinoTheme {
+        androidx.compose.foundation.layout.Column {
+          ConversationTurnRow(prompt)
+          ConversationTurnRow(turn)
+        }
+      }
+    }
     compose
       .onAllNodesWithContentDescription("Assistant", useUnmergedTree = true)
       .assertCountEquals(1)
@@ -61,14 +73,21 @@ class ConversationActivityStyleTest {
         .onNodeWithContentDescription("Assistant", useUnmergedTree = true)
         .fetchSemanticsNode()
         .boundsInRoot
+    for (paragraph in listOf("First paragraph", "Second paragraph")) {
+      val bounds = compose.onNodeWithText(paragraph).fetchSemanticsNode().boundsInRoot
+      org.junit.Assert.assertTrue(paragraph, bubble.contains(bounds.center))
+    }
+    val you =
+      compose
+        .onNodeWithContentDescription("You", useUnmergedTree = true)
+        .fetchSemanticsNode()
+        .boundsInRoot
     val time =
       compose
         .onNodeWithContentDescription(formatConversationTimestamp(timestamp)!!)
         .fetchSemanticsNode()
         .boundsInRoot
-    org.junit.Assert.assertTrue(bubble.contains(time.center))
-    compose.onNodeWithText("First paragraph").assertIsDisplayed()
-    compose.onNodeWithText("Second paragraph").assertIsDisplayed()
+    org.junit.Assert.assertTrue(you.contains(time.center))
   }
 
   @Test

@@ -80,27 +80,24 @@ class MarkdownTextUiTest {
 
   @Test
   fun defaultReaderHeadingsUseMobileBodySize() {
-    var expected: androidx.compose.ui.unit.TextUnit? = null
+    // Headings stay at the reader's body size; weight, not size, marks them.
     compose.setContent {
-      MaterialTheme {
-        expected = MaterialTheme.typography.bodyLarge.fontSize
-        Surface { MarkdownText("# Mobile heading") }
-      }
+      MaterialTheme { Surface { MarkdownText("# Mobile heading\n\nBody text") } }
     }
     compose.waitForIdle()
-    val layouts = mutableListOf<TextLayoutResult>()
-    compose.onNodeWithText("Mobile heading", useUnmergedTree = true).performSemanticsAction(
-      SemanticsActions.GetTextLayoutResult
-    ) { action ->
-      org.junit.Assert.assertTrue(action(layouts))
+    fun style(text: String): androidx.compose.ui.text.TextStyle {
+      val layouts = mutableListOf<TextLayoutResult>()
+      compose.onNodeWithText(text, useUnmergedTree = true).performSemanticsAction(
+        SemanticsActions.GetTextLayoutResult
+      ) { action ->
+        org.junit.Assert.assertTrue(action(layouts))
+      }
+      return layouts.single().layoutInput.style
     }
+    org.junit.Assert.assertEquals(style("Body text").fontSize, style("Mobile heading").fontSize)
     org.junit.Assert.assertEquals(
-      requireNotNull(expected),
-      layouts.single().layoutInput.style.fontSize,
-    )
-    org.junit.Assert.assertEquals(
-      androidx.compose.ui.text.font.FontWeight.SemiBold,
-      layouts.single().layoutInput.style.fontWeight,
+      androidx.compose.ui.text.font.FontWeight.Bold,
+      style("Mobile heading").fontWeight,
     )
   }
 

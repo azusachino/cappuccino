@@ -98,7 +98,7 @@ ui-test-android: ## Run Android shell smoke on one task-owned emulator and expor
 	@test -n "$(ANDROID_SERIAL)" || { echo 'Set ANDROID_SERIAL=<task-owned emulator serial>' >&2; exit 2; }
 	$(ANDROID) :app:connectedDebugAndroidTest
 	mkdir -p .build/android/screens
-	@set -e; for screen in Chats Attention Machines; do \
+	@set -e; for screen in Machines AddMachineIme Settings; do \
 	  image=$$(find "$(ANDROID_TEST_OUTPUT)" -type f -name "$$screen.png"); \
 	  test -n "$$image" && test -f "$$image" || { echo "Missing or ambiguous $$screen screenshot" >&2; exit 1; }; \
 	  test "$$(file --brief --mime-type "$$image")" = image/png || { echo "Invalid $$screen screenshot" >&2; exit 1; }; \
