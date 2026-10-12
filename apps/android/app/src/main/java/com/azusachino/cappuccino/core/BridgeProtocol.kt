@@ -76,6 +76,9 @@ data class AgentRow(
   val working: Boolean,
   val branch: String?,
   val cwd: String? = null,
+  val stateChangeSeq: Long? = null,
+  val completionSeq: Long? = null,
+  val nativeSessionRef: String? = null,
 )
 
 data class StreamEntry(
@@ -217,6 +220,16 @@ fun parseAgents(json: JsonObject, expectedMachine: UUID): List<AgentRow> {
       (row.fields["working"] as? JsonValue.BooleanValue)?.value ?: false,
       row.optionalString("active_branch"),
       row.optionalString("cwd"),
+      row.optionalLong("state_change_seq")?.also {
+        if (it < 0) throw ProtocolException("Invalid state_change_seq")
+      },
+      row.optionalLong("completion_seq")?.also {
+        if (it < 0) throw ProtocolException("Invalid completion_seq")
+      },
+      row.optionalString("native_session_ref")?.also {
+        if (!Regex("native-ref:[a-f0-9]{64}").matches(it))
+          throw ProtocolException("Invalid native_session_ref")
+      },
     )
   }
 }

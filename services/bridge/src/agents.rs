@@ -19,6 +19,10 @@ pub struct AgentRow {
     pub cwd: String,
     pub active_branch: Option<String>,
     pub branch_source: String, // "own" | "none"
+    pub state_change_seq: Option<u64>,
+    pub completion_seq: Option<u64>,
+    /// Opaque hash of the native reported reference, NOT a canonical conversation ID.
+    pub native_session_ref: Option<String>,
 }
 
 impl AgentRow {
@@ -34,6 +38,9 @@ impl AgentRow {
             "cwd": self.cwd,
             "active_branch": self.active_branch,
             "branch_source": self.branch_source,
+            "state_change_seq": self.state_change_seq,
+            "completion_seq": self.completion_seq,
+            "native_session_ref": self.native_session_ref,
         })
     }
 }
@@ -73,7 +80,7 @@ pub fn map_agents(result: &Value, machine_id: &str) -> Result<Vec<AgentRow>, Str
                         .unwrap_or(name)
                         .to_string()
                 },
-                agent: kind,
+                agent: kind.clone(),
                 status: agent["agent_status"]
                     .as_str()
                     .unwrap_or("unknown")
@@ -82,9 +89,25 @@ pub fn map_agents(result: &Value, machine_id: &str) -> Result<Vec<AgentRow>, Str
                 cwd,
                 active_branch: branch.branch,
                 branch_source: branch.source,
+                state_change_seq: agent["state_change_seq"].as_u64(),
+                completion_seq: agent["completion_seq"].as_u64(),
+                native_session_ref: native_session_reference(&agent["agent_session"], &kind),
             })
         })
         .collect())
+}
+
+fn native_session_reference(reference: &Value, kind: &str) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let agent = reference["agent"].as_str()?;
+    let ref_kind = reference["kind"].as_str()?;
+    let value = reference["value"].as_str()?;
+    if agent != kind || !matches!(ref_kind, "id" | "path") || value.is_empty() || value.len() > 8192
+    {
+        return None;
+    }
+    let encoded = serde_json::to_vec(&(agent, ref_kind, value)).ok()?;
+    Some(format!("native-ref:{:x}", Sha256::digest(encoded)))
 }
 
 pub struct BranchReport {
@@ -251,6 +274,49 @@ mod tests {
         assert_eq!(json["branch_source"], "none");
         assert_eq!(json["active_branch"], Value::Null);
         assert_eq!(json["working"], true);
+    }
+
+    #[test]
+    fn completion_metadata_is_preserved_without_exposing_native_paths() {
+        let result = json!({"agents":[{"agent":"pi","pane_id":"w1:p1","agent_status":"idle",
+            "state_change_seq":41,"completion_seq":41,
+            "agent_session":{"agent":"pi","kind":"path","value":"/private/session.jsonl","source":"reported"}}]});
+        let row = &map_agents(&result, "machine").unwrap()[0];
+        assert_eq!(row.state_change_seq, Some(41));
+        assert_eq!(row.completion_seq, Some(41));
+        assert!(row
+            .native_session_ref
+            .as_ref()
+            .unwrap()
+            .starts_with("native-ref:"));
+        assert!(!row.to_json().to_string().contains("/private/session.jsonl"));
+        let mut replacement = result.clone();
+        replacement["agents"][0]["agent_session"]["value"] = json!("/private/new-session.jsonl");
+        assert_ne!(
+            row.native_session_ref,
+            map_agents(&replacement, "machine").unwrap()[0].native_session_ref
+        );
+    }
+
+    #[test]
+    fn missing_or_invalid_native_metadata_is_not_fabricated() {
+        let result = json!({"agents":[{"agent":"pi","pane_id":"w1:p1","agent_status":"idle"}]});
+        let row = &map_agents(&result, "machine").unwrap()[0];
+        assert_eq!(row.completion_seq, None);
+        assert_eq!(row.state_change_seq, None);
+        assert_eq!(row.native_session_ref, None);
+        assert_eq!(
+            native_session_reference(&json!({"agent":"agy","kind":"id","value":"id"}), "pi"),
+            None
+        );
+        assert_eq!(
+            native_session_reference(&json!({"agent":"pi","kind":"locator","value":"pane"}), "pi"),
+            None
+        );
+        assert_eq!(
+            native_session_reference(&json!({"agent":"pi","kind":"id","value":""}), "pi"),
+            None
+        );
     }
 
     #[test]

@@ -53,14 +53,7 @@ class CappuccinoShellTest {
     compose.onNodeWithText("Not connected · 0 agents").assertIsDisplayed()
     capture("Chats")
 
-    compose.onNode(hasText("Attention") and hasClickAction()).performClick()
-    compose.onNodeWithText("No Pending Approvals").assertIsDisplayed()
-    compose
-      .onNodeWithText(
-        "All agents are running smoothly. Any tool approval or ask_question prompts will appear here."
-      )
-      .assertIsDisplayed()
-    capture("Attention")
+    compose.onNodeWithText("Attention").assertDoesNotExist()
 
     compose.onNode(hasText("Machines") and hasClickAction()).performClick()
     compose.onNodeWithText("No machines configured").assertIsDisplayed()
@@ -311,7 +304,7 @@ class CappuccinoShellTest {
     fun roundTrip() {
       val before = position()
       compose.onNodeWithText("Tools (2/9)").performClick()
-      compose.onNodeWithText("1 returned").assertIsDisplayed()
+      compose.onNodeWithText("Normal (2)").assertIsDisplayed()
       compose.onNodeWithText("Session").performClick()
       compose.waitForIdle()
       assertEquals(before, position(), 0.01f)

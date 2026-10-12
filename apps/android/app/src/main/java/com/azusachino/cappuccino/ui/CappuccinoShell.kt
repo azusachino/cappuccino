@@ -66,7 +66,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -312,7 +311,7 @@ fun CappuccinoScreen(
   }
   // Keep the old saved CHATS enum readable, but migrate it into the machine tree.
   LaunchedEffect(destination) {
-    if (destination == Destination.CHATS) {
+    if (destination == Destination.CHATS || destination == Destination.ATTENTION) {
       destination = Destination.MACHINES
     }
   }
@@ -404,7 +403,8 @@ fun CappuccinoScreen(
                 }
                 val status =
                   agentStatusStyle(
-                    state.stream.agentStatus ?: selected.status,
+                    if (state.stream.pendingPrompt != null) "blocked"
+                    else state.stream.agentStatus ?: selected.status,
                     MaterialTheme.colorScheme.background.luminance() < 0.5f,
                   )
                 Surface(color = status.background, shape = RoundedCornerShape(4.dp)) {
@@ -470,8 +470,7 @@ fun CappuccinoScreen(
       bottomBar = {
         if (selected == null)
           NavigationBar {
-            listOf(Destination.MACHINES, Destination.ATTENTION, Destination.SETTINGS).forEach { item
-              ->
+            listOf(Destination.MACHINES, Destination.SETTINGS).forEach { item ->
               NavigationBarItem(
                 selected =
                   destination == item ||
@@ -589,7 +588,6 @@ fun CappuccinoScreen(
               sessionTab,
               toolActivities.size,
               state.omittedToolOperations,
-              toolActivities.count { it.part.output != null || it.part.isError == true },
               toolUpdates.unseen,
             ) { tab ->
               sessionTab = tab
@@ -720,52 +718,14 @@ fun CappuccinoScreen(
                   }
               }
               if (sessionTab == SessionTab.TOOLS) {
-                ToolHistoryPanel(
-                  toolActivities,
-                  state.omittedToolOperations,
-                  Modifier.fillMaxSize(),
-                  onAtLatest = { toolsAtLatest = it },
-                )
-              }
-            }
-          }
-          destination == Destination.ATTENTION -> {
-            val pending = state.stream.pendingPrompt
-            if (pending != null) {
-              Column(
-                Modifier.fillMaxSize().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-              ) {
-                Text(
-                  "Requires Attention",
-                  style = MaterialTheme.typography.titleLarge,
-                  fontWeight = FontWeight.Bold,
-                  color = MaterialTheme.colorScheme.primary,
-                  modifier = Modifier.semantics { heading() },
-                )
-                PromptCardView(
-                  prompt = pending,
-                  enabled =
-                    state.bridgeDetails[state.activeProfileId]
-                      ?.capabilities
-                      ?.get("prompt_answers") != false,
-                  onSelectOption = { idx, optId ->
-                    actions.answerPrompt(pending.promptId, idx, optId, "select_option")
-                  },
-                  onCancel = { actions.answerPrompt(pending.promptId, null, null, "cancel") },
-                )
-              }
-            } else {
-              Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                  "No question received",
-                  style = MaterialTheme.typography.titleLarge,
-                  modifier = Modifier.semantics { heading() },
-                )
-                Text(
-                  "Question notifications aren't available on this screen yet.",
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                readerState.SaveableStateProvider("$conversationKey|tools") {
+                  ToolHistoryPanel(
+                    toolActivities,
+                    state.omittedToolOperations,
+                    Modifier.fillMaxSize(),
+                    onAtLatest = { toolsAtLatest = it },
+                  )
+                }
               }
             }
           }

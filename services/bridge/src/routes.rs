@@ -67,6 +67,9 @@ pub async fn session(State(state): State<Arc<BridgeState>>) -> Response {
                 "conversation_history": true,
                 "prompt_input": true,
                 "prompt_answers": true,
+                "completion_signals": true,
+                "telegram_notifications": false,
+                "telegram_notifications_configured": false,
             },
         })
         .to_string(),

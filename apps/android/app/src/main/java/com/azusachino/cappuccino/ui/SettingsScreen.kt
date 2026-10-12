@@ -71,6 +71,8 @@ internal fun SettingsScreen(
     ) {
       if (onOpenAppearance != null) onOpenAppearance() else choosingTheme = true
     }
+    SettingsHeading("Notifications")
+    NotificationSettings()
     SettingsHeading("Storage")
     PreferenceRow(
       "Saved conversations",

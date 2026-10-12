@@ -111,6 +111,7 @@ internal constructor(
   private val savedStateHandle: SavedStateHandle,
   private val offlineHistory: OfflineConversations? = null,
   private val offlineDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+  private val onMonitorPause: ((String, Boolean) -> Unit)? = null,
 ) : ViewModel(), ConnectedActions {
   private val mutableState =
     MutableStateFlow(
@@ -202,6 +203,27 @@ internal constructor(
         if (token == epoch)
           mutableState.value =
             mutableState.value.copy(offlineProblem = "Couldn't open this saved conversation.")
+      }
+    }
+  }
+
+  fun openNotificationAgent(profileId: String, paneId: String, nativeReference: String) {
+    val profile = mutableState.value.profiles.firstOrNull { it.id == profileId } ?: return
+    val token = epoch
+    viewModelScope.launch {
+      try {
+        val client = bridgeFor(profile.endpoint)
+        client.verify(profile.machineId)
+        val agent =
+          client.agents(profile.machineId).singleOrNull {
+            it.paneId == paneId && it.nativeSessionRef == nativeReference
+          } ?: return@launch
+        if (token != epoch || mutableState.value.profiles.none { it == profile }) return@launch
+        selectProfile(profile.id)
+        selectAgent(agent)
+      } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        // An unavailable or replaced session is not attached by locator guess.
       }
     }
   }
@@ -306,6 +328,7 @@ internal constructor(
   }
 
   override fun disconnectMachine(id: String) {
+    onMonitorPause?.invoke(id, true)
     disconnectedMachines.add(id)
     machineEpochs[id] = (machineEpochs[id] ?: 0L) + 1
     machineJobs.remove(id)?.cancel()
@@ -353,6 +376,7 @@ internal constructor(
 
   private fun refreshProfile(id: String, background: Boolean) {
     val profile = mutableState.value.profiles.firstOrNull { it.id == id } ?: return
+    onMonitorPause?.invoke(id, false)
     disconnectedMachines.remove(id)
     machineJobs.remove(id)?.cancel()
     val token = (machineEpochs[id] ?: 0L) + 1

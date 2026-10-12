@@ -24,6 +24,14 @@ data class JsonObject(val fields: Map<String, JsonValue>) {
   fun long(key: String): Long =
     (fields[key] as? JsonValue.Number)?.value ?: throw ProtocolException("Invalid $key")
 
+  fun optionalLong(key: String): Long? =
+    when (val value = fields[key]) {
+      null,
+      JsonValue.Null -> null
+      is JsonValue.Number -> value.value
+      else -> throw ProtocolException("Invalid $key")
+    }
+
   fun boolean(key: String): Boolean =
     (fields[key] as? JsonValue.BooleanValue)?.value ?: throw ProtocolException("Invalid $key")
 
