@@ -13,7 +13,12 @@ open the generated `Cappuccino.xcodeproj`, select the `Cappuccino` iOS scheme
 with your device as destination, and run (free provisioning; re-sign weekly).
 No store, no TestFlight in the MVP.
 
-**Add a machine and browse agents.** On each Herdr machine, install the bridge
+**Add a machine and browse agents.** First install the appropriate Herdr agent
+integration in the running agent's effective config directory, reload it while
+idle, and verify its native session report. For Pi, an integration installed in
+`~/.pi/agent` does not help a process using `PI_CODING_AGENT_DIR=~/.luna/agent`.
+Follow the [integration prerequisite](services/bridge/README.md#agent-integration-prerequisite);
+scrollback is not canonical-reader readiness. On each Herdr machine, install the bridge
 binary before linking the plugin. From this repository's root, run
 `cargo install --path services/bridge --locked`; ensure Cargo's install `bin`
 directory is on Herdr's `PATH`, then run

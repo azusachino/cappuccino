@@ -62,9 +62,56 @@ Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, op
 
 `serve.auto_apply` defaults to `true`. On `start` and `status`, the binary checks `tailscale serve status` and may apply a Serve entry if one is missing. This can mutate the machine's Tailscale Serve configuration. Set the config value to `false` or `CAPP_BRIDGE_SERVE_AUTO_APPLY=0` to prevent all Tailscale commands; accepted false spellings are `0`, `false`, `no`, and `off` (case-insensitive), and the only true spelling is `true`. Invalid values fail closed. Disabled mode prints the manual command without running it.
 
+## Agent integration prerequisite
+
+Prepare Herdr's integration for each agent before using Cappuccino's canonical
+reader. A running bridge and a discovered pane do not prove native session
+readiness. Installation in the wrong agent config directory does not count.
+
+For Pi, establish the **running Pi process's effective** `PI_CODING_AGENT_DIR`
+first. Run Herdr's installer and status check with that same directory. For
+example, only when Pi actually uses `~/.luna/agent`:
+
+```sh
+env PI_CODING_AGENT_DIR="$HOME/.luna/agent" herdr integration install pi
+env PI_CODING_AGENT_DIR="$HOME/.luna/agent" herdr integration status
+```
+
+Without this override, Herdr may install into `~/.pi/agent` while the running
+Pi loads extensions from `~/.luna/agent`. This mismatch was observed on Mini:
+restarting Pi did not help because its effective directory lacked the
+integration. `current (v9)` in the default directory was not runtime proof.
+For other agent types, use their corresponding supported Herdr integration
+and verify their effective configuration location; do not install all
+integrations indiscriminately.
+
+After installation, wait for the agent's current turn to finish. Pi must load
+the extension through its supported `/reload` command or an owner-authorized
+restart that preserves the exact conversation. Do not send an owner prompt,
+interrupt work, choose the newest transcript or start a new conversation to
+repair setup. A bridge restart cannot make Pi load an extension.
+
+Verify the selected Pi's Herdr `agent.get` response now has an exact path-kind
+`agent_session`, then verify the bridge conversation response is canonical,
+with `source: canonical_log`, a Pi-prefixed `conversation_id` and the expected
+`machine_id`. The
+reported file must pass the store checks above. If it does not, integration
+preparation is incomplete. Scrollback is not an acceptable substitute for
+this prerequisite or evidence of canonical reader readiness. The current
+client still exposes a labeled scrollback fallback; explicit setup-blocker
+UI remains an implementation gap, not a completed requirement.
+
 ## Install and lifecycle
 
-Install the executable before linking the plugin or invoking its startup/actions.
+Agent integration and the Cappuccino plugin are separate preparations: the
+integration reports native session identity; the plugin runs the HTTP bridge.
+Complete and verify both. Install the executable before linking the plugin or
+invoking its startup/actions. Before linking, choose the approved exposure
+policy: set `serve.auto_apply` to `false` in the bridge's JSON config when setup
+must not change Tailscale Serve. Plugin commands inherit the running Herdr
+server's environment; an environment override on a separate Herdr CLI invocation
+is not proof that the plugin inherited it. Keep existing proxy/tailnet routes
+unchanged unless the owner explicitly authorizes changes.
 From the repository root:
 
 ```sh
@@ -80,9 +127,11 @@ that directory must be on the `PATH` inherited by Herdr. Herdr runs plugin
 commands with the plugin root as their working directory, but does not add the
 Cargo install directory to `PATH`. Check `command -v cappuccino-bridge` and
 `herdr plugin action invoke status --plugin azusachino.cappuccino-bridge` in
-that launch environment. If command lookup fails, install the binary and restart
-Herdr from an environment whose `PATH` includes Cargo's bin directory; linking
-or the plugin startup hook does not install/build it. The manifest uses the
+that launch environment. If command lookup fails, install the binary in the running Herdr server's
+existing `PATH`. Restarting Herdr to change its launch environment requires
+explicit owner authorization and preservation of its long-running agents;
+it is not a routine Cappuccino reconnect step. Linking or the plugin startup
+hook does not install/build the executable. The manifest uses the
 installed command name (`cappuccino-bridge`), never a checkout's
 `target/release` artifact.
 
