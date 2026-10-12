@@ -41,15 +41,14 @@ but canonical live Pi transcript/stream behavior has not been verified.
 ```text
 apps/android/    Native Gradle/Kotlin/Compose app and its tests
 apps/ios/        iOS app entrypoint and XCTest UI journey
-apps/macos/      macOS app entrypoint
 packages/apple/  Local SwiftPM core, reusable SwiftUI and core tests
 ```
 
-`packages/apple` shares Swift code between iOS and macOS only. Android keeps Kotlin logic and UI in its app module; it shares product behavior, not Swift code. Root Make commands wrap the native build systems. No monorepo framework or generated cross-platform SDK is needed.
+`packages/apple` holds the Swift core and SwiftUI shell for the iPhone app. There is no macOS app: Herdr covers the desktop (owner decision 2026-10-13). The Swift package keeps `.macOS(.v26)` only so `swift test` runs on the Mac host. Android keeps Kotlin logic and UI in its app module; it shares product behavior, not Swift code. Root Make commands wrap the native build systems. No monorepo framework or generated cross-platform SDK is needed.
 
 ## Apple development
 
-Requires macOS 26+, Xcode 26+ with Swift 6.2+, and mise. No API keys, Herdr runtime or Apple Developer membership is needed for tests or unsigned Simulator builds.
+Requires macOS 26+, Xcode 26+ with Swift 6.2+, and mise. iOS deployment target is 17; glass APIs are used on iOS 26+ only. No API keys, Herdr runtime or Apple Developer membership is needed for tests or unsigned Simulator builds.
 
 ```sh
 make setup
@@ -58,7 +57,7 @@ make generate
 open Cappuccino.xcodeproj
 ```
 
-Choose `Cappuccino` for iPhone/iPad Simulator or `CappuccinoMac` for the shared Mac shell. Edit root `project.yml`, not the ignored generated project. iOS remains 17+; macOS is 26+.
+Choose `Cappuccino` for iPhone/iPad Simulator. Edit root `project.yml`, not the ignored generated project. iOS remains 17+.
 
 If Command Line Tools are selected globally, use a scoped override:
 

@@ -2,14 +2,14 @@ SHELL := bash
 MISE := mise exec --
 SWIFT := xcrun swift
 FORMAT := xcrun swift-format
-SWIFT_PATHS := packages/apple/Package.swift packages/apple/Sources packages/apple/Tests apps/ios apps/macos
+SWIFT_PATHS := packages/apple/Package.swift packages/apple/Sources packages/apple/Tests apps/ios
 XCODEBUILD := xcodebuild -project Cappuccino.xcodeproj -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO
 ANDROID := apps/android/gradlew --no-daemon -p apps/android
 ANDROID_TEST_OUTPUT := apps/android/app/build/outputs/connected_android_test_additional_output/debugAndroidTest/connected
 DESTINATION ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help setup generate fmt fmt-apple fmt-android fmt-check fmt-check-apple fmt-check-android md-format md-check test test-apple test-android lint-android check check-apple check-android build-ios build-macos build-android ui-test ui-test-android validate validate-apple validate-android check-bridge bench-bridge-client resource-bridge-client
+.PHONY: help setup generate fmt fmt-apple fmt-android fmt-check fmt-check-apple fmt-check-android md-format md-check test test-apple test-android lint-android check check-apple check-android build-ios build-android ui-test ui-test-android validate validate-apple validate-android check-bridge bench-bridge-client resource-bridge-client
 
 CARGO ?= cargo
 BRIDGE_MANIFEST := services/bridge/Cargo.toml
@@ -83,9 +83,6 @@ check-android: fmt-check-android test-android lint-android ## Focused Android ga
 build-ios: generate ## Build an unsigned iOS Simulator app
 	$(XCODEBUILD) -scheme Cappuccino -destination 'generic/platform=iOS Simulator' build
 
-build-macos: generate ## Build the shared macOS shell
-	$(XCODEBUILD) -scheme CappuccinoMac -destination 'platform=macOS' build
-
 build-android: ## Build debug app and instrumentation APKs
 	$(ANDROID) :app:assembleDebug :app:assembleDebugAndroidTest
 
@@ -106,6 +103,6 @@ ui-test-android: ## Run Android shell smoke on one task-owned emulator and expor
 
 validate: validate-apple validate-android ## Build/check all apps; UI journeys remain explicit
 
-validate-apple: check-apple build-ios build-macos ## Apple source/test/build acceptance
+validate-apple: check-apple build-ios ## Apple source/test/build acceptance
 
 validate-android: check-android build-android ## Android source/test/build acceptance
