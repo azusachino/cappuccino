@@ -4,6 +4,12 @@
 **Baseline:** `research/native-pi-agent-workspace` @ `15994f1` (stacked on `81ee365`; PR 29 open, unmerged — nothing here assumes it lands).
 **Foundation:** [pi-native-workspace-research.md](../pi-native-workspace-research.md) is the accepted capability/library evidence with file:line citations; this plan links rather than duplicates it. Prior records ([android-plan.md](../android-plan.md), [design/android-material3.md](../design/android-material3.md), PR 29 history) remain authoritative for what they covered.
 
+## Current continuation
+
+The owner-approved [native UX continuation plan](native-ux-improvement-session.md#current-continuation-order-and-evidence) now owns execution order and current implemented/gated/device/accepted checkpoints. The [Paseo study](../design/paseo-source-study.md) adds source-backed replica, liveness and native-text lessons. This older draft retains its unresolved canonical identity, queue/delivery, follow/tail and capability criteria; it is not declared complete, and approval of the continuation does not authorize live prompts, approvals, remote session manipulation or every proposed step below.
+
+In particular, a reusable Herdr locator is not an immutable canonical conversation ID; saved rows are not live synchronization or approval state. Incremental cursor history and independent Attention require separately specified ownership/contracts and tests. Existing native failures remain open rather than becoming passes through plan reconciliation.
+
 ## Goal and non-goals
 
 Native Android with **Pi feature parity** for the agent roster + selected workspace — a real agent workspace, not a restyled chat UI and not terminal/TUI embedding (Pi's TTY framework is TypeScript; not an Android library; out of scope).

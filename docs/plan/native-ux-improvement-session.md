@@ -1,10 +1,10 @@
 # Native UX improvement session
 
-Status: owner-approved plan and UX-1 visual direction; UX-2 implementation in progress. The owner additionally prioritizes visible tool results/errors in this update.
+Status: owner-approved continuation after the Paseo study. Android has installed theme/highlighting, compact headings and recorded-tool corrections; offline-history wiring is gate-green but uncommitted and uninstalled, with behavioral/device acceptance pending. Apple foundations are gated but its consuming UI remains behind Android. No whole-flow acceptance is claimed.
 
 Tracking: [issue #33](https://github.com/azusachino/cappuccino/issues/33).
-Source study: [Telegram, Nekogram and Haven](../design/telegram-nekogram-ux-study.md).
-Existing reader contracts: [Pi phone reader](../design/pi-phone-reader.md).
+Source studies: [Telegram, Nekogram and Haven](../design/telegram-nekogram-ux-study.md), [native highlighting](../design/native-code-highlighting-research.md), [Paseo](../design/paseo-source-study.md).
+Existing reader contracts: [Pi phone reader](../design/pi-phone-reader.md). Apple execution remains in [iOS parity](ios-ux-parity.md); unresolved canonical/input/tail work remains in [Pi workspace](pi-native-workspace.md). This plan owns the current continuation order, not a declaration that those plans are complete.
 
 ## Outcome and baseline
 
@@ -15,11 +15,13 @@ Current working baseline:
 - Active agents are visible directly beneath their machine; no expansion click or intermediate Agents screen.
 - Navigation is Machines, Attention, Settings. Back from a conversation preserves the machine list position.
 - Native Pi session binding, structured tool arguments/results, disclosures, bounded previews and full-content access are present.
-- GitHub-inspired app and code palettes follow System/Light/Dark selection.
+- Owner-selected Catppuccin Latte/Mocha app and code palettes follow System/Light/Dark selection; semantic agent/tool states remain readable without color alone.
 - Machine names are readable and locally editable. UUID/pane/session IDs are not normal user-facing details.
 - Connection metadata exists, but its current alert is too verbose and is not accepted as the intended design.
 
-Recorded checkout: `feat/native-pi-rendering`, base commit `a4c48668b50a43b42ae03496d8d1163ca54d4639`, with substantial uncommitted work. Latest installed APK SHA256: `d583bd28c2e4903a968c153fe1f096d6a889a5b525a0ac4f3f2ed3335d293ca9`. Revalidate these at session start; the base commit alone does not reproduce the baseline.
+Current recorded checkout: `feat/native-pi-rendering`, committed checkpoint `350b199`. Android offline wiring is uncommitted in `MainActivity.kt`, `io/ConnectedViewModel.kt`, `io/OfflineConversations.kt`, `ui/CappuccinoShell.kt` and `ui/SettingsScreen.kt`; preserve and revalidate it. Latest installed slice is `8247404` (tool history), not the offline build; its APK hash is not recorded here.
+
+The initial plan's `a4c48668b50a43b42ae03496d8d1163ca54d4639` and APK `d583bd28c2e4903a968c153fe1f096d6a889a5b525a0ac4f3f2ed3335d293ca9` are historical entry evidence, not the current baseline. Compare actual Git and artifact identities before resuming.
 
 Owner confirmation of basic usability does not establish full rendering/tail acceptance, canonical Agy support, native Pi input semantics or complete app/TUI parity. The older [Pi workspace plan](pi-native-workspace.md) is not overwritten or declared complete.
 
@@ -28,17 +30,18 @@ Owner confirmation of basic usability does not establish full rendering/tail acc
 - Content first: show active work and useful state; remove explanations that merely restate the interface.
 - One row/menu vocabulary across Machines, Settings and the reader. No collection of independently styled cards.
 - Haven informs named-target continuity and contextual Herdr actions. Telegram/Nekogram inform readable chat, preference rows and selective disclosure. Borrow principles, not their feature breadth, custom rendering or copyleft implementations/assets.
-- Keep GitHub colors and native Compose/Material components. Do not assume changing an alert to a sheet alone constitutes a design improvement.
+- Catppuccin supersedes GitHub/coffee/dynamic palettes. Keep native Compose/Material and SwiftUI components. Do not assume changing an alert to a sheet alone constitutes a design improvement.
+- Paseo informs native token spans, bounded replicas, explicit liveness and cursor catch-up, not an Expo migration or new orchestrating daemon. Do not import its WebView Mermaid path or its missing shell-language coverage.
 - Normal machine information is compact. Technical metadata is opt-in. Warn only about an observed condition that affects use; do not infer health or compatibility from matching package versions.
 - Preserve exact session identity, passive external content, image ALT handling, device-local timestamps, manual reading/inspection, composer drafts/reset and Activity-owned system bars.
 
 ## Scope and exclusions
 
-Owned implementation areas are `apps/android/app/src/main/java/com/azusachino/cappuccino/ui/`, focused Android tests and owning design/evidence documentation. Touch `io/ConnectedViewModel.kt` only for a demonstrated state/error-retention defect needed by an approved slice.
+Owned implementation areas are Android `ui/`, focused core/I/O and tests, activity wiring and owning design/evidence documentation for the approved reader/offline slices. Apple parity owns shared Apple code and tests under its linked plan. Avoid unrelated ViewModel rewrites. Snapshot storage stays private and separate from profiles, drafts, preferences and temporary cache.
 
 The bridge already supplies the metadata needed for the initial machine-information improvement. No bridge change or repeated bridge soak is needed for presentation-only slices. The owner's added requirement to expose tool failures does require preserving Pi's `isError` flag as an optional `is_error` tool-part field; that scoped addition requires the full bridge gate before activation. If a real protocol/backend requirement emerges, stop and re-scope it with its own acceptance and full bridge gates.
 
-No terminal embedding, WebView, new renderer/tokenizer, library fork, new dependency, new settings, remote session creation/renaming/deletion or SSH fallback. No emulator restart, device setting changes, prompt/approval submission, agent session manipulation or proxy/auto-apply changes. Preserve app data and all existing dirty work. No commits, pushes, merges or issue closure without authorization.
+No terminal embedding, WebView, library fork, remote session creation/renaming/deletion or SSH fallback. The owner separately authorized native highlighting and bounded offline history with accurate storage controls; the old blanket tokenizer/dependency/settings exclusion no longer blocks those slices. The Android TextMate dependency is already adopted; further tokenizer/runtime adoption needs a scoped license, compatibility and performance decision. No emulator restart, device setting changes, prompt/approval submission, agent session manipulation or proxy/auto-apply changes. Preserve app data and all existing dirty work. Frequent focused green commits are owner-authorized. No pushes, merges, issue closure or other remote writes are authorized by this continuation.
 
 Execution is direct and sequential: no delegated agents or Asobi, per owner instructions. Track progress on issue #33, with this document as the plan; do not create a second task-record system.
 
@@ -51,13 +54,49 @@ Before edits:
 3. Record existing failed tests separately from the new slice's regressions. Preserve raw evidence and do not reset, stash, rebaseline or weaken assertions to manufacture a clean baseline.
 4. State the first slice, owned files, acceptance criteria and checks. Keep the app usable at every checkpoint.
 
-## Ordered slices
+## Current continuation order and evidence
+
+The owner approved this order after the Paseo study. The original UX slices below retain their acceptance criteria; their old cosmetic sequence does not override the current priorities.
+
+| Slice | Implemented | Owning gates | Device proof | Owner acceptance |
+| --- | --- | --- | --- | --- |
+| Catppuccin/semantic colors (`df86042`) | Yes | Android passed | Installed; whole visual matrix pending | Palette choice approved; rendered acceptance open |
+| Native Android highlighting (`fd7fd54`) | Yes, initial language set | Android passed | Installed; native selection/performance journey pending | No complete highlighting acceptance |
+| Compact headings (`6ffa44d`) | Yes | Android passed; native regression compiled | Installed; regression not executed | Compact mobile requirement approved |
+| Recorded tools/results (`8247404`) | Yes | Android passed | Installed; consuming tools journey pending | No live-queue/delivery claim |
+| Offline storage (`4c430fd`) and wiring | Storage committed; wiring uncommitted | Storage and wiring Android gates passed | Not installed; restart/read-only journey pending | Bounded offline history authorized, not accepted as complete |
+| Apple identity/profiles/connections (`083bea7`, `610eae7`, `cabbc9c`) | Core foundations only | Apple gates passed | Consuming multi-machine UI journey pending | No UI parity acceptance |
+
+### Next: complete offline-history acceptance
+
+- Resolve reusable Herdr pane locators versus immutable canonical conversation identity from the actual bridge/session binding. A verified machine UUID plus locator is not proof of canonical generation. Do not invent an ID, merge cached/live histories, or silently expand the bridge contract.
+- Persist only owned verified snapshots. Keep schema/identity validation, bounds (20 entries, 32 MiB total, 4 MiB per entry), atomic replacement and corruption handling. Report actual saved storage separately from temporary cache; preserve profiles/drafts/preferences and remote sessions.
+- Saved content has a capture timestamp and read-only label, unknown current agent status, no active queue/approval claims, no remote actions and no implicit session resume. Discovery/reconnection cannot silently promote it to live.
+- Add hermetic restart/restoration, wrong-machine/conversation, stale selection/generation, failed save, foreground/background, no-send/no-answer and cleanup-preservation regressions. Re-run the Android gate for changed inputs.
+- Execute a contained native journey and the authorized phone's passive saved-reader/restart check without device/network-setting changes or remote agent interactions. Gate/build/install alone does not close acceptance.
+
+### Then: bounded native highlighting
+
+Use theme-independent tokens and measured input/cache budgets, with full plain-text fallback when unsupported or over budget. Preserve exact source, Bash coverage and stale-result/cancellation guards. Additional Kotlin/Nix/Fish grammars need license/provenance and language-specific tests. Paseo's 100,000-character/200-entry constants are evidence of its policy, not our accepted thresholds. Verify long-block responsiveness and selection on native surfaces before claiming performance.
+
+### Then: Apple consuming parity
+
+Follow the [Apple plan](ios-ux-parity.md): wire independent machines, canonical passive reader, native selection/highlighting and identity-scoped state before Liquid Glass. Keep iOS/macOS gates and OS-availability/material fallbacks. Source research is not proof that a JavaScriptCore tokenizer works in our SwiftUI app.
+
+### Separate unresolved work
+
+- Attention currently depends on the selected stream and loses pending state on navigation. Independently scoped attention needs its own behavior/ownership tests; do not persist actionable approvals as offline history.
+- Cursor-based incremental history requires a specified bridge contract, canonical generation/coverage and partial-catch-up tests before implementation. Full snapshot refresh is not cursor synchronization.
+- Four historical native display/tail methods, flashing/popup acceptance and live Pi delivery/readiness remain open. Preserve raw failures and do not weaken tests or call a source fix an executed journey.
+- Mihon-style selectable palettes remain deferred; Catppuccin is the current approved palette, not proof that the chooser requirement shipped.
+
+## Original UX slices
 
 ### UX-1: Review one coherent visual direction
 
 **Dependency:** session-entry baseline. **Scope:** documentation and reviewable visual specimens only.
 
-Prepare Machines, machine information, Settings and conversation examples together in light/dark, using the same spacing, typography, menu policy and GitHub palette. Include one narrow/large-font case. Specimens must be identified as synthetic or actual; they are not proof of live behavior.
+Prepare Machines, machine information, Settings and conversation examples together in light/dark, using the same spacing, typography, menu policy and the current Catppuccin palette. Include one narrow/large-font case. Specimens must be identified as synthetic or actual; they are not proof of live behavior.
 
 Acceptance:
 
@@ -129,7 +168,7 @@ Likely paths: `ui/SettingsScreen.kt`, focused UI tests and, only for a confirmed
 
 **Dependency:** UX-1; execute after UX-4 to preserve sequential review. **Scope:** roughly 3–5 files.
 
-Keep assistant prose primary, thinking secondary and tool operations compact. Use the real operation/command and concise state; remove repeated generic labels and nested decoration. Short details expand inline; long content uses the approved full reader. Keep the existing native highlighter and GitHub token mapping.
+Keep assistant prose primary, thinking secondary and tool operations compact. Use the real operation/command and concise state; remove repeated generic labels and nested decoration. Tools and errors stay outside chat. Short details expand within Tools; long content uses the approved full reader. Keep native highlighting and Catppuccin token mapping, with source-preserving fallbacks.
 
 Acceptance:
 
