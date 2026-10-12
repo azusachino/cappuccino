@@ -66,6 +66,13 @@ interface BridgeTransport {
   /** Owner control over a running agent: `interrupt` (Stop) or `new_session`. */
   suspend fun controlAgent(sessionId: String, action: String) {}
 
+  /** Answers every question of a pending AskUserQuestion card at once. */
+  suspend fun answerQuestions(
+    sessionId: String,
+    promptId: String,
+    answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
+  ) {}
+
   suspend fun answerPrompt(
     sessionId: String,
     promptId: String,
@@ -143,6 +150,36 @@ class BridgeClient(
       if (bridgeDetails?.capabilities?.get("agent_control") == false)
         throw ProtocolException("Agent controls unsupported by this bridge")
       post("api/agents/$sessionId/control", """{"action":"$action"}""")
+    }
+
+  override suspend fun answerQuestions(
+    sessionId: String,
+    promptId: String,
+    answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
+  ): Unit =
+    withContext(Dispatchers.IO) {
+      val body =
+        kotlinx.serialization.json.buildJsonObject {
+          put("type", kotlinx.serialization.json.JsonPrimitive("answer_question"))
+          put("prompt_id", kotlinx.serialization.json.JsonPrimitive(promptId))
+          put(
+            "answers",
+            kotlinx.serialization.json.JsonArray(
+              answers.map { answer ->
+                kotlinx.serialization.json.buildJsonObject {
+                  put(
+                    "selected",
+                    kotlinx.serialization.json.JsonArray(
+                      answer.selected.map { kotlinx.serialization.json.JsonPrimitive(it) }
+                    ),
+                  )
+                  answer.other?.let { put("other", kotlinx.serialization.json.JsonPrimitive(it)) }
+                }
+              }
+            ),
+          )
+        }
+      post("api/agents/$sessionId/prompt", body.toString())
     }
 
   override suspend fun answerPrompt(
@@ -239,8 +276,13 @@ class BridgeClient(
           override fun onResponse(call: okhttp3.Call, response: Response) {
             response.use {
               try {
-                if (!it.isSuccessful) throw IOException("Bridge returned HTTP ${it.code}")
                 val text = readBounded(it.body.source(), MAX_HTTP_BODY_BYTES)
+                // The bridge's error envelope says why ("claude is working; stop it first").
+                if (!it.isSuccessful)
+                  throw IOException(
+                    runCatching { parseJsonObject(text).optionalString("message") }.getOrNull()
+                      ?: "Bridge returned HTTP ${it.code}"
+                  )
                 if (continuation.isActive) continuation.resume(text)
               } catch (error: Exception) {
                 if (continuation.isActive) continuation.resumeWithException(error)

@@ -121,7 +121,19 @@ data class PromptCard(
   val command: String?,
   val options: List<PromptOption>,
   val selectedIndex: Int,
+  /** AskUserQuestion's questions; empty for prompts read off the screen. */
+  val questions: List<PromptQuestion> = emptyList(),
 )
+
+data class PromptQuestion(
+  val header: String,
+  val question: String,
+  val multiSelect: Boolean,
+  val options: List<PromptOption>,
+)
+
+/** One question's answer: chosen option indexes and/or one line of own text. */
+data class QuestionAnswer(val selected: List<Int>, val other: String?)
 
 data class ConversationTurn(
   val id: String,
@@ -260,6 +272,24 @@ fun parsePromptCard(json: JsonObject): PromptCard {
     command = command,
     options = options,
     selectedIndex = selectedIndex,
+    questions =
+      if (json.fields["questions"] == null) emptyList()
+      else
+        json.array("questions").map { question ->
+          PromptQuestion(
+            header = question.optionalString("header").orEmpty(),
+            question = question.string("question"),
+            multiSelect = question.boolean("multi_select"),
+            options =
+              question.array("options").map { opt ->
+                PromptOption(
+                  opt.string("id"),
+                  opt.string("label"),
+                  opt.optionalString("description"),
+                )
+              },
+          )
+        },
   )
 }
 

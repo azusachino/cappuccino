@@ -234,6 +234,16 @@ class ConnectedViewModelTest {
             override suspend fun controlAgent(sessionId: String, action: String) {
               sent += "$sessionId:$action"
             }
+
+            override suspend fun answerQuestions(
+              sessionId: String,
+              promptId: String,
+              answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
+            ) {
+              throw java.io.IOException(
+                "the question is no longer at its start; answer it in the terminal"
+              )
+            }
           }
         }
         viewModel = ConnectedViewModel(store, factory, {}, SavedStateHandle())
@@ -246,6 +256,19 @@ class ConnectedViewModelTest {
         advanceUntilIdle()
         assertEquals(if (advertised) listOf("locator:interrupt") else emptyList(), sent)
         assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
+        // A refused answer is reported on its own; the connection stays usable.
+        viewModel.answerQuestions(
+          "q-1",
+          listOf(com.azusachino.cappuccino.core.QuestionAnswer(listOf(0), null)),
+        )
+        advanceUntilIdle()
+        assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
+        assertEquals(
+          "the question is no longer at its start; answer it in the terminal",
+          viewModel.state.value.actionError,
+        )
+        viewModel.selectAgent(null)
+        assertEquals(null, viewModel.state.value.actionError)
         viewModel.setForeground(false)
       }
     }

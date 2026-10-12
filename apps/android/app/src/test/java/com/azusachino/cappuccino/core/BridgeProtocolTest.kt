@@ -228,6 +228,41 @@ class BridgeProtocolTest {
   }
 
   @Test
+  fun parsesAskUserQuestionCardsWithTheirQuestions() {
+    val event =
+      parseStreamEvent(
+        parseJsonObject(
+          """{"event":"prompt_request","session_id":"s-1","prompt":{"prompt_id":"q-toolu_1","type":"ask_user_question","title":"Pick a color?","tool_name":"AskUserQuestion","options":[],"selected_index":0,"questions":[{"header":"Color","question":"Pick a color?","multi_select":false,"options":[{"id":"opt-0","label":"Red","description":"warm"},{"id":"opt-1","label":"Blue"}]},{"header":"Pets","question":"Which pets?","multi_select":true,"options":[{"id":"opt-0","label":"Cat"}]}]}}"""
+        )
+      )
+        as StreamEvent.PromptRequest
+    val questions = event.prompt.questions
+    assertEquals(2, questions.size)
+    assertEquals(
+      PromptQuestion(
+        "Color",
+        "Pick a color?",
+        false,
+        listOf(PromptOption("opt-0", "Red", "warm"), PromptOption("opt-1", "Blue", null)),
+      ),
+      questions[0],
+    )
+    assertTrue(questions[1].multiSelect)
+    // Screen-read prompts carry no questions.
+    assertTrue(
+      (parseStreamEvent(
+          parseJsonObject(
+            """{"event":"prompt_request","session_id":"s-1","prompt":{"prompt_id":"p-1","type":"tool_approval","title":"T","options":[],"selected_index":0}}"""
+          )
+        )
+          as StreamEvent.PromptRequest)
+        .prompt
+        .questions
+        .isEmpty()
+    )
+  }
+
+  @Test
   fun parsesAgentStatusAndPromptStreamEvents() {
     val statusObj =
       obj(

@@ -57,6 +57,8 @@ data class ConnectedUiState(
   val omittedToolOperations: Int = 0,
   val conversationSource: String? = null,
   val sessionStats: SessionStats? = null,
+  /** Why the last Stop, New session or answer failed; the connection itself is fine. */
+  val actionError: String? = null,
   val savedConversations: List<SavedConversationInfo> = emptyList(),
   val offlineBytes: Long? = null,
   val offlineProblem: String? = null,
@@ -100,6 +102,11 @@ interface ConnectedActions {
   fun submitPrompt(text: String)
 
   fun controlAgent(action: String) = Unit
+
+  fun answerQuestions(
+    promptId: String,
+    answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
+  ) = Unit
 
   fun answerPrompt(promptId: String, optionIndex: Int?, optionId: String?, action: String?)
 
@@ -197,6 +204,7 @@ internal constructor(
             omittedToolOperations = saved.history.omittedTools,
             conversationSource = "offline_snapshot",
             sessionStats = null,
+            actionError = null,
             conversationId = saved.conversationId,
             offlineSavedAt = saved.savedAt,
             connection = ConnectionState.Disconnected,
@@ -322,6 +330,7 @@ internal constructor(
         conversationTurns = emptyList(),
         conversationSource = null,
         sessionStats = null,
+        actionError = null,
         busy = false,
       )
     if (mutableState.value.machineConnection(profile).connection != ConnectionState.Connected)
@@ -348,6 +357,7 @@ internal constructor(
           conversationTurns = emptyList(),
           conversationSource = null,
           sessionStats = null,
+          actionError = null,
           connection = ConnectionState.Disconnected,
           busy = false,
         )
@@ -467,6 +477,7 @@ internal constructor(
           conversationTurns = emptyList(),
           conversationSource = null,
           sessionStats = null,
+          actionError = null,
           connection = ConnectionState.Error("Agent belongs to a different machine"),
         )
       return
@@ -478,6 +489,7 @@ internal constructor(
         conversationTurns = emptyList(),
         conversationSource = null,
         sessionStats = null,
+        actionError = null,
       )
     if (agent == null) clearSavedSelection()
     else {
@@ -612,25 +624,12 @@ internal constructor(
   }
 
   override fun controlAgent(action: String) {
-    if (mutableState.value.offlineSavedAt != null) return
     val profile = activeProfile() ?: return
     // Each request gets a fresh client; the capability comes from the machine's verified details.
     if (mutableState.value.bridgeDetails[profile.id]?.capabilities?.get("agent_control") != true)
       return
-    val agent = mutableState.value.selectedAgent ?: return
-    val client = bridgeFor(profile.endpoint)
-    val requestEpoch = epoch
-    viewModelScope.launch {
-      try {
-        client.controlAgent(agent.sessionId, action)
-      } catch (error: Exception) {
-        if (error is kotlinx.coroutines.CancellationException) throw error
-        if (requestEpoch != epoch || mutableState.value.activeProfileId != profile.id) return@launch
-        mutableState.value =
-          mutableState.value.copy(
-            connection = ConnectionState.Error(error.message ?: "Failed to control the agent")
-          )
-      }
+    runAgentAction("Failed to control the agent") { client, agent ->
+      client.controlAgent(agent.sessionId, action)
     }
   }
 
@@ -639,22 +638,40 @@ internal constructor(
     optionIndex: Int?,
     optionId: String?,
     action: String?,
+  ) =
+    runAgentAction("Failed to answer prompt") { client, agent ->
+      client.answerPrompt(agent.sessionId, promptId, optionIndex, optionId, action)
+    }
+
+  override fun answerQuestions(
+    promptId: String,
+    answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
+  ) =
+    runAgentAction("Failed to answer the question") { client, agent ->
+      client.answerQuestions(agent.sessionId, promptId, answers)
+    }
+
+  /**
+   * An owner action on the selected agent. Its failure (a stale question, a busy agent) is reported
+   * on its own; the connection stays as it is.
+   */
+  private fun runAgentAction(
+    failure: String,
+    send: suspend (BridgeTransport, AgentRow) -> Unit,
   ) {
     if (mutableState.value.offlineSavedAt != null) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
     val client = bridgeFor(profile.endpoint)
     val requestEpoch = epoch
+    mutableState.value = mutableState.value.copy(actionError = null)
     viewModelScope.launch {
       try {
-        client.answerPrompt(agent.sessionId, promptId, optionIndex, optionId, action)
+        send(client, agent)
       } catch (error: Exception) {
         if (error is kotlinx.coroutines.CancellationException) throw error
         if (requestEpoch != epoch || mutableState.value.activeProfileId != profile.id) return@launch
-        mutableState.value =
-          mutableState.value.copy(
-            connection = ConnectionState.Error(error.message ?: "Failed to answer prompt")
-          )
+        mutableState.value = mutableState.value.copy(actionError = error.message ?: failure)
       }
     }
   }

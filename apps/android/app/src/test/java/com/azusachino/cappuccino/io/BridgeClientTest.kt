@@ -406,6 +406,36 @@ class BridgeClientTest {
   }
 
   @Test
+  fun answersEveryQuestionInOneStructuredSubmission() = runBlocking {
+    MockWebServer().use { server ->
+      server.enqueue(MockResponse.Builder().body("""{"event":"question_answered"}""").build())
+      server.enqueue(
+        MockResponse.Builder()
+          .code(409)
+          .body("""{"event":"error","code":"stale_prompt","message":"answer it in the terminal"}""")
+          .build()
+      )
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      val answers =
+        listOf(
+          com.azusachino.cappuccino.core.QuestionAnswer(listOf(1), null),
+          com.azusachino.cappuccino.core.QuestionAnswer(listOf(0, 2), "a \"bird\""),
+        )
+      client.answerQuestions("s-1", "q-toolu_1", answers)
+      val request = server.takeRequest()
+      assertEquals("/api/agents/s-1/prompt", request.url.encodedPath)
+      assertEquals(
+        """{"type":"answer_question","prompt_id":"q-toolu_1","answers":[{"selected":[1]},{"selected":[0,2],"other":"a \"bird\""}]}""",
+        request.body?.utf8(),
+      )
+      // The bridge's reason reaches the owner, not just the status.
+      val refused = runCatching { client.answerQuestions("s-1", "q-toolu_1", answers) }
+      assertEquals("answer it in the terminal", refused.exceptionOrNull()?.message)
+    }
+  }
+
+  @Test
   fun controlsAgentOnlyWhenTheBridgeAdvertisesIt() = runBlocking {
     MockWebServer().use { server ->
       val session =

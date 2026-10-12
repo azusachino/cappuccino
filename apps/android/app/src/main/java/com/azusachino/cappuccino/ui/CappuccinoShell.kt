@@ -581,19 +581,30 @@ fun CappuccinoScreen(
             }
 
             // If there is an active pending prompt on this agent, show the prompt card prominently
+            state.actionError?.let {
+              Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
+            }
             state.stream.pendingPrompt?.let { card ->
+              val answersEnabled =
+                state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_answers") !=
+                  false
               Box(Modifier.padding(horizontal = 16.dp)) {
-                PromptCardView(
-                  prompt = card,
-                  enabled =
-                    state.bridgeDetails[state.activeProfileId]
-                      ?.capabilities
-                      ?.get("prompt_answers") != false,
-                  onSelectOption = { idx, optId ->
-                    actions.answerPrompt(card.promptId, idx, optId, "select_option")
-                  },
-                  onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
-                )
+                if (card.questions.isNotEmpty())
+                  QuestionFormCard(
+                    prompt = card,
+                    enabled = answersEnabled,
+                    onSubmit = { answers -> actions.answerQuestions(card.promptId, answers) },
+                    onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
+                  )
+                else
+                  PromptCardView(
+                    prompt = card,
+                    enabled = answersEnabled,
+                    onSelectOption = { idx, optId ->
+                      actions.answerPrompt(card.promptId, idx, optId, "select_option")
+                    },
+                    onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
+                  )
               }
             }
 
