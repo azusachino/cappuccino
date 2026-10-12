@@ -47,11 +47,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Owner preview capture for the native Material 3 conversation slice. All data is synthetic and
- * stable across captures; dark/large-font variants render through the real theme path and density,
- * and width variants come from the task-owned emulator's density override (compact 320 dp vs normal
- * ~411 dp). Capture names embed the actual rendered width dp so a capture can never be mislabeled
- * after a density change. No owner device, bridge or endpoint data.
+ * Owner preview capture for the conversation page. All data is synthetic and stable across
+ * captures; dark/large-font variants render through the real theme path and density, and width
+ * variants come from the task-owned emulator's density override (compact 320 dp vs normal ~411 dp).
+ * Capture names embed the actual rendered width dp so a capture can never be mislabeled after a
+ * density change. No owner device, bridge or endpoint data.
  */
 @RunWith(AndroidJUnit4::class)
 class ConversationPreviewScreenshotTest {
@@ -84,7 +84,7 @@ class ConversationPreviewScreenshotTest {
             "63 passed · 0 failed",
           ),
           ConversationPart.Text(
-            "Rebuilt the conversation screen on native Material 3 tokens. The transcript reads directly on the background now.\n\n### What changed\n\n- Stock **lightColorScheme** and **darkColorScheme** fallbacks\n- User turns use a `primaryContainer` bubble\n- Disclosures are tonal rows with a real chevron\n\n```kotlin\nval scheme = if (dark) darkColorScheme() else lightColorScheme()\n```"
+            "Ran the Android checks; every test passes.\n\n### What changed\n\n- **Stop** sits beside Send while a run is going\n- Context and cache show under the input\n- Tool steps read as one activity line\n\n```kotlin\nval percent = tokens * 100 / window\n```"
           ),
         ),
       ),
@@ -93,7 +93,7 @@ class ConversationPreviewScreenshotTest {
         "p3",
         "user",
         "2026-10-07T16:05:00Z",
-        "Capture the Material 3 preview set",
+        "Capture the conversation previews",
         emptyList(),
       ),
     )
@@ -151,7 +151,7 @@ class ConversationPreviewScreenshotTest {
   @Test
   fun captureConversationCollapsedLight() {
     setContent(previewState(), ThemeMode.LIGHT)
-    compose.onNodeWithText("Capture the Material 3 preview set").assertIsDisplayed()
+    compose.onNodeWithText("Capture the conversation previews").assertIsDisplayed()
     // Physical reader scroll back to the very top of the transcript so the collapsed capture
     // shows the start of the conversation (p0 prose plus the collapsed disclosure row), not
     // just the tail viewport the list opens on.
@@ -165,12 +165,12 @@ class ConversationPreviewScreenshotTest {
     capture("${capturePrefix()}LightCollapsed")
     // Back down to the lower prose: the markdown fixture turn and the end-aligned user bubble.
     repeat(3) {
-      if (!anyDisplayed("Capture the Material 3 preview set")) {
+      if (!anyDisplayed("Capture the conversation previews")) {
         compose.onNodeWithTag("recentOutputList").performTouchInput { swipeUp() }
         compose.waitForIdle()
       }
     }
-    compose.onNodeWithText("Capture the Material 3 preview set").assertIsDisplayed()
+    compose.onNodeWithText("Capture the conversation previews").assertIsDisplayed()
     capture("${capturePrefix()}LightMarkdownUserTurn")
   }
 
@@ -199,7 +199,7 @@ class ConversationPreviewScreenshotTest {
   @Test
   fun captureConversationLargeFontLight() {
     setContent(previewState(), ThemeMode.LIGHT, fontScale = 1.3f)
-    compose.onNodeWithText("Capture the Material 3 preview set").assertIsDisplayed()
+    compose.onNodeWithText("Capture the conversation previews").assertIsDisplayed()
     capture("${capturePrefix()}LightLargeFont")
   }
 

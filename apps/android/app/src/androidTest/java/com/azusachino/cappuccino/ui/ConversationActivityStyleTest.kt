@@ -157,20 +157,25 @@ class ConversationActivityStyleTest {
   }
 
   @Test
-  fun toolOnlyActivityShowsRealStartAndResultTimes() {
-    val start = "2026-10-10T01:00:00Z"
-    val finish = "2026-10-10T01:00:03Z"
-    compose.activity.setContent {
-      CappuccinoTheme {
-        ConversationDetails(
-          ConversationPart.ToolCall("bash", "pwd", "workspace", false, start, finish)
-        )
-      }
-    }
-    compose
-      .onNodeWithText(
-        "Started ${formatConversationTimestamp(start)} · Result received ${formatConversationTimestamp(finish)}"
+  fun toolActivityShowsHowLongItRanFromRealTimes() {
+    val turn =
+      ConversationTurn(
+        "timed",
+        "agent",
+        null,
+        null,
+        listOf(
+          ConversationPart.ToolCall(
+            "bash",
+            "pwd",
+            "workspace",
+            false,
+            "2026-10-10T01:00:00Z",
+            "2026-10-10T01:00:03Z",
+          )
+        ),
       )
-      .assertIsDisplayed()
+    compose.activity.setContent { CappuccinoTheme { ConversationTurnRow(turn) } }
+    compose.onNodeWithText("3.0s").assertIsDisplayed()
   }
 }

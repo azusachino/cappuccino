@@ -1568,7 +1568,9 @@ fun ConversationTurnRow(
           is TranscriptSegment.Activity -> ActivityGroup(segment.parts, newest, onInspect)
           is TranscriptSegment.Prose -> {
             val part = segment.part
-            if (part !is ConversationPart.Text) ConversationDetails(part, onInspect)
+            if (part is ConversationPart.ResponseStatus) ResponseStatusRow(part)
+            // Thinking and tool calls arrive grouped as activity, never as prose.
+            else if (part !is ConversationPart.Text) Unit
             else if (isUser)
               UserPromptRow(
                 body = {

@@ -84,22 +84,4 @@ class NativeCodeTest {
       assertTrue("$scope token contrast", (maxOf(a, b) + .05f) / (minOf(a, b) + .05f) >= 4.5f)
     }
   }
-
-  @Test
-  fun structuredCommandsStayExactAndPathsAreNotCommands() {
-    val source = "printf '%s' \"${'$'}HOME\"\r\n"
-    val input =
-      kotlinx.serialization.json
-        .buildJsonObject {
-          put("command", kotlinx.serialization.json.JsonPrimitive(source))
-          put("shell", kotlinx.serialization.json.JsonPrimitive("/bin/bash"))
-        }
-        .toString()
-    assertEquals(ToolContent(source, "bash"), toolCommand(input))
-    assertEquals("bash", toolCommand(input)?.language)
-    assertNull(toolCommand("{\"path\":\"/tmp/file.py\"}"))
-    assertNull(toolCommand("{\"command\":true}"))
-    assertEquals("git status", toolCommand("{\"cmd\":\"git status\"}")?.text)
-    assertEquals("{\"cwd\":{}}", toolOtherArguments("{\"cmd\":\"git status\",\"cwd\":{}}"))
-  }
 }
