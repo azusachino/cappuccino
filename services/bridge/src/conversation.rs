@@ -454,6 +454,199 @@ pub fn parse_pi_transcript(content: &str) -> Vec<ConversationTurn> {
     turns
 }
 
+/// Slash-command bookkeeping Claude Code writes as user text; never a person's message.
+fn claude_command_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.starts_with("<local-command-") || trimmed.starts_with("<command-message>") {
+        return Some(String::new());
+    }
+    let name = trimmed
+        .strip_prefix("<command-name>")?
+        .split("</command-name>")
+        .next()?;
+    let args = trimmed
+        .split("<command-args>")
+        .nth(1)
+        .and_then(|rest| rest.split("</command-args>").next())
+        .unwrap_or("")
+        .trim();
+    Some(if args.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name} {args}")
+    })
+}
+
+fn claude_tool_result_text(content: &Value) -> String {
+    match content {
+        Value::String(text) => text.clone(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter(|block| block["type"].as_str() == Some("text"))
+            .filter_map(|block| block["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// Parse a Claude Code session (`<config>/projects/<project>/<session>.jsonl`).
+/// One agent turn spans everything between a person's messages; subagent sidechains,
+/// meta records and hook bookkeeping are skipped.
+pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
+    let mut turns: Vec<ConversationTurn> = Vec::new();
+    let mut tool_calls = std::collections::HashMap::new();
+
+    fn push_user(turns: &mut Vec<ConversationTurn>, text: String, timestamp: Option<String>) {
+        if text.trim().is_empty() {
+            return;
+        }
+        let id = format!("t-{:03}", turns.len() + 1);
+        turns.push(ConversationTurn {
+            id,
+            role: "user".to_string(),
+            timestamp,
+            text: Some(text.trim().to_string()),
+            parts: Vec::new(),
+        });
+    }
+
+    for line in content.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+            continue;
+        };
+        if v["isSidechain"].as_bool() == Some(true) || v["isMeta"].as_bool() == Some(true) {
+            continue;
+        }
+        let timestamp = v["timestamp"].as_str().map(str::to_string);
+        match v["type"].as_str().unwrap_or("") {
+            // A message typed while the agent was working, delivered into the running turn.
+            "attachment" => {
+                let attachment = &v["attachment"];
+                if attachment["type"].as_str() == Some("queued_command")
+                    && attachment["humanTurn"].as_bool() == Some(true)
+                {
+                    let text = attachment["prompt"].as_str().unwrap_or("").to_string();
+                    push_user(&mut turns, text, timestamp);
+                }
+            }
+            "user" => match &v["message"]["content"] {
+                Value::String(text) => {
+                    let text = claude_command_text(text).unwrap_or_else(|| text.clone());
+                    push_user(&mut turns, text, timestamp);
+                }
+                Value::Array(blocks) => {
+                    let text = blocks
+                        .iter()
+                        .filter(|block| block["type"].as_str() == Some("text"))
+                        .filter_map(|block| block["text"].as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    push_user(&mut turns, text, timestamp.clone());
+                    for block in blocks
+                        .iter()
+                        .filter(|block| block["type"].as_str() == Some("tool_result"))
+                    {
+                        let Some(id) = block["tool_use_id"].as_str() else {
+                            continue;
+                        };
+                        // An unmatched result never attaches to another tool.
+                        let Some((turn_index, part_index)) = tool_calls.remove(id) else {
+                            continue;
+                        };
+                        if let Some(ConversationPart::ToolCall {
+                            output,
+                            is_error,
+                            finished_at,
+                            ..
+                        }) = turns
+                            .get_mut(turn_index)
+                            .and_then(|turn: &mut ConversationTurn| turn.parts.get_mut(part_index))
+                        {
+                            *output = Some(claude_tool_result_text(&block["content"]));
+                            *is_error = block["is_error"].as_bool();
+                            *finished_at = timestamp.clone();
+                        }
+                    }
+                }
+                _ => {}
+            },
+            "assistant" => {
+                let mut parts = Vec::new();
+                let next_part = turns
+                    .last()
+                    .filter(|turn| turn.role == "agent")
+                    .map_or(0, |turn| turn.parts.len());
+                for block in v["message"]["content"].as_array().into_iter().flatten() {
+                    match block["type"].as_str().unwrap_or("") {
+                        "text" => {
+                            if let Some(t) = block["text"].as_str().filter(|t| !t.trim().is_empty())
+                            {
+                                parts.push(ConversationPart::Text {
+                                    text: t.trim().to_string(),
+                                });
+                            }
+                        }
+                        "thinking" => {
+                            if let Some(t) =
+                                block["thinking"].as_str().filter(|t| !t.trim().is_empty())
+                            {
+                                parts.push(ConversationPart::Thinking {
+                                    text: t.trim().to_string(),
+                                });
+                            }
+                        }
+                        "tool_use" => {
+                            if let Some(id) = block["id"].as_str() {
+                                let turn_index = if next_part > 0 {
+                                    turns.len() - 1
+                                } else {
+                                    turns.len()
+                                };
+                                tool_calls
+                                    .insert(id.to_string(), (turn_index, next_part + parts.len()));
+                            }
+                            parts.push(ConversationPart::ToolCall {
+                                name: block["name"].as_str().unwrap_or("tool").to_string(),
+                                input: block["input"].clone(),
+                                output: None,
+                                is_error: None,
+                                started_at: timestamp.clone(),
+                                finished_at: None,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+                if v["isApiErrorMessage"].as_bool() == Some(true) {
+                    parts.push(ConversationPart::ResponseStatus {
+                        status: "failed".to_string(),
+                        detail: None,
+                    });
+                }
+                if parts.is_empty() {
+                    continue;
+                }
+                match turns.last_mut().filter(|turn| turn.role == "agent") {
+                    Some(turn) => turn.parts.extend(parts),
+                    None => {
+                        let id = format!("t-{:03}", turns.len() + 1);
+                        turns.push(ConversationTurn {
+                            id,
+                            role: "agent".to_string(),
+                            timestamp,
+                            text: None,
+                            parts,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    turns
+}
+
 /// Fallback parser for raw terminal scrollback lines when no canonical log exists.
 pub fn parse_scrollback_turns(lines: &[String]) -> Vec<ConversationTurn> {
     let mut turns = Vec::new();
@@ -514,6 +707,50 @@ pub fn parse_scrollback_turns(lines: &[String]) -> Vec<ConversationTurn> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_transcript_groups_a_turn_and_attaches_results_by_id() {
+        let turns = parse_claude_transcript(include_str!("../../../fixtures/claude/session.jsonl"));
+        let roles: Vec<_> = turns.iter().map(|t| t.role.as_str()).collect();
+        assert_eq!(roles, ["user", "user", "agent", "user", "agent"]);
+        assert_eq!(turns[0].text.as_deref(), Some("/effort"));
+        assert_eq!(turns[1].text.as_deref(), Some("Fix the failing test"));
+        assert_eq!(turns[3].text.as_deref(), Some("also add a regression test"));
+
+        // Thinking and the split tool_use line join one agent turn; the result attaches by ID.
+        match turns[2].parts.as_slice() {
+            [ConversationPart::Thinking { text }, ConversationPart::ToolCall {
+                name,
+                output,
+                is_error,
+                started_at,
+                finished_at,
+                ..
+            }] => {
+                assert_eq!(text, "Check the test first.");
+                assert_eq!(name, "Bash");
+                assert_eq!(output.as_deref(), Some("1 failed"));
+                assert_eq!(*is_error, Some(true));
+                assert_eq!(started_at.as_deref(), Some("2026-10-12T10:00:05Z"));
+                assert_eq!(finished_at.as_deref(), Some("2026-10-12T10:00:08Z"));
+            }
+            other => panic!("unexpected parts {other:?}"),
+        }
+
+        // Sidechains are skipped, array results are joined, an orphan result attaches nowhere.
+        match turns[4].parts.as_slice() {
+            [ConversationPart::ToolCall {
+                output, is_error, ..
+            }, ConversationPart::Text { text }, ConversationPart::Text { .. }, ConversationPart::ResponseStatus { status, .. }] =>
+            {
+                assert_eq!(output.as_deref(), Some("edited"));
+                assert_eq!(*is_error, None);
+                assert_eq!(text, "Fixed, with a regression test.");
+                assert_eq!(status, "failed");
+            }
+            other => panic!("unexpected parts {other:?}"),
+        }
+    }
 
     #[test]
     fn canonical_identity_is_stable_on_append_but_changes_when_session_is_replaced() {

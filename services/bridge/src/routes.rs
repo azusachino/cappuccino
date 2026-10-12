@@ -317,11 +317,14 @@ pub async fn agent_conversation(
             {
                 Ok((content, conversation_id)) => {
                     let turns = match resolved {
-                        transcript::ResolvedTranscript::Agy(_) => {
-                            conversation::parse_agy_transcript(&content)
-                        }
                         transcript::ResolvedTranscript::Pi(_) => {
                             conversation::parse_pi_transcript(&content)
+                        }
+                        transcript::ResolvedTranscript::Claude(_) => {
+                            conversation::parse_claude_transcript(&content)
+                        }
+                        transcript::ResolvedTranscript::Agy(_) => {
+                            conversation::parse_agy_transcript(&content)
                         }
                     };
                     let payload = conversation::ConversationResponse {

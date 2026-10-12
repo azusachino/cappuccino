@@ -1,0 +1,16 @@
+{"type":"user","isMeta":true,"timestamp":"2026-10-12T10:00:00Z","message":{"role":"user","content":"<local-command-caveat>ignored</local-command-caveat>"}}
+{"type":"user","timestamp":"2026-10-12T10:00:01Z","message":{"role":"user","content":"<command-name>/effort</command-name>\n<command-message>effort</command-message>\n<command-args></command-args>"}}
+{"type":"user","timestamp":"2026-10-12T10:00:02Z","message":{"role":"user","content":"<local-command-stdout>Set effort</local-command-stdout>"}}
+{"type":"user","timestamp":"2026-10-12T10:00:03Z","message":{"role":"user","content":"Fix the failing test"}}
+{"type":"assistant","timestamp":"2026-10-12T10:00:04Z","message":{"id":"m1","role":"assistant","content":[{"type":"thinking","thinking":"Check the test first.","signature":"x"}]}}
+{"type":"assistant","timestamp":"2026-10-12T10:00:05Z","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"make test"}}]}}
+{"type":"user","timestamp":"2026-10-12T10:00:08Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"1 failed","is_error":true}]}}
+{"type":"attachment","timestamp":"2026-10-12T10:00:09Z","attachment":{"type":"queued_command","humanTurn":true,"prompt":"also add a regression test"}}
+{"type":"attachment","timestamp":"2026-10-12T10:00:09Z","attachment":{"type":"queued_command","prompt":"<task-notification>ignored</task-notification>"}}
+{"type":"assistant","isSidechain":true,"timestamp":"2026-10-12T10:00:10Z","message":{"id":"s1","role":"assistant","content":[{"type":"text","text":"subagent noise"}]}}
+{"type":"assistant","timestamp":"2026-10-12T10:00:11Z","message":{"id":"m2","role":"assistant","content":[{"type":"tool_use","id":"tu2","name":"Edit","input":{"file_path":"a.rs"}}]}}
+{"type":"user","timestamp":"2026-10-12T10:00:12Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu2","content":[{"type":"text","text":"edited"}]},{"type":"tool_result","tool_use_id":"unknown","content":"orphan"}]}}
+{"type":"assistant","timestamp":"2026-10-12T10:00:13Z","message":{"id":"m3","role":"assistant","content":[{"type":"text","text":"Fixed, with a regression test."}]}}
+{"type":"assistant","isApiErrorMessage":true,"timestamp":"2026-10-12T10:00:14Z","message":{"id":"m4","role":"assistant","content":[{"type":"text","text":"API Error: overloaded"}]}}
+{"type":"system","subtype":"turn_duration","durationMs":11000,"timestamp":"2026-10-12T10:00:15Z"}
+not json
