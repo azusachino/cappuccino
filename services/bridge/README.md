@@ -118,7 +118,7 @@ From the repository root:
 cargo install --path services/bridge --locked
 herdr plugin link "$PWD/services/bridge"
 herdr plugin list
-herdr plugin action invoke status --plugin azusachino.cappuccino-bridge
+herdr plugin action invoke status --plugin cappuccino-bridge
 ```
 
 Or, from `services/bridge`, use `cargo install --path . --locked`. Cargo places
@@ -126,7 +126,7 @@ Or, from `services/bridge`, use `cargo install --path . --locked`. Cargo places
 that directory must be on the `PATH` inherited by Herdr. Herdr runs plugin
 commands with the plugin root as their working directory, but does not add the
 Cargo install directory to `PATH`. Check `command -v cappuccino-bridge` and
-`herdr plugin action invoke status --plugin azusachino.cappuccino-bridge` in
+`herdr plugin action invoke status --plugin cappuccino-bridge` in
 that launch environment. If command lookup fails, install the binary in the running Herdr server's
 existing `PATH`. Restarting Herdr to change its launch environment requires
 explicit owner authorization and preservation of its long-running agents;
@@ -149,10 +149,10 @@ after startup, and no automatic Herdr-shutdown hook is configured. Use the
 plugin actions to inspect, stop and view logs:
 
 ```text
-herdr plugin action invoke status --plugin azusachino.cappuccino-bridge
-herdr plugin action invoke stop --plugin azusachino.cappuccino-bridge
-herdr plugin action invoke logs --plugin azusachino.cappuccino-bridge
-herdr plugin log list --plugin azusachino.cappuccino-bridge --limit 10
+herdr plugin action invoke status --plugin cappuccino-bridge
+herdr plugin action invoke stop --plugin cappuccino-bridge
+herdr plugin action invoke logs --plugin cappuccino-bridge
+herdr plugin log list --plugin cappuccino-bridge --limit 10
 ```
 
 `stop` sends a token-authenticated shutdown request over the private Unix socket and waits for both the control endpoint and HTTP listener to close. A stale/malformed record, unsafe path, socket mismatch or stop timeout fails closed and preserves uncertain state for manual inspection; it never guesses at a PID or deletes an unrelated file. A legacy `bridge.pid` from the former lifecycle also blocks start/status/stop until an operator verifies any old process and removes that file manually. Earlier versions may have created a permissive state directory: verify the path, owner, contents and any old bridge process before manually securing or cleaning it. This binary refuses unsafe directories and never chmods an existing custom directory. State directories must be current-user-owned mode 0700; lock, control record and log files must be regular owner-owned mode 0600 files. Symlinked, nonregular, multiply-linked, foreign-owned or permissive paths are rejected. `logs` prints the last 80 lines.

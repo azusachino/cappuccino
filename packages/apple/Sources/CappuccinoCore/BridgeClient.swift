@@ -29,7 +29,7 @@ public struct BridgeClient: DaemonServing {
   public func verifyMachine(baseURL: URL, expectedID: UUID? = nil) async throws -> BridgeMachine {
     let event = try await get(baseURL.appendingPathComponent("/api/session"))
     guard event["event"] as? String == "paired",
-      event["plugin"] as? String == "azusachino.cappuccino-bridge",
+      event["plugin"] as? String == "cappuccino-bridge",
       let protocolNumber = event["protocol"] as? NSNumber,
       CFGetTypeID(protocolNumber) != CFBooleanGetTypeID(),
       protocolNumber.doubleValue == 1,

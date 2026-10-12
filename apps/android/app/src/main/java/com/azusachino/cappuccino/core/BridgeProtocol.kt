@@ -7,7 +7,7 @@ const val MAX_HTTP_BODY_BYTES = 2 * 1024 * 1024
 const val MAX_WS_MESSAGE_BYTES = 1024 * 1024
 const val MAX_OUTPUT_ROWS = 2_000
 const val MAX_OUTPUT_UTF8_BYTES = 4 * 1024 * 1024
-const val BRIDGE_PLUGIN_ID = "azusachino.cappuccino-bridge"
+const val BRIDGE_PLUGIN_ID = "cappuccino-bridge"
 
 class StreamRetryBudget(private val maximumRetries: Int = 4) {
   private var retriesUsed = 0

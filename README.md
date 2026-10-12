@@ -23,7 +23,7 @@ binary before linking the plugin. From this repository's root, run
 `cargo install --path services/bridge --locked`; ensure Cargo's install `bin`
 directory is on Herdr's `PATH`, then run
 `herdr plugin link <path-to-services/bridge>` and verify with
-`herdr plugin action invoke status --plugin azusachino.cappuccino-bridge`. The
+`herdr plugin action invoke status --plugin cappuccino-bridge`. The
 plugin does not build or install the binary. Follow the
 [bridge setup guide](services/bridge/README.md) to expose its loopback listener
 over a private tailnet using `tailscale serve`. The bridge has no authentication:

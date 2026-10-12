@@ -53,7 +53,7 @@ final class StubURLProtocol: URLProtocol {
       #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
       return (
         200,
-        #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"azusachino.cappuccino-bridge"}"#
+        #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"cappuccino-bridge"}"#
           .data(using: .utf8)!
       )
     }
@@ -65,9 +65,9 @@ final class StubURLProtocol: URLProtocol {
   @Test func rejectsInvalidPairingAndUnexpectedMachineIdentity() async {
     let base = URL(string: "https://machine.example")!
     for payload in [
-      #"{"event":"paired","machine_id":"invalid","protocol":1,"plugin":"azusachino.cappuccino-bridge"}"#,
-      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":2,"plugin":"azusachino.cappuccino-bridge"}"#,
-      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":true,"plugin":"azusachino.cappuccino-bridge"}"#,
+      #"{"event":"paired","machine_id":"invalid","protocol":1,"plugin":"cappuccino-bridge"}"#,
+      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":2,"plugin":"cappuccino-bridge"}"#,
+      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":true,"plugin":"cappuccino-bridge"}"#,
       #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"wrong"}"#,
     ] {
       StubURLProtocol.handler = { _ in (200, Data(payload.utf8)) }
@@ -79,7 +79,7 @@ final class StubURLProtocol: URLProtocol {
       (
         200,
         Data(
-          #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"azusachino.cappuccino-bridge"}"#
+          #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"cappuccino-bridge"}"#
             .utf8)
       )
     }

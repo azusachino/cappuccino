@@ -9,7 +9,7 @@ import org.junit.Test
 
 class BridgeDetailsTest {
   private val prefix =
-    """"event":"paired","machine_id":"00000000-0000-0000-0000-000000000001","plugin":"azusachino.cappuccino-bridge""""
+    """"event":"paired","machine_id":"00000000-0000-0000-0000-000000000001","plugin":"cappuccino-bridge""""
 
   @Test
   fun legacyHandshakeIsUnknownRatherThanUnsupported() {

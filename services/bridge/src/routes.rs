@@ -58,7 +58,7 @@ pub async fn session(State(state): State<Arc<BridgeState>>) -> Response {
             "machine_id": state.machine_id,
             "machine_name": state.machine_name,
             "protocol": 1,
-            "plugin": "azusachino.cappuccino-bridge",
+            "plugin": "cappuccino-bridge",
             "bridge_version": env!("CARGO_PKG_VERSION"),
             // Endpoint support, not a promise that every agent can use it or is healthy.
             "capabilities": {

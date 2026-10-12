@@ -27,7 +27,7 @@ class BridgeClientTest {
   fun transparentlyNegotiatesAndDecodesGzipWithoutChangingIdentity() = runBlocking {
     MockWebServer().use { server ->
       val payload =
-        """{"event":"paired","machine_id":"$machine","protocol":1,"plugin":"azusachino.cappuccino-bridge"}"""
+        """{"event":"paired","machine_id":"$machine","protocol":1,"plugin":"cappuccino-bridge"}"""
       val bytes = java.io.ByteArrayOutputStream()
       java.util.zip.GZIPOutputStream(bytes).use { it.write(payload.toByteArray(Charsets.UTF_8)) }
       server.enqueue(
@@ -74,7 +74,7 @@ class BridgeClientTest {
       server.enqueue(
         MockResponse.Builder()
           .body(
-            """{"event":"paired","machine_id":"$machine","protocol":1,"plugin":"azusachino.cappuccino-bridge"}"""
+            """{"event":"paired","machine_id":"$machine","protocol":1,"plugin":"cappuccino-bridge"}"""
           )
           .build()
       )
