@@ -31,7 +31,7 @@ class QuestionFormUiTest {
       promptId = "q-toolu_1",
       type = "ask_user_question",
       title = "Pick a color?",
-      message = null,
+      message = "Question 1 of 2",
       toolName = "AskUserQuestion",
       command = null,
       options = emptyList(),
@@ -66,6 +66,7 @@ class QuestionFormUiTest {
         QuestionFormCard(card, onSubmit = { submitted += it }, onCancel = { canceled++ })
       }
     }
+    compose.onNodeWithText("Question 1 of 2").assertExists()
     // Descriptions show with their options.
     compose.onNodeWithText("warm").performScrollTo()
     compose.onNodeWithText("Submit").assertIsNotEnabled()

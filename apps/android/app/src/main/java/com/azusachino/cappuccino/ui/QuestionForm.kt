@@ -62,6 +62,10 @@ fun QuestionFormCard(
     prompt.questions.zip(answers).all { (question, answer) -> answerComplete(question, answer) }
   ElevatedCard(modifier.fillMaxWidth().testTag("questionForm")) {
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+      // "Question 1 of 2": the terminal form shows one question at a time.
+      prompt.message?.let {
+        Text(it, style = MaterialTheme.typography.labelSmall, color = colors.muted)
+      }
       Column(
         Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp),
