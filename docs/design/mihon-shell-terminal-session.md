@@ -21,6 +21,17 @@ Source basis: [pinned Mihon study](mihon-native-ui-source-study.md), commit
 not a manga-gallery clone. No terminal emulator, WebView, launcher or remote
 agent lifecycle control is introduced.
 
+## Pi-first scope correction
+
+The owner's pi-pocket reference does not justify excluding approvals, steer,
+queue or model controls. Pi/Herdr integration is the first priority. The
+[source capability audit](herdr-pi-capability-audit.md) distinguishes documented
+Pi support from gaps in our bridge/client and safe live-session transport.
+Existing approval handling is already present; missing typed controls are
+implementation gaps, not features declared outside the goal. The same audit
+records Herdr's existing completion sequences, currently dropped by our
+catalog, and limitations of the screen-based answer path.
+
 ## Approved capability boundaries
 
 | ID | Job | Depends on |
@@ -154,6 +165,38 @@ The UI rewrite must address behavior, not merely replace visuals.
   across conversations/providers. Record identity and viewport geometry without
   publishing private transcript content. Synthetic tests remain supporting
   evidence, not owner acceptance.
+
+## Subsequent owner feedback: composer, noise and alerts
+
+The owner accepts the three Transcript/Tools/Info tabs and the tidier
+Following/Latest row, but rejects the missing input and excessive explanatory
+wording. Add a bottom native composer; keep identity/state/content prominent
+and explanations in Info rather than the transcript. A disabled preview Send
+is not implemented live delivery. Existing prompt endpoints must be reviewed
+for identity, stale-action, capability, acknowledgement and draft-preservation
+behavior before wiring the new live consuming UI. Saved readers stay read-only.
+
+The palette scope is capped at three: Default, Dynamic and Catppuccin. These
+are a practical selected set, not a measured popularity ranking.
+
+Completion alerts are a new requested capability: configurable Android system
+notifications and/or Telegram in Settings. Settings shown in a synthetic design
+preview do not activate either channel. Required acceptance includes:
+
+- Opt-in channel and session/machine scope; explicit permission/configuration
+  states, no unsolicited notifications or secret-bearing screenshots.
+- Verified session completion, not tool results, first-loaded idle state,
+  historical failures, scrollback guesses or replay after reconnect.
+- Duplicate/stale transition rejection and independently scoped machines;
+  selected-stream-only attention is insufficient for all-session alerts.
+- Explicit foreground/background/closed-app delivery semantics. Existing
+  foreground polling does not prove background completion delivery.
+- A selected Telegram route, credential ownership and separately authorized
+  infrastructure changes; no fabricated delivery or automatic bot deployment.
+
+The completion-event contract and background route remain unresolved. No
+notification permission is requested and no real prompt, approval or Telegram
+message is sent merely to review the UI.
 
 ## Delivery and verification
 
