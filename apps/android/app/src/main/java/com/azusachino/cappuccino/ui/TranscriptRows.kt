@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -26,7 +29,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -34,18 +41,27 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.azusachino.cappuccino.R
 import com.azusachino.cappuccino.core.ConversationPart
+import com.azusachino.cappuccino.core.StepOutcome
+import com.azusachino.cappuccino.core.Tone
 import com.azusachino.cappuccino.core.ToolActivityState
 import com.azusachino.cappuccino.core.ToolKind
 import com.azusachino.cappuccino.core.activityDuration
 import com.azusachino.cappuccino.core.activityState
 import com.azusachino.cappuccino.core.activitySummary
 import com.azusachino.cappuccino.core.compactDuration
-import com.azusachino.cappuccino.core.toolDuration
+import com.azusachino.cappuccino.core.stepOutcome
+import com.azusachino.cappuccino.core.stepWords
 import com.azusachino.cappuccino.core.toolKind
 
 // Transcript grammar after pi-pocket (docs/licenses/pi-pocket): prose is plain text, a person's
@@ -98,23 +114,31 @@ internal fun UserPromptRow(
   }
 }
 
-/** Consecutive thinking and tool calls as one summary line ("Ran 2 commands · 3.1s"). */
+/**
+ * Pi's thinking and tool calls between its words as one line: what they did, and for how long. It
+ * opens into a timeline, a line per call. Open in the newest turn and closed before, unless opened
+ * or closed by hand (pi-pocket's `ActivityGroup`).
+ */
 @Composable
-internal fun ActivityGroup(parts: List<ConversationPart>, onInspect: () -> Unit = {}) {
+internal fun ActivityGroup(
+  parts: List<ConversationPart>,
+  newest: Boolean = false,
+  onInspect: () -> Unit = {},
+) {
   val colors = MaterialTheme.appColors
-  val tools = parts.filterIsInstance<ConversationPart.ToolCall>()
-  val failures = tools.count { it.activityState == ToolActivityState.FAILED }
-  var expanded by rememberSaveable { mutableStateOf(failures > 0) }
+  var chosen by rememberSaveable { mutableStateOf<Boolean?>(null) }
+  val expanded = chosen ?: newest
   val summary = remember(parts) { activitySummary(parts) }
   val duration = remember(parts) { activityDuration(parts)?.let(::compactDuration) }
   Column(Modifier.fillMaxWidth()) {
     Row(
       Modifier.fillMaxWidth()
-        .heightIn(min = 36.dp)
+        .heightIn(min = 30.dp)
         .clickable(role = Role.Button) {
           if (!expanded) onInspect()
-          expanded = !expanded
+          chosen = !expanded
         }
+        .padding(start = 2.dp, end = 8.dp, top = 2.dp, bottom = 2.dp)
         .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -133,17 +157,16 @@ internal fun ActivityGroup(parts: List<ConversationPart>, onInspect: () -> Unit 
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
-      if (failures > 0)
-        Text("$failures failed", style = MaterialTheme.typography.labelSmall, color = colors.err)
       if (duration != null)
-        Text(duration, style = MaterialTheme.typography.labelSmall, color = colors.faint)
+        Text(duration, style = MaterialTheme.typography.labelSmall, color = colors.muted)
     }
     if (expanded) {
       val rule = colors.line
       Column(
-        Modifier.fillMaxWidth().padding(start = 7.dp).drawBehind {
+        Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp).drawBehind {
           drawLine(rule, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 1.dp.toPx())
-        }
+        },
+        verticalArrangement = Arrangement.spacedBy(1.dp),
       ) {
         parts.forEach { ActivityStep(it, onInspect) }
       }
@@ -151,18 +174,7 @@ internal fun ActivityGroup(parts: List<ConversationPart>, onInspect: () -> Unit 
   }
 }
 
-private val ToolKind.glyph: String
-  get() =
-    when (this) {
-      ToolKind.READ -> "≡"
-      ToolKind.SEARCH -> "/"
-      ToolKind.EDIT -> "~"
-      ToolKind.WRITE -> "+"
-      ToolKind.COMMAND -> "$"
-      ToolKind.OTHER -> "·"
-    }
-
-/** One timeline line: glyph, verb, what it touched, and only what the record proves. */
+/** One timeline line: its node on the rule, glyph, tool, what it touched, and what it came to. */
 @Composable
 private fun ActivityStep(part: ConversationPart, onInspect: () -> Unit) {
   val colors = MaterialTheme.appColors
@@ -171,61 +183,65 @@ private fun ActivityStep(part: ConversationPart, onInspect: () -> Unit) {
   val glyphColor: Color
   val label: String
   val subject: String
-  var meta: String? = null
-  var metaColor = colors.muted
+  val outcome: StepOutcome?
+  val failed: Boolean
   when (part) {
     is ConversationPart.Thinking -> {
       glyph = "✦"
       glyphColor = MaterialTheme.colorScheme.tertiary
       label = "Thought"
-      subject = part.text.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+      subject = ""
+      outcome = null
+      failed = false
     }
     is ConversationPart.ToolCall -> {
-      val kind = toolKind(part.name)
-      glyph = kind.glyph
+      glyph = toolKind(part.name).glyph
       glyphColor = colors.muted
-      label = part.name
-      subject = remember(part.input) { toolSummary(part.input).lineSequence().first() }
-      when (part.activityState) {
-        ToolActivityState.FAILED -> {
-          meta = "failed"
-          metaColor = colors.err
-        }
-        // A missing result is not a failure or a running call; say only that none is recorded.
-        ToolActivityState.RESULT_NOT_RECORDED -> {
-          meta = "no result"
-          metaColor = colors.faint
-        }
-        ToolActivityState.RESULT_AVAILABLE -> meta = toolDuration(part)?.let(::compactDuration)
-      }
+      val words = remember(part) { stepWords(part) }
+      label = words.first
+      subject = words.second
+      outcome = remember(part) { stepOutcome(part) }
+      failed = part.activityState == ToolActivityState.FAILED
     }
     is ConversationPart.Text,
     is ConversationPart.ResponseStatus -> return
   }
-  Column(Modifier.fillMaxWidth().padding(start = 10.dp)) {
+  // Done is a muted success color on the rule; only a recorded error is red.
+  val node = if (failed) colors.err else colors.ok.copy(alpha = 0.4f).compositeOver(colors.card)
+  Column(
+    Modifier.fillMaxWidth().drawBehind {
+      val side = 5.dp.toPx()
+      drawRect(node, Offset(-3.dp.toPx(), 13.dp.toPx()), Size(side, side))
+    }
+  ) {
     Row(
       Modifier.fillMaxWidth()
-        .heightIn(min = 32.dp)
+        .padding(start = 14.dp)
+        .heightIn(min = 30.dp)
         .clickable(role = Role.Button) {
           if (!open) onInspect()
           open = !open
         }
+        .padding(horizontal = 8.dp, vertical = 3.dp)
         .semantics { stateDescription = if (open) "Expanded" else "Collapsed" },
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       Text(
         glyph,
-        Modifier.width(12.dp).clearAndSetSemantics {},
-        style = MaterialTheme.typography.labelMedium,
+        Modifier.width(14.dp).clearAndSetSemantics {},
+        style = MaterialTheme.typography.labelSmall,
         color = glyphColor,
+        textAlign = TextAlign.Center,
       )
       Text(
         label,
+        Modifier.widthIn(max = 120.dp),
         style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.Bold,
+        fontWeight = FontWeight.SemiBold,
         color = colors.text,
         maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
       Text(
         subject,
@@ -235,14 +251,28 @@ private fun ActivityStep(part: ConversationPart, onInspect: () -> Unit) {
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
-      meta?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = metaColor) }
+      outcome?.let {
+        Text(
+          it.text,
+          Modifier.widthIn(max = 140.dp),
+          style = MaterialTheme.typography.labelSmall,
+          color =
+            when (it.tone) {
+              Tone.OK -> colors.ok
+              Tone.ERR -> colors.err
+              Tone.PLAIN -> colors.muted
+            },
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
     }
     if (open)
       Column(
-        Modifier.fillMaxWidth().padding(start = 20.dp, top = 2.dp, bottom = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        Modifier.fillMaxWidth().padding(start = 44.dp, end = 8.dp, top = 2.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
       ) {
-        ConversationPartBody(part, onInspect)
+        StepBody(part)
       }
   }
 }
@@ -294,5 +324,118 @@ internal fun JumpToLatest(newOutput: Boolean, modifier: Modifier = Modifier, onC
       modifier = Modifier.size(20.dp),
       tint = if (newOutput) colors.accent else colors.body,
     )
+  }
+}
+
+// pi-pocket's pre.cmd / pre.output: small wrapped monospace on the code ground, a screen's
+// 45% at most, scrolling inside. Very long text shows its start until asked for the rest.
+private const val STEP_TEXT_PREVIEW = 20_000
+
+@Composable
+private fun StepBlock(text: AnnotatedString) {
+  val colors = MaterialTheme.appColors
+  var whole by rememberSaveable { mutableStateOf(false) }
+  val clipped = !whole && text.length > STEP_TEXT_PREVIEW
+  val maxHeight =
+    with(LocalDensity.current) { (LocalWindowInfo.current.containerSize.height * 0.45f).toDp() }
+  Column(
+    Modifier.fillMaxWidth()
+      .heightIn(max = maxHeight)
+      .background(colors.codeBackground)
+      .border(1.dp, colors.line)
+      .verticalScroll(rememberScrollState())
+      .padding(horizontal = 10.dp, vertical = 8.dp)
+  ) {
+    Text(
+      if (clipped) text.subSequence(0, STEP_TEXT_PREVIEW) else text,
+      style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, lineHeight = 16.sp),
+    )
+    if (clipped)
+      Text(
+        "Show everything",
+        Modifier.padding(top = 6.dp).clickable(role = Role.Button) { whole = true },
+        style = MaterialTheme.typography.labelSmall,
+        color = colors.accent,
+      )
+  }
+}
+
+@Composable
+private fun StepBlock(text: String, color: Color) =
+  StepBlock(AnnotatedString(text, SpanStyle(color = color)))
+
+private val prettyJson = kotlinx.serialization.json.Json { prettyPrint = true }
+
+/** What a step shows when opened: what it ran or changed, then what it printed. */
+@Composable
+private fun StepBody(part: ConversationPart) {
+  val colors = MaterialTheme.appColors
+  when (part) {
+    is ConversationPart.Thinking -> StepBlock(part.text, colors.muted)
+    is ConversationPart.ToolCall -> {
+      val failed = part.activityState == ToolActivityState.FAILED
+      val args =
+        remember(part.input) {
+          try {
+            prettyJson.parseToJsonElement(part.input) as? kotlinx.serialization.json.JsonObject
+          } catch (_: Exception) {
+            null
+          }
+        }
+      fun field(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
+        (args?.get(key) as? kotlinx.serialization.json.JsonPrimitive)
+          ?.takeIf { it.isString }
+          ?.content
+      }
+      val kind = toolKind(part.name)
+      when (kind) {
+        ToolKind.COMMAND -> field("command", "cmd")?.let { StepBlock(it, colors.ok) }
+        ToolKind.EDIT -> {
+          val edits = buildList {
+            val old = field("old_string", "oldText")
+            if (old != null) add(old to (field("new_string", "newText") ?: ""))
+            (args?.get("edits") as? kotlinx.serialization.json.JsonArray)?.forEach { edit ->
+              val o = edit as? kotlinx.serialization.json.JsonObject ?: return@forEach
+              fun text(vararg keys: String) = keys.firstNotNullOfOrNull {
+                (o[it] as? kotlinx.serialization.json.JsonPrimitive)?.content
+              }
+              add((text("old_string", "oldText") ?: "") to (text("new_string", "newText") ?: ""))
+            }
+          }
+          if (edits.isNotEmpty())
+            StepBlock(
+              buildAnnotatedString {
+                edits.forEachIndexed { index, (old, new) ->
+                  if (index > 0) append("\n")
+                  withStyle(SpanStyle(color = colors.err)) {
+                    append(old.lines().joinToString("\n") { "- $it" })
+                  }
+                  append("\n")
+                  withStyle(SpanStyle(color = colors.ok)) {
+                    append(new.lines().joinToString("\n") { "+ $it" })
+                  }
+                }
+              }
+            )
+        }
+        ToolKind.WRITE -> field("content")?.let { StepBlock(it, colors.body) }
+        ToolKind.READ,
+        ToolKind.SEARCH,
+        ToolKind.LIST -> Unit
+        ToolKind.OTHER ->
+          if (args != null && args.isNotEmpty())
+            StepBlock(
+              prettyJson.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), args),
+              colors.body,
+            )
+      }
+      val output = part.output
+      // A successful edit's diff already says what changed.
+      if (!output.isNullOrEmpty() && !(kind == ToolKind.EDIT && !failed))
+        StepBlock(output, if (failed) colors.err else colors.body)
+      if (failed && output.isNullOrEmpty()) StepBlock("No error text reported", colors.err)
+    }
+    is ConversationPart.Text,
+    is ConversationPart.ResponseStatus -> Unit
   }
 }

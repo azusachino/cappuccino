@@ -41,23 +41,90 @@ class TranscriptActivityTest {
     assertEquals(emptyList<TranscriptSegment>(), transcriptSegments(emptyList()))
   }
 
+  private fun call(name: String, input: String, output: String? = "ok", isError: Boolean? = null) =
+    ConversationPart.ToolCall(name, input, output, isError)
+
   @Test
-  fun summaryCountsPiAndClaudeToolNamesAlike() {
+  fun summaryCountsDistinctTargetsInTheOrderFirstDone() {
     val parts =
       listOf(
         ConversationPart.Thinking("x"),
-        tool("edit"),
-        tool("Edit"),
-        tool("write"),
-        tool("bash"),
-        tool("Bash"),
-        tool("Glob"),
-        tool("mcp__custom"),
+        call("grep", """{"pattern":"tail"}"""),
+        call("read", """{"path":"a.kt"}"""),
+        call("Read", """{"file_path":"a.kt"}"""),
+        call("read", """{"path":"b.kt"}"""),
+        call("bash", """{"command":"make test"}"""),
       )
+    assertEquals("Thought, searched, read 2 files, ran 1 command", activitySummary(parts))
+    // The noun just said is not repeated.
     assertEquals(
-      "Thought, ran 1 search, edited 2 files, wrote 1 file, ran 2 commands, used 1 tool",
-      activitySummary(parts),
+      "Edited 1 file, wrote 1",
+      activitySummary(
+        listOf(call("Edit", """{"file_path":"a.kt"}"""), call("write", """{"path":"b.kt"}"""))
+      ),
     )
+    assertEquals("Used mcp__x", activitySummary(listOf(call("mcp__x", "{}"))))
+  }
+
+  @Test
+  fun stepWordsNameTheToolAndWhatItTouched() {
+    assertEquals(
+      "bash" to "make test",
+      stepWords(call("Bash", """{"command":"make test\nmore"}""")),
+    )
+    assertEquals(
+      "read" to "a.kt:10+20",
+      stepWords(call("read", """{"path":"a.kt","offset":10,"limit":20}""")),
+    )
+    assertEquals(
+      "glob" to "**/*.kt  src",
+      stepWords(call("Glob", """{"pattern":"**/*.kt","path":"src"}""")),
+    )
+    assertEquals("mcp__x" to "", stepWords(call("mcp__x", "not json")))
+  }
+
+  @Test
+  fun outcomesSayOnlyWhatTheRecordProves() {
+    // Shared first and last lines are not counted as changes.
+    assertEquals(
+      StepOutcome("+2 −1", Tone.OK),
+      stepOutcome(
+        call("Edit", """{"file_path":"a","old_string":"a\nb\nc","new_string":"a\nx\ny\nc"}""")
+      ),
+    )
+    assertEquals(
+      StepOutcome("+1 −1", Tone.OK),
+      stepOutcome(call("edit", """{"path":"a","edits":[{"oldText":"p","newText":"q"}]}""")),
+    )
+    assertEquals(
+      StepOutcome("+3", Tone.OK),
+      stepOutcome(call("write", """{"path":"a","content":"1\n2\n3\n"}""")),
+    )
+    assertEquals(
+      StepOutcome("2 lines"),
+      stepOutcome(call("read", """{"path":"a"}""", "one\ntwo\n")),
+    )
+    assertEquals(
+      StepOutcome("no matches"),
+      stepOutcome(call("Grep", """{"pattern":"z"}""", "No matches found")),
+    )
+    assertEquals(
+      StepOutcome("1 match"),
+      stepOutcome(call("grep", """{"pattern":"z"}""", "a.kt:3: z")),
+    )
+    assertEquals(
+      StepOutcome("48 passed · 3.1s", Tone.OK),
+      stepOutcome(call("bash", """{"command":"npm test"}""", "Tests: 48 passed\nDone in 3.1s")),
+    )
+    assertEquals(StepOutcome("no output"), stepOutcome(call("bash", """{"command":"true"}""", "")))
+    assertEquals(
+      StepOutcome("exit 2", Tone.ERR),
+      stepOutcome(call("bash", """{"command":"make"}""", "Exit code 2\nboom", isError = true)),
+    )
+    // No recorded result is neither a failure nor a running call: nothing is said.
+    assertNull(stepOutcome(call("bash", """{"command":"sleep 9"}""", output = null)))
+    // Output of an unrelated command is never read as a test run.
+    assertNull(testOutcome("3 passed", "echo"))
   }
 
   @Test

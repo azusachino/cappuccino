@@ -235,6 +235,12 @@ fun CappuccinoScreen(
     remember(turns) {
       turns.filter { turn -> !turn.text.isNullOrBlank() || turn.parts.isNotEmpty() }
     }
+  // pi-pocket: everything after the last person's message is the newest turn.
+  val newestTurnIds =
+    remember(chatTurns) {
+      val lastUser = chatTurns.indexOfLast { it.role.lowercase() == "user" }
+      chatTurns.drop(lastUser + 1).map { it.id }.toSet()
+    }
   val rows = state.stream.rows()
   val collapsedRows = remember(rows) { collapseOutputRows(rows) }
   val displayedContent: List<*> = if (turns.isNotEmpty()) chatTurns else collapsedRows
@@ -606,6 +612,7 @@ fun CappuccinoScreen(
                             onInspect = { followingOutput = false },
                             showToolsInline = true,
                             onTextSizeChanged = onTextLayoutChanged,
+                            newest = turn.id in newestTurnIds,
                           )
                         }
                         // The live line lives in the bottom marker so follow targets stay put.
@@ -1376,6 +1383,7 @@ fun ConversationTurnRow(
   onInspect: () -> Unit = {},
   showToolsInline: Boolean = true,
   onTextSizeChanged: (() -> Unit)? = null,
+  newest: Boolean = false,
 ) {
   val textModifier =
     remember(onTextSizeChanged) {
@@ -1400,7 +1408,7 @@ fun ConversationTurnRow(
     segments.forEachIndexed { index, segment ->
       key(turn.id, index) {
         when (segment) {
-          is TranscriptSegment.Activity -> ActivityGroup(segment.parts, onInspect)
+          is TranscriptSegment.Activity -> ActivityGroup(segment.parts, newest, onInspect)
           is TranscriptSegment.Prose -> {
             val part = segment.part
             if (part !is ConversationPart.Text) ConversationDetails(part, onInspect)
