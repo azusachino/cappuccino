@@ -167,6 +167,7 @@ fun MarkdownText(text: String, modifier: Modifier = Modifier, compact: Boolean =
         if (compact) {
           val heading = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
           markdownTypography(
+            text = MaterialTheme.typography.bodyMedium,
             h1 = heading,
             h2 = heading,
             h3 = heading,

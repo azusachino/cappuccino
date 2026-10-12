@@ -20,14 +20,22 @@ internal fun messagePreview(text: String): String {
   )
 }
 
+// Native transcript budget: do not turn ordinary replies into six-line chat previews.
+internal fun transcriptInlineText(text: String): String =
+  text.substring(0, text.offsetByCodePoints(0, minOf(16_000, text.codePointCount(0, text.length))))
+
 @Composable
 internal fun MessageBody(
   text: String,
   modifier: Modifier = Modifier,
   markdown: Boolean = true,
   onInspect: () -> Unit = {},
+  transcript: Boolean = false,
 ) {
-  val preview = remember(text) { messagePreview(text) }
+  val preview =
+    remember(text, transcript) {
+      if (transcript) transcriptInlineText(text) else messagePreview(text)
+    }
   var full by rememberSaveable { mutableStateOf(false) }
   Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
     if (markdown) MarkdownText(preview, compact = true)

@@ -28,7 +28,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -45,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
@@ -71,6 +72,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -207,6 +209,8 @@ fun CappuccinoScreen(
       mutableMapOf<String, LazyListState>()
     }
   val outputListState = outputStates.getOrPut(conversationKey) { LazyListState() }
+  val atSessionBottom by
+    remember(outputListState) { derivedStateOf { !outputListState.canScrollForward } }
   val restoringReadingPosition =
     remember(outputIdentity) {
       outputListState.firstVisibleItemIndex > 0 || outputListState.firstVisibleItemScrollOffset > 0
@@ -218,38 +222,13 @@ fun CappuccinoScreen(
     remember(turns) {
       turns.filter { turn -> !turn.text.isNullOrBlank() || turn.parts.any { it.visibleInChat } }
     }
-  var floatingControlsHeight by remember(conversationKey) { mutableStateOf(0.dp) }
-  val controlDensity = androidx.compose.ui.platform.LocalDensity.current
-  var showingToolActivity by remember(conversationKey) { mutableStateOf(false) }
-  var toolActivityTarget by remember(conversationKey) { mutableStateOf<String?>(null) }
+  var sessionTab by rememberSaveable(conversationKey) { mutableStateOf(SessionTab.TRANSCRIPT) }
   val rows = state.stream.rows()
   val collapsedRows = remember(rows) { collapseOutputRows(rows) }
   val displayedContent: List<*> = if (turns.isNotEmpty()) chatTurns else collapsedRows
   val followContent: List<*> =
     if (turns.isNotEmpty()) com.azusachino.cappuccino.core.conversationFollowContent(turns)
     else collapsedRows
-  var observedTools by remember(conversationKey) { mutableStateOf<List<ToolActivityEntry>?>(null) }
-  var toolPulse by remember(conversationKey) { mutableStateOf(false) }
-  LaunchedEffect(toolActivities) {
-    if (toolActivities.isNotEmpty()) {
-      val previous = observedTools
-      observedTools = toolActivities
-      val changed =
-        previous != null &&
-          toolActivities.any { entry ->
-            previous.none {
-              it.turnId == entry.turnId && it.partIndex == entry.partIndex && it.part == entry.part
-            }
-          }
-      if (changed && !showingToolActivity)
-        try {
-          toolPulse = true
-          kotlinx.coroutines.delay(1_200)
-        } finally {
-          toolPulse = false
-        }
-    }
-  }
   var followPreferences by rememberSaveable { mutableStateOf(emptyMap<String, Boolean>()) }
   val followEnabled = followPreferences[conversationKey] ?: true
   var hasNewOutput by remember(outputIdentity) { mutableStateOf(false) }
@@ -319,8 +298,9 @@ fun CappuccinoScreen(
     }
   }
   LaunchedEffect(showingConnection) { if (showingConnection) followingOutput = false }
-  BackHandler(enabled = selected != null && !showingConnection && !showingToolActivity) {
-    actions.selectAgent(null)
+  BackHandler(enabled = selected != null && !showingConnection) {
+    if (sessionTab != SessionTab.TRANSCRIPT) sessionTab = SessionTab.TRANSCRIPT
+    else actions.selectAgent(null)
   }
   if (showingConnection && detailsProfile != null) {
     if (showingTechnical) {
@@ -395,12 +375,22 @@ fun CappuccinoScreen(
                   )
                   Text(
                     selected.label,
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                   )
                 }
-                StatusBadge(state.stream.agentStatus ?: selected.status)
+                val status =
+                  agentStatusStyle(
+                    state.stream.agentStatus ?: selected.status,
+                    MaterialTheme.colorScheme.background.luminance() < 0.5f,
+                  )
+                Text(
+                  status.label,
+                  color = status.foreground,
+                  style = MaterialTheme.typography.labelSmall,
+                  fontFamily = FontFamily.Monospace,
+                )
               }
             } else {
               Text(
@@ -421,32 +411,29 @@ fun CappuccinoScreen(
           },
           // M3 app bar defaults apply: no colors override (android-material3.md region 1).
           actions = {
+            if (destination == Destination.MACHINES && selected == null) {
+              IconButton(onClick = { adding = true }) {
+                Icon(
+                  painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
+                  contentDescription = "Add machine",
+                )
+              }
+            }
             if (selectedProfile != null && selected != null) {
-              TextButton(
+              IconButton(
                 onClick = {
                   detailsProfileId = selectedProfile.id
                   showingConnection = true
                 }
               ) {
-                Text("Details")
+                Icon(
+                  painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
+                  contentDescription = "Connection details",
+                )
               }
             }
           },
         )
-      },
-      floatingActionButton = {
-        if (destination == Destination.MACHINES && selected == null) {
-          FloatingActionButton(
-            onClick = { adding = true },
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-          ) {
-            Icon(
-              painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
-              contentDescription = "Add machine",
-            )
-          }
-        }
       },
       bottomBar = {
         if (selected == null)
@@ -468,7 +455,7 @@ fun CappuccinoScreen(
     ) { contentPadding ->
       Column(
         Modifier.fillMaxSize().padding(contentPadding).imePadding(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(if (selected == null) 12.dp else 4.dp),
       ) {
         when {
           selected != null -> {
@@ -490,7 +477,7 @@ fun CappuccinoScreen(
                 listOfNotNull(
                     selectedProfile?.label,
                     selected.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() },
-                    selected.branch?.takeIf { it.isNotBlank() } ?: "Branch unknown",
+                    selected.branch?.takeIf { it.isNotBlank() },
                   )
                   .joinToString(" · "),
                 style = MaterialTheme.typography.labelSmall,
@@ -564,145 +551,130 @@ fun CappuccinoScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
-            if (state.offlineSavedAt == null)
-              Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-              ) {
-                Column(Modifier.weight(1f)) {
-                  Text("Follow live output", style = MaterialTheme.typography.bodyMedium)
-                  if (followEnabled && !followingOutput)
-                    Text(
-                      "Paused while reading",
-                      style = MaterialTheme.typography.bodySmall,
-                      color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                androidx.compose.material3.Switch(
-                  modifier = Modifier.semantics { contentDescription = "Follow live output" },
-                  checked = followEnabled,
-                  onCheckedChange = { enabled ->
-                    followPreferences = followPreferences + (conversationKey to enabled)
-                    followingOutput = enabled
-                  },
-                )
-              }
-            readerState.SaveableStateProvider(conversationKey) {
-              val historyOmitted =
-                state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
-              Box(Modifier.weight(1f).fillMaxWidth()) {
-                SelectionContainer(Modifier.fillMaxSize()) {
-                  if (
-                    turns.isEmpty() && state.conversationSource == null && restoringReadingPosition
-                  ) {
-                    Box(Modifier.fillMaxSize()) {
-                      Text("Loading history…", Modifier.padding(16.dp))
-                    }
-                  } else if (turns.isNotEmpty()) {
-                    LazyColumn(
-                      state = outputListState,
-                      modifier =
-                        Modifier.fillMaxSize()
-                          .padding(horizontal = 16.dp)
-                          .testTag("recentOutputList"),
-                      verticalArrangement = Arrangement.spacedBy(8.dp),
+            NativeSessionTabs(sessionTab) { tab ->
+              sessionTab = tab
+              if (tab != SessionTab.TRANSCRIPT) followingOutput = false
+            }
+            if (sessionTab == SessionTab.TOOLS) {
+              ToolHistoryPanel(
+                toolActivities,
+                state.omittedToolOperations,
+                Modifier.weight(1f).fillMaxWidth(),
+              )
+            } else {
+              readerState.SaveableStateProvider(conversationKey) {
+                val historyOmitted =
+                  state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                  SelectionContainer(Modifier.fillMaxSize()) {
+                    if (
+                      turns.isEmpty() &&
+                        state.conversationSource == null &&
+                        restoringReadingPosition
                     ) {
-                      items(
-                        chatTurns,
-                        key = {
-                          "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
-                        },
-                      ) { turn ->
-                        if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
-                          Text(
-                            "Older messages aren't loaded.",
-                            Modifier.padding(vertical = 12.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      Box(Modifier.fillMaxSize()) {
+                        Text("Loading history…", Modifier.padding(16.dp))
+                      }
+                    } else if (turns.isNotEmpty()) {
+                      LazyColumn(
+                        state = outputListState,
+                        modifier =
+                          Modifier.fillMaxSize()
+                            .padding(horizontal = 16.dp)
+                            .testTag("recentOutputList"),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                      ) {
+                        items(
+                          chatTurns,
+                          key = {
+                            "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
+                          },
+                        ) { turn ->
+                          if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
+                            Text(
+                              "Older messages aren't loaded.",
+                              Modifier.padding(vertical = 12.dp),
+                              style = MaterialTheme.typography.bodySmall,
+                              color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                          }
+                          ConversationTurnRow(
+                            turn,
+                            timeZone = timeZone,
+                            assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
+                            onInspect = { followingOutput = false },
+                            showToolsInline = false,
+                            onTextSizeChanged = onTextLayoutChanged,
                           )
                         }
-                        ConversationTurnRow(
-                          turn,
-                          timeZone = timeZone,
-                          assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
-                          onInspect = { followingOutput = false },
-                          showToolsInline = false,
-                          onTextSizeChanged = onTextLayoutChanged,
-                        )
+                        item(key = "conversation-bottom") { Spacer(Modifier.height(8.dp)) }
                       }
-                      item(key = "conversation-bottom") {
-                        Spacer(Modifier.height(floatingControlsHeight + 24.dp))
-                      }
-                    }
-                  } else {
-                    LazyColumn(
-                      state = outputListState,
-                      modifier =
-                        Modifier.fillMaxSize()
-                          .padding(horizontal = 16.dp)
-                          .testTag("recentOutputList"),
-                      verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                      items(collapsedRows, key = { "row:${it.key}" }) { row ->
-                        OutputItemRow(row, onInspect = { followingOutput = false })
-                      }
-                      item(key = "stream-bottom") {
-                        Spacer(Modifier.height(floatingControlsHeight + 24.dp))
+                    } else {
+                      LazyColumn(
+                        state = outputListState,
+                        modifier =
+                          Modifier.fillMaxSize()
+                            .padding(horizontal = 16.dp)
+                            .testTag("recentOutputList"),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                      ) {
+                        items(collapsedRows, key = { "row:${it.key}" }) { row ->
+                          OutputItemRow(row, onInspect = { followingOutput = false })
+                        }
+                        item(key = "stream-bottom") { Spacer(Modifier.height(8.dp)) }
                       }
                     }
                   }
                 }
-                ReaderFloatingControls(
-                  toolActivities,
-                  hasNewOutput,
-                  newActivity = toolPulse,
-                  omittedOperations = state.omittedToolOperations,
-                  onTools = {
-                    toolActivityTarget = null
-                    followingOutput = false
-                    showingToolActivity = true
-                  },
-                  onLatest = {
-                    outputScope.launch {
-                      followingOutput = followEnabled
-                      automaticScroll = true
-                      try {
-                        outputListState.animateScrollToItem(displayedContent.size)
-                        hasNewOutput = false
-                      } finally {
-                        automaticScroll = false
-                      }
-                    }
-                  },
-                  modifier =
-                    Modifier.align(Alignment.BottomEnd).padding(12.dp).onSizeChanged { size ->
-                      floatingControlsHeight = with(controlDensity) { size.height.toDp() }
-                    },
-                )
               }
-            }
-            if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty())
-              Text(
-                "No recent output received.",
-                Modifier.padding(16.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
+              if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty())
+                Text(
+                  "No recent output received.",
+                  Modifier.padding(16.dp),
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
 
-            // Interactive prompt input bar
-            if (
-              state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") == false
-            ) {
-              Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
-            }
-            composerState.SaveableStateProvider(conversationKey) {
-              PromptInputBar(
-                onSend = { text -> actions.submitPrompt(text) },
-                enabled =
-                  state.offlineSavedAt == null &&
-                    state.connection == ConnectionState.Connected &&
-                    state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") !=
-                      false,
-              )
+              // Existing live prompt route; saved readers remain read-only.
+              if (
+                state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") ==
+                  false
+              ) {
+                Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
+              }
+              if (state.offlineSavedAt == null)
+                composerState.SaveableStateProvider(conversationKey) {
+                  PromptInputBar(
+                    onSend = { text -> actions.submitPrompt(text) },
+                    enabled =
+                      state.connection == ConnectionState.Connected &&
+                        state.bridgeDetails[state.activeProfileId]
+                          ?.capabilities
+                          ?.get("prompt_input") != false,
+                    controls = {
+                      if (!atSessionBottom)
+                        NativeSessionFollowBar(
+                          followEnabled && followingOutput,
+                          hasNewOutput,
+                          onFollow = { enabled ->
+                            followPreferences = followPreferences + (conversationKey to enabled)
+                            followingOutput = enabled
+                          },
+                          onLatest = {
+                            outputScope.launch {
+                              followingOutput = followEnabled
+                              automaticScroll = true
+                              try {
+                                outputListState.animateScrollToItem(displayedContent.size)
+                                hasNewOutput = false
+                              } finally {
+                                automaticScroll = false
+                              }
+                            }
+                          },
+                        )
+                    },
+                  )
+                }
             }
           }
           destination == Destination.ATTENTION -> {
@@ -955,16 +927,6 @@ fun CappuccinoScreen(
         }
       }
     }
-  }
-
-  if (showingToolActivity && selected != null) {
-    ToolActivitySheet(
-      toolActivities,
-      toolActivityTarget,
-      onDismiss = { showingToolActivity = false },
-      earlierOmitted = state.omittedConversationTurns > 0 || state.omittedToolOperations > 0,
-      omittedOperations = state.omittedToolOperations,
-    )
   }
 
   if (adding) {
@@ -1354,36 +1316,54 @@ fun PromptInputBar(
   onSend: (String) -> Unit,
   enabled: Boolean,
   modifier: Modifier = Modifier,
+  controls: @Composable () -> Unit = {},
 ) {
   var input by rememberSaveable { mutableStateOf("") }
-  // Native composer: OutlinedTextField with default shape and colors; connectivity and
-  // nonblank-send semantics are exactly as merged (region 9).
-  Row(
-    modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  Surface(
+    modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    shape = RoundedCornerShape(4.dp),
+    color = MaterialTheme.colorScheme.surfaceContainerLow,
   ) {
-    OutlinedTextField(
-      value = input,
-      onValueChange = { input = it },
-      placeholder = { Text("Prompt agent…") },
-      modifier = Modifier.weight(1f).testTag("promptInput"),
-      enabled = enabled,
-      singleLine = true,
-    )
-    IconButton(
-      onClick = {
-        if (input.isNotBlank()) {
-          onSend(input)
-          input = ""
-        }
-      },
-      enabled = enabled && input.isNotBlank(),
-    ) {
-      Icon(
-        painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_chat),
-        contentDescription = "Send",
+    Column {
+      androidx.compose.material3.TextField(
+        value = input,
+        onValueChange = { input = it },
+        placeholder = { Text("Message agent…", fontFamily = FontFamily.Monospace) },
+        modifier = Modifier.fillMaxWidth().testTag("promptInput"),
+        enabled = enabled,
+        maxLines = 4,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+        colors =
+          androidx.compose.material3.TextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+          ),
       )
+      Row(
+        Modifier.fillMaxWidth().padding(end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Box(Modifier.weight(1f)) { controls() }
+        IconButton(
+          onClick = {
+            if (input.isNotBlank()) {
+              onSend(input)
+              input = ""
+            }
+          },
+          enabled = enabled && input.isNotBlank(),
+        ) {
+          Icon(
+            painterResource(com.azusachino.cappuccino.R.drawable.ic_arrow_downward),
+            modifier = Modifier.rotate(180f),
+            contentDescription = "Send",
+          )
+        }
+      }
     }
   }
 }
@@ -1412,49 +1392,75 @@ fun ConversationTurnRow(
   androidx.compose.foundation.layout.BoxWithConstraints(
     modifier.fillMaxWidth().padding(vertical = 2.dp)
   ) {
-    val bubbleWidth = minOf(600.dp, (maxWidth - 32.dp).coerceAtLeast(0.dp))
+    val bubbleWidth = maxWidth
     Column(
       Modifier.fillMaxWidth(),
-      horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
+      horizontalAlignment = Alignment.Start,
       verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
       if (visibleParts.isNotEmpty()) {
         Surface(
           modifier =
-            Modifier.widthIn(max = bubbleWidth).semantics {
+            Modifier.fillMaxWidth().widthIn(max = bubbleWidth).semantics {
               contentDescription = if (isUser) "You" else assistantLabel
             },
-          shape =
-            androidx.compose.foundation.shape.RoundedCornerShape(
-              topStart = 16.dp,
-              topEnd = 16.dp,
-              bottomStart = if (isUser) 16.dp else 4.dp,
-              bottomEnd = if (isUser) 4.dp else 16.dp,
-            ),
+          shape = RoundedCornerShape(4.dp),
           color =
-            if (isUser) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surfaceContainerHigh,
+            if (isUser) MaterialTheme.colorScheme.surfaceContainerLow
+            else MaterialTheme.colorScheme.surface,
         ) {
-          Column(
-            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+          MaterialTheme(
+            typography =
+              MaterialTheme.typography.copy(
+                bodyMedium =
+                  MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                  ),
+                bodyLarge =
+                  MaterialTheme.typography.bodyLarge.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 14.sp,
+                    lineHeight = 21.sp,
+                  ),
+              )
           ) {
-            visibleParts.forEachIndexed { index, part ->
-              key(turn.id, index) {
-                if (part is ConversationPart.Text)
-                  MessageBody(part.text, onInspect = onInspect, modifier = textModifier)
-                else ConversationDetails(part, onInspect)
+            Column(
+              Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+              verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+              Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                  if (isUser) "› You" else assistantLabel,
+                  style = MaterialTheme.typography.labelSmall,
+                  fontFamily = FontFamily.Monospace,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (timestamp != null)
+                  Text(
+                    java.time.Instant.parse(turn.timestamp)
+                      .atZone(timeZone)
+                      .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")),
+                    Modifier.semantics { contentDescription = timestamp },
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  )
+              }
+              visibleParts.forEachIndexed { index, part ->
+                key(turn.id, index) {
+                  if (part is ConversationPart.Text)
+                    MessageBody(
+                      part.text,
+                      onInspect = onInspect,
+                      modifier = textModifier,
+                      transcript = true,
+                    )
+                  else ConversationDetails(part, onInspect)
+                }
               }
             }
-            if (timestamp != null)
-              Text(
-                java.time.Instant.parse(turn.timestamp)
-                  .atZone(timeZone)
-                  .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")),
-                Modifier.align(Alignment.End).semantics { contentDescription = timestamp },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
           }
         }
       }
