@@ -134,4 +134,6 @@ Each slice is one commit (or a few) on `feat/ios-liquid-glass`. It ends green on
 ## Progress
 
 Record each slice's commit and gate results here, one line per slice.
-- Slice 0 (retire macOS): this commit (hash is `git log -1`). Gates `make check-apple` and `make build-ios` with scoped Xcode: exit 0, `BUILD SUCCEEDED`. Removed `apps/macos/`, `CappuccinoMac` target/scheme, macOS deployment target, Makefile `build-macos`, CI path filter and job name.
+
+- Slice 0 (retire macOS): commit b974695. Gates `make check-apple` and `make build-ios` with scoped Xcode: exit 0, `BUILD SUCCEEDED`. Removed `apps/macos/`, `CappuccinoMac` target/scheme, macOS deployment target, Makefile `build-macos`, CI path filter and job name.
+- Slice 1 (typed core): commit hash to be filled in by the slice 2 progress note. Gates `make check-apple` (65 tests, incl. 15 new in BridgeWireTests) and `make build-ios` with scoped Xcode: exit 0. Reducer/stream parsing (BridgeProtocolTest reducer cases) moves to slice 4 with the state model.
