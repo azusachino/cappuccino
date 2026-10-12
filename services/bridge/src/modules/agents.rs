@@ -16,4 +16,8 @@ pub fn router() -> Router<Arc<routes::BridgeState>> {
             "/api/agents/{sessionId}/prompt",
             post(routes::submit_agent_prompt),
         )
+        .route(
+            "/api/agents/{sessionId}/control",
+            post(routes::control_agent),
+        )
 }

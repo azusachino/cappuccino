@@ -67,6 +67,7 @@ pub async fn session(State(state): State<Arc<BridgeState>>) -> Response {
                 "conversation_history": true,
                 "prompt_input": true,
                 "prompt_answers": true,
+                "agent_control": true,
                 "completion_signals": true,
                 "telegram_notifications": false,
                 "telegram_notifications_configured": false,
@@ -385,6 +386,76 @@ pub async fn agent_conversation(
     }
 }
 
+/// The command an agent itself uses to start a fresh conversation in the same process.
+pub fn new_session_command(agent: &str) -> Option<&'static str> {
+    match agent {
+        "pi" => Some("/new"),
+        "claude" | "agy" | "antigravity" | "antigravity-cli" => Some("/clear"),
+        _ => None,
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ControlRequest {
+    pub action: String,
+}
+
+/// POST /api/agents/{sessionId}/control: the owner's own controls over a running agent. `interrupt`
+/// presses Esc to stop the current run; `new_session` types the agent's own new-conversation
+/// command. Neither starts nor ends a process.
+pub async fn control_agent(
+    State(state): State<Arc<BridgeState>>,
+    AxumPath(session_id): AxumPath<String>,
+    Json(request): Json<ControlRequest>,
+) -> Response {
+    if !matches!(request.action.as_str(), "interrupt" | "new_session") {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "unknown control action",
+        );
+    }
+    let rows = match herdr::agent_list().await {
+        Ok(result) => agents::map_agents(&result, &state.machine_id).unwrap_or_default(),
+        Err(err) => {
+            return error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string())
+        }
+    };
+    let Some(row) = rows
+        .into_iter()
+        .find(|row| row.session_id == session_id || row.pane_id == session_id)
+    else {
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            &format!("no agent with session_id {session_id}"),
+        );
+    };
+    let sent = match request.action.as_str() {
+        "interrupt" => herdr::pane_send_keys(&row.pane_id, &["esc"]).await,
+        _ => match new_session_command(&row.agent) {
+            Some(command) => herdr::agent_prompt(&row.pane_id, command).await,
+            None => {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "unsupported",
+                    &format!("no new-session command known for {}", row.agent),
+                )
+            }
+        },
+    };
+    match sent {
+        Ok(_) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            json!({"event": "control_sent", "action": request.action, "session_id": session_id})
+                .to_string(),
+        )
+            .into_response(),
+        Err(err) => error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string()),
+    }
+}
+
 /// POST /api/agents/{sessionId}/prompt
 pub async fn submit_agent_prompt(
     State(state): State<Arc<BridgeState>>,
@@ -530,6 +601,15 @@ pub async fn submit_agent_prompt(
 mod tests {
     use super::*;
 
+    #[test]
+    fn new_session_uses_each_agents_own_command() {
+        assert_eq!(new_session_command("pi"), Some("/new"));
+        assert_eq!(new_session_command("claude"), Some("/clear"));
+        assert_eq!(new_session_command("agy"), Some("/clear"));
+        assert_eq!(new_session_command("antigravity-cli"), Some("/clear"));
+        assert_eq!(new_session_command("codex"), None);
+    }
+
     #[tokio::test]
     async fn machine_name_is_additive_metadata_not_machine_identity() {
         let mut state = BridgeState::new("stable-machine-id".to_string());
@@ -548,5 +628,6 @@ mod tests {
         assert_eq!(value["capabilities"]["conversation_history"], true);
         assert_eq!(value["capabilities"]["prompt_input"], true);
         assert_eq!(value["capabilities"]["prompt_answers"], true);
+        assert_eq!(value["capabilities"]["agent_control"], true);
     }
 }
