@@ -87,6 +87,82 @@ fn read_tail_from(file: &mut File, max_bytes: u64) -> std::io::Result<String> {
     Ok(s.into_owned())
 }
 
+/// Most bytes the compacted Claude reader may read from the end of a transcript.
+pub const CLAUDE_TAIL_IO_CAP: u64 = 32 * 1024 * 1024;
+const COMPACT_LINE_BYTES: usize = 16 * 1024;
+const TAIL_CHUNK_BYTES: u64 = 256 * 1024;
+
+/// Claude Code stores pasted and tool-returned images inline as base64, so a few screenshots
+/// can fill a byte window with nothing the phone shows. Read backwards, drop image data from
+/// each line, and stop once `budget` bytes of compacted lines or `io_cap` bytes read are reached.
+fn read_compacted_tail(file: &mut File, budget: u64, io_cap: u64) -> std::io::Result<String> {
+    let len = file.metadata()?.len();
+    let mut pos = len;
+    let mut carry: Vec<u8> = Vec::new();
+    let mut kept: Vec<String> = Vec::new();
+    let mut kept_bytes = 0u64;
+    while pos > 0 && len - pos < io_cap && kept_bytes < budget {
+        let start = pos.saturating_sub(TAIL_CHUNK_BYTES);
+        let mut chunk = vec![0u8; (pos - start) as usize];
+        file.seek(SeekFrom::Start(start))?;
+        file.read_exact(&mut chunk)?;
+        chunk.extend_from_slice(&carry);
+        pos = start;
+        // Before the file's start, the first line of a chunk may continue in the previous one.
+        let complete_from = if pos == 0 {
+            0
+        } else {
+            match chunk.iter().position(|byte| *byte == b'\n') {
+                Some(newline) => newline + 1,
+                None => {
+                    carry = chunk;
+                    continue;
+                }
+            }
+        };
+        carry = chunk[..complete_from].to_vec();
+        for line in chunk[complete_from..].rsplit(|byte| *byte == b'\n') {
+            if line.is_empty() {
+                continue;
+            }
+            let text = compact_claude_line(line);
+            if text.is_empty() {
+                continue;
+            }
+            kept_bytes += text.len() as u64 + 1;
+            kept.push(text);
+            if kept_bytes >= budget {
+                break;
+            }
+        }
+    }
+    kept.reverse();
+    Ok(kept.join("\n"))
+}
+
+fn compact_claude_line(line: &[u8]) -> String {
+    if line.len() <= COMPACT_LINE_BYTES {
+        return String::from_utf8_lossy(line).into_owned();
+    }
+    fn strip_images(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                if map.get("type").and_then(Value::as_str) == Some("image") {
+                    map.remove("source");
+                }
+                map.values_mut().for_each(strip_images);
+            }
+            Value::Array(items) => items.iter_mut().for_each(strip_images),
+            _ => {}
+        }
+    }
+    let Ok(mut value) = serde_json::from_slice::<Value>(line) else {
+        return String::new();
+    };
+    strip_images(&mut value);
+    value.to_string()
+}
+
 /// Read identity and content from the same open file. A changed/invalid Pi
 /// header still permits display, but cannot establish an offline archive key.
 /// Call only with a transcript returned by the owned-session resolver.
@@ -96,7 +172,12 @@ pub fn read_canonical_tail(
 ) -> std::io::Result<(String, Option<String>)> {
     let mut file = File::open(resolved.path())?;
     let before = read_conversation_id(resolved, &mut file)?;
-    let content = read_tail_from(&mut file, max_bytes)?;
+    let content = match resolved {
+        crate::transcript::ResolvedTranscript::Claude(_) => {
+            read_compacted_tail(&mut file, max_bytes, CLAUDE_TAIL_IO_CAP)?
+        }
+        _ => read_tail_from(&mut file, max_bytes)?,
+    };
     let after = read_conversation_id(resolved, &mut file)?;
     Ok((content, if before == after { before } else { None }))
 }
@@ -1003,6 +1084,38 @@ mod tests {
                 .0;
         assert!(tail.contains("line 999"));
         assert!(!tail.contains("line 0"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn claude_tail_spends_its_budget_on_text_not_inline_images() {
+        let dir = std::env::temp_dir().join(format!("test-claude-tail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        let image = serde_json::json!({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": [
+                {"type": "image", "source": {"type": "base64", "data": "A".repeat(600_000)}}]}]}});
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":"early question"}}"#.to_string(),
+            image.to_string(),
+            image.to_string(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"late answer"}]}}"#.to_string(),
+        ];
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+        let mut file = File::open(&path).unwrap();
+
+        // 1.2 MB of images behind a 4 KB budget: both texts survive, no image data does.
+        let tail = read_compacted_tail(&mut file, 4 * 1024, CLAUDE_TAIL_IO_CAP).unwrap();
+        assert!(tail.contains("early question") && tail.contains("late answer"));
+        assert!(!tail.contains("AAAA"));
+        assert!(tail.len() < 4 * 1024);
+        assert_eq!(tail.lines().count(), 4);
+
+        // The read cap holds even when the budget is not yet spent.
+        let capped = read_compacted_tail(&mut file, 4 * 1024, 700_000).unwrap();
+        assert!(capped.contains("late answer") && !capped.contains("early question"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
