@@ -211,6 +211,46 @@ class ConnectedViewModelTest {
     }
 
   @Test
+  fun controlsUseTheMachinesVerifiedCapabilityWithAFreshClient() =
+    runTest(dispatcher) {
+      for (advertised in listOf(true, false)) {
+        val sent = mutableListOf<String>()
+        // Like the app: a new client per request, whose own details are only set by verify().
+        val factory: (Endpoint) -> BridgeTransport = {
+          object : BridgeTransport {
+            override var bridgeDetails: BridgeDetails? = null
+
+            override suspend fun verify(expectedMachine: UUID?): UUID {
+              bridgeDetails = BridgeDetails(machine, "1", 1, mapOf("agent_control" to advertised))
+              return machine
+            }
+
+            override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
+
+            override fun stream(sessionId: String): Flow<StreamEvent> = flow {
+              kotlinx.coroutines.awaitCancellation()
+            }
+
+            override suspend fun controlAgent(sessionId: String, action: String) {
+              sent += "$sessionId:$action"
+            }
+          }
+        }
+        viewModel = ConnectedViewModel(store, factory, {}, SavedStateHandle())
+        viewModel.setForeground(true)
+        viewModel.selectProfile(profile.id)
+        advanceUntilIdle()
+        viewModel.selectAgent(agent)
+        advanceUntilIdle()
+        viewModel.controlAgent("interrupt")
+        advanceUntilIdle()
+        assertEquals(if (advertised) listOf("locator:interrupt") else emptyList(), sent)
+        assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
+        viewModel.setForeground(false)
+      }
+    }
+
+  @Test
   fun staleCatalogCompletionCannotReplaceNewProfile() =
     runTest(dispatcher) {
       val secondMachine = UUID.randomUUID()

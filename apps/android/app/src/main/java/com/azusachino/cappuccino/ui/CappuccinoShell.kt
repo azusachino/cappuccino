@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -1427,7 +1428,8 @@ fun PromptInputBar(
       if (model != null)
         Text(
           listOfNotNull(shortModel(model), thinkingLevel).joinToString(" · "),
-          Modifier.padding(horizontal = 6.dp).weight(1f, fill = false),
+          // No weight: only the spacer takes the slack, so Stop and Send sit at the end.
+          Modifier.padding(horizontal = 6.dp).widthIn(max = 180.dp),
           style = MaterialTheme.typography.labelSmall,
           color = colors.muted,
           maxLines = 1,
@@ -1496,7 +1498,11 @@ internal fun SessionStatusLine(stats: SessionStats) {
         )
       }
     Text(
-      if (percent != null) "$percent%" else formatTokens(tokens),
+      listOfNotNull(
+          percent?.let { "$it%" },
+          formatTokens(tokens) + (window?.let { " / " + formatTokens(it) } ?: ""),
+        )
+        .joinToString(" · "),
       style = MaterialTheme.typography.labelSmall,
       color = colors.muted,
     )
@@ -1506,13 +1512,13 @@ internal fun SessionStatusLine(stats: SessionStats) {
   }
 }
 
-/** 1234 as "1.2K", 1234567 as "1.2M". */
+/** 1234 as "1.2K", 200000 as "200K", 1234567 as "1.2M". */
 internal fun formatTokens(count: Long): String =
   when {
     count >= 1_000_000 -> String.format(java.util.Locale.ROOT, "%.1fM", count / 1_000_000.0)
     count >= 1_000 -> String.format(java.util.Locale.ROOT, "%.1fK", count / 1_000.0)
     else -> count.toString()
-  }
+  }.replace(".0", "")
 
 @Composable
 fun ConversationTurnRow(

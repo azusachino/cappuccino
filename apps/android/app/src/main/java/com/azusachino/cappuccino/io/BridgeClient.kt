@@ -140,8 +140,7 @@ class BridgeClient(
 
   override suspend fun controlAgent(sessionId: String, action: String): Unit =
     withContext(Dispatchers.IO) {
-      // Older bridges have no control route; only an advertised capability is used.
-      if (bridgeDetails?.capabilities?.get("agent_control") != true)
+      if (bridgeDetails?.capabilities?.get("agent_control") == false)
         throw ProtocolException("Agent controls unsupported by this bridge")
       post("api/agents/$sessionId/control", """{"action":"$action"}""")
     }

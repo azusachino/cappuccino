@@ -614,6 +614,9 @@ internal constructor(
   override fun controlAgent(action: String) {
     if (mutableState.value.offlineSavedAt != null) return
     val profile = activeProfile() ?: return
+    // Each request gets a fresh client; the capability comes from the machine's verified details.
+    if (mutableState.value.bridgeDetails[profile.id]?.capabilities?.get("agent_control") != true)
+      return
     val agent = mutableState.value.selectedAgent ?: return
     val client = bridgeFor(profile.endpoint)
     val requestEpoch = epoch

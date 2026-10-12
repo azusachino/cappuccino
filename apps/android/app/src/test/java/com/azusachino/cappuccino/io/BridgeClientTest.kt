@@ -411,7 +411,9 @@ class BridgeClientTest {
       val session =
         """{"event":"paired","machine_id":"%s","protocol":1,"plugin":"cappuccino-bridge","capabilities":{%s}}"""
       val machine = UUID.randomUUID()
-      server.enqueue(MockResponse.Builder().body(session.format(machine, "")).build())
+      server.enqueue(
+        MockResponse.Builder().body(session.format(machine, """"agent_control":false""")).build()
+      )
       server.enqueue(
         MockResponse.Builder().body(session.format(machine, """"agent_control":true""")).build()
       )
@@ -422,7 +424,7 @@ class BridgeClientTest {
       client.verify()
       try {
         client.controlAgent("s-1", "interrupt")
-        fail("an old bridge must not receive controls")
+        fail("a bridge that declines controls must not receive them")
       } catch (_: ProtocolException) {}
       server.takeRequest()
 

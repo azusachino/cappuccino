@@ -124,7 +124,8 @@ class CappuccinoShellTest {
     }
 
     compose.onNodeWithText("opus 5.5 · high").assertIsDisplayed()
-    compose.onNodeWithText("38%").assertIsDisplayed()
+    assertSendAndStopSitAtTheEnd()
+    compose.onNodeWithText("38% · 76K / 200K").assertIsDisplayed()
     compose.onNodeWithText("cache 90%").assertIsDisplayed()
     compose.onNodeWithContentDescription("Stop").performClick()
     compose.onNodeWithContentDescription("Commands").performClick()
@@ -474,6 +475,19 @@ class CappuccinoShellTest {
       setZone(originalZone)
       compose.waitUntil(timeoutMillis = 5000) { ZoneId.systemDefault() == ZoneId.of(originalZone) }
     }
+  }
+
+  private fun assertSendAndStopSitAtTheEnd() {
+    // The model chip must not take the slack: Stop and Send hug the composer's end edge.
+    val composer = compose.onNodeWithTag("promptInput").fetchSemanticsNode().boundsInRoot
+    val send = compose.onNodeWithContentDescription("Send").fetchSemanticsNode().boundsInRoot
+    val stop = compose.onNodeWithContentDescription("Stop").fetchSemanticsNode().boundsInRoot
+    val slack = composer.right - send.right
+    assertTrue("Send must end at the composer edge (send=$send, field=$composer)", slack < 48f)
+    assertTrue(
+      "Stop must sit just before Send (stop=$stop, send=$send)",
+      stop.right <= send.left + 1f && send.left - stop.right < 48f,
+    )
   }
 
   private fun assertJumpAffordanceSitsAboveComposer() {

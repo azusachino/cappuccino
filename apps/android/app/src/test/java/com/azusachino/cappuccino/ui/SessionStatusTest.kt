@@ -14,7 +14,9 @@ class SessionStatusTest {
   @Test
   fun tokenCountsAreShort() {
     assertEquals("950", formatTokens(950))
-    assertEquals("76.0K", formatTokens(76_000))
+    assertEquals("76K", formatTokens(76_000))
+    assertEquals("200K", formatTokens(200_000))
+    assertEquals("1M", formatTokens(1_000_000))
     assertEquals("1.2M", formatTokens(1_234_567))
   }
 }
