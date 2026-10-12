@@ -1,6 +1,7 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -27,6 +28,9 @@ internal enum class SessionTab(val label: String) {
 @Composable
 internal fun NativeSessionTabs(
   selected: SessionTab,
+  shown: Int,
+  omitted: Int,
+  returned: Int,
   updates: Int = 0,
   onSelect: (SessionTab) -> Unit,
 ) {
@@ -36,7 +40,20 @@ internal fun NativeSessionTabs(
         selected = selected == tab,
         onClick = { onSelect(tab) },
         text = {
-          Text(if (tab == SessionTab.TOOLS && updates > 0) "Tools ($updates)" else tab.label)
+          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+              if (tab == SessionTab.TOOLS) "Tools (${toolActivityCount(shown, omitted)})"
+              else tab.label,
+              maxLines = 1,
+            )
+            Text(
+              if (tab == SessionTab.TOOLS)
+                "$returned returned" + (if (updates > 0) " · $updates new" else "")
+              else " ",
+              style = MaterialTheme.typography.labelSmall,
+              maxLines = 1,
+            )
+          }
         },
       )
     }

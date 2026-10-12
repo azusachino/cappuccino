@@ -64,7 +64,7 @@ internal fun ConnectionDiagnostics(profile: MachineProfile, state: ConnectedUiSt
     ) {
       DetailGroup("Current agent") {
         if (state.omittedConversationTurns > 0 || state.omittedToolOperations > 0) {
-          DetailRow("History window", "Up to 200 recent messages and 100 tool calls")
+          DetailRow("History window", "Up to 200 recent messages and 100 tool calls", true)
         }
         state.conversationTurns
           .flatMap { it.parts }

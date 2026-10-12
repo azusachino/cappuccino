@@ -259,8 +259,6 @@ private fun PreferenceRow(
       headlineContent = { Text(title) },
       supportingContent = { Text(summary) },
       leadingContent = { Icon(painterResource(icon), contentDescription = null) },
-      trailingContent =
-        if (onClick != null) ({ Text("›", style = MaterialTheme.typography.titleLarge) }) else null,
     )
   }
   if (onClick != null) Surface(onClick = onClick, content = content) else content()

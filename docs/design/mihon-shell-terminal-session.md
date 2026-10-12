@@ -23,6 +23,23 @@ agent lifecycle control is introduced.
 
 ## Latest owner session acceptance target
 
+The owner rejected the unread-only Tools badge because it disappeared and did
+not provide persistent counts. Tools must always show loaded call counts
+(shown/total when history is bounded), recorded returns among shown calls,
+and separate new activity. Viewing Tools acknowledges new activity only;
+it must never erase historical counts or imply successful execution.
+
+The owner also reported Session→Tools→Session moving the transcript even at
+bottom. The conditional branch disposed the reader/Markdown and composer,
+allowing remeasurement to clamp the saved anchor; it additionally turned off
+follow just for changing tabs. Retain the measured session reader/composer
+under the in-flow Tools page, excluding hidden semantics, and preserve follow
+preference/position instead of treating tab navigation as manual scrolling.
+Both bottom and intentionally paused anchors require actual phone checks.
+Settings rows have no trailing chevrons. History window diagnostics use a
+full-width supporting value rather than a long trailing value squeezing the
+label into a vertical column.
+
 The owner subsequently expanded palette scope to **Default, Dynamic,
 Catppuccin, GitHub and One Dark**, superseding the earlier three-choice cap.
 Brightness remains separate; One Dark's light mode uses One Light-inspired

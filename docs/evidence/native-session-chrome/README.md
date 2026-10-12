@@ -22,6 +22,32 @@ or acceptance of the previously rejected live scroll behavior.
 - Phone screenshots/hierarchies contain private live content and remain under
   `.tmp/cappuccino-mihon-preview/phone/`; they are not published here.
 
+## Persistent counts and tab-position repair
+
+The owner rejected the unread-only counter and reported tab round-trips moving
+the transcript. APK:
+`fc4ac49a052de754fd985b7a1fce4c39d14d2fa03372f5aaf95ee842c6ee85d7`.
+`validate-android` passed. The new native regression compiles but was not run
+through a connected-test runner against the owner's installation.
+
+Tools now always displays call counts (shown/total for bounded history) and
+recorded returns among shown calls; acknowledging new activity cannot remove
+those counts. Session and composer stay composed and measured beneath the
+Tools page; tab navigation no longer disables follow or recreates Markdown.
+
+Fresh four-file stopped-app backup/install-r/prelaunch byte comparison passed.
+Actual phone checks at bottom and on older paused text each compared three
+matching visible text anchors before/after Session→Tools→Session: all retained
+exact screen bounds. Counts and recorded-return labels remained visible in
+both cases. History window's label was one readable line, with its complete
+value below it rather than squeezing its label. Settings showed no chevrons.
+
+The first diagnostics navigation attempt sent successive Back events without
+observing intermediate screens and stopped when Settings was not found; no
+blind fallback tap was made. Continued with observed native Back transitions.
+No prompt/approval/model change was sent. These samples do not establish every
+font/device/live-growth case or owner acceptance of the broader UI rewrite.
+
 ## Production appearance and tool awareness checkpoint
 
 Owner follow-ups expanded the catalog to Default/Dynamic/Catppuccin/GitHub/One

@@ -57,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onSizeChanged
@@ -584,131 +585,148 @@ fun CappuccinoScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
-            NativeSessionTabs(sessionTab, toolUpdates.unseen) { tab ->
+            NativeSessionTabs(
+              sessionTab,
+              toolActivities.size,
+              state.omittedToolOperations,
+              toolActivities.count { it.part.output != null || it.part.isError == true },
+              toolUpdates.unseen,
+            ) { tab ->
               sessionTab = tab
-              if (tab != SessionTab.TRANSCRIPT) followingOutput = false
             }
-            if (sessionTab == SessionTab.TOOLS) {
-              ToolHistoryPanel(
-                toolActivities,
-                state.omittedToolOperations,
-                Modifier.weight(1f).fillMaxWidth(),
-                onAtLatest = { toolsAtLatest = it },
-              )
-            } else {
-              readerState.SaveableStateProvider(conversationKey) {
-                val historyOmitted =
-                  state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                  SelectionContainer(Modifier.fillMaxSize()) {
-                    if (
-                      turns.isEmpty() &&
-                        state.conversationSource == null &&
-                        restoringReadingPosition
-                    ) {
-                      Box(Modifier.fillMaxSize()) {
-                        Text("Loading history…", Modifier.padding(16.dp))
-                      }
-                    } else if (turns.isNotEmpty()) {
-                      LazyColumn(
-                        state = outputListState,
-                        modifier =
-                          Modifier.fillMaxSize()
-                            .padding(horizontal = 16.dp)
-                            .testTag("recentOutputList"),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+            // Keep the reader AND composer measured at their original size while Tools covers them.
+            // Removing the LazyColumn reparses Markdown and clamps its saved anchor during
+            // re-entry.
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+              Column(
+                Modifier.fillMaxSize()
+                  .then(
+                    if (sessionTab == SessionTab.TOOLS) Modifier.alpha(0f).clearAndSetSemantics {}
+                    else Modifier
+                  )
+              ) {
+                readerState.SaveableStateProvider(conversationKey) {
+                  val historyOmitted =
+                    state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
+                  Box(Modifier.weight(1f).fillMaxWidth()) {
+                    SelectionContainer(Modifier.fillMaxSize()) {
+                      if (
+                        turns.isEmpty() &&
+                          state.conversationSource == null &&
+                          restoringReadingPosition
                       ) {
-                        items(
-                          chatTurns,
-                          key = {
-                            "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
-                          },
-                        ) { turn ->
-                          if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
-                            Text(
-                              "Older messages aren't loaded.",
-                              Modifier.padding(vertical = 12.dp),
-                              style = MaterialTheme.typography.bodySmall,
-                              color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Box(Modifier.fillMaxSize()) {
+                          Text("Loading history…", Modifier.padding(16.dp))
+                        }
+                      } else if (turns.isNotEmpty()) {
+                        LazyColumn(
+                          state = outputListState,
+                          modifier =
+                            Modifier.fillMaxSize()
+                              .padding(horizontal = 16.dp)
+                              .testTag("recentOutputList"),
+                          verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                          items(
+                            chatTurns,
+                            key = {
+                              "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
+                            },
+                          ) { turn ->
+                            if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
+                              Text(
+                                "Older messages aren't loaded.",
+                                Modifier.padding(vertical = 12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                              )
+                            }
+                            ConversationTurnRow(
+                              turn,
+                              timeZone = timeZone,
+                              assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
+                              onInspect = { followingOutput = false },
+                              showToolsInline = false,
+                              onTextSizeChanged = onTextLayoutChanged,
                             )
                           }
-                          ConversationTurnRow(
-                            turn,
-                            timeZone = timeZone,
-                            assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
-                            onInspect = { followingOutput = false },
-                            showToolsInline = false,
-                            onTextSizeChanged = onTextLayoutChanged,
-                          )
+                          item(key = "conversation-bottom") { Spacer(Modifier.height(8.dp)) }
                         }
-                        item(key = "conversation-bottom") { Spacer(Modifier.height(8.dp)) }
-                      }
-                    } else {
-                      LazyColumn(
-                        state = outputListState,
-                        modifier =
-                          Modifier.fillMaxSize()
-                            .padding(horizontal = 16.dp)
-                            .testTag("recentOutputList"),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                      ) {
-                        items(collapsedRows, key = { "row:${it.key}" }) { row ->
-                          OutputItemRow(row, onInspect = { followingOutput = false })
+                      } else {
+                        LazyColumn(
+                          state = outputListState,
+                          modifier =
+                            Modifier.fillMaxSize()
+                              .padding(horizontal = 16.dp)
+                              .testTag("recentOutputList"),
+                          verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                          items(collapsedRows, key = { "row:${it.key}" }) { row ->
+                            OutputItemRow(row, onInspect = { followingOutput = false })
+                          }
+                          item(key = "stream-bottom") { Spacer(Modifier.height(8.dp)) }
                         }
-                        item(key = "stream-bottom") { Spacer(Modifier.height(8.dp)) }
                       }
                     }
                   }
                 }
-              }
-              if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty())
-                Text(
-                  "No recent output received.",
-                  Modifier.padding(16.dp),
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-              // Existing live prompt route; saved readers remain read-only.
-              if (
-                state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") ==
-                  false
-              ) {
-                Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
-              }
-              if (state.offlineSavedAt == null)
-                composerState.SaveableStateProvider(conversationKey) {
-                  PromptInputBar(
-                    onSend = { text -> actions.submitPrompt(text) },
-                    enabled =
-                      state.connection == ConnectionState.Connected &&
-                        state.bridgeDetails[state.activeProfileId]
-                          ?.capabilities
-                          ?.get("prompt_input") != false,
-                    controls = {
-                      if (!atSessionBottom)
-                        NativeSessionFollowBar(
-                          followEnabled && followingOutput,
-                          hasNewOutput,
-                          onFollow = { enabled ->
-                            followPreferences = followPreferences + (conversationKey to enabled)
-                            followingOutput = enabled
-                          },
-                          onLatest = {
-                            outputScope.launch {
-                              followingOutput = followEnabled
-                              automaticScroll = true
-                              try {
-                                outputListState.animateScrollToItem(displayedContent.size)
-                                hasNewOutput = false
-                              } finally {
-                                automaticScroll = false
-                              }
-                            }
-                          },
-                        )
-                    },
+                if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty())
+                  Text(
+                    "No recent output received.",
+                    Modifier.padding(16.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                   )
+
+                // Existing live prompt route; saved readers remain read-only.
+                if (
+                  state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") ==
+                    false
+                ) {
+                  Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
                 }
+                if (state.offlineSavedAt == null)
+                  composerState.SaveableStateProvider(conversationKey) {
+                    PromptInputBar(
+                      onSend = { text -> actions.submitPrompt(text) },
+                      enabled =
+                        state.connection == ConnectionState.Connected &&
+                          state.bridgeDetails[state.activeProfileId]
+                            ?.capabilities
+                            ?.get("prompt_input") != false,
+                      controls = {
+                        if (!atSessionBottom)
+                          NativeSessionFollowBar(
+                            followEnabled && followingOutput,
+                            hasNewOutput,
+                            onFollow = { enabled ->
+                              followPreferences = followPreferences + (conversationKey to enabled)
+                              followingOutput = enabled
+                            },
+                            onLatest = {
+                              outputScope.launch {
+                                followingOutput = followEnabled
+                                automaticScroll = true
+                                try {
+                                  outputListState.animateScrollToItem(displayedContent.size)
+                                  hasNewOutput = false
+                                } finally {
+                                  automaticScroll = false
+                                }
+                              }
+                            },
+                          )
+                      },
+                    )
+                  }
+              }
+              if (sessionTab == SessionTab.TOOLS) {
+                ToolHistoryPanel(
+                  toolActivities,
+                  state.omittedToolOperations,
+                  Modifier.fillMaxSize(),
+                  onAtLatest = { toolsAtLatest = it },
+                )
+              }
             }
           }
           destination == Destination.ATTENTION -> {
