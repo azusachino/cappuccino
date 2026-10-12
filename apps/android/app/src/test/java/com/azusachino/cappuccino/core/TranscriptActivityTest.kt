@@ -13,6 +13,18 @@ class TranscriptActivityTest {
   ) = ConversationPart.ToolCall(name, "{}", "ok", startedAt = started, finishedAt = finished)
 
   @Test
+  fun readOfAnImageSaysSoWhenThereIsNoText() {
+    fun read(images: Int?, output: String = "") =
+      ConversationPart.ToolCall("Read", """{"file_path":"shot.png"}""", output, images = images)
+
+    assertEquals("image", stepOutcome(read(1))?.text)
+    assertEquals("3 images", stepOutcome(read(3))?.text)
+    assertNull(stepOutcome(read(null)))
+    // Text output still reports its lines rather than the image count.
+    assertEquals("1 line", stepOutcome(read(1, output = "only line"))?.text)
+  }
+
+  @Test
   fun consecutiveThinkingAndToolsBecomeOneActivityBetweenProse() {
     val intro = ConversationPart.Text("Looking.")
     val thinking = ConversationPart.Thinking("plan")

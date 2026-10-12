@@ -429,6 +429,12 @@ private fun StepBody(part: ConversationPart) {
               colors.body,
             )
       }
+      val images = part.images ?: 0
+      if (images > 0)
+        StepBlock(
+          "${if (images == 1) "1 image" else "$images images"} returned · not shown on the phone",
+          colors.muted,
+        )
       val output = part.output
       // A successful edit's diff already says what changed.
       if (!output.isNullOrEmpty() && !(kind == ToolKind.EDIT && !failed))

@@ -320,6 +320,20 @@ class BridgeProtocolTest {
   }
 
   @Test
+  fun toolImageCountIsParsedAndAbsentStaysNull() {
+    val parts =
+      parseConversationResponse(
+          parseJsonObject(
+            """{"turns":[{"id":"t","role":"agent","parts":[{"type":"tool_call","name":"Read","input":{"file_path":"shot.png"},"output":"","images":2},{"type":"tool_call","name":"Read","input":"file"}]}]}"""
+          )
+        )
+        .single()
+        .parts
+    assertEquals(2, (parts[0] as ConversationPart.ToolCall).images)
+    assertNull((parts[1] as ConversationPart.ToolCall).images)
+  }
+
+  @Test
   fun parsesConversationTurnResponse() {
     val json =
       obj(

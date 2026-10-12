@@ -274,8 +274,14 @@ fun stepOutcome(part: ConversationPart.ToolCall): StepOutcome? {
           }
         }
         ToolKind.WRITE -> args?.text("content")?.let { StepOutcome("+${lineCount(it)}", Tone.OK) }
-        ToolKind.READ ->
-          if (output.isBlank()) null else StepOutcome(plural(lineCount(output), "line"))
+        ToolKind.READ -> {
+          val images = part.images ?: 0
+          when {
+            output.isNotBlank() -> StepOutcome(plural(lineCount(output), "line"))
+            images > 0 -> StepOutcome(if (images == 1) "image" else "$images images")
+            else -> null
+          }
+        }
         ToolKind.SEARCH ->
           when {
             Regex("^(?:No matches|No files found)").containsMatchIn(output) ->

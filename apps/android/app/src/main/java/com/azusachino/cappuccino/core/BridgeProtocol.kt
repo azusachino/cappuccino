@@ -146,6 +146,7 @@ sealed interface ConversationPart {
     val startedAt: String? = null,
     val finishedAt: String? = null,
     val originalPartIndex: Int? = null,
+    val images: Int? = null,
   ) : ConversationPart
 }
 
@@ -301,6 +302,7 @@ fun parseConversationResponse(json: JsonObject): List<ConversationTurn> {
                 isError,
                 partObj.optionalString("started_at"),
                 partObj.optionalString("finished_at"),
+                images = partObj.optionalLong("images")?.toInt(),
               )
             }
             else -> null

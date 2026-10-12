@@ -57,6 +57,8 @@ pub enum ConversationPart {
         started_at: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         finished_at: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        images: Option<u32>,
     },
 }
 
@@ -266,6 +268,7 @@ pub fn parse_agy_transcript(content: &str) -> Vec<ConversationTurn> {
                             is_error: None,
                             started_at: timestamp.clone(),
                             finished_at: None,
+                            images: None,
                         });
                     }
                 }
@@ -438,6 +441,7 @@ pub fn parse_pi_transcript(content: &str) -> Vec<ConversationTurn> {
                                     is_error: None,
                                     started_at: timestamp.clone(),
                                     finished_at: None,
+                                    images: None,
                                 });
                             }
                             _ => {}
@@ -558,6 +562,16 @@ fn claude_command_text(text: &str) -> Option<String> {
     })
 }
 
+/// Images are never sent to the phone; the count lets the step say one came back.
+fn claude_tool_result_images(content: &Value) -> u32 {
+    content.as_array().map_or(0, |blocks| {
+        blocks
+            .iter()
+            .filter(|block| block["type"].as_str() == Some("image"))
+            .count() as u32
+    })
+}
+
 fn claude_tool_result_text(content: &Value) -> String {
     match content {
         Value::String(text) => text.clone(),
@@ -639,6 +653,7 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
                             output,
                             is_error,
                             finished_at,
+                            images,
                             ..
                         }) = turns
                             .get_mut(turn_index)
@@ -647,6 +662,8 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
                             *output = Some(claude_tool_result_text(&block["content"]));
                             *is_error = block["is_error"].as_bool();
                             *finished_at = timestamp.clone();
+                            let count = claude_tool_result_images(&block["content"]);
+                            *images = (count > 0).then_some(count);
                         }
                     }
                 }
@@ -694,6 +711,7 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
                                 is_error: None,
                                 started_at: timestamp.clone(),
                                 finished_at: None,
+                                images: None,
                             });
                         }
                         _ => {}
@@ -819,13 +837,26 @@ mod tests {
         }
 
         // Sidechains are skipped, array results are joined, an orphan result attaches nowhere.
+        // An image-only result has no text and is counted instead.
         match turns[4].parts.as_slice() {
             [ConversationPart::ToolCall {
-                output, is_error, ..
+                output,
+                is_error,
+                images: edit_images,
+                ..
+            }, ConversationPart::ToolCall {
+                name: read_name,
+                output: read_output,
+                images,
+                ..
             }, ConversationPart::Text { text }, ConversationPart::Text { .. }, ConversationPart::ResponseStatus { status, .. }] =>
             {
                 assert_eq!(output.as_deref(), Some("edited"));
                 assert_eq!(*is_error, None);
+                assert_eq!(*edit_images, None);
+                assert_eq!(read_name, "Read");
+                assert_eq!(read_output.as_deref(), Some(""));
+                assert_eq!(*images, Some(1));
                 assert_eq!(text, "Fixed, with a regression test.");
                 assert_eq!(status, "failed");
             }
