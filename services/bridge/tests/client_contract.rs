@@ -66,6 +66,7 @@ impl TempRoot {
 struct MockAgent {
     kind: String,
     status: String,
+    screen: String,
     requests: Vec<Value>,
 }
 
@@ -74,6 +75,7 @@ impl Default for MockAgent {
         Self {
             kind: "pi".to_string(),
             status: "idle".to_string(),
+            screen: "alpha line\nbeta line\n".to_string(),
             requests: Vec::new(),
         }
     }
@@ -138,6 +140,24 @@ impl MockHerdr {
         agent.status = status.to_string();
     }
 
+    fn set_screen(&self, screen: &str) {
+        self.agent.lock().unwrap().screen = screen.to_string();
+    }
+
+    /// Keys and text sent to the pane, in order: `["2"]`, `"a bird"`, …
+    fn input(&self) -> Vec<Value> {
+        let agent = self.agent.lock().unwrap();
+        agent
+            .requests
+            .iter()
+            .filter_map(|r| match r["method"].as_str() {
+                Some("pane.send_keys") => Some(r["params"]["keys"].clone()),
+                Some("pane.send_text") => Some(r["params"]["text"].clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn requests(&self, method: &str) -> Vec<Value> {
         let agent = self.agent.lock().unwrap();
         agent
@@ -193,10 +213,14 @@ async fn handle_mock_connection(
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_default();
     let session_value = agent_session.lock().unwrap().clone();
-    let (kind, status) = {
+    let (kind, status, screen) = {
         let mut agent = agent.lock().unwrap();
         agent.requests.push(request.clone());
-        (agent.kind.clone(), agent.status.clone())
+        (
+            agent.kind.clone(),
+            agent.status.clone(),
+            agent.screen.clone(),
+        )
     };
     let agent_session_json = match session_value {
         Some(value) => json!({"kind": "path", "value": value}),
@@ -222,7 +246,7 @@ async fn handle_mock_connection(
                 "agent_session": agent_session_json,
             }
         }),
-        "pane.read" => json!({"read": {"text": "alpha line\nbeta line\n"}}),
+        "pane.read" => json!({"read": {"text": screen}}),
         _ => json!({}),
     };
     let response = json!({"id": request["id"], "result": result});
@@ -709,6 +733,160 @@ async fn control_route_sends_each_agents_own_keys_and_refuses_busy_new_sessions(
     }
     herdr.set_agent("codex", "idle");
     assert_eq!(control("s-probe", "new_session").await.status, 400);
+
+    bridge.stop().expect("bridge stop");
+    herdr.stop().await;
+    root.remove();
+}
+
+const PETS_SCREEN: &str = "←  ☒ Color  ☐ Pets  ✔ Submit  →
+
+Which pets?
+
+❯ 1. [ ] Cat
+         indep
+  2. [ ] Dog
+         loyal
+  3. [ ] Fish
+         quiet
+  4. [ ] Type something
+     Submit
+──────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+";
+
+const REVIEW_SCREEN: &str = "←  ☒ Color  ☒ Pets  ✔ Submit  →
+Review your answers
+ ● Pick a color?
+   → Blue
+ ● Which pets?
+   → Cat, Fish
+Ready to submit your answers?
+❯ 1. Submit answers
+  2. Cancel
+";
+
+/// The card id a stale answer's 409 names as currently on screen.
+fn on_screen_id(body: &Value) -> String {
+    let message = body["message"].as_str().unwrap_or_default();
+    let id = message.rsplit("on screen ").next().unwrap_or_default();
+    id.trim_end_matches(')').trim().to_string()
+}
+
+#[tokio::test]
+async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
+    let root = TempRoot::new("question-test");
+    let herdr = MockHerdr::start(&root);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+    let options = probe_options(&bridge.base_url());
+    let post = |body: Value| {
+        let options = options.clone();
+        async move {
+            probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+                .await
+                .expect("prompt request")
+        }
+    };
+    let answer = |id: &str, answers: Value| json!({"type": "answer_question", "prompt_id": id, "answers": answers});
+    let sent_since = |from: usize| herdr.input()[from..].to_vec();
+
+    // A single-select question, as Herdr returns Claude Code's form.
+    herdr.set_screen(include_str!(
+        "../../../fixtures/claude/ask-user-question-screen.txt"
+    ));
+    let stale = post(answer("p-old", json!([{"selected": [1]}]))).await;
+    assert_eq!(stale.status, 409, "payload: {}", stale.body);
+    assert_eq!(stale.body["code"], "stale_prompt");
+    let color = on_screen_id(&stale.body);
+    assert!(color.starts_with("p-"), "id from: {}", stale.body);
+    assert_eq!(
+        post(answer(&color, json!([{"selected": [0, 1]}])))
+            .await
+            .status,
+        400
+    );
+    let two = post(answer(
+        &color,
+        json!([{"selected": [1]}, {"selected": [0]}]),
+    ))
+    .await;
+    assert_eq!(two.status, 400);
+    assert_eq!(two.body["code"], "bad_answer");
+    let select = json!({"type": "answer_prompt", "prompt_id": color, "action": "select_option", "option_index": 1});
+    assert_eq!(
+        post(select).await.status,
+        400,
+        "a question card takes answer_question"
+    );
+    assert!(
+        herdr.input().is_empty(),
+        "nothing is typed for refused answers"
+    );
+
+    let from = herdr.input().len();
+    assert_eq!(
+        post(answer(&color, json!([{"selected": [1]}])))
+            .await
+            .status,
+        200
+    );
+    assert_eq!(sent_since(from), vec![json!(["2"])]);
+    let from = herdr.input().len();
+    assert_eq!(
+        post(answer(&color, json!([{"other": " Teal "}])))
+            .await
+            .status,
+        200
+    );
+    assert_eq!(
+        sent_since(from),
+        vec![json!(["4"]), json!("Teal"), json!(["enter"])]
+    );
+    let from = herdr.input().len();
+    let cancel = json!({"type": "answer_prompt", "prompt_id": color, "action": "cancel"});
+    assert_eq!(post(cancel).await.status, 200);
+    assert_eq!(sent_since(from), vec![json!(["esc"])]);
+
+    // A multi-select toggles, types its own line, then leaves by its Submit row.
+    herdr.set_screen(PETS_SCREEN);
+    let pets = on_screen_id(&post(answer(&color, json!([{"selected": [0]}]))).await.body);
+    assert_ne!(pets, color);
+    let from = herdr.input().len();
+    let multi = post(answer(&pets, json!([{"selected": [0], "other": "a bird"}]))).await;
+    assert_eq!(multi.status, 200, "payload: {}", multi.body);
+    assert_eq!(
+        sent_since(from),
+        vec![
+            json!(["1"]),
+            json!(["4"]),
+            json!(["down", "down", "down"]),
+            json!("a bird"),
+            json!(["down"]),
+            json!(["enter"]),
+        ]
+    );
+    // Ticks made in the terminal would be undone by relative toggles: refused.
+    herdr.set_screen(&PETS_SCREEN.replace("1. [ ] Cat", "1. [✔] Cat"));
+    let ticked = on_screen_id(&post(answer(&pets, json!([{"selected": [0]}]))).await.body);
+    let from = herdr.input().len();
+    let refused = post(answer(&ticked, json!([{"selected": [1]}]))).await;
+    assert_eq!(refused.status, 409, "payload: {}", refused.body);
+    assert!(sent_since(from).is_empty());
+
+    // The review acts on its digit alone; its Cancel row is 2.
+    herdr.set_screen(REVIEW_SCREEN);
+    let review_stale = json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "select_option", "option_index": 0});
+    let review = on_screen_id(&post(review_stale).await.body);
+    let from = herdr.input().len();
+    let submit = json!({"type": "answer_prompt", "prompt_id": review, "action": "select_option", "option_index": 0});
+    assert_eq!(post(submit).await.status, 200);
+    assert_eq!(sent_since(from), vec![json!(["1"])]);
+    let from = herdr.input().len();
+    let cancel = json!({"type": "answer_prompt", "prompt_id": review, "action": "cancel"});
+    assert_eq!(post(cancel).await.status, 200);
+    assert_eq!(sent_since(from), vec![json!(["2"])]);
 
     bridge.stop().expect("bridge stop");
     herdr.stop().await;

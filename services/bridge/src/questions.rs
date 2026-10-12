@@ -68,6 +68,11 @@ fn option_row(line: &str) -> Option<(usize, Option<bool>, String)> {
     Some((number, ticked, label.trim().to_string()))
 }
 
+/// A multi-select's Submit row, with or without the cursor on it.
+fn is_submit_row(text: &str) -> bool {
+    text.trim_start_matches('❯').trim() == "Submit"
+}
+
 fn indent(line: &str) -> usize {
     line.len() - line.trim_start().len()
 }
@@ -103,7 +108,7 @@ pub fn form(screen: &str) -> Option<Form> {
         let text = line.trim();
         let part = text.is_empty()
             || text.starts_with('─')
-            || text == "Submit"
+            || is_submit_row(text)
             || option_row(line).is_some()
             || (!text.is_empty() && indent(line) >= 4);
         if !part {
@@ -112,11 +117,14 @@ pub fn form(screen: &str) -> Option<Form> {
         top -= 1;
     }
     let mut rows: Vec<(Option<bool>, String, Option<String>, bool)> = Vec::new();
+    let mut submit_cursor = false;
     for line in &lines[top..chat] {
         if let Some((_, ticked, label)) = option_row(line) {
             let cursor = line.trim_start().starts_with('❯');
             rows.push((ticked, label, None, cursor));
-        } else if indent(line) >= 4 && line.trim() != "Submit" {
+        } else if is_submit_row(line.trim()) {
+            submit_cursor = line.trim_start().starts_with('❯');
+        } else if indent(line) >= 4 {
             if let Some(row) = rows.last_mut() {
                 let text = line.trim().to_string();
                 row.2 = Some(match row.2.take() {
@@ -148,10 +156,14 @@ pub fn form(screen: &str) -> Option<Form> {
     let tabs = tab_row.unwrap_or_default();
     let multi_select = rows.iter().any(|row| row.0.is_some());
     let ticked = rows.iter().any(|row| row.0 == Some(true));
-    let cursor = rows
-        .iter()
-        .position(|row| row.3)
-        .map_or(1, |index| index + 1);
+    // Rows count from 1; the Submit row sits after the "Type something" row.
+    let cursor = if submit_cursor {
+        rows.len() + 1
+    } else {
+        rows.iter()
+            .position(|row| row.3)
+            .map_or(1, |index| index + 1)
+    };
     rows.pop();
     let header = tabs
         .iter()
@@ -516,6 +528,23 @@ Ready to submit your answers?
             vec![keys(&["2"]), keys(&["down", "down"]), keys(&["enter"])]
         );
         assert!(form_of(&PETS.replace("1. [ ] Cat", "1. [✔] Cat")).ticked);
+        // The cursor can rest on the Submit row; the card stays and keys start from there.
+        let on_submit = TAGS
+            .replace("❯ 1. [ ] A", "  1. [ ] A")
+            .replace("     Submit", "❯    Submit");
+        let form = form_of(&on_submit);
+        assert_eq!(form.cursor, 4);
+        assert_eq!(
+            answer_steps(&form, &answer(&[0], Some("zz"))).unwrap(),
+            vec![
+                keys(&["1"]),
+                keys(&["3"]),
+                keys(&["up"]),
+                Step::Text("zz".into()),
+                keys(&["down"]),
+                keys(&["enter"]),
+            ]
+        );
     }
 
     #[test]

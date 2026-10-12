@@ -302,14 +302,17 @@ async fn resolve_pane(state: &Arc<BridgeState>, session: &str) -> Option<String>
 /// The question form on screen while `prompt_id` still names it, untouched by the terminal.
 async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form, Response> {
     let stale = |message: &str| error_response(StatusCode::CONFLICT, "stale_prompt", message);
-    let screen = herdr::pane_read_recent(pane_id, 40)
+    let screen = herdr::pane_read_recent(pane_id, 80)
         .await
         .map_err(|err| error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string()))?;
     let Some(form) = questions::form(&screen) else {
         return Err(stale("the question is no longer shown"));
     };
-    if questions::card(&form).prompt_id != prompt_id {
-        return Err(stale("the question on screen has changed"));
+    let shown = questions::card(&form).prompt_id;
+    if shown != prompt_id {
+        return Err(stale(&format!(
+            "the question on screen has changed (on screen {shown})"
+        )));
     }
     // Toggles are relative: ticks made in the terminal would be undone.
     if form.ticked {
@@ -551,7 +554,7 @@ pub async fn submit_agent_prompt(
             option_index,
             option_id,
         } => {
-            let active_screen = match herdr::pane_read_recent(&pane_id, 40).await {
+            let active_screen = match herdr::pane_read_recent(&pane_id, 80).await {
                 Ok(text) => text,
                 Err(err) => {
                     return error_response(
