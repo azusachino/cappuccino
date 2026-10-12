@@ -1,6 +1,6 @@
 # Native UX improvement session
 
-Status: owner-approved continuation after the Paseo study. Android has installed theme/highlighting, compact headings and recorded-tool corrections; offline-history/canonical identity is committed and locally gated; Android is reinstalled, with Mini rolled out and a scoped native restart/read-only journey executed; full device/owner acceptance remains open. Apple foundations are gated but its consuming UI remains behind Android. No whole-flow acceptance is claimed.
+Status: direction reset by the owner to a full Android UI rewrite. The whole app follows Mihon; only the core agent session uses a terminal-inspired native layout. Theme system and app shell are both priorities. Floating controls are rejected, and the live jump fix is rejected across conversations. See the [rewrite contract](../design/mihon-shell-terminal-session.md); detailed native previews still require review. Earlier implementation/gate evidence below is historical, not acceptance of the current UI. Apple consuming parity remains outside this first slice. No whole-flow acceptance is claimed.
 
 Tracking: [issue #33](https://github.com/azusachino/cappuccino/issues/33).
 Source studies: [Telegram, Nekogram and Haven](../design/telegram-nekogram-ux-study.md), [native highlighting](../design/native-code-highlighting-research.md), [Paseo](../design/paseo-source-study.md).
@@ -8,7 +8,7 @@ Existing reader contracts: [Pi phone reader](../design/pi-phone-reader.md). Appl
 
 ## Outcome and baseline
 
-The owner confirms the basic UX now works. Improve its coherence, density and information hierarchy without rebuilding the app, replacing its backend or introducing another navigation system.
+The earlier cosmetic-only direction is superseded. Rewrite the Android presentation and theme system around the owner-approved split, preserving the backend, canonical identity, independent machines and private data. Do not apply terminal styling to the whole app or retain floating controls merely because older previews/tests passed.
 
 Current working baseline:
 
@@ -88,7 +88,7 @@ Follow the [Apple plan](ios-ux-parity.md): wire independent machines, canonical 
 - Attention currently depends on the selected stream and loses pending state on navigation. Independently scoped attention needs its own behavior/ownership tests; do not persist actionable approvals as offline history.
 - Cursor-based incremental history requires a specified bridge contract, canonical generation/coverage and partial-catch-up tests before implementation. Full snapshot refresh is not cursor synchronization.
 - Four historical native display/tail methods, flashing/popup acceptance and live Pi delivery/readiness remain open. Preserve raw failures and do not weaken tests or call a source fix an executed journey.
-- Mihon-style selectable palettes remain deferred; Catppuccin is the current approved palette, not proof that the chooser requirement shipped.
+- Mihon-style selectable whole-app palettes are now in the approved rewrite scope, not deferred. Existing Catppuccin rendering is a baseline option, not proof that a chooser or the new theme system shipped.
 
 ## Original UX slices
 

@@ -71,10 +71,14 @@ queue or a global lifetime total.
 | `app-shell` | Material navigation, machine/agent browsing, settings and saved-history access | `theme-system`; existing verified connections/archive identity |
 | `conversation-reader` | Stable visible-answer timeline, separate tool/reasoning history, native full readers and honest historical labels | `theme-system`, `app-shell`; existing passive/native/read-only foundations |
 
-Proposed order: source study and owner-reviewed design → theme boundary →
-shell → reader/tool surfaces → real consuming acceptance. The reader is not
-accepted until live tool-only updates preserve position across conversations;
-a synthetic fixture or screenshot alone is insufficient.
+The owner subsequently approved the split and clarified the visual boundary:
+the overall app follows Mihon; only the core agent session is terminal-inspired
+native Compose. Floating design is explicitly rejected. Theme system and app
+shell are both first-priority work; see the
+[rewrite contract](mihon-shell-terminal-session.md). Detailed layouts still need
+native preview review. The reader is not accepted until live tool-only updates
+preserve position across conversations; a synthetic fixture or screenshot alone
+is insufficient.
 
 ## Safety and remaining work
 
