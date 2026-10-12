@@ -20,8 +20,10 @@ must not be described as a feature being outside that goal.
   consuming path.
 
 No commands, approvals, model changes, reloads or session actions were sent.
-Remote deployed versions/effective extensions were not re-inspected in this
-pass. Earlier Mini installation evidence is not fresh runtime proof.
+The initial source phase did not re-inspect remote deployed versions/effective
+extensions. Fresh checks subsequently executed are recorded in the runtime
+verification section below; earlier installation evidence is not substituted
+for those checks.
 
 ## The managed integration is reporting, not full remote control
 
@@ -64,6 +66,35 @@ is an architectural option, not an installed/verified capability.
 RPC UI explicitly degrades custom terminal components and TUI-specific header,
 footer, editor/theme controls. Native compatibility must cover actual supported
 interactions, not promise to render arbitrary terminal components.
+
+## Fresh read-only runtime verification
+
+Subsequent inspection reached Mini over SSH and both existing private HTTPS
+bridges, without sending input or changing agents:
+
+- Mini CLI and running server: Herdr `0.9.3`, compatible private protocol `22`;
+  Pi reports `1.1.0`. The running Pi foreground PID's environment confirms the
+  effective `.luna/agent` directory and discovered `w1:p21` pane binding.
+- Effective Mini Pi integration status is current `v9`; its discovered live Pi
+  agent has a canonical session report. The private bridge conversation GET
+  verifies canonical source, conversation ID and expected machine/locator
+  binding. Transcript contents remain private scratch, not evidence published
+  here. Observed Pi was working; no idle reload was attempted.
+- The local Mac Herdr running server is also `0.9.3`, compatible private
+  protocol `22`. Mini and Mac schema inventories expose agent prompt/send-keys,
+  wait, discovery and event subscribe/wait, but no named typed Pi model/queue
+  methods. Both bridges verify the expected machine identity and advertise
+  prompt input/answers. Advertisement is not end-to-end action validation.
+- A further installed Pi source check (`interactive-mode.js`) confirms that
+  default TUI submission while streaming uses `streamingBehavior: "steer"`;
+  its follow-up handler uses `"followUp"` and describes Alt+Enter. Thus the PTY
+  route can reach default TUI steering, even though our transport does not
+  expose explicit modes or authoritative queue/disposition acknowledgements.
+  This was source-verified, not exercised against the owner's running agent,
+  and is not proof for custom editors/keybindings.
+
+Private raw records are under `.tmp/cappuccino-mihon-preview/runtime/`; no
+credentials, real transcript text or private network URLs are promoted here.
 
 ## Concrete current defects / overclaims
 

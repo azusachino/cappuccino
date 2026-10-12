@@ -21,6 +21,23 @@ Source basis: [pinned Mihon study](mihon-native-ui-source-study.md), commit
 not a manga-gallery clone. No terminal emulator, WebView, launcher or remote
 agent lifecycle control is introduced.
 
+## Latest owner session acceptance target
+
+The pi-pocket showcase is the session-layout target, not merely permission to
+add tabs to the old chat. Native Compose must deliver compact monospace
+hierarchy, continuous assistant text, flat user blocks, ordinary replies inline
+within an explicit rendering budget, and one integrated bottom composer.
+Respect font scaling; never change the owner's system display settings.
+
+The owner subsequently narrowed session navigation to **Session / Tools**;
+**Info is removed**. Connection diagnostics remain behind the header action.
+Tools use descending source order (newest first), opening at the latest record
+and following arrivals while at the top; intentional older inspection retains
+its position. Follow/Latest disappear at the session bottom and reappear away
+from it, inside the permanent Send toolbar so visibility changes do not resize
+the reader. This supersedes the earlier three-tab/fixed-visible-row sketch
+below. Earlier first-slice installation is not owner acceptance of the target.
+
 ## Pi-first scope correction
 
 The owner's pi-pocket reference does not justify excluding approvals, steer,
