@@ -194,7 +194,8 @@ cargo build --release
 From the repository root, `make check-bridge` runs the full Rust gate (fmt,
 hermetic tests including the client contract suite, release build of the
 companion). `make resource-bridge-client` runs the bounded leak/lifecycle soak
-(`tests/resource_soak.rs`, `#[ignore]`-gated). `make bench-bridge-client
+(`tests/resource_soak.rs`, `#[ignore]`-gated, about six minutes); it is opt-in,
+run before a version release rather than on every change. `make bench-bridge-client
 BASE_URL=http://127.0.0.1:7392` runs the reproducible benchmark against a
 running bridge. Rust diagnostics are treated as errors by review; no warning
 suppression or skipped tests.
@@ -259,16 +260,16 @@ bridge crate stay unchanged.
   steady-state batch and must plateau; the allocator is pressure-relieved
   before teardown sampling so cache retention is distinguished from true
   retention. Soak tests run serially so baselines are not contaminated.
-  Short samples never prove absolute zero-leak. The soak runs as part of the
-  aggregate `check-bridge` gate, not only as an explicit target.
+  Short samples never prove absolute zero-leak. The soak is opt-in
+  (`make resource-bridge-client`) and runs before a version release.
 - Leak acceptance is baseline-relative and per scenario class (success,
   refusal, mid-flight cancellation, server disconnect, child churn): FD counts
   may drop (async runtime teardown) but must not grow beyond a documented
   tolerance after each class; children are reaped (asserted via try_wait);
   mock tasks join under a deadline; temp state is removed. RSS evidence
   combines sampled client RSS growth with peak; short samples never prove
-  absolute zero-leak. The soak runs as part of the aggregate `check-bridge`
-  gate, not only as an explicit target.
+  absolute zero-leak. The soak is opt-in (`make resource-bridge-client`) and
+  runs before a version release.
 
 The manifest uses argv arrays and invokes the installed Rust binary directly;
 there are no bridge shell launchers. The bridge uses `libc` narrowly for Unix
