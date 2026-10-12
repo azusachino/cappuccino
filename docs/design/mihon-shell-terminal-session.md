@@ -23,6 +23,21 @@ agent lifecycle control is introduced.
 
 ## Latest owner session acceptance target
 
+The owner subsequently expanded palette scope to **Default, Dynamic,
+Catppuccin, GitHub and One Dark**, superseding the earlier three-choice cap.
+Brightness remains separate; One Dark's light mode uses One Light-inspired
+colors. Palette previews must fit a scrollable grid, not five cramped columns.
+
+The agent-detail status must retain a colored background and its corresponding
+contrast-checked foreground. The owner reported the plain status as invisible;
+restoring the pair is the acceptance target, not removing status semantics.
+The owner also explicitly restored a **Tools counter**: new calls and returned
+results must be observable while reading Session (or older tool entries).
+Initial loaded history is not new activity; repeated snapshots, trimmed history
+and partial/missing results must not manufacture new return notifications.
+This is selected-conversation UI awareness, not all-session system/Telegram
+notification delivery or proof of successful execution.
+
 The pi-pocket showcase is the session-layout target, not merely permission to
 add tabs to the old chat. Native Compose must deliver compact monospace
 hierarchy, continuous assistant text, flat user blocks, ordinary replies inline

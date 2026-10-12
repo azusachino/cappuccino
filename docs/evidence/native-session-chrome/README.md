@@ -22,6 +22,39 @@ or acceptance of the previously rejected live scroll behavior.
 - Phone screenshots/hierarchies contain private live content and remain under
   `.tmp/cappuccino-mihon-preview/phone/`; they are not published here.
 
+## Production appearance and tool awareness checkpoint
+
+Owner follow-ups expanded the catalog to Default/Dynamic/Catppuccin/GitHub/One
+Dark, restored the colored agent-detail status and required a Tools counter.
+APK: `77493b3374e3b70aebcd81d2b38179382e4b07ac44318970fb3623978e14167e`.
+Full Android and Markdown gates passed; **170 unit tests, zero failures,
+errors or skips**. Unit checks cover fixed-palette normal-text contrast in both
+modes, stable preference IDs/default migration, view-model preference
+restoration without profile/mode changes, and call/result counter transitions.
+
+Four-file stopped-app backup/install-r/prelaunch byte comparison passed again.
+On the actual Appearance page, all five choices were visible and selected in
+turn; each stored its expected preference. The original palette and brightness
+were restored, all existing profile/preference values were compared unchanged
+apart from the deliberate palette key, and the chosen preference survived
+restart. An initial navigation attempt stopped without a tap because the app
+restored its selected session, not the assumed Machines page; continued using
+native Back and observed navigation rather than blind coordinates.
+
+A live session showed a readable blue Working background. No prompt, model
+change or approval was sent. New tool calls and first recorded returns each
+increment the selected-session counter; initial history and repeated/trimmed
+snapshots do not. Opening the newest tools acknowledges it, while older
+inspection retains unread awareness. During a passive check of a naturally
+working session, the tab displayed a nonzero counter and opening newest Tools
+acknowledged it; no artificial prompt/action was used to produce activity.
+Exact per-event count parity and arrivals during older inspection were not
+audited by that smoke. These are not all-session/system/Telegram completion
+alerts.
+
+Private screenshots and preservation records remain in scratch. Full native
+font/theme/performance matrix and owner visual acceptance remain open.
+
 ## Subsequent showcase-target checkpoint
 
 The owner rejected the first slice as too little visual change and narrowed
