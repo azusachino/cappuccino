@@ -79,7 +79,8 @@ extension FixtureBridge: AgentSessionServing {
     async throws
   {}
 
-  public func submitPrompt(base: URL, session: String, text: String) async throws {}
+  public func submitPrompt(base: URL, session: String, text: String, confirmed: Bool) async throws {
+  }
 
   public func answerPrompt(
     base: URL, session: String, promptID: String, optionIndex: Int?, optionID: String?,

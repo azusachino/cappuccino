@@ -36,7 +36,12 @@ pub struct PromptOption {
 #[serde(tag = "type")]
 pub enum PromptSubmission {
     #[serde(rename = "prompt")]
-    Prompt { text: String },
+    Prompt {
+        text: String,
+        /// The owner confirmed running the agent command the text starts with.
+        #[serde(default)]
+        confirmed: bool,
+    },
     #[serde(rename = "answer_prompt")]
     AnswerPrompt {
         prompt_id: String,
@@ -151,6 +156,21 @@ pub fn claim(pane_id: &str, prompt_id: &str) -> bool {
         }
         _ => false,
     }
+}
+
+/// The agent command a composer message would run (`/model` for `/model opus`). A path such as
+/// `/Users/me/notes.md` is text: the command word must end at a space or the end.
+pub fn slash_command(text: &str) -> Option<&str> {
+    let text = text.trim_start();
+    let rest = text.strip_prefix('/')?;
+    let end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':')))
+        .unwrap_or(rest.len());
+    let after = rest[end..].chars().next();
+    (end > 0
+        && rest.starts_with(|c: char| c.is_ascii_alphabetic())
+        && after.is_none_or(char::is_whitespace))
+    .then(|| &text[..=end])
 }
 
 /// Herdr refused the answer, so the card may still be live: the next read shows it with a new id.
@@ -415,6 +435,17 @@ All tests completed in 0.4s
         let scrolled = format!("{APPROVAL}{}", "later output\n".repeat(PROMPT_TAIL_LINES));
         assert!(parse_prompt_from_screen(&scrolled).is_none());
         assert!(parse_prompt_from_screen(&format!("earlier\n{APPROVAL}")).is_some());
+    }
+
+    #[test]
+    fn slash_commands_are_told_apart_from_text_and_paths() {
+        assert_eq!(slash_command("/model opus"), Some("/model"));
+        assert_eq!(slash_command("  /new"), Some("/new"));
+        assert_eq!(slash_command("/mcp:tool-name x"), Some("/mcp:tool-name"));
+        assert_eq!(slash_command("/Users/me/notes.md summarize"), None);
+        assert_eq!(slash_command("/ not a command"), None);
+        assert_eq!(slash_command("/1 two"), None);
+        assert_eq!(slash_command("please run /model"), None);
     }
 
     #[test]

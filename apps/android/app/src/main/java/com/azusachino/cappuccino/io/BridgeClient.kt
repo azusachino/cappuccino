@@ -61,7 +61,8 @@ interface BridgeTransport {
   suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
     ConversationSnapshot(conversation(sessionId), "canonical_log")
 
-  suspend fun submitPrompt(sessionId: String, text: String) {}
+  /** Sends [text]; [confirmed] says the owner approved the agent command it starts with. */
+  suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean = false) {}
 
   /** Owner control over a running agent: `interrupt` (Stop) or `new_session`. */
   suspend fun controlAgent(sessionId: String, action: String) {}
@@ -136,13 +137,17 @@ class BridgeClient(
       ConversationSnapshot(parseConversationResponse(json), source, identity, machine, stats)
     }
 
-  override suspend fun submitPrompt(sessionId: String, text: String): Unit =
+  override suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean): Unit =
     withContext(Dispatchers.IO) {
       if (bridgeDetails?.capabilities?.get("prompt_input") == false)
         throw ProtocolException("Prompt input unsupported by this bridge")
-      val escapedText = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
-      val body = """{"type":"prompt","text":"$escapedText"}"""
-      post("api/agents/$sessionId/prompt", body)
+      val body =
+        kotlinx.serialization.json.buildJsonObject {
+          put("type", kotlinx.serialization.json.JsonPrimitive("prompt"))
+          put("text", kotlinx.serialization.json.JsonPrimitive(text))
+          if (confirmed) put("confirmed", kotlinx.serialization.json.JsonPrimitive(true))
+        }
+      post("api/agents/$sessionId/prompt", body.toString())
     }
 
   override suspend fun controlAgent(sessionId: String, action: String): Unit =
