@@ -249,16 +249,8 @@ public final class SessionModel {
       try await send(makeClient(), profile.endpoint, agent.sessionID)
     } catch {
       guard token == epoch, !(error is CancellationError) else { return }
-      actionError = Self.reason(error) ?? failure
-    }
-  }
-
-  /// The bridge's own reason for a refusal, without the transport prefix.
-  static func reason(_ error: Error) -> String? {
-    switch error as? DaemonClientError {
-    case .protocolError(let detail)?: return detail
-    case let other?: return other.message
-    case nil: return error.localizedDescription
+      let reason = OwnerMessage.text(for: error)
+      actionError = reason.isEmpty ? failure : reason
     }
   }
 }

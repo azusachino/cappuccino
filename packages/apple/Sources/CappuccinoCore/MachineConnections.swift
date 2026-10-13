@@ -75,6 +75,30 @@ public final class MachineConnections {
     if foreground { refresh(profile.id) }
   }
 
+  /// Verifies the bridge at `address` and saves it bound to the verified machine.
+  public func addMachine(address: String, label: String) async throws {
+    guard
+      let url = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)),
+      url.host != nil
+    else {
+      throw DaemonClientError.protocolError(
+        "Enter the machine's base URL, e.g. http://127.0.0.1:7392")
+    }
+    let verified = try await client.verifyMachine(baseURL: url, expectedID: nil)
+    let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+    let name = trimmed.isEmpty ? (verified.name ?? url.host ?? "Machine") : trimmed
+    try saveVerifiedProfile(
+      try BridgeProfile(machineID: verified.machine.id, endpoint: url, name: name))
+  }
+
+  /// Renames a saved machine. Its verified identity and endpoint are unchanged.
+  public func rename(_ id: UUID, to label: String) throws {
+    guard let profile = profiles.first(where: { $0.id == id }) else { return }
+    try saveVerifiedProfile(
+      try BridgeProfile(
+        id: id, machineID: profile.machineID, endpoint: profile.endpoint, name: label))
+  }
+
   public func remove(_ id: UUID) throws {
     let updated = profiles.filter { $0.id != id }
     guard storageError == nil else {
