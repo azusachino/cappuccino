@@ -791,6 +791,11 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
     };
     let answer = |id: &str, answers: Value| json!({"type": "answer_question", "prompt_id": id, "answers": answers});
     let sent_since = |from: usize| herdr.input()[from..].to_vec();
+    // Ids are single-use: a stale probe reports the one the screen shows now.
+    let on_screen = || async {
+        let probe = json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "cancel"});
+        on_screen_id(&post(probe).await.body)
+    };
 
     // A single-select question, as Herdr returns Claude Code's form.
     herdr.set_screen(include_str!(
@@ -833,6 +838,11 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
         200
     );
     assert_eq!(sent_since(from), vec![json!(["2"])]);
+    // A repeated tap is stale even while the terminal still shows the form.
+    let repeat = post(answer(&color, json!([{"selected": [1]}]))).await;
+    assert_eq!(repeat.status, 409, "payload: {}", repeat.body);
+    assert_eq!(sent_since(from), vec![json!(["2"])]);
+    let color = on_screen().await;
     let from = herdr.input().len();
     assert_eq!(
         post(answer(&color, json!([{"other": " Teal "}])))
@@ -844,6 +854,7 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
         sent_since(from),
         vec![json!(["4"]), json!("Teal"), json!(["enter"])]
     );
+    let color = on_screen().await;
     let from = herdr.input().len();
     let cancel = json!({"type": "answer_prompt", "prompt_id": color, "action": "cancel"});
     assert_eq!(post(cancel).await.status, 200);
@@ -883,6 +894,7 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
     let submit = json!({"type": "answer_prompt", "prompt_id": review, "action": "select_option", "option_index": 0});
     assert_eq!(post(submit).await.status, 200);
     assert_eq!(sent_since(from), vec![json!(["1"])]);
+    let review = on_screen().await;
     let from = herdr.input().len();
     let cancel = json!({"type": "answer_prompt", "prompt_id": review, "action": "cancel"});
     assert_eq!(post(cancel).await.status, 200);
@@ -1039,6 +1051,16 @@ async fn ws_stream_open_generation_then_entries() {
         stream.entries_consumed >= 2,
         "entries consumed: {}",
         stream.entries_consumed
+    );
+
+    // The phone is gone and the pane is quiet: polling Herdr for it must stop.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let reads = herdr.requests("pane.read").len();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(
+        herdr.requests("pane.read").len(),
+        reads,
+        "a closed stream keeps reading the pane"
     );
 
     bridge.stop().expect("bridge stop");

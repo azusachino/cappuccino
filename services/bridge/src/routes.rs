@@ -11,6 +11,9 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// How often an idle stream checks that the phone is still there.
+const STREAM_PING_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub struct BridgeState {
     pub machine_id: String,
     pub machine_name: Option<String>,
@@ -180,9 +183,27 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
     }
 
     // Poll loop: read-only pane reads every 400 ms. The trailing line is only
-    // confirmed while the agent is idle or already superseded.
+    // confirmed while the agent is idle or already superseded. The socket is
+    // read too, and pinged, so a closed or vanished phone ends the loop even
+    // when the pane is quiet and nothing else would be sent.
+    let mut last_ping = tokio::time::Instant::now();
+    let mut poll = tokio::time::interval(std::time::Duration::from_millis(400));
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    poll.tick().await;
     loop {
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        tokio::select! {
+            _ = poll.tick() => {}
+            incoming = socket.recv() => match incoming {
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
+                Some(Ok(_)) => continue,
+            },
+        }
+        if last_ping.elapsed() >= STREAM_PING_INTERVAL {
+            last_ping = tokio::time::Instant::now();
+            if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                return;
+            }
+        }
         let text = match herdr::pane_read_recent(&pane_id, 2000).await {
             Ok(text) => text,
             Err(_) => continue,
@@ -230,13 +251,17 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
                 "state": status_pair.0,
                 "detail": status_pair.1,
             });
-            let _ = socket
+            if socket
                 .send(Message::Text(status_msg.to_string().into()))
-                .await;
+                .await
+                .is_err()
+            {
+                return;
+            }
         }
 
         // Check for active interactive prompt (tool approval or a question).
-        let active_prompt = prompt::screen_card(&text);
+        let active_prompt = prompt::shown(&pane_id, prompt::screen_card(&text));
         if let Some(card) = &active_prompt {
             if last_prompt_id.as_deref() != Some(&card.prompt_id) {
                 last_prompt_id = Some(card.prompt_id.clone());
@@ -245,9 +270,13 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
                     "session_id": session,
                     "prompt": card,
                 });
-                let _ = socket
+                if socket
                     .send(Message::Text(prompt_msg.to_string().into()))
-                    .await;
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
             }
         } else if last_prompt_id.is_some() {
             let prompt_id = last_prompt_id.take().unwrap();
@@ -256,9 +285,13 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
                 "session_id": session,
                 "prompt_id": prompt_id,
             });
-            let _ = socket
+            if socket
                 .send(Message::Text(resolved_msg.to_string().into()))
-                .await;
+                .await
+                .is_err()
+            {
+                return;
+            }
         }
 
         let new_entries = ring.ingest(&reconcile::PaneSnapshot { lines }, !working);
@@ -308,7 +341,9 @@ async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form,
     let Some(form) = questions::form(&screen) else {
         return Err(stale("the question is no longer shown"));
     };
-    let shown = questions::card(&form).prompt_id;
+    let shown = prompt::shown(pane_id, Some(questions::card(&form)))
+        .map(|card| card.prompt_id)
+        .unwrap_or_default();
     if shown != prompt_id {
         return Err(stale(&format!(
             "the question on screen has changed (on screen {shown})"
@@ -565,7 +600,7 @@ pub async fn submit_agent_prompt(
                 }
             };
 
-            let Some(card) = prompt::screen_card(&active_screen) else {
+            let Some(card) = prompt::shown(&pane_id, prompt::screen_card(&active_screen)) else {
                 return error_response(
                     StatusCode::CONFLICT,
                     "stale_prompt",
@@ -598,7 +633,14 @@ pub async fn submit_agent_prompt(
                 } else {
                     "esc"
                 };
-                let _ = herdr::pane_send_keys(&pane_id, &[key]).await;
+                prompt::spend(&pane_id);
+                if let Err(err) = herdr::pane_send_keys(&pane_id, &[key]).await {
+                    return error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "herdr_error",
+                        &format!("cannot cancel: {err}"),
+                    );
+                }
                 return (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "application/json")],
@@ -642,6 +684,7 @@ pub async fn submit_agent_prompt(
             } else {
                 &[&key_digit, "enter"]
             };
+            prompt::spend(&pane_id);
             let send_res = herdr::pane_send_keys(&pane_id, keys).await;
             match send_res {
                 Ok(_) => (
@@ -681,6 +724,7 @@ pub async fn submit_agent_prompt(
                     return error_response(StatusCode::BAD_REQUEST, "bad_answer", &message)
                 }
             };
+            prompt::spend(&pane_id);
             for step in steps {
                 let sent = match &step {
                     questions::Step::Keys(keys) => {
