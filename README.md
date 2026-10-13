@@ -182,6 +182,8 @@ your iPhone as the destination, then run it. Sign it with your own team. With
 free provisioning, the installed app must be re-signed about every seven days.
 There is no App Store or TestFlight build.
 
+`make ipa` builds an unsigned `.ipa` for SideStore or AltStore, as an alternative to running from Xcode. The step-by-step routes are in [the iPhone install guide](docs/install-iphone.md).
+
 ### 5. Build and install the Android app
 
 Open `apps/android/` in Android Studio and run the app on your phone. To build
@@ -231,6 +233,8 @@ For the tested behavior and its limits, see [verification](docs/verification.md)
   contract shared by the two apps.
 - [docs/user-stories.md](docs/user-stories.md): the MVP stories and setup for
   two Herdr machines.
+- [docs/install-iphone.md](docs/install-iphone.md): installing the iPhone app
+  with Xcode or SideStore, and the free Apple ID limits.
 - [docs/verification.md](docs/verification.md): what has been exercised and
   the current limits.
 - [docs/development.md](docs/development.md): toolchains, gates and CI for
