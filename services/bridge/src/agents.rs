@@ -1,12 +1,12 @@
 //! Agent catalog: exact `herdr agent list` parity, including unnamed panes,
 //! plus honest branch reporting (a branch is the session's own only when the
-//! git toplevel equals the agent cwd). Mirrors the daemon's catalog contract
-//! so both transports render identically in the clients.
+//! git toplevel equals the agent cwd). Keeps the retired slice-A daemon's
+//! catalog contract, which the client models were written against.
 
 use serde_json::{json, Value};
 
-/// One agent row on the wire; field names match the reference daemon so the
-/// Swift models need no per-transport variants.
+/// One agent row on the wire; field names keep the retired slice-A daemon shape
+/// the client models were written against.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentRow {
     pub machine_id: String,
@@ -179,7 +179,7 @@ pub fn same_directory(a: &str, b: &str) -> bool {
     meta_a.dev() == meta_b.dev() && meta_a.ino() == meta_b.ino()
 }
 
-/// Stable per-machine identity, same store the reference daemon uses
+/// Stable per-machine identity, same store the retired slice-A daemon used
 /// (~/Library/Application Support/cappuccino-spike/machine-id, 0600).
 pub fn machine_id() -> String {
     let dir = format!(

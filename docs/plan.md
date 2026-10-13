@@ -8,7 +8,7 @@ Replace the stale Java/Gradle sample, retaining Git history and the existing GPL
 
 Acceptance:
 
-- Native entrypoints live in `apps/android` and `apps/ios`; `packages/apple` contains the Apple core/UI/tests. Android keeps pure logic, UI and platform I/O separate within its app module. No speculative bridge/service abstraction or fake networking.
+- Native entrypoints live in `apps/android` and `apps/ios`; `apps/ios` also contains the Apple core/UI/tests package. Android keeps pure logic, UI and platform I/O separate within its app module. No speculative bridge/service abstraction or fake networking.
 - Chats, Attention and Machines have honest empty states. Sending is disabled until attachment exists; the Nudge/Follow-up distinction is visible.
 - A session identifier is machine-scoped. Hermetic tests cover that identity separation and the message-delivery choices; no live sessions or credentials are read.
 - `make validate-apple` and `make validate-android` pass, as do explicitly device-selected `make ui-test` and `make ui-test-android`. UI smoke launches each phone shell, checks disconnected states/disabled messaging and explicit delivery choices, and visits Attention and Machines. Android activity recreation preserves selection.
@@ -51,7 +51,7 @@ Telegram is a later, separately configured slice: generic attention only, no cod
 
 ## 4. Native Android client
 
-The disconnected Kotlin/Compose shell can be prepared independently. After the connected iPhone acceptance checkpoint, follow [the Android plan](android-plan.md): paired machine and existing-agent list → active-branch transcript → explicit delivery → typed approvals/grants → lifecycle and real-device acceptance. Reuse proven bridge behavior and synthetic compatibility fixtures, not the SwiftUI implementation. Transport/authentication and wire-format decisions still depend on section 2; no shared protocol is published by this plan.
+The disconnected Kotlin/Compose shell can be prepared independently. After the connected iPhone acceptance checkpoint, follow [the Android plan](https://github.com/azusachino/cappuccino/blob/35e72ff/docs/android-plan.md): paired machine and existing-agent list → active-branch transcript → explicit delivery → typed approvals/grants → lifecycle and real-device acceptance. Reuse proven bridge behavior and synthetic compatibility fixtures, not the SwiftUI implementation. Transport/authentication and wire-format decisions still depend on section 2; no shared protocol is published by this plan.
 
 ## 5. Mac-specific UX
 

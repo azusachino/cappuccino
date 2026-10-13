@@ -2,9 +2,9 @@
 
 A personal native companion for conversations and attention from agents already running on your Herdr machines. The connected-feature order is bridge feasibility, connected iPhone, Android, then Mac-specific UX.
 
-**Current state:** native clients and hermetic core tests, plus iPhone machine/agent and transcript UI slices speaking HTTP/WebSocket to the Herdr plugin bridge (`services/bridge`) or the frozen reference daemon (`services/daemon`) through `DaemonServing`. The bridge is a standalone Rust phone-transport facade launched by Herdr's plugin commands; it is not loaded into Herdr and does not own agent runtime. It reads selected Herdr APIs over the local socket. It ships **no auth** by owner decision: the tailnet/loopback boundary is the security model, the binary refuses non-loopback binds, and `tailscale serve` is the supported exposure. Prompt delivery and tool approval are not implemented, and canonical live Pi transcript/stream behavior remains unverified. There is no agent launcher or terminal emulator.
+**Current state:** native clients and hermetic core tests, plus iPhone machine/agent and transcript UI slices speaking HTTP/WebSocket to the Herdr plugin bridge (`services/bridge`). The bridge is a standalone Rust phone-transport facade launched by Herdr's plugin commands; it is not loaded into Herdr and does not own agent runtime. It reads selected Herdr APIs over the local socket. It ships **no auth** by owner decision: the tailnet/loopback boundary is the security model, the binary refuses non-loopback binds, and `tailscale serve` is the supported exposure. Prompt delivery and tool approval are not implemented, and canonical live Pi transcript/stream behavior remains unverified. There is no agent launcher or terminal emulator.
 
-Read [intent](docs/intent.md), [plan](docs/plan.md), [architecture](docs/architecture.md), [Android plan](docs/android-plan.md), [user stories](docs/user-stories.md) and [source research](docs/discovery.md). Existing remote agents keep their process/session lifetime; future clients attach and detach.
+Read [intent](docs/intent.md), [plan](docs/plan.md), [architecture](docs/architecture.md), [user stories](docs/user-stories.md) and [source research](docs/discovery.md). Existing remote agents keep their process/session lifetime; future clients attach and detach.
 
 ## Getting started (MVP)
 
@@ -40,11 +40,11 @@ but canonical live Pi transcript/stream behavior has not been verified.
 
 ```text
 apps/android/    Native Gradle/Kotlin/Compose app and its tests
-apps/ios/        iOS app entrypoint and XCTest UI journey
-packages/apple/  Local SwiftPM core, reusable SwiftUI and core tests
+apps/ios/        SwiftPM core/SwiftUI package and core tests; App/ entrypoint, UITests/ journey
+services/bridge/ Rust Herdr plugin bridge
 ```
 
-`packages/apple` holds the Swift core and SwiftUI shell for the iPhone app. There is no macOS app: Herdr covers the desktop (owner decision 2026-10-13). The Swift package keeps `.macOS(.v26)` only so `swift test` runs on the Mac host. Android keeps Kotlin logic and UI in its app module; it shares product behavior, not Swift code. Root Make commands wrap the native build systems. No monorepo framework or generated cross-platform SDK is needed.
+`apps/ios` holds the Swift core and SwiftUI shell for the iPhone app. There is no macOS app: Herdr covers the desktop (owner decision 2026-10-13). The Swift package keeps `.macOS(.v26)` only so `swift test` runs on the Mac host. Android keeps Kotlin logic and UI in its app module; it shares product behavior, not Swift code. Root Make commands wrap the native build systems. No monorepo framework or generated cross-platform SDK is needed.
 
 ## Apple development
 

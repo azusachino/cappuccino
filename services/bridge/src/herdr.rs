@@ -1,5 +1,5 @@
 //! Herdr socket RPC client: one newline-delimited JSON request per
-//! short-lived Unix connection, exactly as the reference daemon proved the
+//! short-lived Unix connection, as the retired slice-A daemon proved the
 //! server behaves (it closes after answering).
 
 use serde_json::{json, Value};

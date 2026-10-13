@@ -324,7 +324,7 @@ affected.) The verified content is committed unchanged as
 were taken on the same reviewed content.
 
 The approved evidence set lives in
-[`docs/evidence/android-material3/`](../evidence/android-material3/README.md).
+[`docs/evidence/android-material3/`](https://github.com/azusachino/cappuccino/blob/35e72ff/docs/evidence/android-material3/README.md).
 Remaining parked: other screens' layouts, icon-set replacement, dynamic-color
 default flip, adaptive/tablet layout — unchanged from the out-of-scope list above.
 No PR exists at this acceptance; broader rollout stays an owner decision.
