@@ -78,7 +78,8 @@ check: check-apple check-android ## Check all platforms; requires both toolchain
 
 check-apple: fmt-check-apple md-check test-apple ## Focused Apple gate
 
-check-android: fmt-check-android test-android lint-android ## Focused Android gate
+check-android: ## Focused Android gate: format, unit tests and lint in one Gradle run
+	$(ANDROID) :ktfmtCheck :app:ktfmtCheck :app:testDebugUnitTest :app:lintDebug
 
 build-ios: generate ## Build an unsigned iOS Simulator app
 	$(XCODEBUILD) -scheme Cappuccino -destination 'generic/platform=iOS Simulator' build
@@ -105,4 +106,5 @@ validate: validate-apple validate-android ## Build/check all apps; UI journeys r
 
 validate-apple: check-apple build-ios ## Apple source/test/build acceptance
 
-validate-android: check-android build-android ## Android source/test/build acceptance
+validate-android: ## Android source/test/build acceptance in one Gradle run
+	$(ANDROID) :ktfmtCheck :app:ktfmtCheck :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest

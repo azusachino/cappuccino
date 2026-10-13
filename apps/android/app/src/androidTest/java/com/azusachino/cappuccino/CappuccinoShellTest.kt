@@ -359,7 +359,9 @@ class CappuccinoShellTest {
         }
       }
     }
-    compose.onNodeWithText("FINAL-TAIL").assertIsDisplayed()
+    // Markdown lays out over several frames and the follow re-scrolls as it grows; slow
+    // emulators (CI's x86 AVD) need a bounded wait before the newest text is on screen.
+    awaitDisplayed("FINAL-TAIL")
     compose.runOnIdle {
       state.value =
         state.value.copy(
@@ -370,8 +372,7 @@ class CappuccinoShellTest {
                 .copy(parts = listOf(ConversationPart.Text(tail + "\n\nSame-count update")))
         )
     }
-    compose.waitForIdle()
-    compose.onNodeWithText("Same-count update").assertIsDisplayed()
+    awaitDisplayed("Same-count update")
     compose.onNodeWithTag("recentOutputList").performTouchInput { swipeDown() }
     compose.waitForIdle()
     val before =
@@ -512,6 +513,12 @@ class CappuccinoShellTest {
       "Jump must stay above the composer (jump=$jump, composer=$composer)",
       jump.bottom <= composer.top,
     )
+  }
+
+  private fun awaitDisplayed(text: String) {
+    compose.waitUntil(timeoutMillis = 5_000) {
+      runCatching { compose.onNodeWithText(text).assertIsDisplayed() }.isSuccess
+    }
   }
 
   private fun awaitJumpAffordance() {
