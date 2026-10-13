@@ -7,7 +7,6 @@ Native phone clients reach selected machine-local Herdr APIs through a separate 
 - **Herdr (0.9.3 in the verified environment):** owns panes, agent processes, sessions and its local socket API. Its plugin manifest runs commands; the bridge is not loaded into Herdr's process or into an agent.
 - **Cappuccino bridge (`services/bridge`):** a standalone Rust binary linked as a Herdr plugin. Herdr's one-shot startup hook and actions invoke the binary directly. It starts and manages a separate loopback HTTP/WebSocket server, which calls the local Herdr socket and exposes the routes below to the native clients. It is a phone-reachable facade, not an agent runtime or a replacement for Herdr's APIs.
 - **Phone:** native SwiftUI/Compose clients call the bridge over the private tailnet. The bridge binds to loopback, has no auth by the owner's decision, and may be exposed using Tailscale Serve. Public ingress is out of scope.
-- **Reference daemon:** `services/daemon` remains frozen historical/reference work; it is not the current product runtime.
 
 ## Bridge routes currently implemented
 

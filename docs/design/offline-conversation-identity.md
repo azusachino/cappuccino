@@ -1,6 +1,6 @@
 # Offline conversation identity
 
-Status: owner-selected local contract change, implementation and verification in progress. Deployment and whole-flow acceptance are not authorized or established by this document. This refines the [native continuation plan](../plan/native-ux-improvement-session.md) after the [Paseo study](paseo-source-study.md).
+Status: owner-selected local contract change, implementation and verification in progress. Deployment and whole-flow acceptance are not authorized or established by this document. This refines the [native continuation plan](https://github.com/azusachino/cappuccino/blob/35e72ff/docs/plan/native-ux-improvement-session.md) after the [Paseo study](paseo-source-study.md).
 
 ## Recorded failure and decision
 

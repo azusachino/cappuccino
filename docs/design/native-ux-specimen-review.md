@@ -2,7 +2,7 @@
 
 Status: first static proposal; owner review pending. This is not an installed redesign.
 
-Plan: [native UX improvement session](../plan/native-ux-improvement-session.md).
+Plan: [native UX improvement session](https://github.com/azusachino/cappuccino/blob/35e72ff/docs/plan/native-ux-improvement-session.md).
 Rationale: [Telegram, Nekogram and Haven source study](telegram-nekogram-ux-study.md).
 
 ## Prepared material

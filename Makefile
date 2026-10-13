@@ -2,7 +2,7 @@ SHELL := bash
 MISE := mise exec --
 SWIFT := xcrun swift
 FORMAT := xcrun swift-format
-SWIFT_PATHS := packages/apple/Package.swift packages/apple/Sources packages/apple/Tests apps/ios
+SWIFT_PATHS := apps/ios
 XCODEBUILD := xcodebuild -project Cappuccino.xcodeproj -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO
 ANDROID := apps/android/gradlew --no-daemon -p apps/android
 ANDROID_TEST_OUTPUT := apps/android/app/build/outputs/connected_android_test_additional_output/debugAndroidTest/connected
@@ -49,7 +49,7 @@ md-check: ## Check Markdown
 test: test-apple test-android ## Run both hermetic core suites
 
 test-apple: ## Run Swift core tests with compiler warnings as errors
-	$(SWIFT) test --package-path packages/apple -Xswiftc -warnings-as-errors
+	$(SWIFT) test --package-path apps/ios -Xswiftc -warnings-as-errors
 
 test-android: ## Run pure Kotlin logic tests
 	$(ANDROID) :app:testDebugUnitTest

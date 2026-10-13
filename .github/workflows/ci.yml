@@ -41,14 +41,12 @@ jobs:
             apple:
               - *global
               - 'apps/ios/**'
-              - 'packages/apple/**'
             android:
               - *global
               - 'apps/android/**'
             code:
               - *global
               - 'apps/**'
-              - 'packages/**'
               - 'services/**'
 
   apple:

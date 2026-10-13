@@ -1,6 +1,6 @@
 # Behavior specification (provisional v0)
 
-Shared cross-platform behavior contract for Cappuccino clients (iOS, Android). The companion-daemon and SSH-exec directions are superseded; `services/daemon` remains frozen reference work. The current client transport is the standalone Herdr plugin bridge (`services/bridge`), a loopback HTTP/WebSocket facade over selected Herdr APIs; it is not loaded into Herdr or an agent. Both platform test suites consume the same [fixtures](../fixtures/); implementations stay native. This file records intended behavior, not a published wire protocol. Changes here require updating both platforms' conformance fixtures in the same commit.
+Shared cross-platform behavior contract for Cappuccino clients (iOS, Android). The companion-daemon and SSH-exec directions are superseded. The current client transport is the standalone Herdr plugin bridge (`services/bridge`), a loopback HTTP/WebSocket facade over selected Herdr APIs; it is not loaded into Herdr or an agent. Both platform test suites consume the same [fixtures](../fixtures/); implementations stay native. This file records intended behavior, not a published wire protocol. Changes here require updating both platforms' conformance fixtures in the same commit.
 
 Authority: [intent](intent.md). Process/session lifetime belongs to Herdr/Pi; a phone never starts, replaces or terminates an agent.
 

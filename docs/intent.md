@@ -29,4 +29,4 @@ Agent spawning/termination, arbitrary other extensions' terminal dialogs, remote
 
 The native shell and read-only bridge slices do not implement delivery, approval correlation, grants or Telegram alerts. The bridge is a separate phone-transport facade over machine-local Herdr APIs, not an agent runtime. Herdr's PTY prompt acknowledgement does not prove Pi accepted a Nudge or Follow-up; those semantics and any receipt contract need explicit owner-reconciled acceptance before implementation. Never relax session continuity or fail-closed decisions.
 
-[Discovery](discovery.md) holds the earlier Apple/bridge research and its limits. [Plan](plan.md) defines the bounded feasibility spike and platform order; [Android plan](android-plan.md) defines the later native client without changing these safety requirements.
+[Discovery](discovery.md) holds the earlier Apple/bridge research and its limits. [Plan](plan.md) defines the bounded feasibility spike and platform order; [Android plan](https://github.com/azusachino/cappuccino/blob/35e72ff/docs/android-plan.md) defines the later native client without changing these safety requirements.

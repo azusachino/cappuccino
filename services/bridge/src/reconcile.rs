@@ -1,5 +1,5 @@
-//! Reconciliation semantics ported from the reference daemon's DaemonCore
-//! (services/daemon, slice-A contract): successive pane reads are aligned by
+//! Reconciliation semantics ported from the retired slice-A daemon:
+//! successive pane reads are aligned by
 //! longest common subsequence; candidates are lines the LCS leaves unmatched;
 //! a candidate becomes a durable entry when it is still present one poll
 //! later, or immediately when the agent is idle (quiescence). Volatile footer

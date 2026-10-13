@@ -15,14 +15,13 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
 packages:
   CappuccinoApple:
-    path: packages/apple
+    path: apps/ios
 targets:
   Cappuccino:
     type: application
     platform: iOS
     sources:
-      - path: apps/ios
-        excludes: [UITests]
+      - path: apps/ios/App
     dependencies:
       - package: CappuccinoApple
         product: CappuccinoUI
@@ -35,7 +34,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
       configs:
         Debug:
-          INFOPLIST_FILE: apps/ios/Debug-Info.plist
+          INFOPLIST_FILE: apps/ios/App/Debug-Info.plist
   CappuccinoUITests:
     type: bundle.ui-testing
     platform: iOS
