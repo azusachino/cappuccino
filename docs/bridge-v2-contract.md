@@ -216,6 +216,8 @@ Submits a user prompt or answers an interactive prompt card.
 }
 ```
 
+`action` is `select_option` or `cancel`. A selection must name exactly one option on the card through `option_index`, `option_id`, or both in agreement; a missing, unknown, out-of-range or contradictory choice is refused with `400 bad_answer` and nothing is typed.
+
 ---
 
 ### 4.2 WebSocket Stream (`WS /api/stream?session=:sessionId`)

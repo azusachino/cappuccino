@@ -888,6 +888,31 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
     assert_eq!(post(cancel).await.status, 200);
     assert_eq!(sent_since(from), vec![json!(["2"])]);
 
+    // A tool approval's first option allows the command: unclear choices are refused.
+    herdr.set_screen("Approve tool call: run_command\n$ git push origin main\n1. Allow once\n2. Allow always\n3. Reject\n");
+    let approval_stale = json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "select_option", "option_id": "reject"});
+    let approval = on_screen_id(&post(approval_stale).await.body);
+    let from = herdr.input().len();
+    for bad in [
+        json!({"type": "answer_prompt", "prompt_id": approval}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option"}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_id": "reject_"}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_index": 3}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_index": 0, "option_id": "reject"}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "action": "approve", "option_index": 2}),
+    ] {
+        let refused = post(bad.clone()).await;
+        assert_eq!(refused.status, 400, "{bad} -> {}", refused.body);
+        assert_eq!(refused.body["code"], "bad_answer");
+    }
+    assert!(
+        sent_since(from).is_empty(),
+        "nothing is typed for refused answers"
+    );
+    let reject = json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_index": 2, "option_id": "reject"});
+    assert_eq!(post(reject).await.status, 200);
+    assert_eq!(sent_since(from), vec![json!(["3", "enter"])]);
+
     bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();

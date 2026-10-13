@@ -607,12 +607,31 @@ pub async fn submit_agent_prompt(
                     .into_response();
             }
 
-            let opt_idx = if let Some(idx) = option_index {
-                idx
-            } else if let Some(ref id) = option_id {
-                card.options.iter().position(|o| o.id == *id).unwrap_or(0)
-            } else {
-                0
+            // Fail closed: an approval's first option allows the command, so a missing,
+            // unknown or contradictory choice must never fall back to an index.
+            if action.as_deref() != Some("select_option") {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "bad_answer",
+                    "action must be select_option or cancel",
+                );
+            }
+            let by_id = option_id
+                .as_ref()
+                .map(|id| card.options.iter().position(|o| o.id == *id));
+            let opt_idx = match (option_index, by_id) {
+                (_, Some(None)) => None,
+                (Some(idx), Some(Some(pos))) if idx != pos => None,
+                (Some(idx), _) => Some(idx),
+                (None, Some(pos)) => pos,
+                (None, None) => None,
+            };
+            let Some(opt_idx) = opt_idx.filter(|idx| *idx < card.options.len()) else {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "bad_answer",
+                    "option_index or option_id must name one option on the card",
+                );
             };
 
             // If numbered choice (1, 2, 3), press digit + enter. The review acts on the digit
