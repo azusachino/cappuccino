@@ -170,7 +170,11 @@ public final class SessionModel {
           case .error(let code, let message):
             streamError = "\(code): \(message)"
             return
-          case .open, .entries, .reset, .agentStatus:
+          case .open:
+            // An attach that succeeded earns a fresh budget for the next transient drop.
+            budget = StreamRetryBudget()
+            requestConversation()
+          case .entries, .reset, .agentStatus:
             requestConversation()
           case .promptRequest, .promptResolved:
             break
@@ -194,7 +198,8 @@ public final class SessionModel {
   }
 
   /// Sends a prompt to the selected agent.
-  public func sendPrompt(_ text: String) async {
+  /// `true` once the bridge accepted it, so the composer keeps the text until then.
+  @discardableResult public func sendPrompt(_ text: String) async -> Bool {
     await perform(
       "Failed to submit prompt", supported: capabilities?["prompt_input"] != false,
       unsupported: "Prompt input unsupported by this bridge"
@@ -237,25 +242,28 @@ public final class SessionModel {
 
   /// The one path for owner actions. A failure sets `actionError` and leaves the connection
   /// alone; a result for an agent the owner has since left is dropped.
-  private func perform(
+  /// Runs an owner action; `true` when the bridge accepted it.
+  @discardableResult private func perform(
     _ failure: String,
     supported: Bool = true,
     unsupported: String = "",
     _ send: @escaping @Sendable (any AgentSessionServing, URL, String) async throws -> Void
-  ) async {
-    guard let agent = selectedAgent, let profile = selectedProfile else { return }
+  ) async -> Bool {
+    guard let agent = selectedAgent, let profile = selectedProfile else { return false }
     let token = epoch
     actionError = nil
     guard supported else {
       actionError = unsupported
-      return
+      return false
     }
     do {
       try await send(makeClient(), profile.endpoint, agent.sessionID)
+      return true
     } catch {
-      guard token == epoch, !(error is CancellationError) else { return }
+      guard token == epoch, !(error is CancellationError) else { return false }
       let reason = OwnerMessage.text(for: error)
       actionError = reason.isEmpty ? failure : reason
+      return false
     }
   }
 }

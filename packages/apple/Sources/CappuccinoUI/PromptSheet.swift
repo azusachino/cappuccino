@@ -13,7 +13,7 @@ struct PromptSheet: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
           if !prompt.questions.isEmpty {
-            // "Question 1 of 2": the terminal form shows one question at a time.
+            // "Question 1 of 2" when the form has several; a lone question has no progress line.
             if let progress = prompt.message {
               Text(progress).font(.caption).foregroundStyle(.secondary)
             }
@@ -81,7 +81,8 @@ private struct ScreenPrompt: View {
   }
 }
 
-/// AskUserQuestion: every question on one form, answered together, as the terminal form submits.
+/// AskUserQuestion: the questions a card carries (the bridge sends one per card, then a review
+/// card answered as a screen prompt), with options, own text, Submit and Cancel.
 private struct QuestionForm: View {
   let session: SessionModel
   let prompt: PromptCard

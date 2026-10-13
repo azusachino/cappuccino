@@ -116,6 +116,35 @@ public struct BridgeClient: Sendable {
     _ = try await post(endpoint, body: body)
   }
 
+  /// The bridge's whole response, read only up to Android's 2 MB cap so an oversized body
+  /// is refused before it is held in memory.
+  private func boundedFetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    let bytes: URLSession.AsyncBytes
+    let response: URLResponse
+    do {
+      (bytes, response) = try await session.bytes(for: request)
+    } catch {
+      throw BridgeError.unreachable(error.localizedDescription)
+    }
+    guard let http = response as? HTTPURLResponse else {
+      throw BridgeError.unreachable("response is not HTTP")
+    }
+    var data = Data()
+    do {
+      for try await byte in bytes {
+        data.append(byte)
+        if data.count > maxHTTPBodyBytes {
+          throw BridgeError.protocolError("bridge response is larger than 2 MB")
+        }
+      }
+    } catch let error as BridgeError {
+      throw error
+    } catch {
+      throw BridgeError.unreachable(error.localizedDescription)
+    }
+    return (data, http)
+  }
+
   private func post(_ url: URL, body: [String: Any]) async throws -> [String: Any] {
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -126,15 +155,7 @@ public struct BridgeClient: Sendable {
     } catch {
       throw BridgeError.protocolError("failed to serialize request body")
     }
-    let (data, response): (Data, URLResponse)
-    do {
-      (data, response) = try await session.data(for: request)
-    } catch {
-      throw BridgeError.unreachable(error.localizedDescription)
-    }
-    guard let http = response as? HTTPURLResponse else {
-      throw BridgeError.unreachable("response is not HTTP")
-    }
+    let (data, http) = try await boundedFetch(request)
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
       throw BridgeError.protocolError("response is not a JSON object")
     }
@@ -153,15 +174,7 @@ public struct BridgeClient: Sendable {
   private func get(_ url: URL) async throws -> [String: Any] {
     var request = URLRequest(url: url)
     request.timeoutInterval = timeout
-    let (data, response): (Data, URLResponse)
-    do {
-      (data, response) = try await session.data(for: request)
-    } catch {
-      throw BridgeError.unreachable(error.localizedDescription)
-    }
-    guard let http = response as? HTTPURLResponse else {
-      throw BridgeError.unreachable("response is not HTTP")
-    }
+    let (data, http) = try await boundedFetch(request)
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
       throw BridgeError.protocolError("response is not a JSON object")
     }
@@ -268,3 +281,6 @@ extension BridgeClient {
   private static let locatorCharacters = CharacterSet.alphanumerics.union(
     CharacterSet(charactersIn: "-._~"))
 }
+
+/// The largest bridge response read, as on Android (`MAX_HTTP_BODY_BYTES`).
+public let maxHTTPBodyBytes = 2 * 1024 * 1024

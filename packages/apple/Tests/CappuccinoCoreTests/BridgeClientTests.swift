@@ -166,6 +166,15 @@ final class StubURLProtocol: URLProtocol {
     #expect(rows.map(\.cwd) == ["/tmp/a", "/tmp/b"])
   }
 
+  @Test func oversizedResponsesAreRefused() async {
+    // Valid JSON, but past the 2 MB cap: refused, as Android refuses it.
+    let padding = String(repeating: "x", count: maxHTTPBodyBytes)
+    StubURLProtocol.handler = { _ in (200, Data(#"{"pad":"\#(padding)"}"#.utf8)) }
+    await #expect(throws: BridgeError.protocolError("bridge response is larger than 2 MB")) {
+      try await stubbedClient().listAgents(baseURL: URL(string: "http://127.0.0.1:7392")!)
+    }
+  }
+
   @Test func httpErrorSurfacesAsProtocolError() async {
     StubURLProtocol.handler = { _ in
       (

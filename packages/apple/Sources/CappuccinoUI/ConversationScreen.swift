@@ -33,6 +33,11 @@ import SwiftUI
               assistantLabel: session.selectedAgent?.label ?? "Assistant")
           }
           LiveStatusLine(status: liveStatusWord, detail: session.stream.agentStatusDetail)
+          // The sheet can be swiped away; the waiting prompt stays reachable here, as Android
+          // keeps its card on the page.
+          if let prompt = session.stream.pendingPrompt, !promptOpen {
+            PendingPromptRow(title: prompt.title) { promptOpen = true }
+          }
           if let error = session.streamError {
             Text(error).foregroundStyle(palette.error)
           }
@@ -80,6 +85,7 @@ import SwiftUI
     .onChange(of: session.stream.pendingPrompt?.promptID) { _, promptID in
       promptOpen = promptID != nil
     }
+    .onAppear { promptOpen = session.stream.pendingPrompt != nil }
     .navigationTitle(session.selectedAgent?.label ?? "Conversation")
     .inlineTitle()
     .toolbar {
@@ -155,6 +161,24 @@ func statusWord(_ status: String) -> String {
   case "blocked": "Waiting for your answer"
   case "": "Idle"
   default: "Idle"
+  }
+}
+
+/// A prompt waiting for the owner while its sheet is closed: what it asks, and a way back.
+private struct PendingPromptRow: View {
+  let title: String
+  let open: () -> Void
+
+  var body: some View {
+    HStack(spacing: 10) {
+      Image(systemName: "questionmark.bubble").foregroundStyle(.orange)
+      Text(title).font(.subheadline).lineLimit(2)
+      Spacer()
+      Button("Answer", action: open).buttonStyle(.borderedProminent)
+    }
+    .padding(12)
+    .background(.background.secondary, in: .rect(cornerRadius: 12))
+    .accessibilityElement(children: .combine)
   }
 }
 

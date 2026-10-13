@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The composer: one floating panel at the bottom. Commands (only when the bridge advertises
 /// agent control), the text field, Stop while working, Send, and the model, context and cache line.
-/// Stop and New session only act on an idle or working agent as the Android composer does.
+/// Stop and New session need the bridge's agent control, as on Android.
 @MainActor struct Composer: View {
   let session: SessionModel
   @State private var draft = ""
@@ -38,7 +38,7 @@ import SwiftUI
               .lineLimit(1)
           }
           Spacer(minLength: 0)
-          if status == "working" {
+          if session.canControl, status == "working" {
             Button {
               Task { await session.control("interrupt") }
             } label: {
@@ -49,14 +49,21 @@ import SwiftUI
           }
           Button {
             let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-            draft = ""
-            Task { await session.sendPrompt(text) }
+            Task {
+              // Keep the text until the bridge accepts it; a refusal leaves it to retry.
+              if await session.sendPrompt(text),
+                draft.trimmingCharacters(in: .whitespacesAndNewlines) == text
+              {
+                draft = ""
+              }
+            }
           } label: {
             Image(systemName: "arrow.up").frame(width: 32, height: 32)
           }
           .glassProminentButton()
           .disabled(
             session.selectedAgent == nil
+              || session.capabilities?["prompt_input"] == false
               || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
           )
           .accessibilityLabel("Send")

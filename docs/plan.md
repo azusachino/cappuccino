@@ -1,6 +1,6 @@
 # Native skeleton and attachment feasibility
 
-[Intent](intent.md) is confirmed. The owner selected existing-session bridge feasibility → connected iPhone → native Android → Mac-specific UX. These connected slices are separate from the owner-approved disconnected Android/iOS/macOS scaffold. Live execution belongs in Asobi; detailed connected acceptance and task decomposition belong in the owning parent/task issues after the framework discussion.
+[Intent](intent.md) is confirmed. The owner selected existing-session bridge feasibility → connected iPhone → native Android. The macOS app was retired on 2026-10-13: Herdr covers the desktop. These connected slices are separate from the owner-approved disconnected Android/iOS/macOS scaffold. Live execution belongs in Asobi; detailed connected acceptance and task decomposition belong in the owning parent/task issues after the framework discussion.
 
 ## 1. Repository skeleton
 
@@ -8,13 +8,13 @@ Replace the stale Java/Gradle sample, retaining Git history and the existing GPL
 
 Acceptance:
 
-- Native entrypoints live in `apps/android`, `apps/ios` and `apps/macos`; `packages/apple` contains shared Apple core/UI/tests. Android keeps pure logic, UI and platform I/O separate within its app module. No speculative bridge/service abstraction or fake networking.
+- Native entrypoints live in `apps/android` and `apps/ios`; `packages/apple` contains the Apple core/UI/tests. Android keeps pure logic, UI and platform I/O separate within its app module. No speculative bridge/service abstraction or fake networking.
 - Chats, Attention and Machines have honest empty states. Sending is disabled until attachment exists; the Nudge/Follow-up distinction is visible.
 - A session identifier is machine-scoped. Hermetic tests cover that identity separation and the message-delivery choices; no live sessions or credentials are read.
 - `make validate-apple` and `make validate-android` pass, as do explicitly device-selected `make ui-test` and `make ui-test-android`. UI smoke launches each phone shell, checks disconnected states/disabled messaging and explicit delivery choices, and visits Attention and Machines. Android activity recreation preserves selection.
 - README, CONTRIBUTING and AGENTS name the actual commands and implementation limits. CI runs the same structural/test/build gates without credentials or deployment.
 
-Deployment targets are iOS 17 and macOS 26; the owner raised the Mac minimum after the initial skeleton checkpoint. Xcode 26+ supplies the Swift 6.2 package toolchain and swift-format. These are build requirements, not a claim of hardware acceptance across every supported OS. [Development and quality](development.md) records the native-first framework choice, platform-specific Mac work and CI/behavior gates.
+The deployment target is iOS 17; the Swift package keeps macOS 26 only so its core tests run on the Mac host. Xcode 26+ supplies the Swift 6.2 package toolchain and swift-format. These are build requirements, not a claim of hardware acceptance across every supported OS. [Development and quality](development.md) records the native-first framework choice, platform-specific Mac work and CI/behavior gates.
 
 The owner conventions used here are Make/mise, two-space indentation, pure logic separate from I/O, hermetic checks, small conventional commits, and comments explaining non-obvious constraints rather than narrating code. There was no existing owned Swift project/style configuration in this checkout; use Apple's formatter rather than inventing a framework.
 
@@ -55,7 +55,7 @@ The disconnected Kotlin/Compose shell can be prepared independently. After the c
 
 ## 5. Mac-specific UX
 
-Keep the existing macOS 26 build target throughout earlier slices. After Android acceptance, develop the sidebar/detail, keyboard/menu, selection and window behavior described in [development](development.md#mac-preparation), with an actual Mac runtime journey. A shared shell build is not Mac UX acceptance.
+The macOS app is retired (owner decision 2026-10-13); the Mac preparation notes in [development](development.md#mac-preparation) are historical.
 
 ## Verification and authority
 
