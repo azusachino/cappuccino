@@ -9,6 +9,7 @@ import SwiftUI
   @State private var follow = FollowState()
   @State private var hasNewOutput = false
   @State private var showingDetails = false
+  @State private var promptOpen = false
   @Environment(\.colorScheme) private var colorScheme
 
   public init(machines: MachineConnections, session: SessionModel) {
@@ -55,6 +56,11 @@ import SwiftUI
           hasNewOutput = true
         }
       }
+      .sheet(isPresented: $promptOpen) {
+        if let prompt = session.stream.pendingPrompt {
+          PromptSheet(session: session, prompt: prompt)
+        }
+      }
       .bottomComposer {
         Composer(session: session)
           .padding(.horizontal, 12)
@@ -70,6 +76,9 @@ import SwiftUI
           .padding(16)
         }
       }
+    }
+    .onChange(of: session.stream.pendingPrompt?.promptID) { _, promptID in
+      promptOpen = promptID != nil
     }
     .navigationTitle(session.selectedAgent?.label ?? "Conversation")
     .inlineTitle()
