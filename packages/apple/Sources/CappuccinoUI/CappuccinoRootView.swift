@@ -10,9 +10,12 @@ import SwiftUI
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.colorScheme) private var colorScheme
 
-  public init(machines: MachineConnections = MachineConnections()) {
+  public init(
+    machines: MachineConnections = MachineConnections(),
+    makeClient: @escaping @Sendable () -> any AgentSessionServing = { BridgeClient() }
+  ) {
     _machines = State(initialValue: machines)
-    _session = State(initialValue: SessionModel(machines: machines))
+    _session = State(initialValue: SessionModel(machines: machines, makeClient: makeClient))
   }
 
   public var body: some View {

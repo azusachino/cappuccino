@@ -31,37 +31,37 @@ struct AgentStreamTests {
     #expect(try reduceStream(state, .reset(generation: 1), selectedSession: "s") == state)
     state = try reduceStream(state, .reset(generation: 2), selectedSession: "s")
     #expect(state.entries.isEmpty)
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try reduceStream(state, .reset(generation: 1), selectedSession: "s")
     }
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try reduceStream(state, .open(sessionID: "other", generation: 3), selectedSession: "s")
     }
   }
 
   @Test func reducerRejectsConflictingIdsAndSequencesWithinAndAcrossBatches() throws {
     let open = try opened()
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try reduceStream(
         open, .entries([entry("a", 1, "x"), entry("a", 1, "y")]), selectedSession: "s")
     }
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try reduceStream(open, .entries([entry("a", 1), entry("b", 1)]), selectedSession: "s")
     }
     let populated = try reduceStream(open, .entries([entry("a", 1)]), selectedSession: "s")
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try reduceStream(populated, .entries([entry("b", 1)]), selectedSession: "s")
     }
   }
 
   @Test func entriesBeforeOpenAndUnknownEventsFailClosed() {
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try reduceStream(StreamState(), .entries([entry("a", 1)]), selectedSession: "s")
     }
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try parseStreamFrame(#"{"event":"entries","entries":[{"id":"x"}]}"#)
     }
-    #expect(throws: DaemonClientError.self) { try parseStreamFrame(#"{"event":"mystery"}"#) }
+    #expect(throws: BridgeError.self) { try parseStreamFrame(#"{"event":"mystery"}"#) }
   }
 
   @Test func retentionCapsRowsAndUtf8Bytes() throws {

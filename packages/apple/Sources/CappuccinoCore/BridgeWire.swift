@@ -16,10 +16,10 @@ struct BridgeJSON {
 
   static func parse(_ data: Data) throws -> BridgeJSON {
     guard data.count <= maximumBridgeHTTPBodyBytes else {
-      throw DaemonClientError.protocolError("HTTP body exceeds local limit")
+      throw BridgeError.protocolError("HTTP body exceeds local limit")
     }
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      throw DaemonClientError.protocolError("Expected JSON object")
+      throw BridgeError.protocolError("Expected JSON object")
     }
     return BridgeJSON(object)
   }
@@ -68,7 +68,7 @@ struct BridgeJSON {
     (fields[key] as? [String: Any]).map(BridgeJSON.init)
   }
 
-  private func invalid(_ key: String) -> DaemonClientError {
+  private func invalid(_ key: String) -> BridgeError {
     .protocolError("Invalid \(key)")
   }
 
@@ -100,15 +100,15 @@ public struct BridgeDetails: Equatable, Sendable {
 /// Checks `/api/session`'s identity and protocol, then reads its advertisements.
 func parseBridgeDetails(_ json: BridgeJSON) throws -> BridgeDetails {
   guard try json.string("event") == "paired", try json.string("plugin") == bridgePluginID else {
-    throw DaemonClientError.protocolError("Unsupported bridge session response")
+    throw BridgeError.protocolError("Unsupported bridge session response")
   }
   let protocolVersion = try json.long("protocol")
   guard protocolVersion == 1 else {
-    throw DaemonClientError.protocolError(
+    throw BridgeError.protocolError(
       "Incompatible bridge protocol \(protocolVersion); app requires 1")
   }
   guard let machineID = UUID(uuidString: try json.string("machine_id")) else {
-    throw DaemonClientError.protocolError("Invalid machine identity")
+    throw BridgeError.protocolError("Invalid machine identity")
   }
   let capabilities: [String: Bool]?
   switch json.fields["capabilities"] {
@@ -118,13 +118,13 @@ func parseBridgeDetails(_ json: BridgeJSON) throws -> BridgeDetails {
     var flags: [String: Bool] = [:]
     for (key, value) in object {
       guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else {
-        throw DaemonClientError.protocolError("Invalid bridge capability: \(key)")
+        throw BridgeError.protocolError("Invalid bridge capability: \(key)")
       }
       flags[key] = flag.boolValue
     }
     capabilities = flags
   default:
-    throw DaemonClientError.protocolError("Invalid bridge capabilities")
+    throw BridgeError.protocolError("Invalid bridge capabilities")
   }
   let name = try json.optionalString("machine_name")?.trimmingCharacters(
     in: .whitespacesAndNewlines)
@@ -315,7 +315,7 @@ private func parseToolCall(_ part: BridgeJSON) throws -> ToolCall {
   case let flag as NSNumber where CFGetTypeID(flag) == CFBooleanGetTypeID():
     isError = flag.boolValue
   default:
-    throw DaemonClientError.protocolError("Invalid tool error flag")
+    throw BridgeError.protocolError("Invalid tool error flag")
   }
   return ToolCall(
     name: try part.string("name"),

@@ -151,7 +151,7 @@ private struct InstantDiscovery: BridgeMachineServing {
   @Test func bridgeRefusalReasonIsReportedWithoutTouchingTheConnection() async throws {
     let fx = try await fixture()
     fx.model.select(profileID: fx.profileID, agent: fx.agent)
-    fx.bridge.failure = DaemonClientError.protocolError("answer it in the terminal")
+    fx.bridge.failure = BridgeError.protocolError("answer it in the terminal")
     await fx.model.answerQuestions("q-toolu_1", [QuestionAnswer(selected: [0], other: nil)])
     #expect(fx.model.actionError == "answer it in the terminal")
     #expect(fx.model.streamError == nil)
@@ -161,7 +161,7 @@ private struct InstantDiscovery: BridgeMachineServing {
     let fx = try await fixture()
     fx.model.select(profileID: fx.profileID, agent: fx.agent)
     fx.bridge.latency = 50_000_000
-    fx.bridge.failure = DaemonClientError.protocolError("late refusal")
+    fx.bridge.failure = BridgeError.protocolError("late refusal")
     let action = Task {
       await fx.model.answerQuestions("q", [QuestionAnswer(selected: [0], other: nil)])
     }

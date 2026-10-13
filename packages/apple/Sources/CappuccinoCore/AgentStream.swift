@@ -83,7 +83,7 @@ public struct StreamState: Equatable, Sendable {
 /// One frame of the agent stream. Frames that break the protocol throw, and the caller ends the stream.
 public func parseStreamFrame(_ text: String) throws -> AgentStreamEvent {
   guard text.utf8.count <= maximumWebSocketMessageBytes else {
-    throw DaemonClientError.protocolError("WebSocket message exceeds local limit")
+    throw BridgeError.protocolError("WebSocket message exceeds local limit")
   }
   return try parseStreamEvent(BridgeJSON.parse(Data(text.utf8)))
 }
@@ -104,7 +104,7 @@ func parseStreamEvent(_ json: BridgeJSON) throws -> AgentStreamEvent {
       detail: try json.optionalString("detail"))
   case "prompt_request":
     guard let prompt = json.optionalObject("prompt") else {
-      throw DaemonClientError.protocolError("Missing prompt object")
+      throw BridgeError.protocolError("Missing prompt object")
     }
     return .promptRequest(
       sessionID: try json.string("session_id"), prompt: try parsePromptCard(prompt))
@@ -112,19 +112,19 @@ func parseStreamEvent(_ json: BridgeJSON) throws -> AgentStreamEvent {
     return .promptResolved(
       sessionID: try json.string("session_id"), promptID: try json.string("prompt_id"))
   default:
-    throw DaemonClientError.protocolError("Unknown stream event")
+    throw BridgeError.protocolError("Unknown stream event")
   }
 }
 
 private func parseEntry(_ row: BridgeJSON) throws -> StreamEntry {
   let id = try row.string("id")
   guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-    throw DaemonClientError.protocolError("Entry id is empty")
+    throw BridgeError.protocolError("Entry id is empty")
   }
   let seq = try row.long("seq")
-  guard seq > 0 else { throw DaemonClientError.protocolError("Invalid sequence") }
+  guard seq > 0 else { throw BridgeError.protocolError("Invalid sequence") }
   guard try row.boolean("complete") else {
-    throw DaemonClientError.protocolError("Incomplete stream entry")
+    throw BridgeError.protocolError("Incomplete stream entry")
   }
   return StreamEntry(
     id: id, seq: seq, kind: try row.string("kind"), text: try row.string("text"),
@@ -133,13 +133,13 @@ private func parseEntry(_ row: BridgeJSON) throws -> StreamEntry {
 
 private func locator(_ json: BridgeJSON) throws -> String {
   let session = try json.string("session_id")
-  guard !session.isEmpty else { throw DaemonClientError.protocolError("Stream locator is empty") }
+  guard !session.isEmpty else { throw BridgeError.protocolError("Stream locator is empty") }
   return session
 }
 
 private func nonNegative(_ json: BridgeJSON, _ key: String) throws -> Int64 {
   let value = try json.long(key)
-  guard value >= 0 else { throw DaemonClientError.protocolError("Invalid \(key)") }
+  guard value >= 0 else { throw BridgeError.protocolError("Invalid \(key)") }
   return value
 }
 
@@ -151,7 +151,7 @@ public func reduceStream(
   switch event {
   case .open(let session, let generation):
     guard session == selectedSession else {
-      throw DaemonClientError.protocolError("Stream locator mismatch")
+      throw BridgeError.protocolError("Stream locator mismatch")
     }
     guard state.generation != nil else {
       return StreamState(sessionID: session, generation: generation)
@@ -166,16 +166,16 @@ public func reduceStream(
       ])
   case .entries(let incoming):
     guard state.generation != nil, state.sessionID == selectedSession else {
-      throw DaemonClientError.protocolError("Entries arrived before stream_open")
+      throw BridgeError.protocolError("Entries arrived before stream_open")
     }
     var byID = Dictionary(uniqueKeysWithValues: state.entries.map { ($0.id, $0) })
     var bySeq = Dictionary(uniqueKeysWithValues: state.entries.map { ($0.seq, $0) })
     for entry in incoming {
       if let known = byID[entry.id], known != entry {
-        throw DaemonClientError.protocolError("Conflicting entry id")
+        throw BridgeError.protocolError("Conflicting entry id")
       }
       if let known = bySeq[entry.seq], known != entry {
-        throw DaemonClientError.protocolError("Conflicting entry sequence")
+        throw BridgeError.protocolError("Conflicting entry sequence")
       }
       byID[entry.id] = entry
       bySeq[entry.seq] = entry
@@ -198,9 +198,9 @@ public func reduceStream(
     return next
   case .reset(let generation):
     guard let current = state.generation else {
-      throw DaemonClientError.protocolError("Reset arrived before stream_open")
+      throw BridgeError.protocolError("Reset arrived before stream_open")
     }
-    if generation < current { throw DaemonClientError.protocolError("Regressive stream reset") }
+    if generation < current { throw BridgeError.protocolError("Regressive stream reset") }
     if generation == current { return state }
     return StreamState(
       sessionID: selectedSession, generation: generation,
@@ -264,7 +264,7 @@ extension BridgeClient {
           defer { socket.closeImmediately() }
           while true {
             guard let text = try await socket.receiveText() else {
-              throw DaemonClientError.unreachable("daemon closed the stream")
+              throw BridgeError.unreachable("bridge closed the stream")
             }
             continuation.yield(try parseStreamFrame(text))
           }

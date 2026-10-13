@@ -32,11 +32,11 @@ struct BridgeWireTests {
   }
 
   @Test func malformedCapabilitiesAreRejected() {
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try parseBridgeDetails(
         json("{\(prefix),\"protocol\":1,\"capabilities\":{\"prompt_input\":\"yes\"}}"))
     }
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try parseBridgeDetails(json("{\(prefix),\"protocol\":1,\"capabilities\":true}"))
     }
   }
@@ -45,7 +45,7 @@ struct BridgeWireTests {
     do {
       _ = try parseBridgeDetails(json("{\(prefix),\"protocol\":2}"))
       Issue.record("incompatible protocol must fail closed")
-    } catch let error as DaemonClientError {
+    } catch let error as BridgeError {
       #expect(error.message.contains("protocol 2"))
       #expect(error.message.contains("requires 1"))
     } catch {
@@ -55,7 +55,7 @@ struct BridgeWireTests {
 
   @Test func oversizedHTTPBodiesAreRejected() {
     let body = Data(repeating: 0x20, count: maximumBridgeHTTPBodyBytes + 1)
-    #expect(throws: DaemonClientError.self) { try BridgeJSON.parse(body) }
+    #expect(throws: BridgeError.self) { try BridgeJSON.parse(body) }
   }
 
   @Test func acceptsEachSupportedAgentPrefix() {
@@ -165,7 +165,7 @@ struct BridgeWireTests {
   }
 
   @Test func rejectsTurnsWithoutAnIdentity() {
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try parseConversationTurns(json(#"{"turns":[{"role":"user"}]}"#))
     }
   }

@@ -131,7 +131,7 @@ public final class SessionModel {
       let snapshot = try await makeClient().conversationSnapshot(
         base: profile.endpoint, session: agent.sessionID, agent: agent.provider)
       if let machine = snapshot.machineID, machine != profile.machineID {
-        throw DaemonClientError.protocolError("Conversation machine identity changed")
+        throw BridgeError.protocolError("Conversation machine identity changed")
       }
       guard token == epoch else { return }
       // Terminal snapshots arrive through the stream; only canonical history is shown here.
@@ -180,12 +180,12 @@ public final class SessionModel {
       } catch {
         guard token == epoch, !Task.isCancelled else { return }
         // A protocol violation is final; transport failures retry within the budget.
-        if case DaemonClientError.protocolError(let detail)? = error as? DaemonClientError {
+        if case BridgeError.protocolError(let detail)? = error as? BridgeError {
           streamError = detail
           return
         }
         guard let delay = budget.nextDelayMillis() else {
-          streamError = (error as? DaemonClientError)?.message ?? error.localizedDescription
+          streamError = (error as? BridgeError)?.message ?? error.localizedDescription
           return
         }
         try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)

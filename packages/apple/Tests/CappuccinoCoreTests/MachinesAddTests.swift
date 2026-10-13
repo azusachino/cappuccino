@@ -37,7 +37,7 @@ private struct VerifyingDiscovery: BridgeMachineServing {
     try await connections.addMachine(address: " https://mini.example ", label: "")
     #expect(connections.profiles.map(\.machineID) == [machine])
     #expect(connections.profiles.map(\.name) == ["Mini"])
-    await #expect(throws: DaemonClientError.self) {
+    await #expect(throws: BridgeError.self) {
       try await connections.addMachine(address: "https://mini.example", label: "")
     }
     #expect(connections.profiles.count == 1, "the same verified machine is not saved twice")
@@ -46,7 +46,7 @@ private struct VerifyingDiscovery: BridgeMachineServing {
   @Test func addRejectsMalformedAddressesWithoutSaving() async {
     let (connections, suite) = makeConnections(machine: UUID(), name: nil)
     defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
-    await #expect(throws: DaemonClientError.self) {
+    await #expect(throws: BridgeError.self) {
       try await connections.addMachine(address: "not a url", label: "")
     }
     #expect(connections.profiles.isEmpty)

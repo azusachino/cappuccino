@@ -1,12 +1,11 @@
 import CoreFoundation
 import Foundation
 
-/// Client for the Cappuccino bridge plugin (`services/bridge`), implementing
-/// the same `DaemonServing` seam as the reference daemon client. URLSession
+/// Client for the Cappuccino bridge plugin (`services/bridge`). URLSession
 /// for HTTP, no application auth, typed errors mapped from the bridge's JSON
 /// error envelope. Loopback by default; tailscale-serve exposure is a
 /// deployment decision, not a client change.
-public struct BridgeClient: DaemonServing {
+public struct BridgeClient: Sendable {
   public let baseURL: URL
   public let timeout: TimeInterval
   /// Injectable so hermetic tests can stub the transport via URLProtocol.
@@ -31,7 +30,7 @@ public struct BridgeClient: DaemonServing {
     let json = BridgeJSON(try await get(baseURL.appendingPathComponent("/api/session")))
     let details = try parseBridgeDetails(json)
     guard expectedID == nil || details.machineID == expectedID else {
-      throw DaemonClientError.protocolError("Bridge machine identity changed")
+      throw BridgeError.protocolError("Bridge machine identity changed")
     }
     return VerifiedMachine(
       machine: BridgeMachine(
@@ -51,7 +50,7 @@ public struct BridgeClient: DaemonServing {
       expectedMachineID == nil || machineID == expectedMachineID,
       let rawAgents = event["agents"] as? [[String: Any]]
     else {
-      throw DaemonClientError.protocolError("Invalid agent discovery identity")
+      throw BridgeError.protocolError("Invalid agent discovery identity")
     }
     return try rawAgents.map { agent in
       guard let owner = agent["machine_id"] as? String,
@@ -59,7 +58,7 @@ public struct BridgeClient: DaemonServing {
         let locator = agent["session_id"] as? String ?? agent["pane_id"] as? String,
         !locator.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       else {
-        throw DaemonClientError.protocolError(
+        throw BridgeError.protocolError(
           "Agent is missing its locator or belongs to another machine")
       }
       return AgentRow(
@@ -123,29 +122,29 @@ public struct BridgeClient: DaemonServing {
     do {
       request.httpBody = try JSONSerialization.data(withJSONObject: body)
     } catch {
-      throw DaemonClientError.protocolError("failed to serialize request body")
+      throw BridgeError.protocolError("failed to serialize request body")
     }
     let (data, response): (Data, URLResponse)
     do {
       (data, response) = try await session.data(for: request)
     } catch {
-      throw DaemonClientError.unreachable(error.localizedDescription)
+      throw BridgeError.unreachable(error.localizedDescription)
     }
     guard let http = response as? HTTPURLResponse else {
-      throw DaemonClientError.unreachable("response is not HTTP")
+      throw BridgeError.unreachable("response is not HTTP")
     }
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      throw DaemonClientError.protocolError("response is not a JSON object")
+      throw BridgeError.protocolError("response is not a JSON object")
     }
     switch http.statusCode {
     case 200, 201:
       return object
     case 401:
-      throw DaemonClientError.unauthorized
+      throw BridgeError.unauthorized
     default:
       let code = object["code"] as? String ?? "http_\(http.statusCode)"
       let message = object["message"] as? String ?? code
-      throw DaemonClientError.protocolError(message)
+      throw BridgeError.protocolError(message)
     }
   }
 
@@ -156,23 +155,23 @@ public struct BridgeClient: DaemonServing {
     do {
       (data, response) = try await session.data(for: request)
     } catch {
-      throw DaemonClientError.unreachable(error.localizedDescription)
+      throw BridgeError.unreachable(error.localizedDescription)
     }
     guard let http = response as? HTTPURLResponse else {
-      throw DaemonClientError.unreachable("response is not HTTP")
+      throw BridgeError.unreachable("response is not HTTP")
     }
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      throw DaemonClientError.protocolError("response is not a JSON object")
+      throw BridgeError.protocolError("response is not a JSON object")
     }
     switch http.statusCode {
     case 200:
       return object
     case 401:
-      throw DaemonClientError.unauthorized
+      throw BridgeError.unauthorized
     default:
       let code = object["code"] as? String ?? "http_\(http.statusCode)"
       let message = object["message"] as? String ?? code
-      throw DaemonClientError.protocolError(message)
+      throw BridgeError.protocolError(message)
     }
   }
 }
@@ -196,13 +195,13 @@ extension BridgeClient {
   ) async throws -> ConversationSnapshot {
     let json = BridgeJSON(try await get(agentURL(url, session: session, "conversation")))
     guard try json.string("session_id") == session else {
-      throw DaemonClientError.protocolError("Conversation belongs to a different locator")
+      throw BridgeError.protocolError("Conversation belongs to a different locator")
     }
     let source = try json.string("source")
     let identity = try json.optionalString("conversation_id")
     let machineID = try json.optionalString("machine_id").map { raw in
       guard let id = UUID(uuidString: raw) else {
-        throw DaemonClientError.protocolError("Invalid machine identity")
+        throw BridgeError.protocolError("Invalid machine identity")
       }
       return id
     }
@@ -211,7 +210,7 @@ extension BridgeClient {
         agent.map { CanonicalConversationID.isCanonical(identity, agent: $0) }
         ?? CanonicalConversationID.isCanonical(identity)
       guard source == "canonical_log", machineID != nil, canonical else {
-        throw DaemonClientError.protocolError("Invalid canonical conversation identity")
+        throw BridgeError.protocolError("Invalid canonical conversation identity")
       }
     }
     let stats: SessionStats?
@@ -236,7 +235,7 @@ extension BridgeClient {
     base url: URL, session: String, action: String, capabilities: [String: Bool]? = nil
   ) async throws {
     guard capabilities?["agent_control"] != false else {
-      throw DaemonClientError.protocolError("Agent controls unsupported by this bridge")
+      throw BridgeError.protocolError("Agent controls unsupported by this bridge")
     }
     _ = try await post(
       agentURL(url, session: session, "control"), body: ["action": action])

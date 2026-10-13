@@ -45,7 +45,7 @@ extension BridgeClientTests {
       #"{"session_id":"chosen","source":"canonical_log","machine_id":"\#(machine)","conversation_id":"claude:\#(digest)","turns":[]}"#,
     ] {
       StubURLProtocol.handler = { _ in (200, Data(body.utf8)) }
-      await #expect(throws: DaemonClientError.self) {
+      await #expect(throws: BridgeError.self) {
         try await client().conversationSnapshot(base: base, session: "chosen", agent: "pi")
       }
     }
@@ -131,7 +131,7 @@ extension BridgeClientTests {
         answers: [QuestionAnswer(selected: [0], other: nil)])
       Issue.record("a refused answer must throw")
     } catch {
-      #expect(error as? DaemonClientError == .protocolError("answer it in the terminal"))
+      #expect(error as? BridgeError == .protocolError("answer it in the terminal"))
     }
   }
 
@@ -143,7 +143,7 @@ extension BridgeClientTests {
       recorder.bodies.append(requestBody(request))
       return (200, Data(#"{"event":"control_sent"}"#.utf8))
     }
-    await #expect(throws: DaemonClientError.self) {
+    await #expect(throws: BridgeError.self) {
       try await client().controlAgent(
         base: base, session: "s-1", action: "interrupt", capabilities: ["agent_control": false])
     }
