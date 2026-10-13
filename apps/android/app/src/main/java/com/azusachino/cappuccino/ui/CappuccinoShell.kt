@@ -580,34 +580,6 @@ fun CappuccinoScreen(
               else -> Unit
             }
 
-            // If there is an active pending prompt on this agent, show the prompt card prominently
-            state.actionError?.let {
-              Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
-            }
-            state.stream.pendingPrompt?.let { card ->
-              val answersEnabled =
-                state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_answers") !=
-                  false
-              Box(Modifier.padding(horizontal = 16.dp)) {
-                if (card.questions.isNotEmpty())
-                  QuestionFormCard(
-                    prompt = card,
-                    enabled = answersEnabled,
-                    onSubmit = { answers -> actions.answerQuestions(card.promptId, answers) },
-                    onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
-                  )
-                else
-                  PromptCardView(
-                    prompt = card,
-                    enabled = answersEnabled,
-                    onSelectOption = { idx, optId ->
-                      actions.answerPrompt(card.promptId, idx, optId, "select_option")
-                    },
-                    onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
-                  )
-              }
-            }
-
             if (state.conversationSource == "scrollback") {
               Text(
                 "Live terminal output · canonical session unavailable",
@@ -725,6 +697,41 @@ fun CappuccinoScreen(
                   Modifier.padding(16.dp),
                   color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+              // A waiting prompt sits by the composer, after the output that asked it, so the
+              // transcript keeps the top of the screen and the answer is within thumb reach.
+              state.actionError?.let {
+                Text(
+                  it,
+                  Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                  color = MaterialTheme.colorScheme.error,
+                )
+              }
+              state.stream.pendingPrompt?.let { card ->
+                val answersEnabled =
+                  state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_answers") !=
+                    false
+                Box(
+                  Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("pendingPrompt")
+                ) {
+                  if (card.questions.isNotEmpty())
+                    QuestionFormCard(
+                      prompt = card,
+                      enabled = answersEnabled,
+                      onSubmit = { answers -> actions.answerQuestions(card.promptId, answers) },
+                      onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
+                    )
+                  else
+                    PromptCardView(
+                      prompt = card,
+                      enabled = answersEnabled,
+                      onSelectOption = { idx, optId ->
+                        actions.answerPrompt(card.promptId, idx, optId, "select_option")
+                      },
+                      onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
+                    )
+                }
+              }
 
               // Existing live prompt route; saved readers remain read-only.
               if (

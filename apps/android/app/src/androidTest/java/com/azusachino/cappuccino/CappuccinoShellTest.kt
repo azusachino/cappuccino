@@ -27,6 +27,9 @@ import com.azusachino.cappuccino.core.AgentRow
 import com.azusachino.cappuccino.core.ConversationPart
 import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.Endpoint
+import com.azusachino.cappuccino.core.PromptCard
+import com.azusachino.cappuccino.core.PromptOption
+import com.azusachino.cappuccino.core.PromptQuestion
 import com.azusachino.cappuccino.core.StreamEntry
 import com.azusachino.cappuccino.core.StreamState
 import com.azusachino.cappuccino.io.ConnectedActions
@@ -480,6 +483,73 @@ class CappuccinoShellTest {
       setZone(originalZone)
       compose.waitUntil(timeoutMillis = 5000) { ZoneId.systemDefault() == ZoneId.of(originalZone) }
     }
+  }
+
+  @Test
+  fun pendingQuestionSitsBetweenTranscriptAndComposer() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile("question", "Synthetic", Endpoint.parse("https://bridge.example"), machine)
+    val agent =
+      AgentRow(machine, "question-session", "pane", "claude", "claude", "blocked", false, "main")
+    val options = listOf("Red", "Blue", "Green").map { PromptOption(it.lowercase(), it, null) }
+    val question = PromptQuestion("Color", "Which color should the theme use?", false, options)
+    val state =
+      mutableStateOf(
+        ConnectedUiState(
+          profiles = listOf(profile),
+          activeProfileId = profile.id,
+          selectedAgent = agent,
+          conversationTurns =
+            (1..20).map {
+              ConversationTurn("t$it", "assistant", null, "Synthetic turn $it", emptyList())
+            },
+          connection = ConnectionState.Connected,
+          stream =
+            StreamState(
+              "question-session",
+              1,
+              pendingPrompt =
+                PromptCard(
+                  "p-question-1",
+                  "ask_user_question",
+                  "Color",
+                  null,
+                  null,
+                  null,
+                  options,
+                  0,
+                  listOf(question),
+                ),
+            ),
+        )
+      )
+    compose.activity.runOnUiThread {
+      compose.activity.setContent {
+        CappuccinoTheme {
+          val s by state
+          CappuccinoScreen(s, StateActions(state)) { _, _ -> }
+        }
+      }
+    }
+    awaitDisplayed("Which color should the theme use?")
+    val transcript = compose.onNodeWithTag("recentOutputList").fetchSemanticsNode().boundsInRoot
+    val card = compose.onNodeWithTag("pendingPrompt").fetchSemanticsNode().boundsInRoot
+    val composer = compose.onNodeWithTag("promptInput").fetchSemanticsNode().boundsInRoot
+    // The transcript keeps the top of the screen; the question waits by the composer.
+    assertTrue(
+      "Card must follow the transcript (card=$card, transcript=$transcript)",
+      card.top >= transcript.bottom - 1f,
+    )
+    assertTrue(
+      "Card must sit above the composer (card=$card, composer=$composer)",
+      card.bottom <= composer.top + 1f,
+    )
+    assertTrue(
+      "Transcript must stay at the top (transcript=$transcript)",
+      transcript.top < card.top,
+    )
+    capture("PendingQuestion")
   }
 
   private fun assertSendAndStopSitAtTheEnd() {

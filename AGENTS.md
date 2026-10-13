@@ -4,7 +4,7 @@ Native Android/Apple companion for existing, long-running Herdr/Pi agents. Read 
 
 ## Work
 
-- Current source is a disconnected app skeleton. Keep unavailable actions explicit; sample data never represents a real attachment.
+- Clients attach to existing agents through the bridge. Keep unavailable actions explicit; sample data never represents a real attachment.
 - Herdr/Pi own agent lifetime. Attach/detach preserves the remote process and session. Setup reload is explicit and idle-only.
 - Apple code lives in `apps/ios/`: the SwiftPM package (`Sources/`, hermetic `Tests/`), the iPhone entry in `App/` and UI tests in `UITests/`. There is no macOS app (owner decision 2026-10-13; Herdr covers the desktop). The core target stays independent of the shared SwiftUI target.
 - Android is one Gradle app module at `apps/android/`; keep pure Kotlin logic in `core`, platform I/O in the activity/adapters, and Compose presentation in `ui`. No cross-platform runtime or generated SDK is adopted.

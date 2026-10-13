@@ -132,18 +132,32 @@ pub fn session_stats(kind: Kind, content: &str) -> Option<SessionStats> {
         return None;
     }
     if kind == Kind::Claude {
-        stats.context_window = claude_window(stats.context_tokens);
+        stats.context_window = claude_window(stats.model.as_deref(), stats.context_tokens);
     }
     Some(stats)
 }
 
-/// Claude models run with 200K of context unless started with the 1M option, which the
-/// transcript does not record; a count beyond 200K proves the larger window.
-fn claude_window(tokens: Option<u64>) -> Option<u64> {
-    Some(if tokens.unwrap_or(0) > 200_000 {
-        1_000_000
-    } else {
+/// Models before Opus/Sonnet 4.6, and Haiku 4.5, have 200K of context; every later Claude model
+/// has 1M. Older models could opt into 1M, which the transcript does not record, so a count
+/// beyond 200K proves the larger window.
+const CLAUDE_200K_MODELS: &[&str] = &[
+    "claude-3",
+    "claude-haiku-4-5",
+    "claude-sonnet-4-5",
+    "claude-opus-4-5",
+    "claude-opus-4-1",
+    "claude-opus-4-0",
+    "claude-sonnet-4-0",
+    "claude-opus-4-2025",
+    "claude-sonnet-4-2025",
+];
+
+fn claude_window(model: Option<&str>, tokens: Option<u64>) -> Option<u64> {
+    let legacy = model.is_some_and(|m| CLAUDE_200K_MODELS.iter().any(|p| m.starts_with(p)));
+    Some(if legacy && tokens.unwrap_or(0) <= 200_000 {
         200_000
+    } else {
+        1_000_000
     })
 }
 
@@ -237,12 +251,26 @@ mod tests {
         assert_eq!(stats.thinking_level.as_deref(), Some("medium"));
         assert_eq!(stats.context_tokens, Some(1050));
         assert_eq!(stats.cache_percent, Some(90));
-        assert_eq!(stats.context_window, Some(200_000));
-
-        let large = r#"{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1,"cache_read_input_tokens":250000,"output_tokens":1}}}"#;
         assert_eq!(
-            session_stats(Kind::Claude, large).unwrap().context_window,
-            Some(1_000_000)
+            stats.context_window,
+            Some(1_000_000),
+            "current models have 1M even early in a session"
+        );
+
+        let window = |model: &str, tokens: u64| {
+            let line = format!(
+                r#"{{"type":"assistant","message":{{"model":"{model}","usage":{{"input_tokens":1,"cache_read_input_tokens":{tokens},"output_tokens":1}}}}}}"#
+            );
+            session_stats(Kind::Claude, &line).unwrap().context_window
+        };
+        assert_eq!(window("claude-sonnet-5-5", 10), Some(1_000_000));
+        assert_eq!(window("claude-haiku-5-5", 10), Some(1_000_000));
+        assert_eq!(window("claude-haiku-4-5", 10), Some(200_000));
+        assert_eq!(window("claude-sonnet-4-20250514", 10), Some(200_000));
+        assert_eq!(
+            window("claude-sonnet-4-5-20250929", 250_000),
+            Some(1_000_000),
+            "a count past 200K proves an older model's 1M option"
         );
         assert_eq!(session_stats(Kind::Claude, "{\"type\":\"user\"}"), None);
     }

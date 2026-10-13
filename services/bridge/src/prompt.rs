@@ -94,9 +94,84 @@ pub fn screen_card(screen: &str) -> Option<PromptCard> {
     parse_prompt_from_screen(screen)
 }
 
+/// Content ids repeat when an agent asks the same thing twice, so a stale tap could answer the
+/// newer prompt. Each pane's shown card keeps one nonce until the card leaves the screen. An
+/// answered card is spent (`None`) and stays hidden until it leaves, so the screen catching up
+/// cannot announce it again.
+static SHOWN: std::sync::Mutex<std::collections::BTreeMap<String, (String, Option<String>)>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn fresh_nonce() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static START: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    let start = START.get_or_init(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    });
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut hasher = Sha256::new();
+    hasher.update(start.to_le_bytes());
+    hasher.update(n.to_le_bytes());
+    hex::encode(hasher.finalize())[..8].to_string()
+}
+
+/// Records what the pane shows now and returns the card with its per-showing id; `None` when no
+/// card shows or the one showing was already answered.
+pub fn shown(pane_id: &str, card: Option<PromptCard>) -> Option<PromptCard> {
+    let mut map = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut card) = card else {
+        map.remove(pane_id);
+        return None;
+    };
+    let base = card.prompt_id.clone();
+    let nonce = match map.get(pane_id) {
+        Some((seen, nonce)) if *seen == base => nonce.clone()?,
+        _ => {
+            let nonce = fresh_nonce();
+            map.insert(pane_id.to_string(), (base.clone(), Some(nonce.clone())));
+            nonce
+        }
+    };
+    card.prompt_id = format!("{base}-{nonce}");
+    Some(card)
+}
+
+/// Spends `prompt_id` if it is still the pane's live card, atomically, so of two racing answers
+/// only one types. False means it was already answered or is no longer shown.
+pub fn claim(pane_id: &str, prompt_id: &str) -> bool {
+    let mut map = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+    match map.get_mut(pane_id) {
+        Some((base, nonce @ Some(_)))
+            if prompt_id == format!("{base}-{}", nonce.as_deref().unwrap_or_default()) =>
+        {
+            *nonce = None;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Herdr refused the answer, so the card may still be live: the next read shows it with a new id.
+pub fn forget(pane_id: &str) {
+    SHOWN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(pane_id);
+}
+
+/// A waiting prompt sits at the bottom of the pane; text further up is scrollback.
+const PROMPT_TAIL_LINES: usize = 25;
+
 /// Detects if the visible screen is presenting an interactive prompt.
 pub fn parse_prompt_from_screen(screen_text: &str) -> Option<PromptCard> {
-    let lines: Vec<&str> = screen_text.lines().map(str::trim).collect();
+    let lines: Vec<&str> = screen_text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let lines = &lines[lines.len().saturating_sub(PROMPT_TAIL_LINES)..];
 
     // 1. Tool Approval Detection
     // Signatures: "Approve tool call", "Allow ... to run", "Execute command?"
@@ -123,6 +198,16 @@ fn detect_tool_approval(lines: &[&str]) -> Option<PromptCard> {
     })?;
 
     let header_line = lines[approval_header_idx];
+    // A header quoted in output is not a prompt: the live card lists its numbered choices.
+    let lists_choices = lines[approval_header_idx + 1..].iter().any(|raw_line| {
+        let line = raw_line
+            .trim_matches(|c: char| c == '│' || c == ' ' || c == '\t')
+            .trim_start_matches(|c| c == '❯' || c == '>' || c == ' ');
+        line.starts_with("1. ")
+    });
+    if !lists_choices {
+        return None;
+    }
 
     // Find tool command or details if present
     let command = lines
@@ -319,5 +404,48 @@ test result: ok. 15 passed; 0 failed
 All tests completed in 0.4s
 "#;
         assert!(parse_prompt_from_screen(screen).is_none());
+    }
+
+    const APPROVAL: &str = "Approve tool call: run_command\n$ git push origin main\n1. Allow once\n2. Allow always\n3. Reject\n";
+
+    #[test]
+    fn ignores_approval_text_quoted_in_output() {
+        let quoted = "grep found:\n    || line.contains(\"Permission Required\")\nDone.\n";
+        assert!(parse_prompt_from_screen(quoted).is_none());
+        let scrolled = format!("{APPROVAL}{}", "later output\n".repeat(PROMPT_TAIL_LINES));
+        assert!(parse_prompt_from_screen(&scrolled).is_none());
+        assert!(parse_prompt_from_screen(&format!("earlier\n{APPROVAL}")).is_some());
+    }
+
+    #[test]
+    fn a_reshown_prompt_gets_a_new_id() {
+        let pane = "nonce-test-pane";
+        let card = || parse_prompt_from_screen(APPROVAL);
+        let first = shown(pane, card()).unwrap().prompt_id;
+        assert_eq!(
+            shown(pane, card()).unwrap().prompt_id,
+            first,
+            "stable while shown"
+        );
+        assert!(shown(pane, None).is_none());
+        let again = shown(pane, card()).unwrap().prompt_id;
+        assert_ne!(again, first, "the same command asked again is a new prompt");
+        assert!(!claim(pane, &first), "an earlier showing's id is stale");
+        assert!(claim(pane, &again));
+        assert!(!claim(pane, &again), "only one of two racing answers types");
+        assert!(
+            shown(pane, card()).is_none(),
+            "an answered card stays hidden while the screen catches up"
+        );
+        assert!(shown(pane, None).is_none());
+        let third = shown(pane, card()).unwrap().prompt_id;
+        assert_ne!(third, again, "asked again after it left: a new prompt");
+        assert!(claim(pane, &third));
+        forget(pane);
+        let retry = shown(pane, card()).unwrap().prompt_id;
+        assert_ne!(
+            retry, third,
+            "a refused answer leaves the card answerable under a new id"
+        );
     }
 }

@@ -791,11 +791,21 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
     };
     let answer = |id: &str, answers: Value| json!({"type": "answer_question", "prompt_id": id, "answers": answers});
     let sent_since = |from: usize| herdr.input()[from..].to_vec();
+    // An answered card stays hidden until the screen redraws it; this shows it again, as the
+    // terminal would for the next form step, and reports its new id from a stale probe.
+    let mock = &herdr;
+    let on_screen = |screen: &'static str| async move {
+        mock.set_screen("");
+        post(json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "cancel"})).await;
+        mock.set_screen(screen);
+        let probe = json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "cancel"});
+        on_screen_id(&post(probe).await.body)
+    };
 
     // A single-select question, as Herdr returns Claude Code's form.
-    herdr.set_screen(include_str!(
-        "../../../fixtures/claude/ask-user-question-screen.txt"
-    ));
+    const COLOR_SCREEN: &str =
+        include_str!("../../../fixtures/claude/ask-user-question-screen.txt");
+    herdr.set_screen(COLOR_SCREEN);
     let stale = post(answer("p-old", json!([{"selected": [1]}]))).await;
     assert_eq!(stale.status, 409, "payload: {}", stale.body);
     assert_eq!(stale.body["code"], "stale_prompt");
@@ -833,6 +843,11 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
         200
     );
     assert_eq!(sent_since(from), vec![json!(["2"])]);
+    // A repeated tap is stale even while the terminal still shows the form.
+    let repeat = post(answer(&color, json!([{"selected": [1]}]))).await;
+    assert_eq!(repeat.status, 409, "payload: {}", repeat.body);
+    assert_eq!(sent_since(from), vec![json!(["2"])]);
+    let color = on_screen(COLOR_SCREEN).await;
     let from = herdr.input().len();
     assert_eq!(
         post(answer(&color, json!([{"other": " Teal "}])))
@@ -844,6 +859,7 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
         sent_since(from),
         vec![json!(["4"]), json!("Teal"), json!(["enter"])]
     );
+    let color = on_screen(COLOR_SCREEN).await;
     let from = herdr.input().len();
     let cancel = json!({"type": "answer_prompt", "prompt_id": color, "action": "cancel"});
     assert_eq!(post(cancel).await.status, 200);
@@ -883,10 +899,36 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
     let submit = json!({"type": "answer_prompt", "prompt_id": review, "action": "select_option", "option_index": 0});
     assert_eq!(post(submit).await.status, 200);
     assert_eq!(sent_since(from), vec![json!(["1"])]);
+    let review = on_screen(REVIEW_SCREEN).await;
     let from = herdr.input().len();
     let cancel = json!({"type": "answer_prompt", "prompt_id": review, "action": "cancel"});
     assert_eq!(post(cancel).await.status, 200);
     assert_eq!(sent_since(from), vec![json!(["2"])]);
+
+    // A tool approval's first option allows the command: unclear choices are refused.
+    herdr.set_screen("Approve tool call: run_command\n$ git push origin main\n1. Allow once\n2. Allow always\n3. Reject\n");
+    let approval_stale = json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "select_option", "option_id": "reject"});
+    let approval = on_screen_id(&post(approval_stale).await.body);
+    let from = herdr.input().len();
+    for bad in [
+        json!({"type": "answer_prompt", "prompt_id": approval}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option"}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_id": "reject_"}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_index": 3}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_index": 0, "option_id": "reject"}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "action": "approve", "option_index": 2}),
+    ] {
+        let refused = post(bad.clone()).await;
+        assert_eq!(refused.status, 400, "{bad} -> {}", refused.body);
+        assert_eq!(refused.body["code"], "bad_answer");
+    }
+    assert!(
+        sent_since(from).is_empty(),
+        "nothing is typed for refused answers"
+    );
+    let reject = json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_index": 2, "option_id": "reject"});
+    assert_eq!(post(reject).await.status, 200);
+    assert_eq!(sent_since(from), vec![json!(["3", "enter"])]);
 
     bridge.stop().expect("bridge stop");
     herdr.stop().await;
@@ -987,6 +1029,46 @@ async fn ws_unknown_session_fails_closed_not_found() {
 }
 
 #[tokio::test]
+async fn an_answered_prompt_is_resolved_not_announced_again() {
+    let root = TempRoot::new("wsanswer");
+    let herdr = MockHerdr::start(&root);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+    let options = probe_options(&bridge.base_url());
+    herdr.set_screen(
+        "Approve tool call: run_command\n$ git push origin main\n1. Allow once\n2. Allow always\n3. Reject\n",
+    );
+    let stream = tokio::spawn({
+        let options = options.clone();
+        async move { ws_probe(&options, "s-probe", Duration::from_secs(3)).await }
+    });
+    // Answer once the stream has announced the card; the screen has not redrawn yet.
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    let probe = json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "cancel"});
+    let id = on_screen_id(
+        &probe::post_json(&options, "/api/agents/s-probe/prompt", &probe)
+            .await
+            .expect("probe")
+            .body,
+    );
+    let reject = json!({"type": "answer_prompt", "prompt_id": id, "action": "select_option", "option_id": "reject"});
+    let answered = probe::post_json(&options, "/api/agents/s-probe/prompt", &reject)
+        .await
+        .expect("answer");
+    assert_eq!(answered.status, 200, "payload: {}", answered.body);
+    let events = stream.await.expect("stream task").followup_events;
+    let requests = events.iter().filter(|e| *e == "prompt_request").count();
+    assert_eq!(requests, 1, "announced once: {events:?}");
+    assert!(
+        events.iter().any(|e| e == "prompt_resolved"),
+        "the answered card resolves: {events:?}"
+    );
+
+    bridge.stop().expect("bridge stop");
+    herdr.stop().await;
+    root.remove();
+}
+
+#[tokio::test]
 async fn ws_stream_open_generation_then_entries() {
     let root = TempRoot::new("wsopen");
     let herdr = MockHerdr::start(&root);
@@ -1014,6 +1096,16 @@ async fn ws_stream_open_generation_then_entries() {
         stream.entries_consumed >= 2,
         "entries consumed: {}",
         stream.entries_consumed
+    );
+
+    // The phone is gone and the pane is quiet: polling Herdr for it must stop.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let reads = herdr.requests("pane.read").len();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(
+        herdr.requests("pane.read").len(),
+        reads,
+        "a closed stream keeps reading the pane"
     );
 
     bridge.stop().expect("bridge stop");

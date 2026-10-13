@@ -216,6 +216,8 @@ Submits a user prompt or answers an interactive prompt card.
 }
 ```
 
+`action` is `select_option` or `cancel`. A selection must name exactly one option on the card through `option_index`, `option_id`, or both in agreement; a missing, unknown, out-of-range or contradictory choice is refused with `400 bad_answer` and nothing is typed. Ids are single-use: after an answer or cancel is typed, the same id is `409 stale_prompt`. Only the bottom 25 non-empty screen lines can hold an approval or choice menu, and an approval needs its numbered choices, so prompt text quoted in output is not a card.
+
 ---
 
 ### 4.2 WebSocket Stream (`WS /api/stream?session=:sessionId`)
@@ -308,7 +310,7 @@ Before low-effort sub-agents implement these features, the exact behavior across
 When Claude Code asks the owner a question through its `AskUserQuestion` tool. Claude Code writes the tool call to its transcript only after it is answered, so the visible form is the only source while it waits.
 
 - **Detection**: the pane shows the form (footer `Enter to select`, a `Chat about this` row). The bridge reads the question on screen: its text, the options with their descriptions (the form's own "Type something" and "Chat about this" rows are not options), checkboxes for a multi-select, and the tab row's headers with their answered marks. One card is one question; as the form moves on, the next question becomes a new card. The final review becomes an `ask_user_question_review` card. Other choice menus keep the screen-read `ask_question` card.
-- **Card Schema** (`prompt_id` hashes what is on screen):
+- **Card Schema** (`prompt_id` is a hash of what is on screen plus a per-showing nonce; see Q10):
 
   ```json
   {
@@ -447,6 +449,6 @@ The following 11 mechanical decisions were established during grilling review to
 9. **Stateless Re-hydration on Boot (Q9)**:
    - On bridge restart, it inspects Herdr's live pane state via `session.snapshot` and `agent.list`, re-emitting active prompts without requiring persistent disk state.
 10. **One-Time Nonce Ephemeral Prompt IDs (Q10)**:
-    - Every generated prompt card receives a cryptographically random, single-use nonce ID, closing replay and injection vulnerabilities over the local tailnet.
+    - A card id is a hash of what the screen shows plus a nonce. The nonce stays while the card stays on screen, is renewed when the card leaves and comes back (the same command asked again is a new prompt), and is spent as soon as an answer or cancel is typed. A spent or stale id gets `409 stale_prompt` with the id on screen now.
 11. **Graceful Cancellation Contract (Q11)**:
     - User interruption from mobile sends `ctrl+c` / `agent.stop` via Herdr RPC. Bridge updates status to `"interrupted"` and emits `turn_complete`. If the agent fails to yield within 3 seconds, a forceful kill option is presented.
