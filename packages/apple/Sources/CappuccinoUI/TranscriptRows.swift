@@ -48,17 +48,17 @@ private struct PromptRow: View {
   }
 }
 
-/// A reply shown inline up to the preview limit, with the full text one tap away.
+/// A reply in the transcript, whole up to the inline limit (as Android's transcript shows it),
+/// with anything longer one tap away.
 private struct ReplyText: View {
   let text: String
   @State private var showingFull = false
 
   var body: some View {
-    let preview = messagePreview(text)
+    let inline = transcriptInlineText(text)
     VStack(alignment: .leading, spacing: 4) {
-      Text(markdownText(preview))
-        .textSelection(.enabled)
-      if preview != text {
+      MarkdownView(text: inline)
+      if inline != text {
         Button("View full message") { showingFull = true }
           .font(.subheadline)
       }
@@ -66,8 +66,7 @@ private struct ReplyText: View {
     .sheet(isPresented: $showingFull) {
       NavigationStack {
         ScrollView {
-          Text(markdownText(transcriptInlineText(text)))
-            .textSelection(.enabled)
+          MarkdownView(text: text)
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -82,20 +81,51 @@ private struct ReplyText: View {
   }
 }
 
-/// Markdown as text. Headings keep body size and are bold, as the Android transcript shows them.
-func markdownText(_ raw: String) -> AttributedString {
-  guard
-    var rendered = try? AttributedString(
-      markdown: raw,
-      options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full))
-  else { return AttributedString(raw) }
-  for run in rendered.runs {
-    guard let intent = run.presentationIntent,
-      intent.components.contains(where: { if case .header = $0.kind { true } else { false } })
-    else { continue }
-    rendered[run.range].font = .body.bold()
+/// Markdown laid out block by block: headings at body size in bold (as Android's transcript
+/// shows them), paragraphs, list items with their markers, code, quotes and rules.
+struct MarkdownView: View {
+  let text: String
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      ForEach(Array(markdownBlocks(text).enumerated()), id: \.offset) { _, block in
+        blockView(block)
+      }
+    }
+    .textSelection(.enabled)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
-  return rendered
+
+  @ViewBuilder
+  private func blockView(_ block: MarkdownBlock) -> some View {
+    switch block.kind {
+    case .paragraph:
+      Text(block.text)
+    case .heading:
+      Text(block.text).font(.body.bold())
+    case .listItem(let marker, let depth):
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Text(marker).foregroundStyle(.secondary)
+        Text(block.text)
+      }
+      .padding(.leading, CGFloat(depth - 1) * 16)
+    case .code:
+      ScrollView(.horizontal, showsIndicators: false) {
+        Text(block.text).font(.system(.footnote, design: .monospaced))
+      }
+      .padding(10)
+      .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 8))
+    case .quote:
+      Text(block.text)
+        .foregroundStyle(.secondary)
+        .padding(.leading, 10)
+        .overlay(alignment: .leading) {
+          Rectangle().fill(.tertiary).frame(width: 3)
+        }
+    case .rule:
+      Divider()
+    }
+  }
 }
 
 private struct ProseRow: View {

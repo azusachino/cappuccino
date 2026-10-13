@@ -19,9 +19,9 @@ public protocol BridgeWebSocketConnecting: Sendable {
 public struct URLSessionWebSocketConnector: BridgeWebSocketConnecting {
   public init() {}
 
+  /// `url` is the stream endpoint itself (`BridgeStream.endpointURL`), already ws or wss.
   public func connect(url: URL) async throws -> BridgeWebSocket {
-    let wsURL = try BridgeStream.endpointURL(from: url, session: nil)
-    let task = URLSession.shared.webSocketTask(with: wsURL)
+    let task = URLSession.shared.webSocketTask(with: url)
     task.resume()
     return URLSessionWebSocketConnection(task: task)
   }

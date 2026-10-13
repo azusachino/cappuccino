@@ -56,8 +56,14 @@ final class CappuccinoUITests: XCTestCase {
   }
 
   /// Read-only against the Mac bridge: add it, see its agents, open one and read its status.
+  /// Opt-in, since it needs a bridge on this host:
+  /// `TEST_RUNNER_CAPPUCCINO_LIVE_BRIDGE=1 make ui-test DESTINATION=...`. It captures nothing:
+  /// a real conversation never goes into test results or evidence.
   @MainActor
-  func testLiveBridgeListsAgentsWithoutSendingAnything() {
+  func testLiveBridgeListsAgentsWithoutSendingAnything() throws {
+    try XCTSkipUnless(
+      ProcessInfo.processInfo.environment["CAPPUCCINO_LIVE_BRIDGE"] == "1",
+      "live bridge journey is opt-in")
     let app = XCUIApplication()
     app.launchArguments = ["-cappuccino-fresh"]
     app.launch()
@@ -75,13 +81,18 @@ final class CappuccinoUITests: XCTestCase {
       NSPredicate(format: "label CONTAINS 'Idle' OR label CONTAINS 'Working'")
     ).firstMatch
     XCTAssertTrue(agent.waitForExistence(timeout: 10), "no agent listed by the live bridge")
-    capture("Live machines", app: app)
     agent.tap()
     let status = app.staticTexts.containing(
       NSPredicate(format: "label CONTAINS 'Idle' OR label CONTAINS 'Working'")
     ).firstMatch
     XCTAssertTrue(status.waitForExistence(timeout: 10), "the conversation shows its status word")
-    capture("Live conversation", app: app)
+    // The live stream opens: no stream error replaces it within a few polls.
+    let streamError = app.staticTexts.containing(
+      NSPredicate(format: "label CONTAINS 'stream URL' OR label CONTAINS 'Bridge protocol error'")
+    ).firstMatch
+    XCTAssertFalse(
+      streamError.waitForExistence(timeout: 6),
+      "the live stream failed to open: \(streamError.exists ? streamError.label : "")")
   }
 
   @MainActor

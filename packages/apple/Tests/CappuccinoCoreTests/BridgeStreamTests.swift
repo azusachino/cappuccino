@@ -125,3 +125,15 @@ struct FakeBridgeConnector: BridgeWebSocketConnecting {
     #expect(failure as? BridgeError == .unreachable("bridge closed the stream"))
   }
 }
+
+@Suite struct URLSessionConnectorTests {
+  /// The connector receives the stream endpoint itself; converting it again rejected `ws`
+  /// and left the real app with no live stream.
+  @Test func acceptsTheWebSocketEndpointAsGiven() async throws {
+    let endpoint = try BridgeStream.endpointURL(
+      from: URL(string: "http://127.0.0.1:9")!, session: "w1:p1")
+    #expect(endpoint.scheme == "ws")
+    let socket = try await URLSessionWebSocketConnector().connect(url: endpoint)
+    socket.closeImmediately()
+  }
+}
