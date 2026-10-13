@@ -406,6 +406,18 @@ fn validate_stream_frame(
             }
             Ok(())
         }
+        "prompt_request" => {
+            if frame["prompt"]["prompt_id"].as_str().is_none() {
+                return Err("prompt_request frame missing prompt.prompt_id".into());
+            }
+            Ok(())
+        }
+        "prompt_resolved" => {
+            if frame["prompt_id"].as_str().is_none() {
+                return Err("prompt_resolved frame missing prompt_id".into());
+            }
+            Ok(())
+        }
         other => Err(format!("unknown stream event '{other}'")),
     }
 }

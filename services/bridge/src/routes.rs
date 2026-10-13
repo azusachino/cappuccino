@@ -324,6 +324,17 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
     }
 }
 
+/// Spends the answered card's id before anything is typed; a racing or repeated answer is stale.
+fn claimed(pane_id: &str, prompt_id: &str) -> Option<Response> {
+    (!prompt::claim(pane_id, prompt_id)).then(|| {
+        error_response(
+            StatusCode::CONFLICT,
+            "stale_prompt",
+            "this prompt was already answered",
+        )
+    })
+}
+
 async fn resolve_pane(state: &Arc<BridgeState>, session: &str) -> Option<String> {
     let result = herdr::agent_list().await.ok()?;
     let rows = agents::map_agents(&result, &state.machine_id).ok()?;
@@ -341,9 +352,10 @@ async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form,
     let Some(form) = questions::form(&screen) else {
         return Err(stale("the question is no longer shown"));
     };
-    let shown = prompt::shown(pane_id, Some(questions::card(&form)))
-        .map(|card| card.prompt_id)
-        .unwrap_or_default();
+    let Some(shown) = prompt::shown(pane_id, Some(questions::card(&form))).map(|c| c.prompt_id)
+    else {
+        return Err(stale("this question was already answered"));
+    };
     if shown != prompt_id {
         return Err(stale(&format!(
             "the question on screen has changed (on screen {shown})"
@@ -633,8 +645,11 @@ pub async fn submit_agent_prompt(
                 } else {
                     "esc"
                 };
-                prompt::spend(&pane_id);
+                if let Some(stale) = claimed(&pane_id, &prompt_id) {
+                    return stale;
+                }
                 if let Err(err) = herdr::pane_send_keys(&pane_id, &[key]).await {
+                    prompt::forget(&pane_id);
                     return error_response(
                         StatusCode::BAD_GATEWAY,
                         "herdr_error",
@@ -684,7 +699,9 @@ pub async fn submit_agent_prompt(
             } else {
                 &[&key_digit, "enter"]
             };
-            prompt::spend(&pane_id);
+            if let Some(stale) = claimed(&pane_id, &prompt_id) {
+                return stale;
+            }
             let send_res = herdr::pane_send_keys(&pane_id, keys).await;
             match send_res {
                 Ok(_) => (
@@ -698,11 +715,14 @@ pub async fn submit_agent_prompt(
                     .to_string(),
                 )
                     .into_response(),
-                Err(err) => error_response(
-                    StatusCode::BAD_GATEWAY,
-                    "herdr_error",
-                    &format!("cannot send keys: {err}"),
-                ),
+                Err(err) => {
+                    prompt::forget(&pane_id);
+                    error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "herdr_error",
+                        &format!("cannot send keys: {err}"),
+                    )
+                }
             }
         }
         prompt::PromptSubmission::AnswerQuestion { prompt_id, answers } => {
@@ -724,7 +744,9 @@ pub async fn submit_agent_prompt(
                     return error_response(StatusCode::BAD_REQUEST, "bad_answer", &message)
                 }
             };
-            prompt::spend(&pane_id);
+            if let Some(stale) = claimed(&pane_id, &prompt_id) {
+                return stale;
+            }
             for step in steps {
                 let sent = match &step {
                     questions::Step::Keys(keys) => {
@@ -734,6 +756,7 @@ pub async fn submit_agent_prompt(
                     questions::Step::Text(text) => herdr::pane_send_text(&pane_id, text).await,
                 };
                 if let Err(err) = sent {
+                    prompt::forget(&pane_id);
                     return error_response(
                         StatusCode::BAD_GATEWAY,
                         "herdr_error",

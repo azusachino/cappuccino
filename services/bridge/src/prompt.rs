@@ -95,9 +95,10 @@ pub fn screen_card(screen: &str) -> Option<PromptCard> {
 }
 
 /// Content ids repeat when an agent asks the same thing twice, so a stale tap could answer the
-/// newer prompt. Each pane's shown card keeps one nonce until the card leaves the screen or is
-/// answered; the next showing gets a fresh one.
-static SHOWN: std::sync::Mutex<std::collections::BTreeMap<String, (String, String)>> =
+/// newer prompt. Each pane's shown card keeps one nonce until the card leaves the screen. An
+/// answered card is spent (`None`) and stays hidden until it leaves, so the screen catching up
+/// cannot announce it again.
+static SHOWN: std::sync::Mutex<std::collections::BTreeMap<String, (String, Option<String>)>> =
     std::sync::Mutex::new(std::collections::BTreeMap::new());
 
 fn fresh_nonce() -> String {
@@ -116,7 +117,8 @@ fn fresh_nonce() -> String {
     hex::encode(hasher.finalize())[..8].to_string()
 }
 
-/// Records what the pane shows now and returns the card with its per-showing id.
+/// Records what the pane shows now and returns the card with its per-showing id; `None` when no
+/// card shows or the one showing was already answered.
 pub fn shown(pane_id: &str, card: Option<PromptCard>) -> Option<PromptCard> {
     let mut map = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
     let Some(mut card) = card else {
@@ -125,10 +127,10 @@ pub fn shown(pane_id: &str, card: Option<PromptCard>) -> Option<PromptCard> {
     };
     let base = card.prompt_id.clone();
     let nonce = match map.get(pane_id) {
-        Some((seen, nonce)) if *seen == base => nonce.clone(),
+        Some((seen, nonce)) if *seen == base => nonce.clone()?,
         _ => {
             let nonce = fresh_nonce();
-            map.insert(pane_id.to_string(), (base.clone(), nonce.clone()));
+            map.insert(pane_id.to_string(), (base.clone(), Some(nonce.clone())));
             nonce
         }
     };
@@ -136,8 +138,23 @@ pub fn shown(pane_id: &str, card: Option<PromptCard>) -> Option<PromptCard> {
     Some(card)
 }
 
-/// An answer was typed: the id is spent, so a repeated tap cannot type it again.
-pub fn spend(pane_id: &str) {
+/// Spends `prompt_id` if it is still the pane's live card, atomically, so of two racing answers
+/// only one types. False means it was already answered or is no longer shown.
+pub fn claim(pane_id: &str, prompt_id: &str) -> bool {
+    let mut map = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+    match map.get_mut(pane_id) {
+        Some((base, nonce @ Some(_)))
+            if prompt_id == format!("{base}-{}", nonce.as_deref().unwrap_or_default()) =>
+        {
+            *nonce = None;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Herdr refused the answer, so the card may still be live: the next read shows it with a new id.
+pub fn forget(pane_id: &str) {
     SHOWN
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -413,11 +430,22 @@ All tests completed in 0.4s
         assert!(shown(pane, None).is_none());
         let again = shown(pane, card()).unwrap().prompt_id;
         assert_ne!(again, first, "the same command asked again is a new prompt");
-        spend(pane);
+        assert!(!claim(pane, &first), "an earlier showing's id is stale");
+        assert!(claim(pane, &again));
+        assert!(!claim(pane, &again), "only one of two racing answers types");
+        assert!(
+            shown(pane, card()).is_none(),
+            "an answered card stays hidden while the screen catches up"
+        );
+        assert!(shown(pane, None).is_none());
+        let third = shown(pane, card()).unwrap().prompt_id;
+        assert_ne!(third, again, "asked again after it left: a new prompt");
+        assert!(claim(pane, &third));
+        forget(pane);
+        let retry = shown(pane, card()).unwrap().prompt_id;
         assert_ne!(
-            shown(pane, card()).unwrap().prompt_id,
-            again,
-            "an answer spends the id"
+            retry, third,
+            "a refused answer leaves the card answerable under a new id"
         );
     }
 }
