@@ -2,7 +2,6 @@ package com.azusachino.cappuccino.ui
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import com.azusachino.cappuccino.ui.palette.MihonDefaultPalette
 import kotlin.math.max
 import kotlin.math.min
 import org.junit.Assert.assertEquals
@@ -26,9 +25,9 @@ class AppPaletteTest {
   }
 
   @Test
-  fun defaultSelectsPinnedMihonSchemesInBothModes() {
-    assertEquals(MihonDefaultPalette.lightScheme, scheme(AppPalette.DEFAULT, false))
-    assertEquals(MihonDefaultPalette.darkScheme, scheme(AppPalette.DEFAULT, true))
+  fun defaultSelectsMaterialBaselineSchemesInBothModes() {
+    assertEquals(BaselineLightColorScheme, scheme(AppPalette.DEFAULT, false))
+    assertEquals(BaselineDarkColorScheme, scheme(AppPalette.DEFAULT, true))
   }
 
   @Test
@@ -41,8 +40,8 @@ class AppPaletteTest {
   fun dynamicSelectsNativeSchemeOnlyWhenSupported() {
     assertEquals(FallbackLightColorScheme, scheme(AppPalette.DYNAMIC, false))
     assertEquals(FallbackDarkColorScheme, scheme(AppPalette.DYNAMIC, true))
-    assertEquals(MihonDefaultPalette.lightScheme, scheme(AppPalette.DYNAMIC, false, 30))
-    assertEquals(MihonDefaultPalette.darkScheme, scheme(AppPalette.DYNAMIC, true, 30))
+    assertEquals(BaselineLightColorScheme, scheme(AppPalette.DYNAMIC, false, 30))
+    assertEquals(BaselineDarkColorScheme, scheme(AppPalette.DYNAMIC, true, 30))
   }
 
   @Test

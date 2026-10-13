@@ -1,36 +1,6 @@
 # Cappuccino: native Herdr companion discovery
 
-Source research, 2026-10-05. [Intent](intent.md) was subsequently confirmed by the owner; [plan](plan.md) separates the authorized skeleton from the pending attachment spike. Findings below remain source/document inspection, not runtime verification of a bridge or reference app.
-
-## What the owner has said
-
-- Reuse the Cappuccino repository for a fresh macOS/iOS app. The old Java/Spring sample need not survive the rewrite; Git history remains available.
-- Add machines reachable through a tailnet or LAN and interact with their Herdr agents through native app UI, not a terminal experience.
-- The first-use priorities are continuing existing agent conversations and handling an attention inbox for responses, questions and approvals.
-- Conversations are directly with individual agents, not with a new coordinating assistant.
-- Discuss, explore similar projects and learn before settling the design. Acceptance review is premature during this discovery phase.
-
-### Grilling answers (confirmed; authoritative scope is in intent.md)
-
-- Personal use, Pi first, iPhone prototype first and macOS afterward; primarily coding work.
-- Remote Herdr agents are already long-running. The phone attaches to them; it does not own their process lifecycle. Opening a conversation must not launch or replace an agent, and app detach/network loss must not terminate it. Reattach restores the same session, current branch and pending requests.
-- Installing a trusted integration and explicitly using `/reload` while idle is acceptable; replacing/restarting the session is not. Reload is one-time setup, not a requirement on every phone attachment. Gated operations can still wait while disconnected, with the same request resolvable locally.
-- Show full selected current-session history, following the active branch. Transcript code and tool details suffice initially; no standalone file browser or Git-diff UI.
-- Add a Cappuccino-owned tool approval gate, rather than promising to forward arbitrary other extensions' dialogs. Gate shell commands, writes and unknown tools; known reads can proceed.
-- Terminal and phone can both decide the same pending request. First valid decision wins; stale/conflicting decisions fail visibly. Pending approvals wait without default allow while the phone is unavailable.
-- Support reusable grants for an exact tool, arguments and cwd in that session. Survive ordinary phone reconnects, but revoke on integration reload, active-branch change or session replacement. Manual revocation must be available. Matching granted invocations may run; this is explicit prior authorization, not default approval of pending requests.
-- Composer exposes Nudge (steer at the next boundary) versus Follow-up (after task completion).
-- Notify for approvals, failures and task completion, using generic Telegram alerts with no sensitive task contents or Telegram approval actions. Native APNs is deferred because the owner will not pay for Apple Developer membership now.
-- Weekly free-signing reprovisioning is acceptable for the prototype, not a settled long-term distribution solution.
-- Private LAN/tailnet prototype; no public ingress or relay is authorized. Manual machine registration/pairing is acceptable; machine-side companion and Pi integration may be explored, not deployed without separate authority.
-
-Still undecided: transport and exact authenticated pairing mechanism, implementation language for the companion, deployment targets/build provisioning details, long-term distribution, and runtime feasibility of the new integration. These are not grounds to silently expand product scope.
-
-## Current repository
-
-Cloned from `git@github.com:azusachino/cappuccino.git`, remote default branch `main`, revision `84aba5575459208e2e8eacec79c90e9af94f1850`.
-
-At inspection it contained a Java 11 / Spring Boot 2.7.1 / Spring Native Gradle sample and a coffee-list endpoint. There was no Apple app architecture to retain; the owner authorized replacing that sample with the native skeleton. Existing `LICENSE` is GPL-3.0; rewriting the code does not silently decide a new license or App Store distribution policy.
+Source research from 2026-10-05 that informed the [intent](../intent.md) and the [plan](../plan.md). Findings remain source and document inspection, not runtime verification of a bridge or reference app.
 
 ## References and lessons
 
@@ -94,17 +64,15 @@ Saved SSH machine forwarding already exists in the installed CLI. This helps rea
 
 **Main design risk:** a pretty chat UI built on terminal snapshots still cannot reliably reconstruct message boundaries or safely approve the right pending tool operation. `blocked` also does not identify the question or permission payload. A stale approval must never translate blindly into a keystroke on whichever dialog is now open.
 
-## Pi and Apple follow-up research during grilling
+## Pi and Apple follow-up research
 
-Installed Pi documentation and source were inspected at version 1.0.2 under `/Users/azusachino/.luna/agent/install/releases/1.0.2/node_modules/@earendil-works/pi-coding-agent/`.
+Installed Pi documentation and source were inspected at version 1.0.2 under the install directory of a custom `PI_CODING_AGENT_DIR` (`install/releases/1.0.2/node_modules/@earendil-works/pi-coding-agent/`).
 
 - `docs/sessions.md` describes active-branch context and retained historical branches. `docs/session-format.md` is the reference for implementing a history reader; concatenating a whole JSONL file would mix alternative histories.
 - `docs/slash-commands.md` explicitly supports `/reload` after adding discovered extensions. `docs/extensions.md` exposes `pi.sendUserMessage()`, lifecycle/message events and asynchronous `tool_call` handlers that can block execution.
 - `dist/modes/interactive/interactive-mode.js`, `handleReloadCommand()`, refuses reload while streaming or compacting. `dist/core/agent-session.js`, `reload()`, replaces resources/runtime around the existing session manager; it does not launch a replacement Pi process or new conversation. Extension runtime state is invalidated and must be cleaned up.
 - `docs/security.md` states that Pi does not ask for approval before every tool call. `examples/extensions/permission-gate.ts` demonstrates an awaited confirmation hook, not a security sandbox.
 - Therefore, lack of RPC attachment is **not** proof that a trusted companion extension cannot be added to an existing TUI session. Idle reload is documented; an authenticated remote event/action bridge and correlated tool approvals are new work whose runtime behavior still needs a bounded spike. Already executing calls cannot be retroactively gated.
-
-A read-only Herdr researcher (`cappuccino-feasibility`, Pi/gpt-6-luna medium, task-created pane `w1:p5M`) inspected session/RPC/integration sources. Its initial report overgeneralized the no-RPC-attach limitation to extension loading; the lead found the documented reload path above and requested a correction. The retrieved follow-up explicitly corrected that conclusion after inspecting installed reload code and `examples/extensions/reload-runtime.ts`; it also corrected an earlier implication that APNs needs public inbound hosting. Both results are source inspection, not runtime verification or an acceptance review. A particular companion's successful load, live bridge and continuity still need a bounded spike.
 
 Apple primary sources:
 
@@ -114,25 +82,3 @@ Apple primary sources:
 - [Background pushes](https://developer.apple.com/documentation/usernotifications/pushing-background-updates-to-your-app): delivery is not guaranteed and can be throttled; this is not a persistent background socket or reliable alert mechanism.
 
 The two dynamic APNs pages failed readable extraction; their official DocC JSON was retrieved from `https://developer.apple.com/tutorials/data/documentation/usernotifications/` with the corresponding `.json` filenames. No live APNs registration, build signing, push or Telegram delivery was tested.
-
-## Candidate directions, not decisions
-
-1. **Direct SSH client:** connect from the Apple app, use Herdr for discovery/control, and read harness-native history. Few services; more SSH and per-harness logic in the client. Existing-session fit must be proven. Foreground connectivity does not solve background delivery.
-2. **Small machine-side companion:** Herdr remains the process runtime; a companion normalizes one harness's history/events and exposes narrowly scoped authenticated actions to the app. Better separation and a place for replay/approval correlation, but adds installation, auth and versioning. It is not proven necessary yet.
-3. **Adopt HAPI/ACP as the runtime contract:** more structured chat/approval support, but potentially changes how agents start or are controlled. Not the default because attaching existing Herdr agents is central to the request.
-
-SwiftUI is a reasonable candidate for shared native macOS/iOS UI. Transport and protocol choices should follow the feasibility results, not determine the product in advance. Tailnet/LAN reachability is not application authorization. No public exposure has been authorized.
-
-## Proposed exploration sequence
-
-1. Finish the product conversation: which harness first, what a typical reply/question/approval looks like, and whether alerts must arrive while the iPhone app is closed.
-2. Deep-read the smallest useful reference paths: HAPI native chat/approval and reconnect, Agmente transcript/capabilities, Claude Code Mobile SSH/session discovery. Extract patterns, not whole frameworks.
-3. Agree a bounded feasibility spike against one explicitly selected disposable agent session: identify its native history, read structured messages, reply once through Herdr, and reconnect without duplicated messages or a misdirected send. Investigate one real question/approval shape without blindly sending keys. Check installed API capabilities and session identity through replacement/moves.
-4. Sketch the native journeys with representative data: attention inbox → agent conversation → response/decision, plus add-machine and disconnected states. No terminal layout as the primary interface.
-5. Decide transport, first-harness capabilities, privacy/background trade-offs and minimum scope. Only then write accepted criteria and a thin implementation plan, replace the Java sample, and verify working slices.
-
-Candidate minimum scope for discussion: machine registration, existing-agent list, native transcript, replies, and an attention inbox. Agent spawning, a coordinator bot, remote terminal, broad file management, voice and cloud relay are not established requirements.
-
-## Work state
-
-Discovery led to confirmed [intent](intent.md) and an authorized [skeleton/spike plan](plan.md). Live implementation state is in Asobi (`cappuccino:native-skeleton`); this research page is not its status board. Source research does not establish working remote attachment, safe tool approvals or notification delivery.

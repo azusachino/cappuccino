@@ -42,9 +42,9 @@ toolchain for building from source.
 - **S7 Install the app:** "I build and install the app from the repo with
   Xcode (free provisioning, weekly re-sign)." → documented; no store, no
   TestFlight in MVP.
-- **S8 (in scope, issue #7 — shipped in this slice):** tap an agent → live
-  active-branch transcript with expandable tool details. **(#9, post-MVP):**
-  answer prompts from the phone.
+- **S8 (issue #7, shipped):** tap an agent → transcript with expandable tool
+  details. Answers to approvals and questions are read from the agent's screen;
+  typed approvals and grants (#9) are not implemented.
 
 ## Rules
 

@@ -1,120 +1,265 @@
 # Cappuccino
 
-A personal native companion for conversations and attention from agents already running on your Herdr machines. The connected-feature order is bridge feasibility, connected iPhone, Android, then Mac-specific UX.
+Cappuccino is a native iPhone and Android app for the coding agents already
+running in [Herdr](https://github.com/herdrdev/herdr) panes on your own machines. It lists
+those agents, shows their conversations, and lets you send a prompt, stop a
+run, start a new session, or answer an approval. It does not start, stop or
+replace the agents. A small Rust bridge, installed as a Herdr plugin, serves
+the apps over your private tailnet.
 
-**Current state:** native iPhone and Android clients speaking HTTP/WebSocket to the Herdr plugin bridge (`services/bridge`). The bridge is a standalone Rust phone-transport facade launched by Herdr's plugin commands; it is not loaded into Herdr and does not own agent runtime. It reads selected Herdr APIs over the local socket. It ships **no auth** by owner decision: the tailnet/loopback boundary is the security model, the binary refuses non-loopback binds, and `tailscale serve` is the supported exposure. Clients read conversations, send prompts, stop or start a session, and answer approvals and questions read off the agent screen; prompt text is terminal input, not a receipted Pi queue delivery. There is no agent launcher or terminal emulator.
+## Why
 
-Read [intent](docs/intent.md), [plan](docs/plan.md), [architecture](docs/architecture.md), [user stories](docs/user-stories.md) and [source research](docs/discovery.md). Existing remote agents keep their process/session lifetime; future clients attach and detach.
+Long-running agents keep working after you leave the terminal, but checking
+on them from a phone usually means a remote terminal app. Cappuccino reads
+the agent's own session record and the pane's screen instead, so the phone
+shows a conversation rather than a terminal. The agent keeps running when the
+phone disconnects, and reconnecting shows the same session.
 
-## Getting started (MVP)
+## What you can do
 
-**Phone (S7).** Build and install from this repo with Xcode: `make setup`,
-open the generated `Cappuccino.xcodeproj`, select the `Cappuccino` iOS scheme
-with your device as destination, and run (free provisioning; re-sign weekly).
-No store, no TestFlight in the MVP.
+- **Machines:** add each Herdr machine by its bridge URL. Each machine lists
+  its agents. An unreachable machine shows its own error and does not block
+  the others.
+- **Agents and status:** see each agent's name, working directory, branch (where
+  the repository is known) and state (idle, working or blocked), as Herdr reports them.
+- **Conversations:** read the canonical transcript for Pi, Claude Code and
+  Agy. If an agent has no session file the bridge can resolve, the app shows
+  the pane's terminal scrollback instead, labeled as scrollback and read-only.
+- **Prompts:** send text to an agent. It arrives as typed input, not as a
+  queued delivery with a receipt.
+- **Stop:** send Escape to interrupt the current run. Offered while the agent
+  is working.
+- **New session:** type `/new` into an idle Pi, Claude Code or Agy session.
+  The bridge refuses it while the agent is working or blocked.
+- **Approvals and questions:** answer tool approval prompts and Claude Code's
+  AskUserQuestion forms. The bridge reads them from the bottom of the screen
+  and presses the matching key. An answer is refused if the prompt on screen
+  has changed.
+- **Slash commands:** a message that starts with an agent command, such as
+  `/model opus`, asks for confirmation before it is sent. Commands like
+  `/model` drop the agent's prompt cache, and `/new` ends the conversation, so
+  each one needs an explicit yes.
+- **Session stats:** the composer shows the model, thinking level, context
+  tokens and window, and the share of input read from the prompt cache. Pi and
+  Claude Code also report the context window when it is known. Agy reports
+  token counts without a model.
+- **Saved conversations (Android):** recent conversations stay on the device
+  so you can read them offline. A saved view is read-only, shows when it was
+  captured, and offers no actions.
+- **Notifications (Android):** a foreground service watches the configured
+  machines and alerts you when an agent finishes or waits for input. The iPhone
+  app has no notifications.
 
-**Add a machine and browse agents.** First install the appropriate Herdr agent
-integration in the running agent's effective config directory, reload it while
-idle, and verify its native session report. For Pi, an integration installed in
-`~/.pi/agent` does not help a process using `PI_CODING_AGENT_DIR=~/.luna/agent`.
-Follow the [integration prerequisite](services/bridge/README.md#agent-integration-prerequisite);
-scrollback is not canonical-reader readiness. On each Herdr machine, install the bridge
-binary before linking the plugin. From this repository's root, run
-`cargo install --path services/bridge --locked`; ensure Cargo's install `bin`
-directory is on Herdr's `PATH`, then run
-`herdr plugin link <path-to-services/bridge>` and verify with
-`herdr plugin action invoke status --plugin cappuccino-bridge`. The
-plugin does not build or install the binary. Follow the
-[bridge setup guide](services/bridge/README.md) to expose its loopback listener
-over a private tailnet using `tailscale serve`. The bridge has no authentication:
-do not expose it to public ingress. In the app, open Machines and add the
-machine's base URL (`http://127.0.0.1:7392` locally or your private tailnet
-HTTPS address). Agent listing and read-only transcript streaming are available;
-prompt delivery and approvals are not implemented.
-
-Selecting an agent never starts, stops or replaces it. Prompt delivery and
-approvals are not implemented. The issue #7 transcript UI slice is present,
-but canonical live Pi transcript/stream behavior has not been verified.
-
-## Layout
+## How it works
 
 ```text
-apps/android/    Native Gradle/Kotlin/Compose app and its tests
-apps/ios/        SwiftPM core/SwiftUI package and core tests; App/ entrypoint, UITests/ journey
-services/bridge/ Rust Herdr plugin bridge
+phone (iPhone or Android)
+  │  HTTPS / WebSocket over the tailnet
+  ▼
+tailscale serve   https://<machine>.<tailnet>.ts.net  ->  127.0.0.1:7392
+  │
+  ▼
+cappuccino-bridge (loopback 127.0.0.1:7392)
+  │  NDJSON over the Herdr socket
+  ▼
+Herdr  ->  agent panes (Pi, Claude Code, Agy)
 ```
 
-`apps/ios` holds the Swift core and SwiftUI shell for the iPhone app. There is no macOS app: Herdr covers the desktop (owner decision 2026-10-13). The Swift package keeps `.macOS(.v26)` only so `swift test` runs on the Mac host. Android keeps Kotlin logic and UI in its app module; it shares product behavior, not Swift code. Root Make commands wrap the native build systems. No monorepo framework or generated cross-platform SDK is needed.
+The bridge is a Rust program that Herdr starts through its plugin manifest.
+It runs its own loopback HTTP and WebSocket server and keeps that server
+running after startup. For each request it asks Herdr, over Herdr's local
+socket, for the agent list, pane text or a prompt operation. For a
+conversation it reads the agent's session file, after checking that the path Herdr
+reports is inside that agent's session store. `tailscale serve` maps the loopback port
+to an HTTPS address on your tailnet, and nothing else is exposed. Stop and New
+session only type into the existing pane, so neither starts nor ends a process.
 
-## Apple development
+## Design and trade-offs
 
-Requires macOS 26+, Xcode 26+ with Swift 6.2+, and mise. iOS deployment target is 17; glass APIs are used on iOS 26+ only. No API keys, Herdr runtime or Apple Developer membership is needed for tests or unsigned Simulator builds.
+- **No app-level authentication.** The tailnet is the boundary: anyone on
+  your tailnet who has the URL can use the bridge. The bridge refuses any
+  non-loopback bind, and `tailscale serve` is the only supported way to expose
+  it. Do not expose it to public ingress.
+- **A Herdr plugin, not a separate daemon.** Herdr's plugin system starts the
+  bridge and provides its status, stop and log actions. The bridge is not
+  loaded into Herdr or into an agent. Herdr and the agent own process lifetime,
+  so the app never launches or kills an agent.
+- **Reading prompts off the screen, failing closed.** The bridge does not
+  integrate with each agent's prompt flow. It reads the visible prompt, gives it
+  a single-use id, and checks the bottom of the screen for it. It refuses an
+  answer for a stale or reused id, and it asks you to confirm any slash command
+  before sending it.
+- **Prompt text is terminal input.** A prompt is written to the pane with
+  Enter. Herdr does not report which Pi queue accepted it, so the app does not
+  claim a delivery receipt.
+- **Native apps, shared behavior.** The iPhone and Android apps are written
+  separately in Swift and Kotlin. They share behavior through a common set of
+  fixtures and the behavior spec, not through shared code.
+
+### Claude Code notes
+
+- **Transcript:** the bridge reads Claude Code's project session files, under
+  `CLAUDE_CONFIG_DIR` when that is set, otherwise under `~/.claude`.
+- **Approvals and questions:** Claude Code writes an AskUserQuestion to its
+  transcript only after it is answered. While the form waits, the bridge reads
+  it from the screen, and it does the same for tool approvals.
+- **New session:** `/new` starts a fresh conversation in the same process.
+- **Context window:** 200K for Claude 3 models, Haiku 4.5, Sonnet 4.5, Opus 4.5,
+  Opus 4.1, Opus 4.0 and Sonnet 4.0. Every other model is 1M. A count above
+  200K shows that the larger window applies.
+- **Commands:** slash commands are confirmed before they are sent, as above.
+
+## Getting started
+
+### Requirements
+
+- Herdr 0.9.0 or later. The plugin manifest sets this minimum, and the bridge
+  is tested against Herdr 0.9.3.
+- Tailscale on each Herdr machine and on each phone, on the same tailnet.
+- A Rust toolchain (`cargo`) on each Herdr machine, to build the bridge.
+- iPhone app: macOS 26 or later with Xcode 26 or later (Swift 6.2), and
+  [mise](https://mise.jdx.dev). The app targets iOS 17 and later.
+- Android app: JDK 21 and an Android SDK with platform API 37 and build-tools
+  36.0.0. The app runs on Android 8.0 (API 26) and later.
+
+### 1. Prepare each agent's Herdr integration
+
+The bridge can only read a Pi conversation after Herdr's integration has
+reported the session. Install the integration in the config directory that
+the running Pi process uses (`<pi-config-dir>` below, for example a custom `PI_CODING_AGENT_DIR`):
+
+```sh
+env PI_CODING_AGENT_DIR="<pi-config-dir>" herdr integration install pi
+env PI_CODING_AGENT_DIR="<pi-config-dir>" herdr integration status
+```
+
+Then run Pi's `/reload` while it is idle, as described in the
+[integration prerequisite](services/bridge/README.md#agent-integration-prerequisite).
+Use the supported integration for other agent types.
+
+### 2. Install and link the bridge on each Herdr machine
+
+From the root of this repository:
+
+```sh
+cargo install --path services/bridge --locked
+herdr plugin link "$PWD/services/bridge"
+herdr plugin list
+herdr plugin action invoke status --plugin cappuccino-bridge
+```
+
+Install the binary first. Linking the plugin does not build it. Cargo's bin
+directory (normally `~/.cargo/bin`) must be on the `PATH` that Herdr passes to
+plugin commands. The `status` action confirms this.
+
+### 3. Expose the bridge to your tailnet
+
+On `start` and `status`, the bridge checks Tailscale Serve and adds the entry
+if it is missing. The entry maps `https://<machine>.<tailnet>.ts.net` to the
+loopback port. The bridge prints the URL. Check it from any device on the tailnet:
+
+```sh
+curl https://<machine>.<tailnet>.ts.net/api/session
+```
+
+If you want to run the Serve command yourself, set `serve.auto_apply` to
+`false` in `~/.config/cappuccino-bridge/config.json`, or set
+`CAPP_BRIDGE_SERVE_AUTO_APPLY=0`, before you start the bridge. The bridge then prints the command instead
+of running it. The
+[bridge setup guide](services/bridge/README.md#install-and-lifecycle) covers
+the one-time Tailscale operator setup, the config file and the other bridge
+actions.
+
+### 4. Build and install the iPhone app
 
 ```sh
 make setup
-make check-apple
 make generate
-open Cappuccino.xcodeproj
 ```
 
-Choose `Cappuccino` for iPhone/iPad Simulator. Edit root `project.yml`, not the ignored generated project. iOS remains 17+.
+Open the generated `Cappuccino.xcodeproj`, select the `Cappuccino` scheme and
+your iPhone as the destination, then run it. Sign it with your own team. With
+free provisioning, the installed app must be re-signed about every seven days.
+There is no App Store or TestFlight build.
 
-If Command Line Tools are selected globally, use a scoped override:
+### 5. Build and install the Android app
 
-```sh
-env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make validate-apple
-env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make ui-test DESTINATION="platform=iOS Simulator,id=<task-owned simulator-id>"
-```
+Open `apps/android/` in Android Studio and run the app on your phone. To build
+the debug APK without Android Studio, run `make build-android`. The APK is
+written to `apps/android/app/build/outputs/apk/debug/app-debug.apk`. Only debug
+builds are provided.
 
-Discover available device types/runtimes with `xcrun simctl list devicetypes` and `xcrun simctl list runtimes`. Create a dedicated simulator with `xcrun simctl create <name> <type-id> <runtime-id>`, use its returned UUID, and shut down/delete only that task-created device after preserving evidence. UI results and synthetic screenshot attachments live in `.build/xcode/Logs/Test/`.
+### 6. Add a machine
 
-## Android development
-
-Requires JDK 21 and an Android SDK containing API 37/build tools 36.0.0. Set `ANDROID_HOME` to that SDK; use `JAVA_HOME` only when selecting an existing JDK. The app minimum is API 26; compile/target is API 37. The checked-in, checksum-verified Gradle wrapper owns Gradle; `gradle/libs.versions.toml` owns Android/Kotlin/Compose versions. Open `apps/android/` in Android Studio.
-
-```sh
-make fmt-android
-make validate-android
-ANDROID_SERIAL=<task-owned emulator serial> make ui-test-android
-```
-
-The Android conversation reader renders native CommonMark prose/code, keeps tool
-and thought details collapsed until expanded, and formats timestamps in the
-device timezone as `yyyy-MM-dd HH:mm:ss`. It follows the newest displayed
-content unless you scroll back; incoming content then offers an explicit jump
-to latest. Canonical Pi identity still requires an authoritative Herdr session
-report; see [Pi identity](services/bridge/README.md#pi-transcript-identity).
-
-Create a new, uniquely named AVD from an already available image; do not reuse
-or overwrite an owner's AVD. Local evidence uses an API 35 ARM emulator; CI
-selects API 35 x86_64 on its disposable Linux runner. Instrumentation covers
-navigation/recreation, machine and foreground recovery, connection failures,
-conversation scrolling, disclosures, Markdown and live timezone changes.
-Reports and additional synthetic PNGs remain under `apps/android/app/build/`;
-the three baseline screenshots export to `.build/android/screens/`.
-
-Release keys and physical-phone installation are separate work. Debug APK
-assembly uses development signing only. Android declares network access for
-bridge connections; legacy and modern backup/transfer rules exclude app data.
-Those rules are not a credential-storage implementation.
-
-## Gates
-
-```sh
-make fmt
-make validate
-```
-
-These aggregate commands require both toolchains. Use `fmt-apple`/`check-apple`/`validate-apple` or their Android counterparts for platform-focused iteration. `make md-check` checks all Markdown. Formatting, core tests, lint and compilation are prerequisites; both platform UI journeys are explicit commands, not implicit acceptance of remote behavior.
-
-CI defines separate Apple and Android jobs using released action tags and read-only contents permissions. Pull requests run format, tests, lint and builds; the emulator and simulator UI journeys run on pushes to `main` and on demand (`workflow_dispatch`). It preserves narrow synthetic UI evidence for seven days and uses only task-owned simulators/emulators. Delivered-head hosted runs succeeded for both platforms (run 37325757158); the hosted Android capture shows an unrelated system launcher ANR dialog from emulator load, recorded in [verification](docs/verification.md#delivered-head-hosted-checkpoint). See [development and quality](docs/development.md) for toolchain details and [verification](docs/verification.md) for actual accepted runs and limits.
+In the app, open Machines and add the bridge URL: the `https://…ts.net`
+address from step 3. A loopback address such as `http://127.0.0.1:7392` reaches
+the bridge only from the same machine, for example the iOS Simulator. Each
+saved machine is bound to the machine ID the bridge reports.
 
 ## Limitations
 
-The bridge currently supports machine reachability, agent listing and read-only
-transcript/stream routes. Prompt delivery and approvals are not implemented.
-The bridge is intentionally unauthenticated and must remain on loopback/private
-tailnet ingress. See [verification](docs/verification.md) for tested behavior
-and known limits, and [the plan](docs/plan.md) for future work.
+- The bridge has no authentication. Its safety depends on the tailnet and on
+  loopback-only binding.
+- Prompts are terminal input. Nudge and Follow-up queue selection and delivery
+  receipts are not implemented.
+- Approvals are answered from the screen. There is no typed approval gate, no
+  reusable grants, and no reconciliation of pending requests after a
+  reconnect.
+- Canonical history is read from each agent's session file, and that path must
+  be reported by Herdr. An agent without a usable reported session shows the
+  read-only scrollback fallback.
+- Live parity with an owner's active session has not been verified. The
+  automated UI journeys use synthetic transcripts.
+- The bridge is not supervised after startup. No Herdr shutdown hook stops it,
+  so use the plugin stop action.
+- There are no push or Telegram alerts. The iPhone app has no notifications and
+  no saved conversations.
+- The Android app is available only as a debug build. Release signing and
+  physical-phone installation are separate work.
+- The Mac app was retired. Herdr covers the desktop.
 
-See [CONTRIBUTING](CONTRIBUTING.md) and [AGENTS](AGENTS.md) for style, gates and ownership. The existing [GPL-3.0 license](LICENSE) remains unchanged.
+For the tested behavior and its limits, see [verification](docs/verification.md).
+
+## Documentation
+
+- [docs/intent.md](docs/intent.md): the confirmed product intent and owner
+  decisions.
+- [docs/plan.md](docs/plan.md): the current issue slices and what is next.
+- [docs/architecture.md](docs/architecture.md): components, bridge routes and
+  the Herdr input boundary.
+- [docs/behavior-spec.md](docs/behavior-spec.md): the provisional behavior
+  contract shared by the two apps.
+- [docs/user-stories.md](docs/user-stories.md): the MVP stories and setup for
+  two Herdr machines.
+- [docs/verification.md](docs/verification.md): what has been exercised and
+  the current limits.
+- [docs/development.md](docs/development.md): toolchains, gates and CI for
+  contributors.
+- [docs/bridge-v2-contract.md](docs/bridge-v2-contract.md): the bridge HTTP and WebSocket contract, including the answer, prompt-id and command-confirmation rules.
+- [services/bridge/README.md](services/bridge/README.md): bridge installation,
+  lifecycle, API, configuration and security notes.
+- [docs/design/](docs/design): current design notes for the apps, including
+  [agent completion notifications](docs/design/agent-completion-notifications.md),
+  [Android Material 3](docs/design/android-material3.md),
+  [conversation rework](docs/design/conversation-rework.md),
+  [offline conversation identity](docs/design/offline-conversation-identity.md),
+  [Pi phone reader](docs/design/pi-phone-reader.md) and
+  [Herdr and Pi capability audit](docs/design/herdr-pi-capability-audit.md).
+- [docs/research/](docs/research): source studies and research notes behind
+  the design, including [discovery](docs/research/discovery.md).
+- [docs/licenses/](docs/licenses): notices for bundled third-party fonts and
+  derived code.
+- [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md): style, gates
+  and ownership rules.
+
+## Development
+
+Contributor setup, repository layout, toolchain pins, make targets, gates,
+scoped toolchain selection and task-owned devices are in
+[docs/development.md](docs/development.md). Style and contribution rules are
+in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+Cappuccino is licensed under the GNU General Public License v3.0. See
+[LICENSE](LICENSE).

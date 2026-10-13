@@ -2,7 +2,7 @@
 
 The bridge is Cappuccino's phone-reachable transport facade over selected machine-local Herdr APIs. It is a Rust/Tokio/axum executable linked through a Herdr plugin manifest; Herdr starts and controls it, but does not load it into the Herdr server or an agent. Herdr and Pi continue to own agent/session lifetime.
 
-This standalone process serves a loopback HTTP/WebSocket API to native clients over the private tailnet. It has no auth by owner decision; public ingress is out of scope. The bridge currently has no prompt-delivery endpoint and is not an agent runtime.
+This standalone process serves a loopback HTTP/WebSocket API to native clients over the private tailnet. It has no auth by owner decision; public ingress is out of scope. The bridge is not an agent runtime.
 
 ## Layout
 
@@ -33,11 +33,14 @@ same base URL for both transports.
 | `GET /api/session` | HTTP | reachability, machine identity, version and capability advertisement |
 | `GET /api/agents` | HTTP | Herdr `agent.list` mapping; names/pane IDs are locators, not proven native Pi session IDs |
 | `GET /api/transcript?session=…` | HTTP | resolves Herdr-reported `agent_session`; fails closed when missing or outside Pi's canonical session store |
+| `GET /api/agents/{sessionId}/conversation` | HTTP | canonical transcript for Pi, Claude Code or Agy; labeled `scrollback` when no usable session is reported |
+| `POST /api/agents/{sessionId}/prompt` | HTTP | prompt text (commands need `confirmed`) or an answer to a visible card |
+| `POST /api/agents/{sessionId}/control` | HTTP | `interrupt` (Escape) or `new_session` (`/new`, refused while the agent is busy) |
 | `/api/stream?session=…` | WebSocket | read-only pane-line append/reset events with visible gaps |
 
-`GET /api/session` adds optional `bridge_version` (the Cargo package version) and a boolean `capabilities` object: `agent_discovery`, `live_output`, `conversation_history`, `prompt_input`, and `prompt_answers`. These advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Missing fields mean not reported; `false` explicitly means unsupported. Protocol remains 1 and existing identity validation is unchanged. Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog.
+`GET /api/session` adds optional `bridge_version` (the Cargo package version) and a boolean `capabilities` object: `agent_discovery`, `live_output`, `conversation_history`, `prompt_input`, `prompt_answers`, `agent_control` and `completion_signals`. `telegram_notifications` is reported `false`. These advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Missing fields mean not reported; `false` explicitly means unsupported. Protocol remains 1 and existing identity validation is unchanged. Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog.
 
-The bridge exposes `/api/agents/{sessionId}/conversation` and a legacy `POST /api/agents/{sessionId}/prompt` route for prompt text and validated prompt-card answers; this is not native Pi queue selection or a correlated delivery receipt. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
+The bridge exposes `/api/agents/{sessionId}/conversation`, `POST /api/agents/{sessionId}/prompt` for prompt text and validated prompt-card answers, and `POST /api/agents/{sessionId}/control` for `interrupt` and `new_session`; this is not native Pi queue selection or a correlated delivery receipt. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
 
 Pi conversation tool parts optionally include `is_error`, directly from the matching Pi `toolResult.isError`. Unknown-ID results remain unattached; missing flags remain absent rather than claiming success. This additive field preserves protocol 1 and existing clients. The Android reader uses it to expose failed results by default, not a keyword heuristic.
 
@@ -48,11 +51,12 @@ Ordinary JSON responses negotiate gzip with `Accept-Encoding`; SSE and WebSocket
 ### Pi transcript identity
 
 Pi resolution requires Herdr's exact path-kind `agent_session` report. Without
-an explicit override, paths inside either `~/.luna/agent/sessions` or
-`~/.pi/agent/sessions` are accepted after canonical containment checks.
-`PI_CODING_AGENT_SESSION_DIR` restricts resolution to that store;
-`PI_CODING_AGENT_DIR` otherwise restricts it to that config directory's
-`sessions` subdirectory. Missing, invalid or ambiguous locators remain
+an override, paths inside `~/.pi/agent/sessions` are accepted after canonical
+containment checks. `PI_CODING_AGENT_SESSION_DIR` or `PI_CODING_AGENT_DIR`, read
+from the bridge's environment (which it inherits from Herdr), selects the store
+instead: `PI_CODING_AGENT_SESSION_DIR` restricts resolution to that store, and
+`PI_CODING_AGENT_DIR` restricts it to that config directory's `sessions`
+subdirectory. Missing, invalid or ambiguous locators remain
 unavailable: cwd, terminal titles and newest-file timestamps never establish
 the selected Pi session's identity.
 
@@ -70,17 +74,19 @@ readiness. Installation in the wrong agent config directory does not count.
 
 For Pi, establish the **running Pi process's effective** `PI_CODING_AGENT_DIR`
 first. Run Herdr's installer and status check with that same directory. For
-example, only when Pi actually uses `~/.luna/agent`:
+example, only when Pi actually uses a custom config directory, `<pi-config-dir>`:
 
 ```sh
-env PI_CODING_AGENT_DIR="$HOME/.luna/agent" herdr integration install pi
-env PI_CODING_AGENT_DIR="$HOME/.luna/agent" herdr integration status
+env PI_CODING_AGENT_DIR="<pi-config-dir>" herdr integration install pi
+env PI_CODING_AGENT_DIR="<pi-config-dir>" herdr integration status
 ```
 
 Without this override, Herdr may install into `~/.pi/agent` while the running
-Pi loads extensions from `~/.luna/agent`. This mismatch was observed on Mini:
+Pi loads extensions from `<pi-config-dir>`. This mismatch has been observed:
 restarting Pi did not help because its effective directory lacked the
 integration. `current (v9)` in the default directory was not runtime proof.
+If Pi runs with a custom `PI_CODING_AGENT_DIR`, Herdr's environment must export
+the same value so the bridge reads that store.
 For other agent types, use their corresponding supported Herdr integration
 and verify their effective configuration location; do not install all
 integrations indiscriminately.
@@ -262,14 +268,6 @@ bridge crate stay unchanged.
   retention. Soak tests run serially so baselines are not contaminated.
   Short samples never prove absolute zero-leak. The soak is opt-in
   (`make resource-bridge-client`) and runs before a version release.
-- Leak acceptance is baseline-relative and per scenario class (success,
-  refusal, mid-flight cancellation, server disconnect, child churn): FD counts
-  may drop (async runtime teardown) but must not grow beyond a documented
-  tolerance after each class; children are reaped (asserted via try_wait);
-  mock tasks join under a deadline; temp state is removed. RSS evidence
-  combines sampled client RSS growth with peak; short samples never prove
-  absolute zero-leak. The soak is opt-in (`make resource-bridge-client`) and
-  runs before a version release.
 
 The manifest uses argv arrays and invokes the installed Rust binary directly;
 there are no bridge shell launchers. The bridge uses `libc` narrowly for Unix

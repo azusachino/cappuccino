@@ -1,6 +1,6 @@
 # Offline conversation identity
 
-Status: owner-selected local contract change, implementation and verification in progress. Deployment and whole-flow acceptance are not authorized or established by this document. This refines the [native continuation plan](https://github.com/azusachino/cappuccino/blob/35e72ff/docs/plan/native-ux-improvement-session.md) after the [Paseo study](paseo-source-study.md).
+Status: implemented on the bridge and Android. Whole-flow acceptance and deployment are not established by this document. This refines the [native continuation plan](https://github.com/azusachino/cappuccino/blob/35e72ff/docs/plan/native-ux-improvement-session.md) after the [Paseo study](../research/paseo-source-study.md).
 
 ## Recorded failure and decision
 
@@ -30,7 +30,6 @@ Saved views are read-only, show their capture time, use unknown current agent st
 
 - Hermetic bridge checks: identity stable on append, replacement session separated, provider namespace separated, invalid/oversized header has no key, legacy response remains compatible, scrollback has no key; preserve the existing exact-session/process ownership tests and mandatory resource soak.
 - Hermetic Android checks: response ownership/type/source rejection, legacy readability without saving, same-pane canonical separation, moved-pane continuity, machine isolation, reconstruction, read-only actions, discovery isolation, corruption and preservation/bounds.
-- The first full bridge attempt passed 51 unit tests but failed the structured-conversation integration request with a connection error; the exact focused diagnostic subsequently passed. The fixture had a source-visible reserve/release readiness race: TCP success could observe another parallel server. Readiness now requires the spawned root's machine ID, with child stderr retained and no expanded deadlines, retries, skipped tests or serial-only substitute. Full parallel gate reproduction remains required; the focused pass alone does not prove the failure's cause.
 - Full `make check-bridge` and `make validate-android` are required for changed inputs. Source/build/unit checks are not native acceptance or independent verification.
 - Still required: stale in-flight save/read coverage, consuming native saved-reader/restart/selection journeys, artifact identity and owner visual acceptance. Existing display/tail failures and Attention/delivery gaps remain open.
 - No bridge deployment, push, release or owner-session manipulation follows from local gates. Old deployed bridges will not acquire this field until a separately authorized rollout.

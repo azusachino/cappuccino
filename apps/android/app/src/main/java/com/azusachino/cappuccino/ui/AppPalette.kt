@@ -2,8 +2,9 @@ package com.azusachino.cappuccino.ui
 
 import android.os.Build
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import com.azusachino.cappuccino.ui.palette.EditorPalettes
-import com.azusachino.cappuccino.ui.palette.MihonDefaultPalette
 
 /** Stable preference IDs, independent of brightness mode and list order. */
 enum class AppPalette(val label: String) {
@@ -32,5 +33,9 @@ internal fun appColorScheme(
       if (dark) FallbackDarkColorScheme else FallbackLightColorScheme
     palette == AppPalette.DYNAMIC && apiLevel >= Build.VERSION_CODES.S ->
       if (dark) dynamicDark else dynamicLight
-    else -> if (dark) MihonDefaultPalette.darkScheme else MihonDefaultPalette.lightScheme
+    else -> if (dark) BaselineDarkColorScheme else BaselineLightColorScheme
   }
+
+/** Material 3 baseline colors for the Default palette; one instance each, compared by identity. */
+internal val BaselineLightColorScheme = lightColorScheme()
+internal val BaselineDarkColorScheme = darkColorScheme()

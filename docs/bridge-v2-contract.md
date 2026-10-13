@@ -2,7 +2,7 @@
 
 **Status**: Proposal / Draft Contract  
 **Target Repositories**: `vendor/cappuccino/services/bridge`, `refs/coding-agents/herdr-web-ui`  
-**Related Documents**: [Architecture](architecture.md), [Herdr WebUI Research](herdr-webui-design-research.md), [Behavior Spec](behavior-spec.md)
+**Related Documents**: [Architecture](architecture.md), [Herdr WebUI Research](research/herdr-webui-design-research.md), [Behavior Spec](behavior-spec.md)
 
 ---
 

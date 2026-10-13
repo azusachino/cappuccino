@@ -1,7 +1,7 @@
 # Native Pi-paired agent workspace — primary-source research
 
-**Status:** research only (doc-writer scope; no implementation, no deps added, no protocol changes, no runtime/device probes).
-**Repo baseline:** `vendor/cappuccino` branch `research/native-pi-agent-workspace` @ `81ee365` (clean). PR 29 remains open and unmerged; nothing here assumes it landed.
+**Status:** research only (no implementation, no deps added, no protocol changes, no runtime/device probes).
+**Repo baseline:** `vendor/cappuccino` branch `research/native-pi-agent-workspace` @ `81ee365` (clean).
 **Sources:** installed Pi 1.1.0 package docs (canonical public reference: <https://pi.dev/docs/latest> — `sdk`, `rpc-commands`, `json` event stream, `message-types`, `tui`); repo source read with file/line citations below; GitHub primary sources fetched 2026-10 (repo metadata, LICENSE, README per candidate). Versions are cited per source; nothing here asserts live runtime parity — the running agent/bridge was never exercised.
 
 ## 1. Scope
