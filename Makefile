@@ -57,10 +57,9 @@ test-android: ## Run pure Kotlin logic tests
 lint-android: ## Run Android lint with warnings as errors
 	$(ANDROID) :app:lintDebug
 
-check-bridge: ## Bridge Rust gate: fmt, all hermetic tests, mandatory resource soak, release example
+check-bridge: ## Bridge Rust gate: fmt, all hermetic tests, release example (soak is resource-bridge-client)
 	$(CARGO) fmt --manifest-path $(BRIDGE_MANIFEST) -- --check
 	$(CARGO) test --locked --manifest-path $(BRIDGE_MANIFEST)
-	$(CARGO) test --locked --manifest-path $(BRIDGE_MANIFEST) --test resource_soak -- --ignored
 	$(CARGO) build --locked --release --manifest-path $(BRIDGE_MANIFEST) --example test-client
 
 # Stream scenarios require an existing readable SESSION and nonzero entries.
@@ -72,14 +71,15 @@ STREAM_CYCLES ?= 20
 bench-bridge-client: ## Reproducible bridge benchmark (BASE_URL, SESSION, STREAM_CYCLES; consumes bodies + stream entries)
 	$(CARGO) run --locked --release --manifest-path $(BRIDGE_MANIFEST) --example test-client -- bench --base-url $(or $(BASE_URL),http://127.0.0.1:7392) --session $(SESSION) --stream-cycles $(STREAM_CYCLES) --iterations 300
 
-resource-bridge-client: ## Leak/lifecycle soak (bounded); asserts FD/RSS/child/temp recovery
+resource-bridge-client: ## Leak/lifecycle soak (~6 min, opt-in before a version release); asserts FD/RSS/child/temp recovery
 	$(CARGO) test --locked --manifest-path $(BRIDGE_MANIFEST) --test resource_soak -- --ignored --nocapture
 
 check: check-apple check-android ## Check all platforms; requires both toolchains
 
 check-apple: fmt-check-apple md-check test-apple ## Focused Apple gate
 
-check-android: fmt-check-android test-android lint-android ## Focused Android gate
+check-android: ## Focused Android gate: format, unit tests and lint in one Gradle run
+	$(ANDROID) :ktfmtCheck :app:ktfmtCheck :app:testDebugUnitTest :app:lintDebug
 
 build-ios: generate ## Build an unsigned iOS Simulator app
 	$(XCODEBUILD) -scheme Cappuccino -destination 'generic/platform=iOS Simulator' build
@@ -98,7 +98,7 @@ ui-test-android: ## Run Android shell smoke on one task-owned emulator and expor
 	@test -n "$(ANDROID_SERIAL)" || { echo 'Set ANDROID_SERIAL=<task-owned emulator serial>' >&2; exit 2; }
 	$(ANDROID) :app:connectedDebugAndroidTest
 	mkdir -p .build/android/screens
-	@set -e; for screen in Chats Attention Machines; do \
+	@set -e; for screen in Machines AddMachineIme Settings; do \
 	  image=$$(find "$(ANDROID_TEST_OUTPUT)" -type f -name "$$screen.png"); \
 	  test -n "$$image" && test -f "$$image" || { echo "Missing or ambiguous $$screen screenshot" >&2; exit 1; }; \
 	  test "$$(file --brief --mime-type "$$image")" = image/png || { echo "Invalid $$screen screenshot" >&2; exit 1; }; \
@@ -109,4 +109,5 @@ validate: validate-apple validate-android ## Build/check all apps; UI journeys r
 
 validate-apple: check-apple build-ios build-macos ## Apple source/test/build acceptance
 
-validate-android: check-android build-android ## Android source/test/build acceptance
+validate-android: ## Android source/test/build acceptance in one Gradle run
+	$(ANDROID) :ktfmtCheck :app:ktfmtCheck :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest

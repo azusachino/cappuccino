@@ -2,7 +2,7 @@
 //! `pane.read` and emits wire-v0-shaped events with the slice-A
 //! reconciliation semantics.
 
-use crate::{agents, conversation, herdr, prompt, reconcile, transcript};
+use crate::{agents, conversation, herdr, prompt, questions, reconcile, stats, transcript};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Json, Path as AxumPath, Query, State};
 use axum::http::{header, StatusCode};
@@ -13,11 +13,30 @@ use std::sync::Arc;
 
 pub struct BridgeState {
     pub machine_id: String,
+    pub machine_name: Option<String>,
 }
 
 impl BridgeState {
     pub fn new(machine_id: String) -> Self {
-        BridgeState { machine_id }
+        BridgeState {
+            machine_id,
+            machine_name: host_name(),
+        }
+    }
+}
+
+fn host_name() -> Option<String> {
+    let mut bytes = [0u8; 256];
+    // SAFETY: gethostname receives a writable buffer and its exact capacity.
+    if unsafe { libc::gethostname(bytes.as_mut_ptr().cast(), bytes.len()) } != 0 {
+        return None;
+    }
+    let end = bytes.iter().position(|byte| *byte == 0)?;
+    let name = std::str::from_utf8(&bytes[..end]).ok()?.trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
     }
 }
 
@@ -37,8 +56,22 @@ pub async fn session(State(state): State<Arc<BridgeState>>) -> Response {
         json!({
             "event": "paired",
             "machine_id": state.machine_id,
+            "machine_name": state.machine_name,
             "protocol": 1,
-            "plugin": "azusachino.cappuccino-bridge",
+            "plugin": "cappuccino-bridge",
+            "bridge_version": env!("CARGO_PKG_VERSION"),
+            // Endpoint support, not a promise that every agent can use it or is healthy.
+            "capabilities": {
+                "agent_discovery": true,
+                "live_output": true,
+                "conversation_history": true,
+                "prompt_input": true,
+                "prompt_answers": true,
+                "agent_control": true,
+                "completion_signals": true,
+                "telegram_notifications": false,
+                "telegram_notifications_configured": false,
+            },
         })
         .to_string(),
     )
@@ -202,8 +235,8 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
                 .await;
         }
 
-        // Check for active interactive prompt (tool approval or ask_question)
-        let active_prompt = prompt::parse_prompt_from_screen(&text);
+        // Check for active interactive prompt (tool approval or a question).
+        let active_prompt = prompt::screen_card(&text);
         if let Some(card) = &active_prompt {
             if last_prompt_id.as_deref() != Some(&card.prompt_id) {
                 last_prompt_id = Some(card.prompt_id.clone());
@@ -266,6 +299,30 @@ async fn resolve_pane(state: &Arc<BridgeState>, session: &str) -> Option<String>
         .map(|row| row.pane_id)
 }
 
+/// The question form on screen while `prompt_id` still names it, untouched by the terminal.
+async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form, Response> {
+    let stale = |message: &str| error_response(StatusCode::CONFLICT, "stale_prompt", message);
+    let screen = herdr::pane_read_recent(pane_id, 80)
+        .await
+        .map_err(|err| error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string()))?;
+    let Some(form) = questions::form(&screen) else {
+        return Err(stale("the question is no longer shown"));
+    };
+    let shown = questions::card(&form).prompt_id;
+    if shown != prompt_id {
+        return Err(stale(&format!(
+            "the question on screen has changed (on screen {shown})"
+        )));
+    }
+    // Toggles are relative: ticks made in the terminal would be undone.
+    if form.ticked {
+        return Err(stale(
+            "this question was started in the terminal; finish it there",
+        ));
+    }
+    Ok(form)
+}
+
 /// GET /api/agents/{sessionId}/conversation
 pub async fn agent_conversation(
     State(state): State<Arc<BridgeState>>,
@@ -281,21 +338,40 @@ pub async fn agent_conversation(
 
     match transcript::resolve_session_transcript(&session_id).await {
         Ok(Some(resolved)) => {
-            let path = resolved.path();
-            match conversation::read_tail_lines(path, conversation::TRANSCRIPT_TAIL_BYTES) {
-                Ok(content) => {
-                    let turns = match resolved {
-                        transcript::ResolvedTranscript::Agy(_) => {
-                            conversation::parse_agy_transcript(&content)
-                        }
+            match conversation::read_canonical_tail(&resolved, conversation::TRANSCRIPT_TAIL_BYTES)
+            {
+                Ok((content, conversation_id)) => {
+                    let (turns, kind) = match resolved {
                         transcript::ResolvedTranscript::Pi(_) => {
-                            conversation::parse_pi_transcript(&content)
+                            (conversation::parse_pi_transcript(&content), stats::Kind::Pi)
                         }
+                        transcript::ResolvedTranscript::Claude(_) => (
+                            conversation::parse_claude_transcript(&content),
+                            stats::Kind::Claude,
+                        ),
+                        transcript::ResolvedTranscript::Agy(_) => (
+                            conversation::parse_agy_transcript(&content),
+                            stats::Kind::Agy,
+                        ),
                     };
+                    let mut session_stats = stats::session_stats(kind, &content);
+                    if let Some(found) = session_stats.as_mut().filter(|_| kind == stats::Kind::Pi)
+                    {
+                        if let (Some(provider), Some(model)) = (&found.provider, &found.model) {
+                            found.context_window =
+                                stats::pi_context_window(resolved.path(), provider, model);
+                        }
+                        if found.thinking_level.is_none() {
+                            found.thinking_level = stats::pi_thinking_level(resolved.path());
+                        }
+                    }
                     let payload = conversation::ConversationResponse {
                         session_id,
                         source: "canonical_log".to_string(),
+                        machine_id: Some(state.machine_id.clone()),
+                        conversation_id,
                         turns,
+                        stats: session_stats,
                     };
                     (
                         StatusCode::OK,
@@ -321,7 +397,10 @@ pub async fn agent_conversation(
                         let payload = conversation::ConversationResponse {
                             session_id,
                             source: "scrollback".to_string(),
+                            machine_id: Some(state.machine_id.clone()),
+                            conversation_id: None,
                             turns,
+                            stats: None,
                         };
                         (
                             StatusCode::OK,
@@ -343,6 +422,89 @@ pub async fn agent_conversation(
             }
         }
         Err(err) => error_response(StatusCode::BAD_GATEWAY, "protocol", &err),
+    }
+}
+
+/// The command an agent itself uses to start a fresh conversation in the same process.
+pub fn new_session_command(agent: &str) -> Option<&'static str> {
+    match agent {
+        "pi" => Some("/new"),
+        "claude" | "agy" | "antigravity" | "antigravity-cli" => Some("/clear"),
+        _ => None,
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ControlRequest {
+    pub action: String,
+}
+
+/// POST /api/agents/{sessionId}/control: the owner's own controls over a running agent. `interrupt`
+/// presses Esc to stop the current run; `new_session` types the agent's own new-conversation
+/// command. Neither starts nor ends a process.
+pub async fn control_agent(
+    State(state): State<Arc<BridgeState>>,
+    AxumPath(session_id): AxumPath<String>,
+    Json(request): Json<ControlRequest>,
+) -> Response {
+    if !matches!(request.action.as_str(), "interrupt" | "new_session") {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "unknown control action",
+        );
+    }
+    let rows = match herdr::agent_list().await {
+        Ok(result) => agents::map_agents(&result, &state.machine_id).unwrap_or_default(),
+        Err(err) => {
+            return error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string())
+        }
+    };
+    let Some(row) = rows
+        .into_iter()
+        .find(|row| row.session_id == session_id || row.pane_id == session_id)
+    else {
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            &format!("no agent with session_id {session_id}"),
+        );
+    };
+    // Typed into a running turn or an open question, the command would become its input.
+    if request.action == "new_session"
+        && (row.working || matches!(row.status.as_str(), "working" | "blocked"))
+    {
+        return error_response(
+            StatusCode::CONFLICT,
+            "agent_busy",
+            &format!(
+                "{} is {}; stop it before starting a new session",
+                row.agent, row.status
+            ),
+        );
+    }
+    let sent = match request.action.as_str() {
+        "interrupt" => herdr::pane_send_keys(&row.pane_id, &["esc"]).await,
+        _ => match new_session_command(&row.agent) {
+            Some(command) => herdr::agent_prompt(&row.pane_id, command).await,
+            None => {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "unsupported",
+                    &format!("no new-session command known for {}", row.agent),
+                )
+            }
+        },
+    };
+    match sent {
+        Ok(_) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            json!({"event": "control_sent", "action": request.action, "session_id": session_id})
+                .to_string(),
+        )
+            .into_response(),
+        Err(err) => error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string()),
     }
 }
 
@@ -392,7 +554,7 @@ pub async fn submit_agent_prompt(
             option_index,
             option_id,
         } => {
-            let active_screen = match herdr::pane_read_recent(&pane_id, 30).await {
+            let active_screen = match herdr::pane_read_recent(&pane_id, 80).await {
                 Ok(text) => text,
                 Err(err) => {
                     return error_response(
@@ -403,7 +565,7 @@ pub async fn submit_agent_prompt(
                 }
             };
 
-            let Some(card) = prompt::parse_prompt_from_screen(&active_screen) else {
+            let Some(card) = prompt::screen_card(&active_screen) else {
                 return error_response(
                     StatusCode::CONFLICT,
                     "stale_prompt",
@@ -422,9 +584,21 @@ pub async fn submit_agent_prompt(
                 );
             }
 
-            // Determine key to send
+            if card.card_type == questions::QUESTION && action.as_deref() != Some("cancel") {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    "answer a question card with answer_question",
+                );
+            }
+            // Determine key to send. The review's own Cancel row stops the whole form.
             if action.as_deref() == Some("cancel") {
-                let _ = herdr::pane_send_keys(&pane_id, &["esc"]).await;
+                let key = if card.card_type == questions::REVIEW {
+                    "2"
+                } else {
+                    "esc"
+                };
+                let _ = herdr::pane_send_keys(&pane_id, &[key]).await;
                 return (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "application/json")],
@@ -441,9 +615,15 @@ pub async fn submit_agent_prompt(
                 0
             };
 
-            // If numbered choice (1, 2, 3), press digit + enter
+            // If numbered choice (1, 2, 3), press digit + enter. The review acts on the digit
+            // alone; a following enter would land in the agent's input.
             let key_digit = format!("{}", opt_idx + 1);
-            let send_res = herdr::pane_send_keys(&pane_id, &[&key_digit, "enter"]).await;
+            let keys: &[&str] = if card.card_type == questions::REVIEW {
+                &[&key_digit]
+            } else {
+                &[&key_digit, "enter"]
+            };
+            let send_res = herdr::pane_send_keys(&pane_id, keys).await;
             match send_res {
                 Ok(_) => (
                     StatusCode::OK,
@@ -464,25 +644,83 @@ pub async fn submit_agent_prompt(
             }
         }
         prompt::PromptSubmission::AnswerQuestion { prompt_id, answers } => {
-            // For ask_question answers submitted as structured JSON or text
-            let answer_text = if let Some(s) = answers.as_str() {
-                s.to_string()
-            } else {
-                answers.to_string()
+            let form = match current_form(&pane_id, &prompt_id).await {
+                Ok(form) => form,
+                Err(response) => return response,
             };
-            match herdr::pane_send_text(&pane_id, &format!("{answer_text}\n")).await {
-                Ok(_) => (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "application/json")],
-                    json!({"event": "question_answered", "prompt_id": prompt_id}).to_string(),
-                )
-                    .into_response(),
-                Err(err) => error_response(
-                    StatusCode::BAD_GATEWAY,
-                    "herdr_error",
-                    &format!("cannot send answer: {err}"),
-                ),
+            // One card is one question: the form shows the next once this one is answered.
+            let [answer] = answers.as_slice() else {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "bad_answer",
+                    "answer the question on screen",
+                );
+            };
+            let steps = match questions::answer_steps(&form, answer) {
+                Ok(steps) => steps,
+                Err(message) => {
+                    return error_response(StatusCode::BAD_REQUEST, "bad_answer", &message)
+                }
+            };
+            for step in steps {
+                let sent = match &step {
+                    questions::Step::Keys(keys) => {
+                        let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+                        herdr::pane_send_keys(&pane_id, &keys).await
+                    }
+                    questions::Step::Text(text) => herdr::pane_send_text(&pane_id, text).await,
+                };
+                if let Err(err) = sent {
+                    return error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "herdr_error",
+                        &format!("cannot send answer: {err}"),
+                    );
+                }
+                // The form redraws between keys; faster input lands on the previous step.
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             }
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/json")],
+                json!({"event": "question_answered", "prompt_id": prompt_id}).to_string(),
+            )
+                .into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_session_uses_each_agents_own_command() {
+        assert_eq!(new_session_command("pi"), Some("/new"));
+        assert_eq!(new_session_command("claude"), Some("/clear"));
+        assert_eq!(new_session_command("agy"), Some("/clear"));
+        assert_eq!(new_session_command("antigravity-cli"), Some("/clear"));
+        assert_eq!(new_session_command("codex"), None);
+    }
+
+    #[tokio::test]
+    async fn machine_name_is_additive_metadata_not_machine_identity() {
+        let mut state = BridgeState::new("stable-machine-id".to_string());
+        state.machine_name = Some("Owner's Mac".to_string());
+        let response = session(State(Arc::new(state))).await;
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["machine_name"], "Owner's Mac");
+        assert_eq!(value["machine_id"], "stable-machine-id");
+        assert_eq!(value["protocol"], 1);
+        assert_eq!(value["bridge_version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(value["capabilities"]["agent_discovery"], true);
+        assert_eq!(value["capabilities"]["live_output"], true);
+        assert_eq!(value["capabilities"]["conversation_history"], true);
+        assert_eq!(value["capabilities"]["prompt_input"], true);
+        assert_eq!(value["capabilities"]["prompt_answers"], true);
+        assert_eq!(value["capabilities"]["agent_control"], true);
     }
 }

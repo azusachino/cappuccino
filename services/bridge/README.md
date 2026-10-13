@@ -30,12 +30,20 @@ same base URL for both transports.
 
 | Method / route | Transport | Behavior |
 | --- | --- | --- |
-| `GET /api/session` | HTTP | reachability and machine identity |
+| `GET /api/session` | HTTP | reachability, machine identity, version and capability advertisement |
 | `GET /api/agents` | HTTP | Herdr `agent.list` mapping; names/pane IDs are locators, not proven native Pi session IDs |
 | `GET /api/transcript?session=…` | HTTP | resolves Herdr-reported `agent_session`; fails closed when missing or outside Pi's canonical session store |
 | `/api/stream?session=…` | WebSocket | read-only pane-line append/reset events with visible gaps |
 
-The current bridge has no send route. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
+`GET /api/session` adds optional `bridge_version` (the Cargo package version) and a boolean `capabilities` object: `agent_discovery`, `live_output`, `conversation_history`, `prompt_input`, and `prompt_answers`. These advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Missing fields mean not reported; `false` explicitly means unsupported. Protocol remains 1 and existing identity validation is unchanged. Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog.
+
+The bridge exposes `/api/agents/{sessionId}/conversation` and a legacy `POST /api/agents/{sessionId}/prompt` route for prompt text and validated prompt-card answers; this is not native Pi queue selection or a correlated delivery receipt. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
+
+Pi conversation tool parts optionally include `is_error`, directly from the matching Pi `toolResult.isError`. Unknown-ID results remain unattached; missing flags remain absent rather than claiming success. This additive field preserves protocol 1 and existing clients. The Android reader uses it to expose failed results by default, not a keyword heuristic.
+
+Pi assistant records retain their individual timestamps/boundaries. Explicit `stopReason: aborted` or `error` becomes a `response_status` part with `aborted`/`failed` and optional reported detail; empty aborted responses are retained. Tool parts optionally include `started_at` from the call record and `finished_at` from the matching result record. No clock substitution, cancellation guessing or keyword classification is used.
+
+Ordinary JSON responses negotiate gzip with `Accept-Encoding`; SSE and WebSocket bodies are excluded. Android's existing OkHttp decoder handles it transparently and still enforces the decompressed response limit. The owner approved tower-http gzip middleware (and its standard test decoder) as a scoped dependency exception. Small/non-negotiated responses retain identity encoding. This changes transfer size, not session semantics or the trust boundary.
 
 ### Pi transcript identity
 
@@ -54,16 +62,63 @@ Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, op
 
 `serve.auto_apply` defaults to `true`. On `start` and `status`, the binary checks `tailscale serve status` and may apply a Serve entry if one is missing. This can mutate the machine's Tailscale Serve configuration. Set the config value to `false` or `CAPP_BRIDGE_SERVE_AUTO_APPLY=0` to prevent all Tailscale commands; accepted false spellings are `0`, `false`, `no`, and `off` (case-insensitive), and the only true spelling is `true`. Invalid values fail closed. Disabled mode prints the manual command without running it.
 
+## Agent integration prerequisite
+
+Prepare Herdr's integration for each agent before using Cappuccino's canonical
+reader. A running bridge and a discovered pane do not prove native session
+readiness. Installation in the wrong agent config directory does not count.
+
+For Pi, establish the **running Pi process's effective** `PI_CODING_AGENT_DIR`
+first. Run Herdr's installer and status check with that same directory. For
+example, only when Pi actually uses `~/.luna/agent`:
+
+```sh
+env PI_CODING_AGENT_DIR="$HOME/.luna/agent" herdr integration install pi
+env PI_CODING_AGENT_DIR="$HOME/.luna/agent" herdr integration status
+```
+
+Without this override, Herdr may install into `~/.pi/agent` while the running
+Pi loads extensions from `~/.luna/agent`. This mismatch was observed on Mini:
+restarting Pi did not help because its effective directory lacked the
+integration. `current (v9)` in the default directory was not runtime proof.
+For other agent types, use their corresponding supported Herdr integration
+and verify their effective configuration location; do not install all
+integrations indiscriminately.
+
+After installation, wait for the agent's current turn to finish. Pi must load
+the extension through its supported `/reload` command or an owner-authorized
+restart that preserves the exact conversation. Do not send an owner prompt,
+interrupt work, choose the newest transcript or start a new conversation to
+repair setup. A bridge restart cannot make Pi load an extension.
+
+Verify the selected Pi's Herdr `agent.get` response now has an exact path-kind
+`agent_session`, then verify the bridge conversation response is canonical,
+with `source: canonical_log`, a Pi-prefixed `conversation_id` and the expected
+`machine_id`. The
+reported file must pass the store checks above. If it does not, integration
+preparation is incomplete. Scrollback is not an acceptable substitute for
+this prerequisite or evidence of canonical reader readiness. The current
+client still exposes a labeled scrollback fallback; explicit setup-blocker
+UI remains an implementation gap, not a completed requirement.
+
 ## Install and lifecycle
 
-Install the executable before linking the plugin or invoking its startup/actions.
+Agent integration and the Cappuccino plugin are separate preparations: the
+integration reports native session identity; the plugin runs the HTTP bridge.
+Complete and verify both. Install the executable before linking the plugin or
+invoking its startup/actions. Before linking, choose the approved exposure
+policy: set `serve.auto_apply` to `false` in the bridge's JSON config when setup
+must not change Tailscale Serve. Plugin commands inherit the running Herdr
+server's environment; an environment override on a separate Herdr CLI invocation
+is not proof that the plugin inherited it. Keep existing proxy/tailnet routes
+unchanged unless the owner explicitly authorizes changes.
 From the repository root:
 
 ```sh
 cargo install --path services/bridge --locked
 herdr plugin link "$PWD/services/bridge"
 herdr plugin list
-herdr plugin action invoke status --plugin azusachino.cappuccino-bridge
+herdr plugin action invoke status --plugin cappuccino-bridge
 ```
 
 Or, from `services/bridge`, use `cargo install --path . --locked`. Cargo places
@@ -71,17 +126,20 @@ Or, from `services/bridge`, use `cargo install --path . --locked`. Cargo places
 that directory must be on the `PATH` inherited by Herdr. Herdr runs plugin
 commands with the plugin root as their working directory, but does not add the
 Cargo install directory to `PATH`. Check `command -v cappuccino-bridge` and
-`herdr plugin action invoke status --plugin azusachino.cappuccino-bridge` in
-that launch environment. If command lookup fails, install the binary and restart
-Herdr from an environment whose `PATH` includes Cargo's bin directory; linking
-or the plugin startup hook does not install/build it. The manifest uses the
+`herdr plugin action invoke status --plugin cappuccino-bridge` in
+that launch environment. If command lookup fails, install the binary in the running Herdr server's
+existing `PATH`. Restarting Herdr to change its launch environment requires
+explicit owner authorization and preservation of its long-running agents;
+it is not a routine Cappuccino reconnect step. Linking or the plugin startup
+hook does not install/build the executable. The manifest uses the
 installed command name (`cappuccino-bridge`), never a checkout's
 `target/release` artifact.
 
 The one-shot `[[startup]]` command invokes the installed binary's `start`
 subcommand. It creates a separate server process with redirected logs and an
 owner-only state directory at `HERDR_PLUGIN_STATE_DIR/state`
-(or `~/.local/state/cappuccino-bridge`). If the plugin state root already
+(without it, Herdr's own `${XDG_STATE_HOME:-~/.local/state}/herdr/plugins/cappuccino-bridge`,
+so bare `cappuccino-bridge status` finds the bridge Herdr started). If the plugin state root already
 contains legacy bridge lifecycle files, the binary keeps using that location
 rather than silently abandoning them; the same strict permission checks still
 apply. The private `bridge.control` record
@@ -92,10 +150,10 @@ after startup, and no automatic Herdr-shutdown hook is configured. Use the
 plugin actions to inspect, stop and view logs:
 
 ```text
-herdr plugin action invoke status --plugin azusachino.cappuccino-bridge
-herdr plugin action invoke stop --plugin azusachino.cappuccino-bridge
-herdr plugin action invoke logs --plugin azusachino.cappuccino-bridge
-herdr plugin log list --plugin azusachino.cappuccino-bridge --limit 10
+herdr plugin action invoke status --plugin cappuccino-bridge
+herdr plugin action invoke stop --plugin cappuccino-bridge
+herdr plugin action invoke logs --plugin cappuccino-bridge
+herdr plugin log list --plugin cappuccino-bridge --limit 10
 ```
 
 `stop` sends a token-authenticated shutdown request over the private Unix socket and waits for both the control endpoint and HTTP listener to close. A stale/malformed record, unsafe path, socket mismatch or stop timeout fails closed and preserves uncertain state for manual inspection; it never guesses at a PID or deletes an unrelated file. A legacy `bridge.pid` from the former lifecycle also blocks start/status/stop until an operator verifies any old process and removes that file manually. Earlier versions may have created a permissive state directory: verify the path, owner, contents and any old bridge process before manually securing or cleaning it. This binary refuses unsafe directories and never chmods an existing custom directory. State directories must be current-user-owned mode 0700; lock, control record and log files must be regular owner-owned mode 0600 files. Symlinked, nonregular, multiply-linked, foreign-owned or permissive paths are rejected. `logs` prints the last 80 lines.
@@ -136,7 +194,8 @@ cargo build --release
 From the repository root, `make check-bridge` runs the full Rust gate (fmt,
 hermetic tests including the client contract suite, release build of the
 companion). `make resource-bridge-client` runs the bounded leak/lifecycle soak
-(`tests/resource_soak.rs`, `#[ignore]`-gated). `make bench-bridge-client
+(`tests/resource_soak.rs`, `#[ignore]`-gated, about six minutes); it is opt-in,
+run before a version release rather than on every change. `make bench-bridge-client
 BASE_URL=http://127.0.0.1:7392` runs the reproducible benchmark against a
 running bridge. Rust diagnostics are treated as errors by review; no warning
 suppression or skipped tests.
@@ -201,16 +260,16 @@ bridge crate stay unchanged.
   steady-state batch and must plateau; the allocator is pressure-relieved
   before teardown sampling so cache retention is distinguished from true
   retention. Soak tests run serially so baselines are not contaminated.
-  Short samples never prove absolute zero-leak. The soak runs as part of the
-  aggregate `check-bridge` gate, not only as an explicit target.
+  Short samples never prove absolute zero-leak. The soak is opt-in
+  (`make resource-bridge-client`) and runs before a version release.
 - Leak acceptance is baseline-relative and per scenario class (success,
   refusal, mid-flight cancellation, server disconnect, child churn): FD counts
   may drop (async runtime teardown) but must not grow beyond a documented
   tolerance after each class; children are reaped (asserted via try_wait);
   mock tasks join under a deadline; temp state is removed. RSS evidence
   combines sampled client RSS growth with peak; short samples never prove
-  absolute zero-leak. The soak runs as part of the aggregate `check-bridge`
-  gate, not only as an explicit target.
+  absolute zero-leak. The soak is opt-in (`make resource-bridge-client`) and
+  runs before a version release.
 
 The manifest uses argv arrays and invokes the installed Rust binary directly;
 there are no bridge shell launchers. The bridge uses `libc` narrowly for Unix

@@ -1,7 +1,6 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.Heading
@@ -19,7 +18,7 @@ class MarkdownTextTest {
     val rendered = markdownInlineText(paragraph, Color.Gray)
     assertEquals("Use bold a*b and *literal*. Next\nline.", rendered.text)
     assertTrue(rendered.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
-    val code = rendered.spanStyles.single { it.item.fontFamily == FontFamily.Monospace }
+    val code = rendered.spanStyles.single { it.item.fontFamily == JetBrainsMono }
     assertEquals("a*b", rendered.text.substring(code.start, code.end))
     assertEquals(Color.Gray, code.item.background)
   }

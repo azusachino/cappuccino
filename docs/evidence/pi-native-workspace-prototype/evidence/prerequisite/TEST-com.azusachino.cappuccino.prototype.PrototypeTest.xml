@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.azusachino.cappuccino.prototype.PrototypeTest" tests="15" skipped="0" failures="0" errors="0" timestamp="2026-10-10T05:17:40.999Z" hostname="MacMini.local" time="0.022">
+  <properties/>
+  <testcase name="redacted thinking never exposes content beyond the label" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.008"/>
+  <testcase name="every unavailable action carries a reason and none are queue abort or receipts enabled" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.005"/>
+  <testcase name="heuristic statuses are labelled as heuristic in their label" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.0"/>
+  <testcase name="tool parts keep input and output and error flag" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.0"/>
+  <testcase name="roster groups machines with agent rows carrying identity job session status" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.0"/>
+  <testcase name="selection matches workspace identity to roster row" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.002"/>
+  <testcase name="authoritative replacement replaces accumulated deltas" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.002"/>
+  <testcase name="unknown selection fails closed with null row and no label" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.001"/>
+  <testcase name="composer enabled only when connected, explicit placeholders otherwise" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.0"/>
+  <testcase name="deltas append in order" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.0"/>
+  <testcase name="fixture conversation markdown contains link and image syntax that the passive path must neutralize" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.001"/>
+  <testcase name="images map to passive text and policy flags stay closed" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.0"/>
+  <testcase name="conversation is ordered user assistant turns with parts inside owning turn" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.001"/>
+  <testcase name="manifest grants no INTERNET permission" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.001"/>
+  <testcase name="only settled status claims settled truth" classname="com.azusachino.cappuccino.prototype.PrototypeTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

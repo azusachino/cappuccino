@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.azusachino.cappuccino.prototype.FollowPolicyTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-10-10T05:17:40.995Z" hostname="MacMini.local" time="0.002">
+  <properties/>
+  <testcase name="programmatic movement never flips intent in either direction" classname="com.azusachino.cappuccino.prototype.FollowPolicyTest" time="0.001"/>
+  <testcase name="growth while following away from tail preserves intent" classname="com.azusachino.cappuccino.prototype.FollowPolicyTest" time="0.0"/>
+  <testcase name="penultimate item near tail is not tail" classname="com.azusachino.cappuccino.prototype.FollowPolicyTest" time="0.0"/>
+  <testcase name="actual tail with reasonable pixel rounding is tail" classname="com.azusachino.cappuccino.prototype.FollowPolicyTest" time="0.0"/>
+  <testcase name="partial large last item extending past viewport is not tail" classname="com.azusachino.cappuccino.prototype.FollowPolicyTest" time="0.0"/>
+  <testcase name="failing-old trace start-at-tail drag-away stop append does not auto-jump" classname="com.azusachino.cappuccino.prototype.FollowPolicyTest" time="0.001"/>
+  <testcase name="explicit jump resumes following and idle at actual tail resumes" classname="com.azusachino.cappuccino.prototype.FollowPolicyTest" time="0.0"/>
+  <testcase name="empty and degenerate inputs are safely false" classname="com.azusachino.cappuccino.prototype.FollowPolicyTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

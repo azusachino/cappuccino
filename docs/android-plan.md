@@ -80,3 +80,11 @@ Inspected 2026-10-05 for architecture direction, not as a dependency lockfile:
 - [Compose testing](https://developer.android.com/develop/ui/compose/testing): UI semantics and instrumentation testing.
 - [Android Keystore](https://developer.android.com/privacy-and-security/keystore): key isolation and device-dependent hardware protection.
 - [Background task overview](https://developer.android.com/develop/background-work/background-tasks): lifecycle and scheduling restrictions; no promised permanent foreground connection after app backgrounding.
+
+## Deferred to a future release: self-update
+
+Owner decision 2026-10-12: defer until the first release; core features come first.
+
+- Source: GitHub Releases of `azusachino/cappuccino` (public, so the app checks `releases/latest` without a token), installed through Android's package installer with the owner's confirmation; app data is kept.
+- Signing: the installed app is signed with the build Mac's debug key (`CN=Android Debug`). Releases must use that same key, or the owner's install needs one uninstall, which loses saved data. Choose the key, store it as a CI secret and add a release workflow, all with owner approval.
+- Settings' About section shows the version only until then.

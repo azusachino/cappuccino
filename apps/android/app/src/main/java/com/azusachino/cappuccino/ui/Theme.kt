@@ -9,8 +9,12 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 
 enum class ThemeMode {
@@ -19,17 +23,104 @@ enum class ThemeMode {
   DARK,
 }
 
-// Semantic agent-status colors: they label bridge-reported state on tonal pills and small
-// status dots and are deliberately not Material color-scheme slots (android-material3.md).
-val HerdrStatusWorking = Color(0xFF6CB8D6)
-val HerdrStatusIdle = Color(0xFF9B9183)
-val HerdrStatusBlocked = Color(0xFFFF7B70)
-val HerdrStatusDone = Color(0xFF93C36B)
+// Catppuccin palette 1.8.0: https://github.com/catppuccin/palette
+// Material container roles use accent tints; small text uses the stronger text tone.
+val FallbackLightColorScheme =
+  lightColorScheme(
+    primary = Color(0xFF8839EF),
+    onPrimary = Color(0xFFEFF1F5),
+    primaryContainer = Color(0xFF8839EF).copy(alpha = 0.12f).compositeOver(Color(0xFFEFF1F5)),
+    onPrimaryContainer = Color(0xFF4C4F69),
+    secondary = Color(0xFF7287FD),
+    onSecondary = Color(0xFF11111B),
+    secondaryContainer = Color(0xFFE6E9EF),
+    onSecondaryContainer = Color(0xFF4C4F69),
+    tertiary = Color(0xFF40A02B),
+    onTertiary = Color(0xFF11111B),
+    tertiaryContainer = Color(0xFFEFF1F5),
+    onTertiaryContainer = Color(0xFF4C4F69),
+    background = Color(0xFFEFF1F5),
+    onBackground = Color(0xFF4C4F69),
+    surface = Color(0xFFEFF1F5),
+    onSurface = Color(0xFF4C4F69),
+    surfaceVariant = Color(0xFFDCE0E8),
+    onSurfaceVariant = Color(0xFF4C4F69),
+    surfaceContainerLowest = Color(0xFFEFF1F5),
+    surfaceContainerLow = Color(0xFFE6E9EF),
+    surfaceContainer = Color(0xFFE6E9EF),
+    surfaceContainerHigh = Color(0xFFDCE0E8),
+    surfaceContainerHighest = Color(0xFFCCD0DA),
+    surfaceDim = Color(0xFFCCD0DA),
+    surfaceBright = Color(0xFFEFF1F5),
+    outline = Color(0xFF6C6F85),
+    outlineVariant = Color(0xFFBCC0CC),
+    error = Color(0xFFD20F39),
+    onError = Color.White,
+    errorContainer = Color(0xFFD20F39).copy(alpha = 0.1f).compositeOver(Color(0xFFEFF1F5)),
+    onErrorContainer = Color(0xFF4C4F69),
+    surfaceTint = Color(0xFF8839EF),
+    inverseSurface = Color(0xFF313244),
+    inverseOnSurface = Color(0xFFCDD6F4),
+    inversePrimary = Color(0xFFCBA6F7),
+  )
+val FallbackDarkColorScheme =
+  darkColorScheme(
+    primary = Color(0xFFCBA6F7),
+    onPrimary = Color(0xFF11111B),
+    primaryContainer = Color(0xFFCBA6F7).copy(alpha = 0.15f).compositeOver(Color(0xFF1E1E2E)),
+    onPrimaryContainer = Color(0xFFCDD6F4),
+    secondary = Color(0xFFB4BEFE),
+    onSecondary = Color(0xFF11111B),
+    secondaryContainer = Color(0xFF313244),
+    onSecondaryContainer = Color(0xFFCDD6F4),
+    tertiary = Color(0xFFA6E3A1),
+    onTertiary = Color(0xFF11111B),
+    tertiaryContainer = Color(0xFF313244),
+    onTertiaryContainer = Color(0xFFCDD6F4),
+    background = Color(0xFF1E1E2E),
+    onBackground = Color(0xFFCDD6F4),
+    surface = Color(0xFF1E1E2E),
+    onSurface = Color(0xFFCDD6F4),
+    surfaceVariant = Color(0xFF45475A),
+    onSurfaceVariant = Color(0xFFBAC2DE),
+    surfaceContainerLowest = Color(0xFF11111B),
+    surfaceContainerLow = Color(0xFF181825),
+    surfaceContainer = Color(0xFF313244),
+    surfaceContainerHigh = Color(0xFF313244),
+    surfaceContainerHighest = Color(0xFF45475A),
+    surfaceDim = Color(0xFF181825),
+    surfaceBright = Color(0xFF45475A),
+    outline = Color(0xFF9399B2),
+    outlineVariant = Color(0xFF585B70),
+    error = Color(0xFFF38BA8),
+    onError = Color(0xFF11111B),
+    errorContainer = Color(0xFFF38BA8).copy(alpha = 0.15f).compositeOver(Color(0xFF1E1E2E)),
+    onErrorContainer = Color(0xFFCDD6F4),
+    surfaceTint = Color(0xFFCBA6F7),
+    inverseSurface = Color(0xFFEFF1F5),
+    inverseOnSurface = Color(0xFF4C4F69),
+    inversePrimary = Color(0xFF8839EF),
+  )
 
-// Stock Material 3 fallback schemes. The preview contract keeps component defaults
-// authoritative and forbids hand-mixed scheme slots (android-material3.md rev 2).
-val FallbackLightColorScheme = lightColorScheme()
-val FallbackDarkColorScheme = darkColorScheme()
+internal data class AgentStatusStyle(
+  val background: Color,
+  val foreground: Color,
+  val label: String,
+)
+
+internal fun agentStatusStyle(status: String, dark: Boolean): AgentStatusStyle {
+  val (background, label) =
+    when (status.lowercase()) {
+      "working" -> (if (dark) Color(0xFF89B4FA) else Color(0xFF1E66F5)) to "Working"
+      "idle" -> (if (dark) Color(0xFFFAB387) else Color(0xFFFE640B)) to "Idle"
+      "done" -> (if (dark) Color(0xFFA6E3A1) else Color(0xFF40A02B)) to "Done"
+      "blocked" -> (if (dark) Color(0xFFF38BA8) else Color(0xFFD20F39)) to "Blocked"
+      else -> (if (dark) Color(0xFF313244) else Color(0xFFDCE0E8)) to "Unknown"
+    }
+  val foreground =
+    if ((1.05f / (background.luminance() + 0.05f)) >= 4.5f) Color.White else Color(0xFF11111B)
+  return AgentStatusStyle(background, foreground, label)
+}
 
 fun resolveIsDark(themeMode: ThemeMode, systemDark: Boolean): Boolean =
   when (themeMode) {
@@ -58,36 +149,33 @@ fun selectColorScheme(
 fun CappuccinoTheme(
   themeMode: ThemeMode = ThemeMode.SYSTEM,
   useDynamicColor: Boolean = false,
-  // Optional activity-owned sink for the actually resolved theme (e.g. system-bar
-  // appearance). Resolution stays pure here; the platform window mutation lives in the
-  // caller (android-material3.md repair ledger, review finding 2).
   onResolvedDarkChanged: ((Boolean) -> Unit)? = null,
+  palette: AppPalette = AppPalette.CATPPUCCIN,
   content: @Composable () -> Unit,
 ) {
   val context = LocalContext.current
   val isDark = resolveIsDark(themeMode, isSystemInDarkTheme())
-  // Reports whenever the resolved theme changes, whether from the preference or the
-  // system mode; idempotent per composition, no extra observer lifecycle.
-  SideEffect { onResolvedDarkChanged?.invoke(isDark) }
-  val lightFallback = FallbackLightColorScheme
-  val darkFallback = FallbackDarkColorScheme
+  val themeSink by rememberUpdatedState(onResolvedDarkChanged)
+  LaunchedEffect(isDark) { themeSink?.invoke(isDark) }
+  val selectedPalette = if (useDynamicColor) AppPalette.DYNAMIC else palette
   val dynamicLight =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicLightColorScheme(context)
-    else lightFallback
+    if (selectedPalette == AppPalette.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+      dynamicLightColorScheme(context)
+    else FallbackLightColorScheme
   val dynamicDark =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicDarkColorScheme(context)
-    else darkFallback
-  MaterialTheme(
-    colorScheme =
-      selectColorScheme(
-        Build.VERSION.SDK_INT,
-        isDark,
-        dynamicLight,
-        dynamicDark,
-        lightFallback,
-        darkFallback,
-        useDynamic = useDynamicColor,
-      ),
-    content = content,
-  )
+    if (selectedPalette == AppPalette.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+      dynamicDarkColorScheme(context)
+    else FallbackDarkColorScheme
+  val base =
+    appColorScheme(selectedPalette, isDark, Build.VERSION.SDK_INT, dynamicLight, dynamicDark)
+  androidx.compose.runtime.CompositionLocalProvider(
+    LocalAppColors provides appColors(base, isDark)
+  ) {
+    MaterialTheme(
+      colorScheme = flatSurfaceScheme(base, isDark),
+      typography = AppTypography,
+      shapes = AppShapes,
+      content = content,
+    )
+  }
 }

@@ -53,13 +53,60 @@ final class StubURLProtocol: URLProtocol {
       #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
       return (
         200,
-        #"{"event":"paired","machine_id":"bridge-m-1","protocol":1,"plugin":"azusachino.cappuccino-bridge"}"#
+        #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"cappuccino-bridge"}"#
           .data(using: .utf8)!
       )
     }
     let machine = try await stubbedClient().pair(
       baseURL: URL(string: "http://127.0.0.1:7392")!)
-    #expect(machine.machineID == "bridge-m-1")
+    #expect(machine.machineID == "11111111-1111-4111-8111-111111111111")
+  }
+
+  @Test func rejectsInvalidPairingAndUnexpectedMachineIdentity() async {
+    let base = URL(string: "https://machine.example")!
+    for payload in [
+      #"{"event":"paired","machine_id":"invalid","protocol":1,"plugin":"cappuccino-bridge"}"#,
+      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":2,"plugin":"cappuccino-bridge"}"#,
+      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":true,"plugin":"cappuccino-bridge"}"#,
+      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"wrong"}"#,
+    ] {
+      StubURLProtocol.handler = { _ in (200, Data(payload.utf8)) }
+      await #expect(throws: DaemonClientError.self) {
+        try await stubbedClient().verifyMachine(baseURL: base)
+      }
+    }
+    StubURLProtocol.handler = { _ in
+      (
+        200,
+        Data(
+          #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"cappuccino-bridge"}"#
+            .utf8)
+      )
+    }
+    await #expect(throws: DaemonClientError.self) {
+      try await stubbedClient().verifyMachine(
+        baseURL: base, expectedID: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!)
+    }
+  }
+
+  @Test func rejectsForeignAgentAndMissingLocator() async {
+    let base = URL(string: "https://machine.example")!
+    for row in [
+      #"{"machine_id":"22222222-2222-4222-8222-222222222222","session_id":"same-locator"}"#,
+      #"{"machine_id":"11111111-1111-4111-8111-111111111111","session_id":" "}"#,
+    ] {
+      let payload =
+        "{\"event\":\"agents\",\"machine_id\":\"11111111-1111-4111-8111-111111111111\",\"agents\":[\(row)]}"
+      StubURLProtocol.handler = { _ in (200, Data(payload.utf8)) }
+      await #expect(throws: DaemonClientError.self) {
+        try await stubbedClient().listAgents(baseURL: base)
+      }
+    }
+    StubURLProtocol.handler = { _ in (200, Data(agentsEventJSON.utf8)) }
+    await #expect(throws: DaemonClientError.self) {
+      try await stubbedClient().listAgents(
+        baseURL: base, expectedMachineID: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!)
+    }
   }
 
   @Test func unauthorizedMapsVisibly() async {

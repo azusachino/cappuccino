@@ -3,7 +3,6 @@
 //! option menus) from visible pane text and maps user responses back to Herdr keystrokes/prompts.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -20,6 +19,9 @@ pub struct PromptCard {
     pub command: Option<String>,
     pub options: Vec<PromptOption>,
     pub selected_index: usize,
+    /// AskUserQuestion's questions, read from the transcript; empty for screen-read prompts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<crate::questions::Question>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -43,7 +45,10 @@ pub enum PromptSubmission {
         option_id: Option<String>,
     },
     #[serde(rename = "answer_question")]
-    AnswerQuestion { prompt_id: String, answers: Value },
+    AnswerQuestion {
+        prompt_id: String,
+        answers: Vec<crate::questions::Answer>,
+    },
 }
 
 /// Computes a stable hash ID from the prompt title, message, and options
@@ -65,6 +70,28 @@ mod hex {
     pub fn encode<T: AsRef<[u8]>>(data: T) -> String {
         data.as_ref().iter().map(|b| format!("{b:02x}")).collect()
     }
+}
+
+/// The card for whatever prompt the screen shows. Claude's question form has its own reader: the
+/// generic menu reader would take its "Type something" and "Chat about this" rows for answers.
+pub fn screen_card(screen: &str) -> Option<PromptCard> {
+    // Scrollback can still hold the form above its review; the later one is what shows.
+    let review_last =
+        screen.rfind("Ready to submit your answers?") > screen.rfind("Enter to select");
+    let review = || crate::questions::review(screen);
+    let form = || crate::questions::form(screen).map(|form| crate::questions::card(&form));
+    let card = if review_last {
+        review().or_else(form)
+    } else {
+        form().or_else(review)
+    };
+    if card.is_some() {
+        return card;
+    }
+    if crate::questions::on_screen(screen) {
+        return None;
+    }
+    parse_prompt_from_screen(screen)
 }
 
 /// Detects if the visible screen is presenting an interactive prompt.
@@ -147,6 +174,7 @@ fn detect_tool_approval(lines: &[&str]) -> Option<PromptCard> {
         command,
         options: default_options,
         selected_index: 0,
+        questions: Vec::new(),
     })
 }
 
@@ -236,6 +264,7 @@ fn detect_choice_menu(lines: &[&str]) -> Option<PromptCard> {
         command: None,
         options,
         selected_index: selected_idx,
+        questions: Vec::new(),
     })
 }
 

@@ -47,6 +47,9 @@ dependencies {
   implementation(platform(libs.compose.bom))
   implementation(libs.compose.material3)
   implementation(libs.commonmark)
+  implementation(libs.mikepenz.markdown.m3)
+  implementation(libs.mikepenz.markdown.code)
+  implementation(libs.kotlin.textmate.core)
   implementation(libs.activity.compose)
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.okhttp)
@@ -61,5 +64,7 @@ dependencies {
   androidTestImplementation(libs.compose.ui.test)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.test.runner)
+  // Compose's transitive Espresso 3.5.0 uses InputManager reflection removed on API 36.
+  androidTestImplementation(libs.espresso.core)
   debugImplementation(libs.compose.ui.test.manifest)
 }

@@ -1,4 +1,4 @@
-//! Transcript resolution for pi and agy sessions.
+//! Transcript resolution for pi, claude and agy sessions.
 //! Stores are checked, not trusted. A path outside the canonical store,
 //! a symlink escaping it, or a non-jsonl file answers None.
 
@@ -43,6 +43,44 @@ fn reported_pi_transcript(agent_info: &Value, stores: &[PathBuf]) -> Option<Path
         .find_map(|store| transcript_in_store(path, store))
 }
 
+/// Claude Code's project store: `CLAUDE_CONFIG_DIR` moves it; otherwise `~/.claude`.
+pub fn claude_projects_dir() -> PathBuf {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(&home_dir()).join(".claude"))
+        .join("projects")
+}
+
+/// Claude session IDs are UUIDs; anything with separators or dots could name another file.
+fn is_claude_session_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// Herdr keeps only the session ID that Claude's SessionStart hook reported (it drops the
+/// path), so find `<id>.jsonl` in the project store. Exactly one match is required; the ID,
+/// not the pane's cwd or a newest file, establishes identity.
+fn reported_claude_transcript(agent_info: &Value, projects: &Path) -> Option<PathBuf> {
+    let report = &agent_info["agent_session"];
+    if report["source"].as_str() != Some("herdr:claude")
+        || report["agent"].as_str() != Some("claude")
+        || report["kind"].as_str() != Some("id")
+    {
+        return None;
+    }
+    let id = report["value"].as_str()?;
+    if !is_claude_session_id(id) {
+        return None;
+    }
+    let file = format!("{id}.jsonl");
+    let mut matches = std::fs::read_dir(projects)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|project| project.path().join(&file))
+        .filter_map(|candidate| transcript_in_store(&candidate, projects));
+    let found = matches.next()?;
+    matches.next().is_none().then_some(found)
+}
+
 /// agy's brain store: `ANTIGRAVITY_APP_DATA_DIR` moves it; otherwise
 /// `~/.gemini/antigravity-cli/brain`.
 pub fn agy_brain_dir() -> PathBuf {
@@ -82,6 +120,7 @@ pub fn transcript_in_store(path: &Path, session_dir: &Path) -> Option<PathBuf> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedTranscript {
     Pi(PathBuf),
+    Claude(PathBuf),
     Agy(PathBuf),
 }
 
@@ -89,28 +128,67 @@ impl ResolvedTranscript {
     pub fn path(&self) -> &Path {
         match self {
             ResolvedTranscript::Pi(p) => p.as_path(),
+            ResolvedTranscript::Claude(p) => p.as_path(),
             ResolvedTranscript::Agy(p) => p.as_path(),
         }
     }
 
-    #[allow(dead_code)]
     pub fn agent_type(&self) -> &'static str {
         match self {
             ResolvedTranscript::Pi(_) => "pi",
+            ResolvedTranscript::Claude(_) => "claude",
             ResolvedTranscript::Agy(_) => "agy",
         }
+    }
+
+    /// Identity of the resolved canonical session, never its reusable pane locator.
+    /// Pi supplies its session-header ID; Claude its reported session ID; Agy's process-bound presence lock selected
+    /// this exact brain session directory. Hashing keeps raw IDs/paths off the wire.
+    pub fn conversation_id(&self, pi_header: Option<&str>) -> Option<String> {
+        let header;
+        let session = match self {
+            Self::Pi(_) => {
+                header = serde_json::from_str::<Value>(pi_header?).ok()?;
+                if header["type"].as_str()? != "session" {
+                    return None;
+                }
+                header["id"].as_str()?
+            }
+            // The resolver only selects `<reported session id>.jsonl`.
+            Self::Claude(path) => path.file_stem()?.to_str()?,
+            Self::Agy(path) => {
+                if !path.ends_with(".system_generated/logs/transcript.jsonl") {
+                    return None;
+                }
+                path.parent()?.parent()?.parent()?.file_name()?.to_str()?
+            }
+        };
+        if session.is_empty()
+            || session.len() > 256
+            || session.trim() != session
+            || session.chars().any(char::is_control)
+        {
+            return None;
+        }
+        use sha2::{Digest, Sha256};
+        let mut digest = Sha256::new();
+        digest.update(b"cappuccino:canonical-conversation:v1\0");
+        digest.update(self.agent_type().as_bytes());
+        digest.update([0]);
+        digest.update(session.as_bytes());
+        Some(format!("{}:{:x}", self.agent_type(), digest.finalize()))
     }
 }
 
 /// Resolves one session locator (agent name or pane id) to its transcript.
-/// Returns Ok(Some(path)) for Pi or Agy, or Ok(None) if not available.
+/// Returns Ok(Some(path)) for Pi, Claude or Agy, or Ok(None) if not available.
 pub async fn resolve_transcript(session: &str) -> Result<Option<PathBuf>, String> {
     Ok(resolve_session_transcript(session)
         .await?
         .map(|r| r.path().to_path_buf()))
 }
 
-/// Resolves session locator to a typed ResolvedTranscript (distinguishing agy vs pi).
+/// Resolves session locator to a typed ResolvedTranscript (Pi, Claude or Agy).
 pub async fn resolve_session_transcript(
     session: &str,
 ) -> Result<Option<ResolvedTranscript>, String> {
@@ -125,9 +203,15 @@ pub async fn resolve_session_transcript(
         return Ok(Some(ResolvedTranscript::Pi(path)));
     }
 
+    if agent_name == "claude" {
+        if let Some(path) = reported_claude_transcript(agent_info, &claude_projects_dir()) {
+            return Ok(Some(ResolvedTranscript::Claude(path)));
+        }
+    }
+
     // If agent is agy (or pane runs agy), attempt agy resolution
     if agent_name == "agy" || is_agy_pane(pane_id, agent_info) {
-        if let Some(path) = resolve_agy_transcript_for_pane(pane_id, agent_info) {
+        if let Some(path) = resolve_agy_transcript_for_pane(pane_id).await {
             return Ok(Some(ResolvedTranscript::Agy(path)));
         }
     }
@@ -153,61 +237,79 @@ fn is_agy_pane(pane_id: &str, agent_info: &Value) -> bool {
     false
 }
 
-/// Resolves active agy session transcript.
-/// Checks the agy brain directory for an active presence lock or newest session.
-pub fn resolve_agy_transcript_for_pane(_pane_id: &str, _agent_info: &Value) -> Option<PathBuf> {
-    let brain_dir = agy_brain_dir();
-    let presence_dir = brain_dir.parent()?.join("presence");
-
-    // Look for active presence locks
-    if let Ok(entries) = std::fs::read_dir(&presence_dir) {
-        let mut locks: Vec<PathBuf> = entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|ext| ext.to_str()) == Some("lock"))
-            .collect();
-        // Sort newest first
-        locks.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
-        locks.reverse();
-
-        for lock in locks {
-            if let Some(stem) = lock.file_stem().and_then(|s| s.to_str()) {
-                let candidate = brain_dir
-                    .join(stem)
-                    .join(".system_generated")
-                    .join("logs")
-                    .join("transcript.jsonl");
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
-        }
+/// The selected pane must contain exactly one foreground Agy process.
+fn agy_pid(info: &Value, pane_id: &str) -> Option<u32> {
+    let process_info = &info["process_info"];
+    if process_info["pane_id"].as_str()? != pane_id {
+        return None;
     }
-
-    // Fallback: look for the most recently modified transcript in brain/
-    if let Ok(entries) = std::fs::read_dir(&brain_dir) {
-        let mut candidates: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
-        for entry in entries.filter_map(|e| e.ok()) {
-            let log = entry
-                .path()
-                .join(".system_generated")
-                .join("logs")
-                .join("transcript.jsonl");
-            if let Ok(meta) = std::fs::metadata(&log) {
-                if meta.is_file() {
-                    if let Ok(mod_time) = meta.modified() {
-                        candidates.push((log, mod_time));
-                    }
-                }
-            }
-        }
-        candidates.sort_by_key(|(_, t)| *t);
-        if let Some((newest, _)) = candidates.pop() {
-            return Some(newest);
-        }
+    let mut pids = process_info["foreground_processes"]
+        .as_array()?
+        .iter()
+        .filter(|process| process["name"].as_str() == Some("agy"))
+        .filter_map(|process| u32::try_from(process["pid"].as_u64()?).ok());
+    let pid = pids.next().filter(|pid| *pid > 0)?;
+    if pids.next().is_some() {
+        return None;
     }
+    Some(pid)
+}
 
-    None
+/// Only a presence file OPEN BY that process identifies its session. Stale files,
+/// directory mtimes, terminal titles and cwd are never session identity.
+fn agy_open_transcript(files: &str, brain_dir: &Path) -> Option<PathBuf> {
+    let presence = std::fs::canonicalize(brain_dir.parent()?.join("presence")).ok()?;
+    let mut sessions = std::collections::BTreeSet::new();
+    for line in files.lines().filter_map(|line| line.strip_prefix('n')) {
+        let path = Path::new(line);
+        if path.extension().and_then(|ext| ext.to_str()) != Some("lock") {
+            continue;
+        }
+        let canonical = std::fs::canonicalize(path).ok()?;
+        if canonical.parent() != Some(presence.as_path()) {
+            continue;
+        }
+        let session = canonical.file_stem()?.to_str()?;
+        sessions.insert(session.to_string());
+    }
+    if sessions.len() != 1 {
+        return None;
+    }
+    let path = brain_dir
+        .join(sessions.first()?)
+        .join(".system_generated/logs/transcript.jsonl");
+    transcript_in_store(&path, brain_dir)
+}
+
+async fn resolve_agy_transcript_for_pane(pane_id: &str) -> Option<PathBuf> {
+    let params = serde_json::json!({"pane_id": pane_id});
+    let info = crate::herdr::request("pane.process_info", params.clone())
+        .await
+        .ok()?;
+    let pid = agy_pid(&info, pane_id)?;
+    // lsof is a passive, process-scoped FD query. Missing tool, timeout, changed
+    // process or ambiguous ownership means no canonical history, never a guess.
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        tokio::process::Command::new("lsof")
+            .args(["-a", "-p", &pid.to_string(), "-Fn"])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = agy_open_transcript(std::str::from_utf8(&output.stdout).ok()?, &agy_brain_dir())?;
+    let current = crate::herdr::request("pane.process_info", params)
+        .await
+        .ok()?;
+    if agy_pid(&current, pane_id) != Some(pid) {
+        return None;
+    }
+    Some(path)
 }
 
 /// Shape returned by GET /api/transcript.
@@ -230,6 +332,71 @@ pub fn transcript_json(session_id: &str, path: Option<&Path>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn claude_report(id: &str) -> Value {
+        serde_json::json!({
+            "agent": "claude", "cwd": "/synthetic",
+            "agent_session": {"source": "herdr:claude", "agent": "claude", "kind": "id", "value": id}
+        })
+    }
+
+    #[test]
+    fn claude_resolves_only_the_reported_id_inside_the_store() {
+        let projects = TempStore::new("claude-projects");
+        let id = "0f6c2a3e-1111-4abc-9def-123456789abc";
+        std::fs::create_dir_all(projects.path.join("-synthetic")).unwrap();
+        std::fs::create_dir_all(projects.path.join("-other")).unwrap();
+        let selected = projects.path.join("-synthetic").join(format!("{id}.jsonl"));
+        std::fs::write(&selected, "{}\n").unwrap();
+        // A newer, unreported session in the same project is never chosen.
+        std::fs::write(projects.path.join("-synthetic/newer.jsonl"), "{}\n").unwrap();
+
+        assert_eq!(
+            reported_claude_transcript(&claude_report(id), &projects.path),
+            Some(std::fs::canonicalize(&selected).unwrap())
+        );
+        assert_eq!(
+            ResolvedTranscript::Claude(selected.clone())
+                .conversation_id(None)
+                .map(|id| id.starts_with("claude:")),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn claude_rejects_foreign_sources_unsafe_ids_and_ambiguous_matches() {
+        let projects = TempStore::new("claude-reject");
+        let id = "abc-123";
+        for project in ["-a", "-b"] {
+            std::fs::create_dir_all(projects.path.join(project)).unwrap();
+        }
+        std::fs::write(projects.path.join(format!("-a/{id}.jsonl")), "{}\n").unwrap();
+
+        let mut foreign = claude_report(id);
+        foreign["agent_session"]["source"] = "custom".into();
+        assert_eq!(reported_claude_transcript(&foreign, &projects.path), None);
+        let mut path_kind = claude_report(id);
+        path_kind["agent_session"]["kind"] = "path".into();
+        assert_eq!(reported_claude_transcript(&path_kind, &projects.path), None);
+        for unsafe_id in ["../-a/abc-123", "abc.123", "", "a/b"] {
+            assert_eq!(
+                reported_claude_transcript(&claude_report(unsafe_id), &projects.path),
+                None,
+                "{unsafe_id}"
+            );
+        }
+        assert_eq!(
+            reported_claude_transcript(&claude_report("missing"), &projects.path),
+            None
+        );
+
+        // The same ID in two projects cannot establish one session.
+        std::fs::write(projects.path.join(format!("-b/{id}.jsonl")), "{}\n").unwrap();
+        assert_eq!(
+            reported_claude_transcript(&claude_report(id), &projects.path),
+            None
+        );
+    }
 
     struct TempStore {
         path: PathBuf,
@@ -283,6 +450,35 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn agy_session_is_owned_by_the_selected_process_not_newest_file() {
+        let home = TempStore::new("agy-owner");
+        let brain = home.path.join("brain");
+        let presence = home.path.join("presence");
+        std::fs::create_dir_all(&presence).unwrap();
+        for session in ["selected", "newer-closed"] {
+            let logs = brain.join(session).join(".system_generated/logs");
+            std::fs::create_dir_all(&logs).unwrap();
+            std::fs::write(logs.join("transcript.jsonl"), "{}\n").unwrap();
+            std::fs::write(presence.join(format!("{session}.lock")), "").unwrap();
+        }
+        let owned = format!("p42\nn{}\n", presence.join("selected.lock").display());
+        let expected =
+            std::fs::canonicalize(brain.join("selected/.system_generated/logs/transcript.jsonl"))
+                .unwrap();
+        assert_eq!(agy_open_transcript(&owned, &brain), Some(expected));
+        assert_eq!(agy_open_transcript("p42\n", &brain), None);
+        let ambiguous = format!("{owned}n{}\n", presence.join("newer-closed.lock").display());
+        assert_eq!(agy_open_transcript(&ambiguous, &brain), None);
+        let info = serde_json::json!({"process_info": {
+            "pane_id": "selected-pane", "foreground_processes": [
+                {"name": "agy", "pid": 42}, {"name": "node", "pid": 43}
+            ]
+        }});
+        assert_eq!(agy_pid(&info, "selected-pane"), Some(42));
+        assert_eq!(agy_pid(&info, "other-pane"), None);
     }
 
     #[test]

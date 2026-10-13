@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -30,6 +31,7 @@ import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.Endpoint
 import com.azusachino.cappuccino.core.StreamEntry
 import com.azusachino.cappuccino.core.StreamState
+import com.azusachino.cappuccino.core.activitySummary
 import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectionState
@@ -45,11 +47,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Owner preview capture for the native Material 3 conversation slice. All data is synthetic and
- * stable across captures; dark/large-font variants render through the real theme path and density,
- * and width variants come from the task-owned emulator's density override (compact 320 dp vs normal
- * ~411 dp). Capture names embed the actual rendered width dp so a capture can never be mislabeled
- * after a density change. No owner device, bridge or endpoint data.
+ * Owner preview capture for the conversation page. All data is synthetic and stable across
+ * captures; dark/large-font variants render through the real theme path and density, and width
+ * variants come from the task-owned emulator's density override (compact 320 dp vs normal ~411 dp).
+ * Capture names embed the actual rendered width dp so a capture can never be mislabeled after a
+ * density change. No owner device, bridge or endpoint data.
  */
 @RunWith(AndroidJUnit4::class)
 class ConversationPreviewScreenshotTest {
@@ -82,7 +84,7 @@ class ConversationPreviewScreenshotTest {
             "63 passed · 0 failed",
           ),
           ConversationPart.Text(
-            "Rebuilt the conversation screen on native Material 3 tokens. The transcript reads directly on the background now.\n\n### What changed\n\n- Stock **lightColorScheme** and **darkColorScheme** fallbacks\n- User turns use a `primaryContainer` bubble\n- Disclosures are tonal rows with a real chevron\n\n```kotlin\nval scheme = if (dark) darkColorScheme() else lightColorScheme()\n```"
+            "Ran the Android checks; every test passes.\n\n### What changed\n\n- **Stop** sits beside Send while a run is going\n- Context and cache show under the input\n- Tool steps read as one activity line\n\n```kotlin\nval percent = tokens * 100 / window\n```"
           ),
         ),
       ),
@@ -91,7 +93,7 @@ class ConversationPreviewScreenshotTest {
         "p3",
         "user",
         "2026-10-07T16:05:00Z",
-        "Capture the Material 3 preview set",
+        "Capture the conversation previews",
         emptyList(),
       ),
     )
@@ -143,13 +145,13 @@ class ConversationPreviewScreenshotTest {
       }
     }
     compose.waitForIdle()
-    compose.onNodeWithText("Recent agent output · Read-only").assertIsDisplayed()
+    compose.onNodeWithTag("recentOutputList").assertIsDisplayed()
   }
 
   @Test
   fun captureConversationCollapsedLight() {
     setContent(previewState(), ThemeMode.LIGHT)
-    compose.onNodeWithText("Capture the Material 3 preview set").assertIsDisplayed()
+    compose.onNodeWithText("Capture the conversation previews").assertIsDisplayed()
     // Physical reader scroll back to the very top of the transcript so the collapsed capture
     // shows the start of the conversation (p0 prose plus the collapsed disclosure row), not
     // just the tail viewport the list opens on.
@@ -163,12 +165,12 @@ class ConversationPreviewScreenshotTest {
     capture("${capturePrefix()}LightCollapsed")
     // Back down to the lower prose: the markdown fixture turn and the end-aligned user bubble.
     repeat(3) {
-      if (!anyDisplayed("Capture the Material 3 preview set")) {
+      if (!anyDisplayed("Capture the conversation previews")) {
         compose.onNodeWithTag("recentOutputList").performTouchInput { swipeUp() }
         compose.waitForIdle()
       }
     }
-    compose.onNodeWithText("Capture the Material 3 preview set").assertIsDisplayed()
+    compose.onNodeWithText("Capture the conversation previews").assertIsDisplayed()
     capture("${capturePrefix()}LightMarkdownUserTurn")
   }
 
@@ -176,47 +178,28 @@ class ConversationPreviewScreenshotTest {
   fun captureConversationExpandedDark() {
     val state = previewState()
     setContent(state, ThemeMode.DARK)
-    // Physical reader scroll back until the disclosure rows are actually on screen
-    // (off-screen pre-composed nodes exist but are not displayed).
-    repeat(3) {
-      if (!anyDisplayed("Thinking", maxTopFraction = 0.5f)) {
-        compose.onNodeWithTag("recentOutputList").performTouchInput { swipeDown() }
-        compose.waitForIdle()
-      }
-    }
-    compose.onNodeWithText("Thinking").assertIsDisplayed()
-    compose.onNodeWithText("Thinking").performClick()
-    // Reader scroll so the expanded content is actually in view at narrow widths (the single
-    // click already happened; this only brings the disclosed detail into the viewport).
-    compose
-      .onNodeWithTag("recentOutputList")
-      .performScrollToNode(hasText("Hidden thought details: check collapse, contrast and spacing."))
-    // Exact full paragraph text: MarkdownText renders the second thinking paragraph as one Text
-    // node with exactly this content; a shorter exact matcher can never display.
-    compose.waitUntil(timeoutMillis = 5_000) {
-      anyDisplayed("Hidden thought details: check collapse, contrast and spacing.")
-    }
-    compose
-      .onNodeWithText("Hidden thought details: check collapse, contrast and spacing.")
-      .assertIsDisplayed()
-    // At the 320x640@160 CI frame the Tool row sits below the fold after the bottom-pinning
-    // scroll to the Thinking detail; a click injected at its clipped center never lands.
-    // Bring the row into view and prove it is displayed before the single expand click.
-    compose
-      .onNodeWithTag("recentOutputList")
-      .performScrollToNode(hasText("Tool: bash · Result available"))
-    compose.onNodeWithText("Tool: bash · Result available").assertIsDisplayed()
-    compose.onNodeWithText("Tool: bash · Result available").performClick()
-    compose.onNodeWithTag("recentOutputList").performScrollToNode(hasText("63 passed · 0 failed"))
-    compose.waitUntil(timeoutMillis = 5_000) { anyDisplayed("63 passed · 0 failed") }
-    compose.onNodeWithText("63 passed · 0 failed").assertIsDisplayed()
+    // p1's thinking and tool call are one activity line, closed in an older turn.
+    val summary = activitySummary(previewTurns()[1].parts.filter { it !is ConversationPart.Text })
+    val list = compose.onNodeWithTag("recentOutputList")
+    list.performScrollToNode(hasText(summary))
+    compose.onNodeWithText(summary).performClick()
+    list.performScrollToNode(hasText("Thought"))
+    compose.onNodeWithText("Thought").performClick()
+    list.performScrollToNode(hasText("Hidden thought details", substring = true))
+    compose.onNodeWithText("Hidden thought details", substring = true).assertIsDisplayed()
+    val results = { compose.onAllNodesWithText("63 passed · 0 failed").fetchSemanticsNodes().size }
+    val closed = results()
+    list.performScrollToNode(hasText("bash"))
+    compose.onNodeWithText("bash").performClick()
+    compose.waitUntil(timeoutMillis = 5_000) { results() > closed }
+    list.performScrollToNode(hasText("63 passed · 0 failed"))
     capture("${capturePrefix()}DarkExpanded")
   }
 
   @Test
   fun captureConversationLargeFontLight() {
     setContent(previewState(), ThemeMode.LIGHT, fontScale = 1.3f)
-    compose.onNodeWithText("Capture the Material 3 preview set").assertIsDisplayed()
+    compose.onNodeWithText("Capture the conversation previews").assertIsDisplayed()
     capture("${capturePrefix()}LightLargeFont")
   }
 
@@ -288,7 +271,7 @@ class ConversationPreviewScreenshotTest {
         )
     }
     waitAndAdvanceUntilJumpHasSize()
-    compose.onNodeWithText("Jump to latest").assertIsDisplayed()
+    compose.onNodeWithTag("jumpToLatest").assertIsDisplayed()
     capture("${capturePrefix()}LightFollowLatest")
   }
 
@@ -308,11 +291,10 @@ class ConversationPreviewScreenshotTest {
   }
 
   private fun waitAndAdvanceUntilJumpHasSize() {
-    // The M3 extended FAB animates its width in on appearance; wait (bounded, test
-    // thread) until the affordance has real size before asserting display.
+    // Wait (bounded, test thread) until the jump button is laid out with real size.
     compose.waitUntil(timeoutMillis = 5_000) {
-      compose.onAllNodesWithText("Jump to latest").fetchSemanticsNodes().any {
-        it.boundsInRoot.width > 100
+      compose.onAllNodesWithTag("jumpToLatest").fetchSemanticsNodes().any {
+        it.boundsInRoot.width > 0
       }
     }
     compose.waitForIdle()
@@ -341,6 +323,13 @@ class ConversationPreviewScreenshotTest {
     ConnectedActions {
     override fun addMachine(label: String, url: String) = Unit
 
+    override fun renameProfile(id: String, label: String) {
+      state.value =
+        state.value.copy(
+          profiles = state.value.profiles.map { if (it.id == id) it.copy(label = label) else it }
+        )
+    }
+
     override fun selectProfile(id: String) = Unit
 
     override fun disconnectProfile() = Unit
@@ -354,6 +343,10 @@ class ConversationPreviewScreenshotTest {
     override fun removeProfile(id: String) = Unit
 
     override fun retry() = Unit
+
+    override fun setAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette) {
+      state.value = state.value.copy(appPalette = palette)
+    }
 
     override fun setThemeMode(mode: ThemeMode) {
       state.value = state.value.copy(themeMode = mode)

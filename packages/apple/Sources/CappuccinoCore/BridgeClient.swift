@@ -1,8 +1,9 @@
+import CoreFoundation
 import Foundation
 
 /// Client for the Cappuccino bridge plugin (`services/bridge`), implementing
 /// the same `DaemonServing` seam as the reference daemon client. URLSession
-/// for HTTP, bearer-token auth, typed errors mapped from the bridge's JSON
+/// for HTTP, no application auth, typed errors mapped from the bridge's JSON
 /// error envelope. Loopback by default; tailscale-serve exposure is a
 /// deployment decision, not a client change.
 public struct BridgeClient: DaemonServing {
@@ -21,22 +22,56 @@ public struct BridgeClient: DaemonServing {
   }
 
   public func pair(baseURL: URL) async throws -> PairedMachine {
+    let machine = try await verifyMachine(baseURL: baseURL)
+    return PairedMachine(machineID: machine.id.uuidString.lowercased())
+  }
+
+  public func verifyMachine(baseURL: URL, expectedID: UUID? = nil) async throws -> BridgeMachine {
     let event = try await get(baseURL.appendingPathComponent("/api/session"))
-    guard let machineID = event["machine_id"] as? String, !machineID.isEmpty else {
-      throw DaemonClientError.protocolError("paired event missing machine_id")
+    guard event["event"] as? String == "paired",
+      event["plugin"] as? String == "cappuccino-bridge",
+      let protocolNumber = event["protocol"] as? NSNumber,
+      CFGetTypeID(protocolNumber) != CFBooleanGetTypeID(),
+      protocolNumber.doubleValue == 1,
+      let rawID = event["machine_id"] as? String,
+      let id = UUID(uuidString: rawID)
+    else {
+      throw DaemonClientError.protocolError(
+        "Invalid bridge identity or incompatible protocol; requires 1")
     }
-    return PairedMachine(machineID: machineID)
+    guard expectedID == nil || id == expectedID else {
+      throw DaemonClientError.protocolError("Bridge machine identity changed")
+    }
+    return BridgeMachine(
+      id: id, name: event["machine_name"] as? String, version: event["bridge_version"] as? String)
   }
 
   public func listAgents(baseURL: URL) async throws -> [AgentRow] {
+    try await listAgents(baseURL: baseURL, expectedMachineID: nil)
+  }
+
+  public func listAgents(baseURL: URL, expectedMachineID: UUID?) async throws -> [AgentRow] {
     let event = try await get(baseURL.appendingPathComponent("/api/agents"))
-    guard let rawAgents = event["agents"] as? [[String: Any]] else {
-      throw DaemonClientError.protocolError("agents event missing agents array")
+    guard event["event"] as? String == "agents",
+      let rawMachineID = event["machine_id"] as? String,
+      let machineID = UUID(uuidString: rawMachineID),
+      expectedMachineID == nil || machineID == expectedMachineID,
+      let rawAgents = event["agents"] as? [[String: Any]]
+    else {
+      throw DaemonClientError.protocolError("Invalid agent discovery identity")
     }
-    return rawAgents.map { agent in
-      AgentRow(
-        machineID: agent["machine_id"] as? String ?? "",
-        sessionID: agent["session_id"] as? String ?? agent["pane_id"] as? String ?? "",
+    return try rawAgents.map { agent in
+      guard let owner = agent["machine_id"] as? String,
+        UUID(uuidString: owner) == machineID,
+        let locator = agent["session_id"] as? String ?? agent["pane_id"] as? String,
+        !locator.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else {
+        throw DaemonClientError.protocolError(
+          "Agent is missing its locator or belongs to another machine")
+      }
+      return AgentRow(
+        machineID: owner,
+        sessionID: locator,
         label: agent["label"] as? String ?? agent["agent"] as? String ?? "",
         branch: agent["active_branch"] as? String,
         working: agent["working"] as? Bool ?? false

@@ -24,6 +24,14 @@ data class JsonObject(val fields: Map<String, JsonValue>) {
   fun long(key: String): Long =
     (fields[key] as? JsonValue.Number)?.value ?: throw ProtocolException("Invalid $key")
 
+  fun optionalLong(key: String): Long? =
+    when (val value = fields[key]) {
+      null,
+      JsonValue.Null -> null
+      is JsonValue.Number -> value.value
+      else -> throw ProtocolException("Invalid $key")
+    }
+
   fun boolean(key: String): Boolean =
     (fields[key] as? JsonValue.BooleanValue)?.value ?: throw ProtocolException("Invalid $key")
 
@@ -60,6 +68,16 @@ fun validateWebSocketMessage(text: String) {
   if (text.toByteArray(Charsets.UTF_8).size > MAX_WS_MESSAGE_BYTES)
     throw ProtocolException("WebSocket message exceeds local limit")
 }
+
+internal fun JsonValue.toJsonElement(): JsonElement =
+  when (this) {
+    is JsonValue.Object -> SerializationObject(value.fields.mapValues { it.value.toJsonElement() })
+    is JsonValue.Array -> kotlinx.serialization.json.JsonArray(value.map { it.toJsonElement() })
+    is JsonValue.StringValue -> JsonPrimitive(value)
+    is JsonValue.Number -> JsonPrimitive(value)
+    is JsonValue.BooleanValue -> JsonPrimitive(value)
+    JsonValue.Null -> JsonNull
+  }
 
 private fun parseJson(text: String): JsonValue =
   try {

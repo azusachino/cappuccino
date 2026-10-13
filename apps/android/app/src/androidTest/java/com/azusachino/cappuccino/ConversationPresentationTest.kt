@@ -7,7 +7,9 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -15,6 +17,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.platform.io.PlatformTestStorageRegistry
 import com.azusachino.cappuccino.core.ConversationPart
 import com.azusachino.cappuccino.core.ConversationTurn
+import com.azusachino.cappuccino.core.activitySummary
 import com.azusachino.cappuccino.ui.CappuccinoTheme
 import com.azusachino.cappuccino.ui.ConversationTurnRow
 import java.util.TimeZone
@@ -45,20 +48,26 @@ class ConversationPresentationTest {
     }
     compose.onNodeWithText("Visible reply").assertIsDisplayed()
     capture("ConversationCollapsed")
-    compose.onNodeWithText("Hidden thought details").assertDoesNotExist()
-    compose.onNodeWithText("Hidden tool result").assertDoesNotExist()
+    compose.onNodeWithText("Hidden thought details", substring = true).assertDoesNotExist()
+    compose.onNodeWithText("Hidden tool result", substring = true).assertDoesNotExist()
+    // An older turn's activity is one closed summary line; it opens into a step per part.
+    val summary = activitySummary(turn.parts)
     compose
-      .onNodeWithText("Thinking")
+      .onNodeWithText(summary)
       .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
-    compose.onNodeWithText("Thinking").performClick()
-    compose.onNodeWithText("Hidden thought details").assertIsDisplayed()
-    compose.onNodeWithText("Hidden tool result").assertDoesNotExist()
-    compose.onNodeWithText("Tool: bash · Result available").performClick()
-    compose.onNodeWithText("Hidden tool result").assertIsDisplayed()
+    compose.onNodeWithText(summary).performClick()
+    compose.onNodeWithText("Thought").assertIsDisplayed()
+    compose.onNodeWithText("bash").assertIsDisplayed()
+    compose.onNodeWithText("Hidden thought details", substring = true).assertDoesNotExist()
+    compose.onNodeWithText("Thought").performClick()
+    compose.onNodeWithText("Hidden thought details", substring = true).assertIsDisplayed()
+    compose.onNodeWithText("Hidden tool result", substring = true).assertDoesNotExist()
+    compose.onNodeWithText("bash").performClick()
+    compose.onNodeWithText("Hidden tool result", substring = true).assertIsDisplayed()
     capture("ConversationExpanded")
-    compose.onNodeWithText("Thinking").performClick()
-    compose.onNodeWithText("Hidden thought details").assertDoesNotExist()
-    compose.onNodeWithText("Hidden tool result").assertIsDisplayed()
+    compose.onNodeWithText("Thought").performClick()
+    compose.onNodeWithText("Hidden thought details", substring = true).assertDoesNotExist()
+    compose.onNodeWithText("Hidden tool result", substring = true).assertIsDisplayed()
   }
 
   @Test
@@ -78,15 +87,31 @@ class ConversationPresentationTest {
             )
           ),
         )
+      // Only the person's prompts carry a time: HH:mm, with the full local time as its description.
+      val prompt =
+        ConversationTurn("prompt", "user", "2026-10-07T16:02:03Z", "Synthetic prompt", emptyList())
       compose.activity.runOnUiThread {
-        compose.activity.setContent { CappuccinoTheme { Column { ConversationTurnRow(turn) } } }
+        compose.activity.setContent {
+          CappuccinoTheme {
+            Column {
+              ConversationTurnRow(prompt)
+              ConversationTurnRow(turn)
+            }
+          }
+        }
       }
-      compose.onNodeWithText("2026-10-08 01:02:03").assertIsDisplayed()
+      compose.onNodeWithText("01:02").assertIsDisplayed()
+      compose.onNodeWithContentDescription("2026-10-08 01:02:03").assertExists()
       compose
         .onNodeWithText("Synthetic heading")
         .assertIsDisplayed()
         .assert(SemanticsMatcher.expectValue(SemanticsProperties.Heading, Unit))
-      compose.onNodeWithText("Use bold and inline code.").assertIsDisplayed()
+      // Inline code carries its own padding spaces, so match the words, not the spacing.
+      compose
+        .onNode(
+          hasText("Use bold and", substring = true) and hasText("inline code", substring = true)
+        )
+        .assertIsDisplayed()
       compose.onNodeWithText("val value = 42").assertIsDisplayed()
       compose.onNodeWithText("First item").assertIsDisplayed()
       compose.onNodeWithText("Second item").assertIsDisplayed()

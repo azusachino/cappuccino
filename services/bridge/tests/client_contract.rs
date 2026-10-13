@@ -63,10 +63,29 @@ impl TempRoot {
 // stop; the socket path and the agent cwd are switchable for reset scenarios.
 // ---------------------------------------------------------------------------
 
+struct MockAgent {
+    kind: String,
+    status: String,
+    screen: String,
+    requests: Vec<Value>,
+}
+
+impl Default for MockAgent {
+    fn default() -> Self {
+        Self {
+            kind: "pi".to_string(),
+            status: "idle".to_string(),
+            screen: "alpha line\nbeta line\n".to_string(),
+            requests: Vec::new(),
+        }
+    }
+}
+
 struct MockHerdr {
     socket_path: PathBuf,
     cwd: Arc<Mutex<Option<PathBuf>>>,
     agent_session: Arc<Mutex<Option<String>>>,
+    agent: Arc<Mutex<MockAgent>>,
     connections: Arc<std::sync::atomic::AtomicUsize>,
     listener_task: tokio::task::JoinHandle<()>,
 }
@@ -77,6 +96,8 @@ impl MockHerdr {
         let listener = tokio::net::UnixListener::bind(&socket_path).expect("bind mock herdr");
         let cwd: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
         let agent_session: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let agent = Arc::new(Mutex::new(MockAgent::default()));
+        let agent_task = Arc::clone(&agent);
         let cwd_task = Arc::clone(&cwd);
         let session_task = Arc::clone(&agent_session);
         let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -90,9 +111,10 @@ impl MockHerdr {
                             let guard = RunningGuard::new(Arc::clone(&connections_counter));
                             let cwd = Arc::clone(&cwd_task);
                             let session = Arc::clone(&session_task);
+                            let mock_agent = Arc::clone(&agent_task);
                             connections.push(async move {
                                 let _guard = guard;
-                                handle_mock_connection(stream, cwd, session).await;
+                                handle_mock_connection(stream, cwd, session, mock_agent).await;
                             });
                         },
                         Err(_) => return,
@@ -105,9 +127,45 @@ impl MockHerdr {
             socket_path,
             cwd,
             agent_session,
+            agent,
             connections: active,
             listener_task,
         }
+    }
+
+    /// The agent the mock reports in `agent.list`, and every request it received.
+    fn set_agent(&self, kind: &str, status: &str) {
+        let mut agent = self.agent.lock().unwrap();
+        agent.kind = kind.to_string();
+        agent.status = status.to_string();
+    }
+
+    fn set_screen(&self, screen: &str) {
+        self.agent.lock().unwrap().screen = screen.to_string();
+    }
+
+    /// Keys and text sent to the pane, in order: `["2"]`, `"a bird"`, …
+    fn input(&self) -> Vec<Value> {
+        let agent = self.agent.lock().unwrap();
+        agent
+            .requests
+            .iter()
+            .filter_map(|r| match r["method"].as_str() {
+                Some("pane.send_keys") => Some(r["params"]["keys"].clone()),
+                Some("pane.send_text") => Some(r["params"]["text"].clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn requests(&self, method: &str) -> Vec<Value> {
+        let agent = self.agent.lock().unwrap();
+        agent
+            .requests
+            .iter()
+            .filter(|r| r["method"] == method)
+            .cloned()
+            .collect()
     }
 
     /// Sets the agent cwd returned by agent.list / agent.get (for branch
@@ -138,6 +196,7 @@ async fn handle_mock_connection(
     stream: tokio::net::UnixStream,
     cwd: Arc<Mutex<Option<PathBuf>>>,
     agent_session: Arc<Mutex<Option<String>>>,
+    agent: Arc<Mutex<MockAgent>>,
 ) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
     let (reader, mut writer) = stream.into_split();
@@ -154,6 +213,15 @@ async fn handle_mock_connection(
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_default();
     let session_value = agent_session.lock().unwrap().clone();
+    let (kind, status, screen) = {
+        let mut agent = agent.lock().unwrap();
+        agent.requests.push(request.clone());
+        (
+            agent.kind.clone(),
+            agent.status.clone(),
+            agent.screen.clone(),
+        )
+    };
     let agent_session_json = match session_value {
         Some(value) => json!({"kind": "path", "value": value}),
         None => json!(null),
@@ -163,8 +231,8 @@ async fn handle_mock_connection(
             "agents": [{
                 "name": "s-probe",
                 "pane_id": "w1:a",
-                "agent": "pi",
-                "agent_status": "idle",
+                "agent": kind,
+                "agent_status": status,
                 "cwd": cwd_text,
             }]
         }),
@@ -178,7 +246,7 @@ async fn handle_mock_connection(
                 "agent_session": agent_session_json,
             }
         }),
-        "pane.read" => json!({"read": {"text": "alpha line\nbeta line\n"}}),
+        "pane.read" => json!({"read": {"text": screen}}),
         _ => json!({}),
     };
     let response = json!({"id": request["id"], "result": result});
@@ -220,7 +288,7 @@ fn spawn_bridge_once(
         .env("CAPP_BRIDGE_PORT", port.to_string())
         .env("CAPP_BRIDGE_SERVE_AUTO_APPLY", "0")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .current_dir(&root.path);
     match herdr_socket {
         Some(socket) => {
@@ -260,11 +328,26 @@ async fn spawn_bridge_with(
             if let Ok(Some(_status)) = bridge.child.try_wait() {
                 break; // bind failure or crash: retry on a new port
             }
-            if tokio::net::TcpStream::connect(("127.0.0.1", port))
-                .await
-                .is_ok()
-            {
-                return bridge;
+            // A parallel child can win the released port while this child is
+            // still starting. TCP readiness alone may borrow that other server.
+            let identity_path = root
+                .path
+                .join("home/Library/Application Support/cappuccino-spike/machine-id");
+            if let Ok(expected) = std::fs::read_to_string(identity_path) {
+                if let Ok(exchange) =
+                    probe::get(&probe_options(&bridge.base_url()), "/api/session").await
+                {
+                    if exchange.status == 200
+                        && exchange.body["machine_id"].as_str() == Some(expected.trim())
+                        && bridge
+                            .child
+                            .try_wait()
+                            .expect("inspect bridge child")
+                            .is_none()
+                    {
+                        return bridge;
+                    }
+                }
             }
             if tokio::time::Instant::now() > deadline {
                 break;
@@ -505,20 +588,49 @@ async fn agent_conversation_returns_structured_turns() {
     assert_eq!(exchange.status, 200, "payload: {}", exchange.body);
     assert_eq!(exchange.body["source"], "canonical_log");
     assert_eq!(exchange.body["session_id"], "s-probe");
+    let paired = probe::get(&probe_options(&bridge.base_url()), "/api/session")
+        .await
+        .unwrap();
+    assert_eq!(exchange.body["machine_id"], paired.body["machine_id"]);
+    assert!(exchange.body.get("conversation_id").is_none());
+    std::fs::write(
+        &transcript,
+        format!("{{\"type\":\"session\",\"id\":\"fixture-session\"}}\n{jsonl}"),
+    )
+    .unwrap();
+    let modern = probe::get(
+        &probe_options(&bridge.base_url()),
+        "/api/agents/s-probe/conversation",
+    )
+    .await
+    .unwrap();
+    assert_eq!(modern.status, 200);
+    assert_eq!(modern.body["machine_id"], paired.body["machine_id"]);
+    let canonical = modern.body["conversation_id"].as_str().unwrap();
+    assert!(canonical.starts_with("pi:"));
+    assert_eq!(canonical.len(), 67);
+    assert_eq!(modern.body["turns"], exchange.body["turns"]);
 
     let turns = exchange.body["turns"].as_array().expect("turns array");
-    assert_eq!(turns.len(), 2);
+    assert_eq!(turns.len(), 3);
     assert_eq!(turns[0]["role"], "user");
     assert_eq!(turns[0]["text"], "Run tests");
 
     assert_eq!(turns[1]["role"], "agent");
     let parts = turns[1]["parts"].as_array().expect("parts array");
-    assert_eq!(parts.len(), 2);
+    assert_eq!(parts.len(), 1);
+    assert_eq!(turns[1]["timestamp"], "2026-10-07T12:00:01Z");
+    assert_eq!(parts[0]["started_at"], "2026-10-07T12:00:01Z");
+    assert_eq!(parts[0]["finished_at"], "2026-10-07T12:00:05Z");
     assert_eq!(parts[0]["type"], "tool_call");
     assert_eq!(parts[0]["name"], "cargo_test");
     assert_eq!(parts[0]["output"], "test result: ok");
-    assert_eq!(parts[1]["type"], "text");
-    assert_eq!(parts[1]["text"], "Tests passed successfully");
+    assert_eq!(turns[2]["role"], "agent");
+    assert_eq!(turns[2]["timestamp"], "2026-10-07T12:00:06Z");
+    let reply = turns[2]["parts"].as_array().expect("response parts");
+    assert_eq!(reply.len(), 1);
+    assert_eq!(reply[0]["type"], "text");
+    assert_eq!(reply[0]["text"], "Tests passed successfully");
 
     bridge.stop().expect("bridge stop");
     herdr.stop().await;
@@ -561,6 +673,220 @@ async fn submit_agent_prompt_delivers_input() {
     .expect("empty prompt request");
 
     assert_eq!(err_exchange.status, 400);
+
+    bridge.stop().expect("bridge stop");
+    herdr.stop().await;
+    root.remove();
+}
+
+#[tokio::test]
+async fn control_route_sends_each_agents_own_keys_and_refuses_busy_new_sessions() {
+    let root = TempRoot::new("control-test");
+    let herdr = MockHerdr::start(&root);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+    let options = probe_options(&bridge.base_url());
+    let control = |session: &'static str, action: &'static str| {
+        let options = options.clone();
+        async move {
+            probe::post_json(
+                &options,
+                &format!("/api/agents/{session}/control"),
+                &json!({"action": action}),
+            )
+            .await
+            .expect("control request")
+        }
+    };
+
+    let unknown = control("s-probe", "reboot").await;
+    assert_eq!(unknown.status, 400, "payload: {}", unknown.body);
+    let missing = control("s-missing", "interrupt").await;
+    assert_eq!(missing.status, 404, "payload: {}", missing.body);
+
+    // Stop presses Esc in the agent's pane, whatever it is doing.
+    herdr.set_agent("claude", "working");
+    let stop = control("s-probe", "interrupt").await;
+    assert_eq!(stop.status, 200, "payload: {}", stop.body);
+    let keys = herdr.requests("pane.send_keys");
+    assert_eq!(
+        keys.last().unwrap()["params"],
+        json!({"pane_id": "w1:a", "keys": ["esc"]})
+    );
+
+    // A command typed into a running turn would become its input.
+    let busy = control("s-probe", "new_session").await;
+    assert_eq!(busy.status, 409, "payload: {}", busy.body);
+    assert_eq!(busy.body["code"], "agent_busy");
+    herdr.set_agent("claude", "blocked");
+    assert_eq!(control("s-probe", "new_session").await.status, 409);
+    assert!(herdr.requests("agent.prompt").is_empty());
+
+    for (kind, command) in [("claude", "/clear"), ("pi", "/new"), ("agy", "/clear")] {
+        herdr.set_agent(kind, "idle");
+        let fresh = control("s-probe", "new_session").await;
+        assert_eq!(fresh.status, 200, "{kind}: {}", fresh.body);
+        let prompts = herdr.requests("agent.prompt");
+        assert_eq!(
+            prompts.last().unwrap()["params"],
+            json!({"target": "w1:a", "text": command})
+        );
+    }
+    herdr.set_agent("codex", "idle");
+    assert_eq!(control("s-probe", "new_session").await.status, 400);
+
+    bridge.stop().expect("bridge stop");
+    herdr.stop().await;
+    root.remove();
+}
+
+const PETS_SCREEN: &str = "←  ☒ Color  ☐ Pets  ✔ Submit  →
+
+Which pets?
+
+❯ 1. [ ] Cat
+         indep
+  2. [ ] Dog
+         loyal
+  3. [ ] Fish
+         quiet
+  4. [ ] Type something
+     Submit
+──────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+";
+
+const REVIEW_SCREEN: &str = "←  ☒ Color  ☒ Pets  ✔ Submit  →
+Review your answers
+ ● Pick a color?
+   → Blue
+ ● Which pets?
+   → Cat, Fish
+Ready to submit your answers?
+❯ 1. Submit answers
+  2. Cancel
+";
+
+/// The card id a stale answer's 409 names as currently on screen.
+fn on_screen_id(body: &Value) -> String {
+    let message = body["message"].as_str().unwrap_or_default();
+    let id = message.rsplit("on screen ").next().unwrap_or_default();
+    id.trim_end_matches(')').trim().to_string()
+}
+
+#[tokio::test]
+async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
+    let root = TempRoot::new("question-test");
+    let herdr = MockHerdr::start(&root);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+    let options = probe_options(&bridge.base_url());
+    let post = |body: Value| {
+        let options = options.clone();
+        async move {
+            probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+                .await
+                .expect("prompt request")
+        }
+    };
+    let answer = |id: &str, answers: Value| json!({"type": "answer_question", "prompt_id": id, "answers": answers});
+    let sent_since = |from: usize| herdr.input()[from..].to_vec();
+
+    // A single-select question, as Herdr returns Claude Code's form.
+    herdr.set_screen(include_str!(
+        "../../../fixtures/claude/ask-user-question-screen.txt"
+    ));
+    let stale = post(answer("p-old", json!([{"selected": [1]}]))).await;
+    assert_eq!(stale.status, 409, "payload: {}", stale.body);
+    assert_eq!(stale.body["code"], "stale_prompt");
+    let color = on_screen_id(&stale.body);
+    assert!(color.starts_with("p-"), "id from: {}", stale.body);
+    assert_eq!(
+        post(answer(&color, json!([{"selected": [0, 1]}])))
+            .await
+            .status,
+        400
+    );
+    let two = post(answer(
+        &color,
+        json!([{"selected": [1]}, {"selected": [0]}]),
+    ))
+    .await;
+    assert_eq!(two.status, 400);
+    assert_eq!(two.body["code"], "bad_answer");
+    let select = json!({"type": "answer_prompt", "prompt_id": color, "action": "select_option", "option_index": 1});
+    assert_eq!(
+        post(select).await.status,
+        400,
+        "a question card takes answer_question"
+    );
+    assert!(
+        herdr.input().is_empty(),
+        "nothing is typed for refused answers"
+    );
+
+    let from = herdr.input().len();
+    assert_eq!(
+        post(answer(&color, json!([{"selected": [1]}])))
+            .await
+            .status,
+        200
+    );
+    assert_eq!(sent_since(from), vec![json!(["2"])]);
+    let from = herdr.input().len();
+    assert_eq!(
+        post(answer(&color, json!([{"other": " Teal "}])))
+            .await
+            .status,
+        200
+    );
+    assert_eq!(
+        sent_since(from),
+        vec![json!(["4"]), json!("Teal"), json!(["enter"])]
+    );
+    let from = herdr.input().len();
+    let cancel = json!({"type": "answer_prompt", "prompt_id": color, "action": "cancel"});
+    assert_eq!(post(cancel).await.status, 200);
+    assert_eq!(sent_since(from), vec![json!(["esc"])]);
+
+    // A multi-select toggles, types its own line, then leaves by its Submit row.
+    herdr.set_screen(PETS_SCREEN);
+    let pets = on_screen_id(&post(answer(&color, json!([{"selected": [0]}]))).await.body);
+    assert_ne!(pets, color);
+    let from = herdr.input().len();
+    let multi = post(answer(&pets, json!([{"selected": [0], "other": "a bird"}]))).await;
+    assert_eq!(multi.status, 200, "payload: {}", multi.body);
+    assert_eq!(
+        sent_since(from),
+        vec![
+            json!(["1"]),
+            json!(["4"]),
+            json!(["down", "down", "down"]),
+            json!("a bird"),
+            json!(["down"]),
+            json!(["enter"]),
+        ]
+    );
+    // Ticks made in the terminal would be undone by relative toggles: refused.
+    herdr.set_screen(&PETS_SCREEN.replace("1. [ ] Cat", "1. [✔] Cat"));
+    let ticked = on_screen_id(&post(answer(&pets, json!([{"selected": [0]}]))).await.body);
+    let from = herdr.input().len();
+    let refused = post(answer(&ticked, json!([{"selected": [1]}]))).await;
+    assert_eq!(refused.status, 409, "payload: {}", refused.body);
+    assert!(sent_since(from).is_empty());
+
+    // The review acts on its digit alone; its Cancel row is 2.
+    herdr.set_screen(REVIEW_SCREEN);
+    let review_stale = json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "select_option", "option_index": 0});
+    let review = on_screen_id(&post(review_stale).await.body);
+    let from = herdr.input().len();
+    let submit = json!({"type": "answer_prompt", "prompt_id": review, "action": "select_option", "option_index": 0});
+    assert_eq!(post(submit).await.status, 200);
+    assert_eq!(sent_since(from), vec![json!(["1"])]);
+    let from = herdr.input().len();
+    let cancel = json!({"type": "answer_prompt", "prompt_id": review, "action": "cancel"});
+    assert_eq!(post(cancel).await.status, 200);
+    assert_eq!(sent_since(from), vec![json!(["2"])]);
 
     bridge.stop().expect("bridge stop");
     herdr.stop().await;

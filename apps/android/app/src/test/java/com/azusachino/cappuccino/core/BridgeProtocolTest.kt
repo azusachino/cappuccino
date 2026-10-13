@@ -228,6 +228,41 @@ class BridgeProtocolTest {
   }
 
   @Test
+  fun parsesAskUserQuestionCardsWithTheirQuestions() {
+    val event =
+      parseStreamEvent(
+        parseJsonObject(
+          """{"event":"prompt_request","session_id":"s-1","prompt":{"prompt_id":"q-toolu_1","type":"ask_user_question","title":"Pick a color?","tool_name":"AskUserQuestion","options":[],"selected_index":0,"questions":[{"header":"Color","question":"Pick a color?","multi_select":false,"options":[{"id":"opt-0","label":"Red","description":"warm"},{"id":"opt-1","label":"Blue"}]},{"header":"Pets","question":"Which pets?","multi_select":true,"options":[{"id":"opt-0","label":"Cat"}]}]}}"""
+        )
+      )
+        as StreamEvent.PromptRequest
+    val questions = event.prompt.questions
+    assertEquals(2, questions.size)
+    assertEquals(
+      PromptQuestion(
+        "Color",
+        "Pick a color?",
+        false,
+        listOf(PromptOption("opt-0", "Red", "warm"), PromptOption("opt-1", "Blue", null)),
+      ),
+      questions[0],
+    )
+    assertTrue(questions[1].multiSelect)
+    // Screen-read prompts carry no questions.
+    assertTrue(
+      (parseStreamEvent(
+          parseJsonObject(
+            """{"event":"prompt_request","session_id":"s-1","prompt":{"prompt_id":"p-1","type":"tool_approval","title":"T","options":[],"selected_index":0}}"""
+          )
+        )
+          as StreamEvent.PromptRequest)
+        .prompt
+        .questions
+        .isEmpty()
+    )
+  }
+
+  @Test
   fun parsesAgentStatusAndPromptStreamEvents() {
     val statusObj =
       obj(
@@ -302,6 +337,35 @@ class BridgeProtocolTest {
 
     state = reduce(state, StreamEvent.PromptResolved("s-1", "p-1"), "s-1")
     assertNull(state.pendingPrompt)
+  }
+
+  @Test
+  fun preservesStructuredToolArgumentsAndResultsForDisclosure() {
+    val turns =
+      parseConversationResponse(
+        parseJsonObject(
+          """{"turns":[{"id":"entry","role":"agent","parts":[{"type":"tool_call","name":"bash","input":{"command":"printf \"hello\"","timeout":10,"nested":[true,null]},"output":"hello"}]}]}"""
+        )
+      )
+    val tool = turns.single().parts.single() as ConversationPart.ToolCall
+    assertEquals("bash", tool.name)
+    assertEquals("printf \"hello\"", parseJsonObject(tool.input).string("command"))
+    assertEquals(10L, parseJsonObject(tool.input).long("timeout"))
+    assertEquals("hello", tool.output)
+  }
+
+  @Test
+  fun toolImageCountIsParsedAndAbsentStaysNull() {
+    val parts =
+      parseConversationResponse(
+          parseJsonObject(
+            """{"turns":[{"id":"t","role":"agent","parts":[{"type":"tool_call","name":"Read","input":{"file_path":"shot.png"},"output":"","images":2},{"type":"tool_call","name":"Read","input":"file"}]}]}"""
+          )
+        )
+        .single()
+        .parts
+    assertEquals(2, (parts[0] as ConversationPart.ToolCall).images)
+    assertNull((parts[1] as ConversationPart.ToolCall).images)
   }
 
   @Test

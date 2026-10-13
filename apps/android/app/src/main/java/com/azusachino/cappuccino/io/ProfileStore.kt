@@ -31,6 +31,10 @@ interface MachineProfileStore {
   fun readThemeMode(): ThemeMode
 
   fun saveThemeMode(mode: ThemeMode)
+
+  fun readAppPalette(): com.azusachino.cappuccino.ui.AppPalette
+
+  fun saveAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette)
 }
 
 class ProfileStore(context: Context) : MachineProfileStore {
@@ -102,8 +106,17 @@ class ProfileStore(context: Context) : MachineProfileStore {
     preferences.edit(commit = true) { putString(KEY_THEME_MODE, mode.name) }
   }
 
+  override fun readAppPalette(): com.azusachino.cappuccino.ui.AppPalette =
+    com.azusachino.cappuccino.ui.parseAppPalette(preferences.getString(KEY_PALETTE, null))
+
+  override fun saveAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette) {
+    preferences.edit(commit = true) { putString(KEY_PALETTE, palette.name) }
+    check(preferences.getString(KEY_PALETTE, null) == palette.name) { "Could not save app palette" }
+  }
+
   companion object {
     private const val KEY = "profiles"
     private const val KEY_THEME_MODE = "theme_mode"
+    private const val KEY_PALETTE = "app_palette"
   }
 }

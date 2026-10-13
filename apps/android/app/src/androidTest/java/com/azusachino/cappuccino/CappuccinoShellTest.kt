@@ -8,9 +8,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -37,6 +39,7 @@ import java.time.ZoneId
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -47,40 +50,99 @@ class CappuccinoShellTest {
 
   @Test
   fun disconnectedJourneyAndRecreation() {
-    compose
-      .onNodeWithText("Select or add a bridge in Machines to discover agents.")
-      .assertIsDisplayed()
-    compose.onNodeWithText("Not connected · 0 agents").assertIsDisplayed()
-    capture("Chats")
-
-    compose.onNode(hasText("Attention") and hasClickAction()).performClick()
-    compose.onNodeWithText("No Pending Approvals").assertIsDisplayed()
-    compose
-      .onNodeWithText(
-        "All agents are running smoothly. Any tool approval or ask_question prompts will appear here."
-      )
-      .assertIsDisplayed()
-    capture("Attention")
-
-    compose.onNode(hasText("Machines") and hasClickAction()).performClick()
+    // The app opens on Machines; agents are reached through their machine, not a Chats tab.
     compose.onNodeWithText("No machines configured").assertIsDisplayed()
     compose.onNodeWithContentDescription("Add machine").assertIsDisplayed()
     capture("Machines")
 
     compose.onNodeWithContentDescription("Add machine").performClick()
-    compose.onNodeWithText("Private bridge URL").assertIsDisplayed()
+    compose.onNodeWithText("Bridge address").assertIsDisplayed()
     compose.onNodeWithText("Connect").assertIsDisplayed()
-    compose.onNodeWithText("Private bridge URL").performClick()
+    compose.onNodeWithText("Bridge address").performClick()
     compose.waitForIdle()
     compose.onNodeWithText("Connect").assertIsDisplayed()
     capture("AddMachineIme")
     compose.activityRule.scenario.recreate()
     compose.waitForIdle()
     compose.onNodeWithText("No machines configured").assertIsDisplayed()
-    compose.onNode(hasText("Chats") and hasClickAction()).performClick()
-    compose
-      .onNodeWithText("Select or add a bridge in Machines to discover agents.")
-      .assertIsDisplayed()
+
+    compose.onNode(hasText("Settings") and hasClickAction()).performClick()
+    compose.onNodeWithText("Theme").assertIsDisplayed()
+    capture("Settings")
+    compose.onNode(hasText("Machines") and hasClickAction()).performClick()
+    compose.onNodeWithText("No machines configured").assertIsDisplayed()
+  }
+
+  @Test
+  fun stopWhileWorkingAndNewSessionOnlyWhenIdle() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile(
+        "synthetic",
+        "Synthetic machine",
+        Endpoint.parse("https://bridge.example"),
+        machine,
+      )
+    val agent =
+      AgentRow(machine, "synthetic-session", "pane-1", "claude", "claude", "working", false, "main")
+    val state =
+      mutableStateOf(
+        ConnectedUiState(
+          profiles = listOf(profile),
+          activeProfileId = profile.id,
+          agents = listOf(agent),
+          selectedAgent = agent,
+          connection = ConnectionState.Connected,
+          bridgeDetails =
+            mapOf(
+              profile.id to
+                com.azusachino.cappuccino.io.BridgeDetails(
+                  machine,
+                  "0.1.0",
+                  1,
+                  mapOf("prompt_input" to true, "agent_control" to true),
+                )
+            ),
+          sessionStats =
+            com.azusachino.cappuccino.io.SessionStats(
+              "claude-opus-5-5",
+              "high",
+              76_000,
+              200_000,
+              90,
+            ),
+        )
+      )
+    val actions = StateActions(state)
+    compose.activity.runOnUiThread {
+      compose.activity.setContent {
+        CappuccinoTheme {
+          val s by state
+          CappuccinoScreen(s, actions) { _, _ -> }
+        }
+      }
+    }
+
+    compose.onNodeWithText("opus 5.5 · high").assertIsDisplayed()
+    assertSendAndStopSitAtTheEnd()
+    compose.onNodeWithText("38% · 76K / 200K").assertIsDisplayed()
+    compose.onNodeWithText("cache 90%").assertIsDisplayed()
+    compose.onNodeWithContentDescription("Stop").performClick()
+    compose.onNodeWithContentDescription("Commands").performClick()
+    compose.onNodeWithText("New session").assertIsNotEnabled()
+    compose.onNodeWithText("New session").performClick()
+    assertEquals(listOf("interrupt"), actions.controls)
+
+    compose.activity.runOnUiThread {
+      state.value = state.value.copy(selectedAgent = agent.copy(status = "idle"))
+    }
+    compose.waitForIdle()
+    compose.onNodeWithContentDescription("Stop").assertDoesNotExist()
+    // The menu stayed open; the same item is now enabled.
+    compose.onNodeWithText("New session").performClick()
+    compose.onNodeWithText("Start a new session?").assertIsDisplayed()
+    compose.onNode(hasText("New session") and hasClickAction()).performClick()
+    assertEquals(listOf("interrupt", "new_session"), actions.controls)
   }
 
   @Test
@@ -119,7 +181,7 @@ class CappuccinoShellTest {
         }
       }
     }
-    compose.onNodeWithText("Recent agent output · Read-only").assertIsDisplayed()
+    compose.onNodeWithText("Recent output · History not verified").assertIsDisplayed()
     compose.onNodeWithText("Synthetic output 30").assertIsDisplayed()
     capture("SelectedOutput")
 
@@ -137,9 +199,9 @@ class CappuccinoShellTest {
     }
     compose.waitForIdle()
     awaitJumpAffordance()
-    compose.onNodeWithText("Jump to latest").assertIsDisplayed()
+    compose.onNodeWithTag("jumpToLatest").assertIsDisplayed()
     assertJumpAffordanceSitsAboveComposer()
-    compose.onNodeWithText("Jump to latest").performClick()
+    compose.onNodeWithTag("jumpToLatest").performClick()
     compose.onNodeWithText("Synthetic output 31").assertIsDisplayed()
 
     compose.runOnUiThread {
@@ -150,7 +212,115 @@ class CappuccinoShellTest {
     capture("ConnectionError")
     compose.onNodeWithContentDescription("Back").performClick()
     compose.waitForIdle()
-    compose.onNodeWithText("synthetic-session", substring = true).assertIsDisplayed()
+    // Back returns to the machine the agent belongs to.
+    compose.onNodeWithText("Synthetic machine").assertIsDisplayed()
+  }
+
+  @Test
+  fun toolOnlyReasoningUpdatePreservesChatViewport() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile("tool-only", "Synthetic", Endpoint.parse("https://bridge.example"), machine)
+    val agent = AgentRow(machine, "synthetic-session", "pane", "pi", "pi", "idle", false, "main")
+    val tool = ConversationPart.ToolCall("bash", "pwd", null)
+    val replies =
+      (1..30).map {
+        ConversationTurn("reply-$it", "agent", null, "Reply paragraph $it", emptyList())
+      }
+    val state =
+      mutableStateOf(
+        ConnectedUiState(
+          profiles = listOf(profile),
+          activeProfileId = profile.id,
+          selectedAgent = agent,
+          conversationTurns =
+            replies + ConversationTurn("reply", "agent", null, "ANCHOR REPLY", listOf(tool)),
+          connection = ConnectionState.Connected,
+          conversationSource = "canonical_log",
+        )
+      )
+    compose.activity.runOnUiThread {
+      compose.activity.setContent {
+        CappuccinoTheme {
+          val s by state
+          CappuccinoScreen(s, StateActions(state)) { _, _ -> }
+        }
+      }
+    }
+    // The reader opens following the newest message.
+    compose.waitForIdle()
+    capture("ToolOnlyBefore")
+    compose.onNodeWithText("ANCHOR REPLY").assertIsDisplayed()
+    compose.waitForIdle()
+    val before = compose.onNodeWithText("ANCHOR REPLY").fetchSemanticsNode().boundsInRoot.top
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          conversationTurns =
+            state.value.conversationTurns +
+              ConversationTurn(
+                "tool-step",
+                "agent",
+                null,
+                null,
+                listOf(ConversationPart.Thinking("Inspecting another file"), tool),
+              )
+        )
+    }
+    compose.waitForIdle()
+    compose.onNodeWithText("ANCHOR REPLY").assertIsDisplayed()
+    val after = compose.onNodeWithText("ANCHOR REPLY").fetchSemanticsNode().boundsInRoot.top
+    assertEquals(before, after, 0.5f)
+    // Tool-only updates may leave the reader above the bottom, but never flag new output.
+    compose.onNodeWithContentDescription("Jump to new output").assertDoesNotExist()
+    capture("ToolOnlyAfter")
+
+    compose.onNodeWithTag("recentOutputList").performTouchInput { swipeDown() }
+    compose.waitForIdle()
+    val readingBefore =
+      compose
+        .onNodeWithTag("recentOutputList")
+        .fetchSemanticsNode()
+        .config[SemanticsProperties.VerticalScrollAxisRange]
+        .value()
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          conversationTurns =
+            state.value.conversationTurns.dropLast(1) +
+              state.value.conversationTurns
+                .last()
+                .copy(
+                  parts =
+                    listOf(
+                      ConversationPart.Thinking("Still inspecting"),
+                      tool.copy(output = "done"),
+                    )
+                )
+        )
+    }
+    compose.waitForIdle()
+    val readingAfter =
+      compose
+        .onNodeWithTag("recentOutputList")
+        .fetchSemanticsNode()
+        .config[SemanticsProperties.VerticalScrollAxisRange]
+        .value()
+    assertEquals(readingBefore, readingAfter, 0.01f)
+    // Tool-only updates may leave the reader above the bottom, but never flag new output.
+    compose.onNodeWithContentDescription("Jump to new output").assertDoesNotExist()
+
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          conversationTurns =
+            state.value.conversationTurns +
+              ConversationTurn("new-answer", "agent", null, "NEW ANSWER", emptyList())
+        )
+    }
+    awaitJumpAffordance()
+    compose.onNodeWithTag("jumpToLatest").performClick()
+    compose.onNodeWithText("NEW ANSWER").assertIsDisplayed()
   }
 
   @Test
@@ -189,7 +359,9 @@ class CappuccinoShellTest {
         }
       }
     }
-    compose.onNodeWithText("FINAL-TAIL").assertIsDisplayed()
+    // Markdown lays out over several frames and the follow re-scrolls as it grows; slow
+    // emulators (CI's x86 AVD) need a bounded wait before the newest text is on screen.
+    awaitDisplayed("FINAL-TAIL")
     compose.runOnIdle {
       state.value =
         state.value.copy(
@@ -200,7 +372,7 @@ class CappuccinoShellTest {
                 .copy(parts = listOf(ConversationPart.Text(tail + "\n\nSame-count update")))
         )
     }
-    compose.onNodeWithText("Same-count update").assertIsDisplayed()
+    awaitDisplayed("Same-count update")
     compose.onNodeWithTag("recentOutputList").performTouchInput { swipeDown() }
     compose.waitForIdle()
     val before =
@@ -218,7 +390,7 @@ class CappuccinoShellTest {
         )
     }
     awaitJumpAffordance()
-    compose.onNodeWithText("Jump to latest").assertIsDisplayed()
+    compose.onNodeWithTag("jumpToLatest").assertIsDisplayed()
     assertJumpAffordanceSitsAboveComposer()
     val after =
       compose
@@ -227,7 +399,7 @@ class CappuccinoShellTest {
         .config[SemanticsProperties.VerticalScrollAxisRange]
         .value()
     assertEquals(before, after, 0.01f)
-    compose.onNodeWithText("Jump to latest").performClick()
+    compose.onNodeWithTag("jumpToLatest").performClick()
     compose.onNodeWithText("Newest structured response").assertIsDisplayed()
     capture("ConversationLatest")
     compose.runOnIdle {
@@ -243,13 +415,13 @@ class CappuccinoShellTest {
         )
     }
     compose.onNodeWithText("Other machine latest").assertIsDisplayed()
-    compose.onNodeWithText("Jump to latest").assertDoesNotExist()
+    compose.onNodeWithTag("jumpToLatest").assertDoesNotExist()
   }
 
   @Test
   fun visibleTimestampTracksDeviceTimezoneChangesWithoutReloadingConversation() {
-    // This OS-setting journey is emulator-only; never mutate a physical phone's timezone.
-    assertEquals("1", shell("getprop ro.kernel.qemu").trim())
+    // This OS-setting journey is emulator-only; never mutate a physical device's timezone.
+    assumeTrue("needs an emulator", shell("getprop ro.kernel.qemu").trim() == "1")
     val originalZone = ZoneId.of(shell("getprop persist.sys.timezone").trim()).id
     fun setZone(zone: String) {
       require(zone.matches(Regex("[A-Za-z0-9_+/:.-]+")))
@@ -270,11 +442,13 @@ class CappuccinoShellTest {
             selectedAgent = agent,
             conversationTurns =
               listOf(
+                // Only the person's prompts carry a time: HH:mm, the full local time as its
+                // description.
                 ConversationTurn(
                   "tz-turn",
-                  "assistant",
+                  "user",
                   "2026-10-07T16:02:03Z",
-                  "Timezone reply",
+                  "Timezone prompt",
                   emptyList(),
                 )
               ),
@@ -292,13 +466,15 @@ class CappuccinoShellTest {
           }
         }
       }
-      compose.onNodeWithText("2026-10-07 16:02:03").assertIsDisplayed()
+      compose.onNodeWithText("16:02").assertIsDisplayed()
+      compose.onNodeWithContentDescription("2026-10-07 16:02:03").assertExists()
       setZone("Asia/Tokyo")
       compose.waitUntil(timeoutMillis = 5000) {
-        compose.onAllNodesWithText("2026-10-08 01:02:03").fetchSemanticsNodes().isNotEmpty()
+        compose.onAllNodesWithText("01:02").fetchSemanticsNodes().isNotEmpty()
       }
-      compose.onNodeWithText("2026-10-08 01:02:03").assertIsDisplayed()
-      compose.onNodeWithText("Timezone reply").assertIsDisplayed()
+      compose.onNodeWithText("01:02").assertIsDisplayed()
+      compose.onNodeWithContentDescription("2026-10-08 01:02:03").assertExists()
+      compose.onNodeWithText("Timezone prompt").assertIsDisplayed()
       capture("DeviceTimezoneChanged")
     } finally {
       setZone(originalZone)
@@ -306,35 +482,50 @@ class CappuccinoShellTest {
     }
   }
 
-  private fun assertJumpAffordanceSitsAboveComposer() {
-    // Contract geometry, not just text presence (android-material3.md region 8): the
-    // extended FAB must render in flow at the bottom end, between the transcript and the
-    // composer — never back at the top of the transcript column.
-    val decor = compose.activity.window.decorView
-    val fab = compose.onNodeWithText("Jump to latest").fetchSemanticsNode().boundsInRoot
+  private fun assertSendAndStopSitAtTheEnd() {
+    // The model chip must not take the slack: Stop and Send hug the composer's end edge.
     val composer = compose.onNodeWithTag("promptInput").fetchSemanticsNode().boundsInRoot
-    val transcript = compose.onNodeWithTag("recentOutputList").fetchSemanticsNode().boundsInRoot
+    val send = compose.onNodeWithContentDescription("Send").fetchSemanticsNode().boundsInRoot
+    val stop = compose.onNodeWithContentDescription("Stop").fetchSemanticsNode().boundsInRoot
+    val slack = composer.right - send.right
+    assertTrue("Send must end at the composer edge (send=$send, field=$composer)", slack < 48f)
     assertTrue(
-      "FAB must sit in the bottom half of the screen " +
-        "(bottom=${fab.bottom}, window=${decor.height})",
-      fab.bottom > decor.height / 2f,
-    )
-    assertTrue(
-      "FAB bottom must stay above the composer (fab=$fab, composer=$composer)",
-      fab.bottom <= composer.top,
-    )
-    assertTrue(
-      "FAB must not overlap the transcript above it (transcript=$transcript, fab=$fab)",
-      transcript.bottom <= fab.top,
+      "Stop must sit just before Send (stop=$stop, send=$send)",
+      stop.right <= send.left + 1f && send.left - stop.right < 48f,
     )
   }
 
-  private fun awaitJumpAffordance() {
-    // The M3 extended FAB animates its width in on appearance; wait (bounded, test
-    // thread) until the affordance has real size, then the unchanged display assertions apply.
+  private fun assertJumpAffordanceSitsAboveComposer() {
+    // Contract geometry, not just presence: the jump button overlays the transcript's
+    // bottom-end corner (pi-pocket's `.jump`) and never reaches into the composer.
+    val jump = compose.onNodeWithTag("jumpToLatest").fetchSemanticsNode().boundsInRoot
+    val composer = compose.onNodeWithTag("promptInput").fetchSemanticsNode().boundsInRoot
+    val transcript = compose.onNodeWithTag("recentOutputList").fetchSemanticsNode().boundsInRoot
+    assertTrue(
+      "Jump must sit inside the transcript's lower half (jump=$jump, transcript=$transcript)",
+      jump.top >= transcript.center.y && jump.bottom <= transcript.bottom,
+    )
+    assertTrue(
+      "Jump must sit at the end edge (jump=$jump, transcript=$transcript)",
+      jump.right > transcript.center.x,
+    )
+    assertTrue(
+      "Jump must stay above the composer (jump=$jump, composer=$composer)",
+      jump.bottom <= composer.top,
+    )
+  }
+
+  private fun awaitDisplayed(text: String) {
     compose.waitUntil(timeoutMillis = 5_000) {
-      compose.onAllNodesWithText("Jump to latest").fetchSemanticsNodes().any {
-        it.boundsInRoot.width > 100
+      runCatching { compose.onNodeWithText(text).assertIsDisplayed() }.isSuccess
+    }
+  }
+
+  private fun awaitJumpAffordance() {
+    // Wait (bounded, test thread) until the jump button is laid out with real size.
+    compose.waitUntil(timeoutMillis = 5_000) {
+      compose.onAllNodesWithTag("jumpToLatest").fetchSemanticsNodes().any {
+        it.boundsInRoot.width > 0
       }
     }
     compose.waitForIdle()
@@ -348,7 +539,20 @@ class CappuccinoShellTest {
       .use { it.readText() }
 
   private class StateActions(private val state: MutableState<ConnectedUiState>) : ConnectedActions {
+    val controls = mutableListOf<String>()
+
+    override fun controlAgent(action: String) {
+      controls += action
+    }
+
     override fun addMachine(label: String, url: String) = Unit
+
+    override fun renameProfile(id: String, label: String) {
+      state.value =
+        state.value.copy(
+          profiles = state.value.profiles.map { if (it.id == id) it.copy(label = label) else it }
+        )
+    }
 
     override fun selectProfile(id: String) = Unit
 
@@ -363,6 +567,10 @@ class CappuccinoShellTest {
     override fun removeProfile(id: String) = Unit
 
     override fun retry() = Unit
+
+    override fun setAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette) {
+      state.value = state.value.copy(appPalette = palette)
+    }
 
     override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
       state.value = state.value.copy(themeMode = mode)

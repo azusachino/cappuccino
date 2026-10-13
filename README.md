@@ -13,12 +13,17 @@ open the generated `Cappuccino.xcodeproj`, select the `Cappuccino` iOS scheme
 with your device as destination, and run (free provisioning; re-sign weekly).
 No store, no TestFlight in the MVP.
 
-**Add a machine and browse agents.** On each Herdr machine, install the bridge
+**Add a machine and browse agents.** First install the appropriate Herdr agent
+integration in the running agent's effective config directory, reload it while
+idle, and verify its native session report. For Pi, an integration installed in
+`~/.pi/agent` does not help a process using `PI_CODING_AGENT_DIR=~/.luna/agent`.
+Follow the [integration prerequisite](services/bridge/README.md#agent-integration-prerequisite);
+scrollback is not canonical-reader readiness. On each Herdr machine, install the bridge
 binary before linking the plugin. From this repository's root, run
 `cargo install --path services/bridge --locked`; ensure Cargo's install `bin`
 directory is on Herdr's `PATH`, then run
 `herdr plugin link <path-to-services/bridge>` and verify with
-`herdr plugin action invoke status --plugin azusachino.cappuccino-bridge`. The
+`herdr plugin action invoke status --plugin cappuccino-bridge`. The
 plugin does not build or install the binary. Follow the
 [bridge setup guide](services/bridge/README.md) to expose its loopback listener
 over a private tailnet using `tailscale serve`. The bridge has no authentication:
@@ -103,7 +108,7 @@ make validate
 
 These aggregate commands require both toolchains. Use `fmt-apple`/`check-apple`/`validate-apple` or their Android counterparts for platform-focused iteration. `make md-check` checks all Markdown. Formatting, core tests, lint and compilation are prerequisites; both platform UI journeys are explicit commands, not implicit acceptance of remote behavior.
 
-CI defines separate Apple and Android jobs using released action tags and read-only contents permissions. It preserves narrow synthetic UI evidence for seven days and uses only task-owned simulators/emulators. Delivered-head hosted runs succeeded for both platforms (run 37325757158); the hosted Android capture shows an unrelated system launcher ANR dialog from emulator load, recorded in [verification](docs/verification.md#delivered-head-hosted-checkpoint). See [development and quality](docs/development.md) for toolchain details and [verification](docs/verification.md) for actual accepted runs and limits.
+CI defines separate Apple and Android jobs using released action tags and read-only contents permissions. Pull requests run format, tests, lint and builds; the emulator and simulator UI journeys run on pushes to `main` and on demand (`workflow_dispatch`). It preserves narrow synthetic UI evidence for seven days and uses only task-owned simulators/emulators. Delivered-head hosted runs succeeded for both platforms (run 37325757158); the hosted Android capture shows an unrelated system launcher ANR dialog from emulator load, recorded in [verification](docs/verification.md#delivered-head-hosted-checkpoint). See [development and quality](docs/development.md) for toolchain details and [verification](docs/verification.md) for actual accepted runs and limits.
 
 ## Limitations
 

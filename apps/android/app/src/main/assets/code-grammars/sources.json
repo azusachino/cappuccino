@@ -1,0 +1,122 @@
+[
+  {
+    "file": "LICENSE.txt",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/LICENSE.txt",
+    "sha256": "9480271317925265e806a9a196aaa33410a962fa9d4d1e248a4a5187bc8c9df9"
+  },
+  {
+    "file": "ThirdPartyNotices.txt",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/ThirdPartyNotices.txt",
+    "sha256": "4cb210d0c8f8fa304b37a31d44436ebf86dff59466a4033fbcd0c401d63c6568"
+  },
+  {
+    "file": "go.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/go/syntaxes/go.tmLanguage.json",
+    "sha256": "de8f2fa64ff273ecd3bfd815164c460e2e406759fb7c8ffabf6cb3639a0efc5f"
+  },
+  {
+    "file": "JavaScript.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/javascript/syntaxes/JavaScript.tmLanguage.json",
+    "sha256": "db6f17f15bc4f5e860a3b8fa6055a69720a53df845c8d5121cdc4f128c16291f"
+  },
+  {
+    "file": "JavaScriptReact.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/javascript/syntaxes/JavaScriptReact.tmLanguage.json",
+    "sha256": "dd29ed97c74d9be896c76c1e8ba51534ca29b253ab50b2abb575f321cb2ac635"
+  },
+  {
+    "file": "JSON.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/json/syntaxes/JSON.tmLanguage.json",
+    "sha256": "d7238f1cc9033993b9816b0945cab4bb8ea108de0399663c551f28f913e94c70"
+  },
+  {
+    "file": "JSONC.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/json/syntaxes/JSONC.tmLanguage.json",
+    "sha256": "9f927bb3aa53e66efc3cace9d2fa1185822b2adfa3f4a9299e7c078f136e1ee2"
+  },
+  {
+    "file": "JSONL.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/json/syntaxes/JSONL.tmLanguage.json",
+    "sha256": "43993c393f6141af3cbc8c1e8b2fdcf2f7f88fc7e63415ac5f36ab6bb05ba103"
+  },
+  {
+    "file": "snippets.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/json/syntaxes/snippets.tmLanguage.json",
+    "sha256": "0fc1af278857af70f8f97ac959a8245b0834c2b0ad898d2c0324103f7f519685"
+  },
+  {
+    "file": "MagicPython.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/python/syntaxes/MagicPython.tmLanguage.json",
+    "sha256": "ca981430eb3df004f4955bb7cba51ad06c4d8408d168c81eec7059d7d9aec5c8"
+  },
+  {
+    "file": "MagicRegExp.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/python/syntaxes/MagicRegExp.tmLanguage.json",
+    "sha256": "d44f8811521bd35ea6bb9f7049b9e8a2cb6a04c514dcb9ec369633ab2cb139d1"
+  },
+  {
+    "file": "rust.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/rust/syntaxes/rust.tmLanguage.json",
+    "sha256": "015f28e49b5bd4f2b2bb9863cd62e5831a4b570d8b65fe24a7df9b25312da75f"
+  },
+  {
+    "file": "shell-unix-bash.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/shellscript/syntaxes/shell-unix-bash.tmLanguage.json",
+    "sha256": "838a597b9bbc29bcfc89ca0190118550ae57517ec3e4b4baa1f8500edcf601d1"
+  },
+  {
+    "file": "swift.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/swift/syntaxes/swift.tmLanguage.json",
+    "sha256": "acd12f33c06092e1ccff5d44bee2b59f288d941bd94747e7178305d3a140e91b"
+  },
+  {
+    "file": "TypeScript.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/typescript-basics/syntaxes/TypeScript.tmLanguage.json",
+    "sha256": "4e92e0d7de560217d6c8d3236d85e6e17a5d77825b15729a230c761743122661"
+  },
+  {
+    "file": "TypeScriptReact.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/typescript-basics/syntaxes/TypeScriptReact.tmLanguage.json",
+    "sha256": "532fb887df3117e9f4eaf5d3ea1e850114fb6899fe3d3ddabedb153bec08b32a"
+  },
+  {
+    "file": "jsdoc.js.injection.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/typescript-basics/syntaxes/jsdoc.js.injection.tmLanguage.json",
+    "sha256": "c11fde5c9bb2d9b6bd6faaad51f398b127438a93b3047641a270552a760e76b6"
+  },
+  {
+    "file": "jsdoc.ts.injection.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/typescript-basics/syntaxes/jsdoc.ts.injection.tmLanguage.json",
+    "sha256": "526076af53f330358ae3f5293a7779ac0dbd19d5ef27b71effd94faeef4f1249"
+  },
+  {
+    "file": "yaml-1.0.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/yaml/syntaxes/yaml-1.0.tmLanguage.json",
+    "sha256": "6e521c226b702f17fca01ee380479e77350ac754fc4bc127d997ab52c140bd1e"
+  },
+  {
+    "file": "yaml-1.1.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/yaml/syntaxes/yaml-1.1.tmLanguage.json",
+    "sha256": "577102ecafb5a6fe88b766ceed020c2cc32aa16f82556ae36385f23f7b834963"
+  },
+  {
+    "file": "yaml-1.2.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/yaml/syntaxes/yaml-1.2.tmLanguage.json",
+    "sha256": "1e62af3f7ccccce7ed45b4ee4f3d8461b7e9c3bee42d40b0057934ba6dd62f80"
+  },
+  {
+    "file": "yaml-1.3.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/yaml/syntaxes/yaml-1.3.tmLanguage.json",
+    "sha256": "4d2eb8e4139b82a610e4f02a0f663ebbb183d4d5e97b3f098a5a844f4efcf6b0"
+  },
+  {
+    "file": "yaml-embedded.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/yaml/syntaxes/yaml-embedded.tmLanguage.json",
+    "sha256": "b63b60dfef3237d9c51c7dfd2a488735ecc8e22fdb1a0e8fa8b34d2f77bf873e"
+  },
+  {
+    "file": "yaml.tmLanguage.json",
+    "source": "https://github.com/microsoft/vscode/blob/48a76cacaa61545e481a605e1067486f8f1b656b/extensions/yaml/syntaxes/yaml.tmLanguage.json",
+    "sha256": "17f25b037d082408b3ac7af5bb53e94125cc1a47857a75da451d6ea4ac0602df"
+  }
+]

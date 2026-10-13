@@ -63,12 +63,26 @@ class MainActivity : ComponentActivity() {
       ContextCompat.RECEIVER_NOT_EXPORTED,
     )
     deviceTimeZone = ZoneId.systemDefault()
+    val preferences = com.azusachino.cappuccino.io.NotificationPreferences(this)
+    if (preferences.enabled && ProfileStore(this).read().isNotEmpty()) {
+      if (com.azusachino.cappuccino.io.AgentNotificationService.permissionGranted(this)) {
+        com.azusachino.cappuccino.io.AgentNotificationService.start(this)
+      } else if (!preferences.permissionRequested) {
+        preferences.permissionRequested = true
+        notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+      }
+    }
   }
 
   override fun onStop() {
     unregisterReceiver(timezoneReceiver)
     super.onStop()
   }
+
+  private val notificationPermission =
+    registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+      if (granted) com.azusachino.cappuccino.io.AgentNotificationService.start(this)
+    }
 
   private var pendingConnect: Pair<String, String>? = null
   private val localNetworkPermission =
@@ -85,9 +99,24 @@ class MainActivity : ComponentActivity() {
           .show()
     }
   private var connectedViewModel: ConnectedViewModel? = null
+  private var alertRequest by mutableStateOf<Triple<String, String, String>?>(null)
+
+  private fun readAlert(intent: Intent?): Triple<String, String, String>? {
+    val profile = intent?.getStringExtra("alert_profile") ?: return null
+    val pane = intent.getStringExtra("alert_pane") ?: return null
+    val reference = intent.getStringExtra("alert_reference") ?: return null
+    return Triple(profile, pane, reference)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    alertRequest = readAlert(intent)
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    alertRequest = readAlert(intent)
     enableEdgeToEdge()
     setContent {
       val vm: ConnectedViewModel =
@@ -100,11 +129,25 @@ class MainActivity : ComponentActivity() {
                   { endpoint -> com.azusachino.cappuccino.io.BridgeClient(endpoint) },
                   { kotlinx.coroutines.delay(it) },
                   createSavedStateHandle(),
+                  com.azusachino.cappuccino.io.OfflineConversations(
+                    java.io.File(application.filesDir, "offline-conversations")
+                  ),
+                  onMonitorPause = { id, paused ->
+                    com.azusachino.cappuccino.io
+                      .NotificationPreferences(application)
+                      .setPaused(id, paused)
+                  },
                 )
               }
             }
         )
       connectedViewModel = vm
+      androidx.compose.runtime.LaunchedEffect(vm, alertRequest) {
+        alertRequest?.let { (profile, pane, reference) ->
+          vm.openNotificationAgent(profile, pane, reference)
+        }
+        alertRequest = null
+      }
       val owner = LocalLifecycleOwner.current
       androidx.compose.runtime.DisposableEffect(owner, vm) {
         val observer = LifecycleEventObserver { _, event ->
@@ -121,6 +164,7 @@ class MainActivity : ComponentActivity() {
       val state by vm.state.collectAsStateWithLifecycle()
       CappuccinoTheme(
         themeMode = state.themeMode,
+        palette = state.appPalette,
         onResolvedDarkChanged = ::applySystemBarAppearance,
       ) {
         CappuccinoShell(vm, timeZone = deviceTimeZone) { label, url ->

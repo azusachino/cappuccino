@@ -303,34 +303,42 @@ Before low-effort sub-agents implement these features, the exact behavior across
 └───────────────────┴──────────────────────────────┴─────────────────────┘
 ```
 
-### 6.1 Flow 1: `ask_user_question` / `ask_question`
+### 6.1 Flow 1: Claude Code `AskUserQuestion` (`ask_user_question`)
 
-When an agent (like `agy` or `omo`) pauses execution to elicit user clarification:
+When Claude Code asks the owner a question through its `AskUserQuestion` tool. Claude Code writes the tool call to its transcript only after it is answered, so the visible form is the only source while it waits.
 
-- **Detection**:
-  - *From session log*: Assistant tool call with `name: "ask_question"` or `"ask_user_question"` containing `questions: [{ question, options, is_multi_select }]`, with no corresponding `toolResult` yet.
-  - *From screen*: Live TUI form showing question title, radio/checkbox options, and hint `enter select / tab next`.
-- **Card Schema**:
+- **Detection**: the pane shows the form (footer `Enter to select`, a `Chat about this` row). The bridge reads the question on screen: its text, the options with their descriptions (the form's own "Type something" and "Chat about this" rows are not options), checkboxes for a multi-select, and the tab row's headers with their answered marks. One card is one question; as the form moves on, the next question becomes a new card. The final review becomes an `ask_user_question_review` card. Other choice menus keep the screen-read `ask_question` card.
+- **Card Schema** (`prompt_id` hashes what is on screen):
 
   ```json
   {
-    "type": "ask_question",
-    "prompt_id": "step-2640-ask",
+    "type": "ask_user_question",
+    "prompt_id": "p-918ff1b95c4e",
+    "title": "Pick a color?",
+    "message": "Question 1 of 2",
+    "tool_name": "AskUserQuestion",
+    "options": [],
+    "selected_index": 0,
     "questions": [
       {
-        "id": "q1",
-        "question": "Which backend framework should we use?",
-        "is_multi_select": false,
-        "options": ["Axum (Recommended)", "Actix-web"]
+        "header": "Color",
+        "question": "Pick a color?",
+        "multi_select": false,
+        "options": [{"id": "opt-0", "label": "Red", "description": "warm"}]
       }
     ]
   }
   ```
 
+  The review card has `type: "ask_user_question_review"`, the chosen answers as its `message`, and the options `Submit answers` and `Cancel`.
 - **Resolution**:
-  - Client answers via `POST /api/agents/:sessionId/prompt`:
-    `{"type": "answer_question", "prompt_id": "step-2640-ask", "answers": {"q1": "Axum (Recommended)"}}`
-  - Bridge sends the response back to the waiting agent via `pane.send-keys` (selecting the options) or via the agent's interactive stdin.
+  - `POST /api/agents/:sessionId/prompt` with the one question's answer: option indexes and/or one line of free text (the form's "Type something"):
+    `{"type": "answer_question", "prompt_id": "p-918ff1b95c4e", "answers": [{"selected": [0, 2], "other": "a bird"}]}`
+  - A single-select takes exactly one of an index or text; a multi-select takes at least one. Answers that do not fit are `400 bad_answer`.
+  - The bridge re-reads the screen first: the same question must still show, with nothing ticked in the terminal; otherwise `409 stale_prompt`, and the owner finishes it in the terminal.
+  - Keys, with a short pause between steps (checked against Claude Code 2.1 in a Herdr pane): single-select digit, or the "Type something" digit, the text and enter; multi-select digits toggle, free text goes on its row (reached from the `❯` cursor), then the Submit row and enter.
+  - The review is answered with `answer_prompt`: `select_option` presses its digit alone (`1` submits, `2` cancels).
+  - Cancel is `answer_prompt` with `action: "cancel"`: Esc on a question, `2` on the review.
 
 ### 6.2 Flow 2: Tool Permission Approval (`tool_approval`)
 

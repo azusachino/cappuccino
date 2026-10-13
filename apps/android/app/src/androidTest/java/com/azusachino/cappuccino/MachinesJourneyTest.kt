@@ -51,7 +51,10 @@ class MachinesJourneyTest {
         CappuccinoScreen(state.value, actions) { _, _ ->
           if (attempts++ == 0) {
             state.value =
-              state.value.copy(connection = ConnectionState.Error("Synthetic connection failed"))
+              state.value.copy(
+                connection = ConnectionState.Error("Synthetic connection failed"),
+                addError = "Synthetic connection failed",
+              )
           } else {
             state.value =
               state.value.copy(
@@ -67,12 +70,12 @@ class MachinesJourneyTest {
     openMachines()
     compose.onNodeWithContentDescription("Add machine").performClick()
     compose.onNodeWithText("Label (optional)").performTextInput("Synthetic bridge")
-    compose.onNodeWithText("Private bridge URL").performTextInput("https://bridge.example")
+    compose.onNodeWithText("Bridge address").performTextInput("https://bridge.example")
     compose.onNodeWithText("Connect").performClick()
     assertTrue(
       compose.onAllNodesWithText("Synthetic connection failed").fetchSemanticsNodes().isNotEmpty()
     )
-    compose.onNodeWithText("Private bridge URL").assertIsDisplayed()
+    compose.onNodeWithText("Bridge address").assertIsDisplayed()
     compose.onNodeWithText("Connect").performClick()
     compose.waitForIdle()
     assertEquals(profile, state.value.profiles.single())
@@ -108,9 +111,132 @@ class MachinesJourneyTest {
     compose.onNodeWithText("Retry").assertIsDisplayed().performClick()
     compose.waitForIdle()
     assertEquals(1, actions.retryCalls)
-    compose.onNodeWithContentDescription("Remove").performClick()
+    compose.onNodeWithContentDescription("Machine actions").performClick()
+    compose.onNodeWithText("Remove").performClick()
     compose.onNodeWithText("No machines configured").assertIsDisplayed()
     assertTrue(state.value.profiles.isEmpty())
+  }
+
+  @Test
+  fun machineTreeOpensAgentDirectlyAndPreservesExpansionOnBack() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile("tree", "Synthetic machine", Endpoint.parse("https://bridge.example"), machine)
+    val agent =
+      AgentRow(
+        machine,
+        "private-pane-id",
+        "private-pane-id",
+        "Synthetic Pi",
+        "pi",
+        "idle",
+        false,
+        null,
+      )
+    val foreign = agent.copy(machineId = UUID.randomUUID(), label = "Foreign agent")
+    val state =
+      mutableStateOf(
+        ConnectedUiState(
+          profiles = listOf(profile),
+          activeProfileId = profile.id,
+          agents = listOf(agent, foreign),
+          connection = ConnectionState.Connected,
+        )
+      )
+    val actions = TestActions(state)
+    compose.activity.setContent {
+      CappuccinoTheme { CappuccinoScreen(state.value, actions) { _, _ -> } }
+    }
+    compose.onNodeWithText("Synthetic machine").assertIsDisplayed()
+    compose.onNodeWithText("Synthetic Pi").assertIsDisplayed().performClick()
+    compose.waitForIdle()
+    assertEquals(agent, state.value.selectedAgent)
+    compose.onNodeWithText("private-pane-id").assertDoesNotExist()
+    compose.onNodeWithContentDescription("Back").performClick()
+    compose.onNodeWithText("Synthetic Pi").assertIsDisplayed()
+    compose.onNodeWithText("Foreign agent").assertDoesNotExist()
+    compose.onNodeWithText("Synthetic machine").assertIsDisplayed()
+    compose.onNodeWithText("Select a machine to view its agents").assertDoesNotExist()
+    compose.onNodeWithText("1 saved").assertDoesNotExist()
+  }
+
+  @Test
+  fun lateLoadedActiveMachineAlwaysShowsAgentsWithoutAnExpansionTap() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile(
+        "late-tree",
+        "Loaded machine",
+        Endpoint.parse("https://bridge.example"),
+        machine,
+      )
+    val agent = AgentRow(machine, "pane", "pane", "Loaded Pi", "pi", "idle", false, null)
+    val state = mutableStateOf(ConnectedUiState())
+    val actions = TestActions(state)
+    compose.activity.setContent {
+      CappuccinoTheme { CappuccinoScreen(state.value, actions) { _, _ -> } }
+    }
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          profiles = listOf(profile),
+          activeProfileId = profile.id,
+          agents = listOf(agent),
+          connection = ConnectionState.Connected,
+        )
+    }
+    compose.onNodeWithText("Loaded Pi").assertIsDisplayed()
+    compose.onNodeWithText("Loaded machine").performClick()
+    compose.onNodeWithText("Loaded Pi").assertIsDisplayed()
+    compose.runOnIdle {
+      state.value = state.value.copy(themeMode = com.azusachino.cappuccino.ui.ThemeMode.DARK)
+    }
+    compose.onNodeWithText("Loaded Pi").assertIsDisplayed()
+  }
+
+  @Test
+  fun connectionDetailsShowVersionsAndNeverExposeMachineIds() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile(
+        "diagnostics",
+        "Synthetic machine",
+        Endpoint.parse("https://bridge.example"),
+        machine,
+      )
+    val metadata =
+      com.azusachino.cappuccino.io.BridgeDetails(
+        machine,
+        "0.1.0",
+        1,
+        mapOf("live_output" to true, "prompt_input" to false),
+      )
+    val state =
+      mutableStateOf(
+        ConnectedUiState(
+          profiles = listOf(profile),
+          activeProfileId = profile.id,
+          connection = ConnectionState.Connected,
+          bridgeDetails = mapOf(profile.id to metadata),
+        )
+      )
+    val actions = TestActions(state)
+    compose.activity.setContent {
+      CappuccinoTheme { CappuccinoScreen(state.value, actions) { _, _ -> } }
+    }
+    compose.onNodeWithContentDescription("Machine actions").performClick()
+    compose.onNodeWithText("Connection details").performClick()
+    compose.onNodeWithText("Bridge version").assertIsDisplayed()
+    compose.onNodeWithText("Protocol").assertDoesNotExist()
+    compose.onNodeWithText("Technical details").performClick()
+    compose.onNodeWithText("Bridge version").assertIsDisplayed()
+    check(compose.onAllNodesWithText("0.1.0").fetchSemanticsNodes().isNotEmpty())
+    compose.onNodeWithText("Protocol version").assertIsDisplayed()
+    compose.onNodeWithText("1").assertIsDisplayed()
+    compose.onNodeWithContentDescription("Back").performClick()
+    compose.onNodeWithText("Bridge version").assertIsDisplayed()
+    compose.onNodeWithText(machine.toString(), substring = true).assertDoesNotExist()
+    compose.onNodeWithText("Machine ID", substring = true).assertDoesNotExist()
   }
 
   private fun openMachines() {
@@ -121,6 +247,13 @@ class MachinesJourneyTest {
     var retryCalls = 0
 
     override fun addMachine(label: String, url: String) = Unit
+
+    override fun renameProfile(id: String, label: String) {
+      state.value =
+        state.value.copy(
+          profiles = state.value.profiles.map { if (it.id == id) it.copy(label = label) else it }
+        )
+    }
 
     override fun selectProfile(id: String) = Unit
 
@@ -135,7 +268,9 @@ class MachinesJourneyTest {
 
     override fun refresh() = Unit
 
-    override fun selectAgent(agent: AgentRow?) = Unit
+    override fun selectAgent(agent: AgentRow?) {
+      state.value = state.value.copy(selectedAgent = agent)
+    }
 
     override fun removeProfile(id: String) {
       state.value =
@@ -148,6 +283,10 @@ class MachinesJourneyTest {
 
     override fun retry() {
       retryCalls++
+    }
+
+    override fun setAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette) {
+      state.value = state.value.copy(appPalette = palette)
     }
 
     override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {

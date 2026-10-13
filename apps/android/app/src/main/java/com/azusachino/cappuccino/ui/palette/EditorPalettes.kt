@@ -1,0 +1,118 @@
+package com.azusachino.cappuccino.ui.palette
+
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.graphics.Color
+
+// Cappuccino-authored app roles using recognizable editor-theme colors.
+// One Dark's light mode uses the corresponding One Light-inspired colors.
+internal object EditorPalettes {
+  val githubLight =
+    lightColorScheme(
+      primary = Color(0xFF0969DA),
+      onPrimary = Color.White,
+      primaryContainer = Color(0xFFDDF4FF),
+      onPrimaryContainer = Color(0xFF0A3069),
+      secondary = Color(0xFF57606A),
+      onSecondary = Color.White,
+      secondaryContainer = Color(0xFFEAEef2),
+      onSecondaryContainer = Color(0xFF24292F),
+      tertiary = Color(0xFF8250DF),
+      onTertiary = Color.White,
+      tertiaryContainer = Color(0xFFFBEFFF),
+      onTertiaryContainer = Color(0xFF6639BA),
+      background = Color.White,
+      onBackground = Color(0xFF24292F),
+      surface = Color.White,
+      onSurface = Color(0xFF24292F),
+      surfaceVariant = Color(0xFFF6F8FA),
+      onSurfaceVariant = Color(0xFF57606A),
+      surfaceContainerLow = Color(0xFFF6F8FA),
+      surfaceContainer = Color(0xFFEAEef2),
+      surfaceContainerHigh = Color(0xFFEAEef2),
+      surfaceContainerHighest = Color(0xFFD0D7DE),
+      outline = Color(0xFF57606A),
+      outlineVariant = Color(0xFFD0D7DE),
+    )
+  val githubDark =
+    darkColorScheme(
+      primary = Color(0xFF58A6FF),
+      onPrimary = Color(0xFF0D1117),
+      primaryContainer = Color(0xFF173A5E),
+      onPrimaryContainer = Color(0xFFDDF4FF),
+      secondary = Color(0xFF8B949E),
+      onSecondary = Color(0xFF0D1117),
+      secondaryContainer = Color(0xFF21262D),
+      onSecondaryContainer = Color(0xFFC9D1D9),
+      tertiary = Color(0xFFBC8CFF),
+      onTertiary = Color(0xFF0D1117),
+      tertiaryContainer = Color(0xFF34234D),
+      onTertiaryContainer = Color(0xFFFBEFFF),
+      background = Color(0xFF0D1117),
+      onBackground = Color(0xFFC9D1D9),
+      surface = Color(0xFF0D1117),
+      onSurface = Color(0xFFC9D1D9),
+      surfaceVariant = Color(0xFF161B22),
+      onSurfaceVariant = Color(0xFF8B949E),
+      surfaceContainerLow = Color(0xFF161B22),
+      surfaceContainer = Color(0xFF21262D),
+      surfaceContainerHigh = Color(0xFF21262D),
+      surfaceContainerHighest = Color(0xFF30363D),
+      outline = Color(0xFF8B949E),
+      outlineVariant = Color(0xFF30363D),
+    )
+  val oneLight =
+    lightColorScheme(
+      primary = Color(0xFF4078F2),
+      onPrimary = Color(0xFF101216),
+      primaryContainer = Color(0xFFDDE7FF),
+      onPrimaryContainer = Color(0xFF243C70),
+      secondary = Color(0xFF526FFF),
+      onSecondary = Color.White,
+      secondaryContainer = Color(0xFFE8EAED),
+      onSecondaryContainer = Color(0xFF383A42),
+      tertiary = Color(0xFFA626A4),
+      onTertiary = Color.White,
+      tertiaryContainer = Color(0xFFF6E0F6),
+      onTertiaryContainer = Color(0xFF6B196A),
+      background = Color(0xFFFAFAFA),
+      onBackground = Color(0xFF383A42),
+      surface = Color(0xFFFAFAFA),
+      onSurface = Color(0xFF383A42),
+      surfaceVariant = Color(0xFFF0F0F0),
+      onSurfaceVariant = Color(0xFF5C6370),
+      surfaceContainerLow = Color(0xFFF0F0F0),
+      surfaceContainer = Color(0xFFE8EAED),
+      surfaceContainerHigh = Color(0xFFE8EAED),
+      surfaceContainerHighest = Color(0xFFD8DADE),
+      outline = Color(0xFF5C6370),
+      outlineVariant = Color(0xFFD8DADE),
+    )
+  val oneDark =
+    darkColorScheme(
+      primary = Color(0xFF61AFEF),
+      onPrimary = Color(0xFF282C34),
+      primaryContainer = Color(0xFF30465A),
+      onPrimaryContainer = Color(0xFFDDE7FF),
+      secondary = Color(0xFFC678DD),
+      onSecondary = Color(0xFF282C34),
+      secondaryContainer = Color(0xFF3E4451),
+      onSecondaryContainer = Color(0xFFABB2BF),
+      tertiary = Color(0xFF98C379),
+      onTertiary = Color(0xFF282C34),
+      tertiaryContainer = Color(0xFF344330),
+      onTertiaryContainer = Color(0xFFD7E9CA),
+      background = Color(0xFF282C34),
+      onBackground = Color(0xFFABB2BF),
+      surface = Color(0xFF282C34),
+      onSurface = Color(0xFFABB2BF),
+      surfaceVariant = Color(0xFF2C313A),
+      onSurfaceVariant = Color(0xFFABB2BF),
+      surfaceContainerLow = Color(0xFF2C313A),
+      surfaceContainer = Color(0xFF353B45),
+      surfaceContainerHigh = Color(0xFF353B45),
+      surfaceContainerHighest = Color(0xFF3E4451),
+      outline = Color(0xFFABB2BF),
+      outlineVariant = Color(0xFF3E4451),
+    )
+}

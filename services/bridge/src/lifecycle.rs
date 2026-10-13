@@ -51,7 +51,18 @@ pub fn state_path() -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    Ok(home.join(".local/state/cappuccino-bridge"))
+    plugin_state_path(&herdr_plugin_dir(
+        &home,
+        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+    ))
+}
+
+/// The directory Herdr gives this plugin, so a bare `cappuccino-bridge status`
+/// addresses the same bridge that Herdr's startup hook launched.
+fn herdr_plugin_dir(home: &Path, xdg_state_home: Option<PathBuf>) -> PathBuf {
+    xdg_state_home
+        .unwrap_or_else(|| home.join(".local/state"))
+        .join("herdr/plugins/cappuccino-bridge")
 }
 
 fn plugin_state_path(plugin_dir: &Path) -> Result<PathBuf, String> {
@@ -587,6 +598,18 @@ fn ensure_serve(config: &BridgeConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bare_commands_default_to_herdrs_plugin_state_directory() {
+        assert_eq!(
+            herdr_plugin_dir(Path::new("/home/u"), None),
+            PathBuf::from("/home/u/.local/state/herdr/plugins/cappuccino-bridge")
+        );
+        assert_eq!(
+            herdr_plugin_dir(Path::new("/home/u"), Some("/xdg/state".into())),
+            PathBuf::from("/xdg/state/herdr/plugins/cappuccino-bridge")
+        );
+    }
     use std::{
         fs,
         os::unix::fs::{MetadataExt, PermissionsExt},

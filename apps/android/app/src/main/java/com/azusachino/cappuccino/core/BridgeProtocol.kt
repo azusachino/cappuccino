@@ -7,7 +7,7 @@ const val MAX_HTTP_BODY_BYTES = 2 * 1024 * 1024
 const val MAX_WS_MESSAGE_BYTES = 1024 * 1024
 const val MAX_OUTPUT_ROWS = 2_000
 const val MAX_OUTPUT_UTF8_BYTES = 4 * 1024 * 1024
-const val BRIDGE_PLUGIN_ID = "azusachino.cappuccino-bridge"
+const val BRIDGE_PLUGIN_ID = "cappuccino-bridge"
 
 class StreamRetryBudget(private val maximumRetries: Int = 4) {
   private var retriesUsed = 0
@@ -75,6 +75,10 @@ data class AgentRow(
   val status: String,
   val working: Boolean,
   val branch: String?,
+  val cwd: String? = null,
+  val stateChangeSeq: Long? = null,
+  val completionSeq: Long? = null,
+  val nativeSessionRef: String? = null,
 )
 
 data class StreamEntry(
@@ -117,7 +121,19 @@ data class PromptCard(
   val command: String?,
   val options: List<PromptOption>,
   val selectedIndex: Int,
+  /** AskUserQuestion's questions; empty for prompts read off the screen. */
+  val questions: List<PromptQuestion> = emptyList(),
 )
+
+data class PromptQuestion(
+  val header: String,
+  val question: String,
+  val multiSelect: Boolean,
+  val options: List<PromptOption>,
+)
+
+/** One question's answer: chosen option indexes and/or one line of own text. */
+data class QuestionAnswer(val selected: List<Int>, val other: String?)
 
 data class ConversationTurn(
   val id: String,
@@ -132,7 +148,18 @@ sealed interface ConversationPart {
 
   data class Thinking(val text: String) : ConversationPart
 
-  data class ToolCall(val name: String, val input: String, val output: String?) : ConversationPart
+  data class ResponseStatus(val status: String, val detail: String?) : ConversationPart
+
+  data class ToolCall(
+    val name: String,
+    val input: String,
+    val output: String?,
+    val isError: Boolean? = null,
+    val startedAt: String? = null,
+    val finishedAt: String? = null,
+    val originalPartIndex: Int? = null,
+    val images: Int? = null,
+  ) : ConversationPart
 }
 
 data class OutputRow(val key: String, val text: String, val gap: Boolean = false)
@@ -175,12 +202,11 @@ data class StreamState(
 }
 
 fun parsePaired(json: JsonObject): UUID {
-  if (
-    json.string("event") != "paired" ||
-      json.long("protocol") != 1L ||
-      json.string("plugin") != BRIDGE_PLUGIN_ID
-  )
+  if (json.string("event") != "paired" || json.string("plugin") != BRIDGE_PLUGIN_ID)
     throw ProtocolException("Unsupported bridge session response")
+  val protocol = json.long("protocol")
+  if (protocol != 1L)
+    throw ProtocolException("Incompatible bridge protocol $protocol; app requires 1")
   return uuid(json.string("machine_id"))
 }
 
@@ -206,6 +232,17 @@ fun parseAgents(json: JsonObject, expectedMachine: UUID): List<AgentRow> {
       row.optionalString("status") ?: "unknown",
       (row.fields["working"] as? JsonValue.BooleanValue)?.value ?: false,
       row.optionalString("active_branch"),
+      row.optionalString("cwd"),
+      row.optionalLong("state_change_seq")?.also {
+        if (it < 0) throw ProtocolException("Invalid state_change_seq")
+      },
+      row.optionalLong("completion_seq")?.also {
+        if (it < 0) throw ProtocolException("Invalid completion_seq")
+      },
+      row.optionalString("native_session_ref")?.also {
+        if (!Regex("native-ref:[a-f0-9]{64}").matches(it))
+          throw ProtocolException("Invalid native_session_ref")
+      },
     )
   }
 }
@@ -235,6 +272,24 @@ fun parsePromptCard(json: JsonObject): PromptCard {
     command = command,
     options = options,
     selectedIndex = selectedIndex,
+    questions =
+      if (json.fields["questions"] == null) emptyList()
+      else
+        json.array("questions").map { question ->
+          PromptQuestion(
+            header = question.optionalString("header").orEmpty(),
+            question = question.string("question"),
+            multiSelect = question.boolean("multi_select"),
+            options =
+              question.array("options").map { opt ->
+                PromptOption(
+                  opt.string("id"),
+                  opt.string("label"),
+                  opt.optionalString("description"),
+                )
+              },
+          )
+        },
   )
 }
 
@@ -251,14 +306,34 @@ fun parseConversationResponse(json: JsonObject): List<ConversationTurn> {
           when (partObj.string("type")) {
             "text" -> ConversationPart.Text(partObj.string("text"))
             "thinking" -> ConversationPart.Thinking(partObj.string("text"))
+            "response_status" ->
+              partObj
+                .string("status")
+                .takeIf { it == "aborted" || it == "failed" }
+                ?.let { ConversationPart.ResponseStatus(it, partObj.optionalString("detail")) }
             "tool_call" -> {
               val name = partObj.string("name")
               val inputStr =
                 (partObj.fields["input"] as? JsonValue.StringValue)?.value
-                  ?: (partObj.fields["input"] as? JsonValue.Object)?.value?.let { "..." }
+                  ?: partObj.fields["input"]?.toJsonElement()?.toString()
                   ?: ""
               val outputStr = partObj.optionalString("output")
-              ConversationPart.ToolCall(name, inputStr, outputStr)
+              val isError =
+                when (val flag = partObj.fields["is_error"]) {
+                  null,
+                  JsonValue.Null -> null
+                  is JsonValue.BooleanValue -> flag.value
+                  else -> throw ProtocolException("Invalid tool error flag")
+                }
+              ConversationPart.ToolCall(
+                name,
+                inputStr,
+                outputStr,
+                isError,
+                partObj.optionalString("started_at"),
+                partObj.optionalString("finished_at"),
+                images = partObj.optionalLong("images")?.toInt(),
+              )
             }
             else -> null
           }
@@ -405,7 +480,7 @@ fun reduce(state: StreamState, event: StreamEvent, selectedSession: String): Str
     }
   }
 
-private fun uuid(value: String): UUID =
+internal fun uuid(value: String): UUID =
   try {
     UUID.fromString(value)
   } catch (_: Exception) {

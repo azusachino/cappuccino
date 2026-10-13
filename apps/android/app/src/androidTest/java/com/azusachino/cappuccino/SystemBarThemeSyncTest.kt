@@ -14,6 +14,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.platform.io.PlatformTestStorageRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,6 +30,20 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class SystemBarThemeSyncTest {
   @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+
+  // Night mode is a system setting: flip it only on an emulator, never on a person's device.
+  @Before
+  fun requireEmulator() {
+    val qemu =
+      ParcelFileDescriptor.AutoCloseInputStream(
+          InstrumentationRegistry.getInstrumentation()
+            .uiAutomation
+            .executeShellCommand("getprop ro.kernel.qemu")
+        )
+        .bufferedReader()
+        .use { it.readText().trim() }
+    assumeTrue("needs an emulator", qemu == "1")
+  }
 
   @Test
   fun darkAppWhileSystemLightShowsLightStatusIcons() {
@@ -58,6 +74,8 @@ class SystemBarThemeSyncTest {
 
   private fun selectTheme(label: String) {
     compose.onNode(hasText("Settings") and hasClickAction()).performClick()
+    compose.waitForIdle()
+    compose.onNodeWithText("Theme").performClick()
     compose.waitForIdle()
     compose.onNodeWithText(label).performClick()
     compose.waitForIdle()
