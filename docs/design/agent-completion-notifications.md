@@ -1,5 +1,7 @@
 # Agent completion notifications
 
+Status: Android completion and input alerts run from a local foreground monitor. Telegram delivery is not implemented; the rules below apply if it is built.
+
 ## Owner intent and boundaries
 
 Android system notifications are the default route; Telegram is optional and
@@ -9,17 +11,15 @@ ended, not that its task succeeded. No transcript, tool output, credential,
 working-directory path or executable action belongs in an alert.
 
 Owned paths: bridge agent/event/notification transport and tests; Android
-completion models, notification lifecycle/settings and tests. This is a tier-2
-published protocol addition. Local implementation is authorized; actual bridge
-deployment, credentials and external Telegram test delivery require separate
-owner authorization. Existing agent processes/integrations must not be
-restarted or prompted to manufacture acceptance events. No delegation/Asobi.
+completion models, notification lifecycle/settings and tests. Bridge deployment, credentials and external Telegram test delivery need separate
+owner authorization. Do not restart or prompt existing agents to manufacture
+acceptance events.
 
 ## Signal and identity contract
 
 Herdr's `completion_seq` identifies a completed working→idle transition,
-independent of focus; idle/status text by itself is not completion. Cappuccino
-currently discards it. Preserve `state_change_seq`, `completion_seq` and the
+independent of focus; idle/status text by itself is not completion. The bridge
+carries it on each agent row. Preserve `state_change_seq`, `completion_seq` and the
 reported native agent-session reference. A native reference change, pane
 replacement, sequence regression or producer restart establishes a fresh
 baseline; never replay a previous session's completion into its replacement.

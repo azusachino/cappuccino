@@ -75,7 +75,7 @@ The owner subsequently approved the split and clarified the visual boundary:
 the overall app follows Mihon; only the core agent session is terminal-inspired
 native Compose. Floating design is explicitly rejected. Theme system and app
 shell are both first-priority work; see the
-[rewrite contract](mihon-shell-terminal-session.md). Detailed layouts still need
+[rewrite contract](../design/mihon-shell-terminal-session.md). Detailed layouts still need
 native preview review. The reader is not accepted until live tool-only updates
 preserve position across conversations; a synthetic fixture or screenshot alone
 is insufficient.

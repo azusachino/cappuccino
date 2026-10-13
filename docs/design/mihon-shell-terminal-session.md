@@ -16,7 +16,7 @@ chooser. It does not replace the native Compose stack, bridge, verified
 machine/conversation identity, independent connections, private storage or
 passive-content boundary. Android is the first slice; Apple is outside it.
 
-Source basis: [pinned Mihon study](mihon-native-ui-source-study.md), commit
+Source basis: [pinned Mihon study](../research/mihon-native-ui-source-study.md), commit
 `866d045c7aba343fd739c57d15c81ff6df59e796`. Source patterns inform our own domain,
 not a manga-gallery clone. No terminal emulator, WebView, launcher or remote
 agent lifecycle control is introduced.

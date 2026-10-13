@@ -1,6 +1,6 @@
 # Cappuccino
 
-Native Android/Apple companion for existing, long-running Herdr/Pi agents. Read [intent](docs/intent.md) before changing behavior and [plan](docs/plan.md) before the attachment spike. [Discovery](docs/discovery.md) contains source-backed research, not runtime guarantees.
+Native Android/Apple companion for existing, long-running Herdr/Pi agents. Read [intent](docs/intent.md) before changing behavior and [plan](docs/plan.md) before the attachment spike. [Discovery](docs/research/discovery.md) contains source-backed research, not runtime guarantees.
 
 ## Work
 
@@ -13,7 +13,7 @@ Native Android/Apple companion for existing, long-running Herdr/Pi agents. Read 
 
 ## Verify
 
-Run the focused `make check-apple` or `make check-android` during iteration. Before acceptance, run the changed platform's `validate-*` and consuming UI journey: `make ui-test DESTINATION="platform=iOS Simulator,id=<task-owned simulator>"` or `ANDROID_SERIAL=<task-owned emulator> make ui-test-android`. `make validate` aggregates both toolchains. Preserve both platform gates for shared/build changes. README covers scoped toolchain selection and task-owned devices. Compiler/lint warnings are errors; no diagnostic suppression, lint baseline or skipped critical tests to obtain green gates. Structural/package tests do not prove attachment, approvals or notifications.
+Run the focused `make check-apple` or `make check-android` during iteration. Before acceptance, run the changed platform's `validate-*` and consuming UI journey: `make ui-test DESTINATION="platform=iOS Simulator,id=<task-owned simulator>"` or `ANDROID_SERIAL=<task-owned emulator> make ui-test-android`. `make validate` aggregates both toolchains. Preserve both platform gates for shared/build changes. `docs/development.md` covers scoped toolchain selection and task-owned devices. Compiler/lint warnings are errors; no diagnostic suppression, lint baseline or skipped critical tests to obtain green gates. Structural/package tests do not prove attachment, approvals or notifications.
 
 Tests use no owner sessions, network credentials or real approvals. A live spike uses explicitly task-owned processes and scoped integration files; preserve its source/runtime identity evidence. Approval/transport changes need fail-closed, stale-action and reconnect tests.
 

@@ -4,14 +4,6 @@
 
 The owner selected Catppuccin and requested better code highlighting, including shell commands, without a WebView. This research inspects actual app integrations and upstream implementations. It does not adopt a dependency, copy third-party implementation, or establish device performance. Android/Apple acceptance and historical native-test failures remain open.
 
-## Implementation checkpoint after owner authorization
-
-The owner subsequently requested installation followed by implementation. The Catppuccin APK was installed with data preserved. Android now has an initial TextMate-backed native code-block path using the existing renderer's code callbacks, with structured command previews/full readers routed into the same component. Pinned VS Code grammars and upstream license notices are bundled locally; `code-grammars/sources.json` records the exact source URLs and hashes. No WebView, networking binding or command execution was added.
-
-This first slice covers Bash/sh, Python, JSON/JSONC, JavaScript/JSX, TypeScript/TSX, Rust, YAML, Swift and Go. Kotlin, Nix, Fish, file-result provenance and the Apple adapter are still incomplete. Jobs are limited to two concurrent workers, own their mutable grammars, and only apply results matching current source/language/theme. Original command text remains the annotated string's backing text; tokenization does not reconstruct line endings. Latte token accents are contrast-adjusted against the actual code canvas.
-
-Dependency preflight passed after fixing a Gradle version-catalog name collision; the initial failed gate is retained. Integration gate `ba8d09cf7` exposed YAML capture-map documentation comments incompatible with the library reader. The adapter now removes only string-valued `comment` metadata inside capture maps in memory; original assets and actual captures remain unchanged, with a preservation regression test. Full `validate-android` passed on rerun `b6f32f235`: 136 unit tests, zero failures/errors/skips, lint, app build and instrumentation compilation. The implementation was committed as `fd7fd54` and installed with `adb install -r` on the authorized phone, preserving data; APK SHA-256 `057c4703106245cc69b88d39f2f5b363e43839cf4cb2c21ae007bc96c98e03a3`. Installation and compilation do not establish native interaction or visual acceptance; those remain open.
-
 ## Why the previous renderer showed so much plain text
 
 These were separate problems identified in the Android source before the implementation slice:

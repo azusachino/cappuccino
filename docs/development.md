@@ -1,58 +1,286 @@
-# Native development and quality
+# Development and quality
 
-## Platform and framework choices
+Contributor reference: layout, toolchains, make targets and gates, device
+selection, and the design rules behind the native apps and the bridge. Style
+and contribution rules are in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
-iOS is 17+; the macOS app was retired on 2026-10-13, and the package keeps macOS 26 only for host tests. SwiftPM uses tools 6.2 and Xcode 26+ supplies the required toolchain. Share pure models and reusable views, not every navigation or lifecycle decision.
+## Repository layout
 
-Use SwiftUI and standard platform APIs first. Primitive view state stays in `@State`; introduce Observation models when the connected flow actually needs shared state. Keep UI state main-actor isolated; use structured concurrency and actor isolation for genuinely shared mutable connection state. An actor does not itself provide server-side approval atomicity or durable receipts.
+```text
+apps/android/    Native Gradle/Kotlin/Compose app module and its tests
+apps/ios/        SwiftPM core/SwiftUI package and core tests; App/ entrypoint, UITests/ journey
+services/bridge/ Rust Herdr plugin bridge
+docs/            Intent, plan, architecture, behavior spec, design and research notes
+```
 
-No TCA, dependency container, persistence framework or transport dependency is adopted by the skeleton. Evaluate a maintained library only against a demonstrated need, its supported platforms, maintenance/license, concurrency behavior and testability. Native Foundation networking applies if HTTP/WebSocket is selected; it is not an SSH client. Do not invent cryptography or rely on tailnet membership as authorization.
+`apps/ios` holds the Swift core, the SwiftUI shell and the iPhone entrypoint. The
+Swift package keeps `.macOS(.v26)` only so `swift test` runs on the Mac host; there
+is no macOS app. Android keeps pure Kotlin logic in `core`, platform I/O in the
+activity and adapters, and Compose presentation in `ui`. The two platforms share
+product behavior through fixtures, not code. No monorepo framework, cross-platform
+runtime or generated SDK is used.
 
-## Plugin bridge transport design (supersedes the SSH-exec sketch)
+## Toolchains and pins
 
-Per the 2026-10-06 plugin pivot (issue #16), `BridgeClient` (`URLSession` + `URLSessionWebSocketTask`) talks to the standalone Rust Tokio/axum process in `services/bridge`. Herdr's plugin manifest invokes this executable for startup and actions; it is not loaded into Herdr or an agent. The process calls the local socket (`HERDR_SOCKET_PATH`) using NDJSON RPC, maps `agent.list` including unnamed panes, validates Herdr's reported Pi session path against the canonical `~/.pi/agent/sessions` store, and exposes a read-only pane-line WebSocket stream. This is a phone-reachable facade, not an agent runtime. Herdr `agent.prompt` is PTY text-plus-Enter submission; its acknowledgement and optional lifecycle wait do not select or confirm Pi's distinct `steer` and `follow_up` queue behavior. There is no bridge prompt route. Delivery and its receipt semantics remain unimplemented pending owner-reconciled acceptance. The bridge implements no auth challenge; the shared client still maps an HTTP 401 response to its generic unauthorized error, but this is not a bridge token flow.
+- **mise** (`.mise.toml`) pins the non-Xcode tools that Make invokes, such as
+  `xcodegen` and `rumdl`. `make setup` installs them. The Apple SDK and the JDK are
+  prerequisites, not mise-managed.
+- **Apple:** macOS 26 or later, Xcode 26 or later with Swift 6.2 or later, and
+  swift-format through `xcrun`. The deployment target is iOS 17; glass APIs are
+  used on iOS 26 and later only. Edit `project.yml`, not the generated, ignored
+  `Cappuccino.xcodeproj`.
+- **Android:** JDK 21 and an Android SDK with platform API 37 and build-tools
+  36.0.0. Set `ANDROID_HOME` to that SDK. The app minimum is API 26 and the compile
+  and target level is API 37. The checked-in, checksum-verified Gradle wrapper
+  owns Gradle (9.8.0 at the time of writing), and `apps/android/gradle/libs.versions.toml`
+  owns the Android Gradle Plugin, Kotlin, Compose and library versions. AGP's
+  built-in Kotlin stays enabled. ktfmt uses two-space Google style.
+- **Bridge:** Rust (Cargo) with the crate's own `Cargo.lock`. The bridge is built
+  with `--locked`.
+- **Markdown:** rumdl through mise. `make md-check` is the gate.
 
-## Android scaffold and connected plan
+Kotlin's published compatibility table can lag the pinned Gradle and AGP pair. Use
+the pinned versions and consuming gates as the evidence, not the table. Attribute
+an upstream Gradle warning to its plugin. Do not hide project, compiler or lint
+diagnostics.
 
-The owner chose connected iPhone first, native Android next, then Mac-specific UX, and separately approved buildable disconnected skeletons now. `apps/android/` uses Kotlin/Compose in one native Gradle app module, with pure identity/delivery types separate from activity I/O and UI. Saved tab/delivery selection survives activity recreation; this is not process-death/network reconciliation or a grant store. No lifecycle Flow, transport or ViewModel abstraction is needed for empty states.
+## Local environment and scoped selection
 
-Use JDK 21, Gradle 9.8.0, AGP 9.4.1, matching Kotlin/Compose compiler 2.4.20, Compose BOM 2026.09.00 and Activity 1.13.0. The catalog and wrapper are authoritative; SDK minimum is 26, compile/target 37, with API 35 emulator acceptance separate from actual-phone acceptance. AGP built-in Kotlin remains enabled; its documented explicit KGP upgrade supplies the selected compiler. Ktfmt uses two-space Google style. Kotlin compiler and Android lint warnings are errors; freshness checks are not disabled.
+`.mise.toml` loads the tracked `.env` defaults, then the optional, ignored
+`.env.local`, through mise's `_.file` setting. Relative paths resolve from the
+config root, even when a command starts in a subdirectory. Keep `.env` portable and
+free of secrets. Put machine-specific `ANDROID_HOME`, an optional `DEVELOPER_DIR`,
+and an existing JDK selection in `.env.local`, or inherit them from the environment.
+Do not put private bridge endpoints or credentials in either file. `.env.local` may
+be absent on clean checkouts and in CI. Do not print `mise env` output, because it
+includes the actual values.
 
-### Local development environment
+Run native gates through mise so that the declared tools and the local SDK
+selection both apply:
 
-The project `.mise.toml` loads tracked `.env` defaults followed by optional ignored `.env.local` through mise `[env] _.file`; relative file paths resolve from the config root, including when a command starts in a subdirectory. Keep `.env` portable and non-secret. Put machine-specific `ANDROID_HOME`, optional `DEVELOPER_DIR`, and existing JDK selection in `.env.local` or inherit them from the environment. Do not add private bridge endpoints or credentials to either file, and never shell-source dotenv files. The `.env.local` file may be absent on clean checkouts and CI.
+```sh
+mise exec -- make check-android
+mise exec -- make validate-android
+ANDROID_SERIAL=<task-owned emulator serial> mise exec -- make ui-test-android
+```
 
-Run native gates through mise so both declared tools and local SDK selection are available, for example `mise exec -- make check-android`, `mise exec -- make validate-android`, and `ANDROID_SERIAL=<task-owned serial> mise exec -- make ui-test-android`. CI has no `.env`; it inherits its runner-provided SDK/toolchain environment. The config requires the tracked `.env` and references optional `.env.local`; verify that a missing local file is harmless for clean checkouts and CI when changing mise behavior. Do not print `mise env` output: it includes actual environment values. See the [mise environment and dotenv documentation](https://mise.jdx.dev/environments/#env-file).
+If the global Command Line Tools are selected, scope the Xcode override to a single
+command instead of changing the global selection:
 
-Kotlin's published fully-tested compatibility table currently ends at Gradle 9.7.0/AGP 9.3.1 for KGP 2.4.20; it explicitly permits later releases with possible deprecations/features limitations. Therefore the selected current releases need actual consuming gates, not a claim that every pair is covered by that table. Attribute any upstream Gradle warning to its plugin; do not hide project/compiler/lint diagnostics. No Flutter, React Native, Kotlin Multiplatform or generated SDK is adopted, and no wire protocol is frozen.
+```sh
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make validate-apple
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make ui-test DESTINATION="platform=iOS Simulator,id=<task-owned simulator-id>"
+```
 
-## Mac preparation
+CI has no `.env` and inherits its runner's SDK and toolchain environment.
 
-The separate Mac target shares the core and currently compiles the same empty shell. A native Mac slice still needs sidebar/detail presentation, keyboard/menu commands, text selection, appropriate window state and actual Mac UI tests. Do not treat a successful build as desktop interaction acceptance or force the phone's tab layout onto the finished Mac product.
+## Task-owned devices
 
-## CI and dependencies
+Never reuse an owner's simulator or emulator. Create one for the task and remove
+only that device afterwards, after its evidence is preserved.
 
-The owner selected released GitHub Action version tags rather than commit SHAs. `.github/workflows/ci.yml` owns the exact runner/Xcode/runtime selections; do not silently fall back when a configured environment disappears. Weekly Dependabot PRs review action major upgrades; no automatic merge or repository protection change is configured. Mise CLI/tool versions are separately selected and need normal compatibility review.
+- **iOS Simulator:** list types and runtimes with `xcrun simctl list devicetypes`
+  and `xcrun simctl list runtimes`. Create a device with
+  `xcrun simctl create <name> <type-id> <runtime-id>` and use the UUID it returns.
+  Shut down and delete only that device. XCTest results and screenshot attachments
+  are in `.build/xcode/Logs/Test/`.
+- **Android emulator:** create a new, uniquely named AVD from an image that is
+  already installed. Do not reuse or overwrite an owner's AVD. Local evidence uses
+  an API 35 ARM emulator. CI uses API 35 x86_64 on a disposable Linux runner. Pass
+  its serial as `ANDROID_SERIAL`. Reports and extra screenshots are under
+  `apps/android/app/build/`. The three baseline screenshots are copied to
+  `.build/android/screens/`.
 
-CI runs on a macOS 26 host so the macOS 26 core tests can execute. It selects stable Xcode 26.6 through `DEVELOPER_DIR`, runs `make validate-apple`, creates one iPhone 17 Pro/iOS 26.5 Simulator, runs the disconnected XCTest journey, and deletes only that created device. PRs and pushes to main are checked without duplicate feature-push jobs. Compiler warnings are errors for SwiftPM tests and generated app/test targets; Swift 6 language mode provides data-race checks. Do not add suppression annotations or relax gates to accommodate a failure.
+## Make targets and gates
 
-The Android job uses Ubuntu 24.04/JDK 21, `make validate-android`, and an explicitly named API 35 x86_64 Google APIs emulator. KVM permissions are configured only inside that disposable hosted runner, never on an owner's host. Emulator-runner owns emulator shutdown. The UI journey visits all three empty states, changes delivery selection, verifies disabled messaging and activity recreation, and exports three synthetic screenshots. Capture uses AndroidX platform test storage so Gradle collects images before uninstalling the app; Make rejects missing, ambiguous or non-PNG exports instead of trusting `adb exec-out` exit status. Hosted execution, not the presence of this workflow, establishes runner compatibility.
+`make help` lists every target. The gates a contributor uses most:
 
-The job token has read-only contents permission. Checkout does not persist credentials, and mise-action does not export its token to subsequent commands. XCTest bundles and Android instrumentation reports/screenshots are uploaded from narrow synthetic-evidence paths for seven days on success or failure. No owner session, real transcript, pairing token or signing credential is an acceptable fixture or artifact.
+| Target | What it runs |
+| --- | --- |
+| `make setup` | Installs the pinned mise tools (SDKs and JDK are prerequisites) |
+| `make generate` | Generates the ignored Xcode project from `project.yml` |
+| `make fmt` | Formats Markdown, Swift and Kotlin |
+| `make fmt-check` | Checks Swift and Kotlin style |
+| `make md-format` / `make md-check` | Formats or checks all Markdown with rumdl |
+| `make test` | Runs both hermetic core suites (Swift and Kotlin unit tests) |
+| `make check-apple` | Swift style, Markdown check and Swift core tests, warnings as errors |
+| `make check-android` | ktfmt check, unit tests and lint in one Gradle run |
+| `make check` | Both focused platform gates; needs both toolchains |
+| `make build-ios` | Unsigned iOS Simulator app |
+| `make build-android` | Debug app and instrumentation APKs |
+| `make validate-apple` | `check-apple` and `build-ios` |
+| `make validate-android` | ktfmt, unit tests, lint and both debug APKs |
+| `make validate` | Both platform validations; needs both toolchains |
+| `make ui-test DESTINATION=…` | iPhone shell journey on the named simulator |
+| `make ui-test-android` | Android shell journey on `ANDROID_SERIAL`; exports three screenshots |
+| `make check-bridge` | Bridge gate: `cargo fmt --check`, all hermetic tests, release example build |
+| `make bench-bridge-client` | Benchmark against a running bridge (`BASE_URL`, `SESSION`, `STREAM_CYCLES`) |
+| `make resource-bridge-client` | Leak and lifecycle soak, about six minutes; run before a version release |
+
+Use the platform-focused targets while iterating, and run `make validate` before
+acceptance. `make validate` covers both toolchains. Shared or build changes need
+both platform gates. Run the owning gates before committing: `make check` for changes that touch
+both platforms, `make check-bridge` for bridge changes and `make md-check` for
+Markdown. Run `make validate` before a pull request.
+
+Formatting, compilation and core tests are prerequisites, not proof of safe remote
+control. Both platform UI journeys are explicit commands. Nothing in the gates
+establishes attachment, approvals or notifications on a live agent.
+
+Compiler and lint warnings are errors. Do not add suppressions, lint baselines or
+skipped tests to get a green gate. Swift 6 language mode provides data-race checks.
+
+## Apple development
+
+```sh
+make setup
+make check-apple
+make generate
+open Cappuccino.xcodeproj
+```
+
+Choose the `Cappuccino` scheme for an iPhone or iPad Simulator. Use a
+task-owned simulator for `make ui-test`. No API keys, Herdr runtime or Apple
+Developer membership is needed for tests or unsigned Simulator builds.
+
+## Android development
+
+```sh
+make fmt-android
+make validate-android
+ANDROID_SERIAL=<task-owned emulator serial> make ui-test-android
+```
+
+Open `apps/android/` in Android Studio to work interactively. Android declares
+network access for bridge connections. Its legacy and modern backup and transfer
+rules exclude app data. Those rules are not a credential-storage implementation.
+
+The conversation reader renders CommonMark prose and code natively. Tool and
+thought details stay collapsed until expanded. Timestamps use the device timezone
+in `yyyy-MM-dd HH:mm:ss`. The reader follows the newest content unless the user
+scrolls back. Incoming content then offers an explicit jump to the latest. The
+Pi identity rules that it depends on are in
+[the bridge README](../services/bridge/README.md#pi-transcript-identity).
+
+Release signing and physical-phone installation are separate work. Debug APK
+assembly uses development signing only. Instrumentation covers navigation and
+activity recreation, machine and foreground recovery, connection failures,
+conversation scrolling, disclosures, Markdown rendering and live timezone changes.
+
+## Bridge development
+
+From `services/bridge`, the crate's own commands are `cargo fmt --check`, `cargo test`
+and `cargo build --release`. From the repository root, `make check-bridge` runs the
+full bridge gate, including the client contract suite and the release example
+build. The bridge's own setup, lifecycle and API notes are in
+[services/bridge/README.md](../services/bridge/README.md).
+
+The headless `test-client` example in `services/bridge/examples/test-client/` is
+a read-only companion. Its `check` mode validates the HTTP routes and an optional
+WebSocket stream. Its `bench` mode reports timings, RSS and CPU for a running bridge
+with consumed, validated bodies. It establishes a baseline and asserts no
+performance threshold. Its hermetic tests spawn the real bridge against a mock
+Herdr socket.
+
+The resource soak (`make resource-bridge-client`) is opt-in. It asserts that file
+descriptors, child processes, temp files and memory recover after each scenario
+class. Short samples never prove an absolute zero leak.
+
+## CI
+
+- **Pull requests** run the format, test, lint and build jobs for the platforms
+  they change. Pull requests that change no code run the Markdown check.
+- **Pushes to `main` and manual runs** (`workflow_dispatch`) also run the emulator
+  and simulator UI journeys. Those journeys preserve narrow synthetic evidence for
+  seven days.
+- **Apple job:** macOS 26 with Xcode 26.6 through `DEVELOPER_DIR`. It runs
+  `make validate-apple`, creates one iOS 26.5 simulator, runs the iPhone shell
+  journey and deletes only that simulator.
+- **Android job:** Ubuntu 24.04 with JDK 21 and `make validate-android`. It starts
+  an API 35 x86_64 Google APIs emulator, with KVM enabled only on that disposable
+  runner. It runs the Android shell journey.
+
+CI actions use released version tags, chosen by the owner, and not commit SHAs.
+Dependabot proposes action major upgrades weekly and does not merge them. The job
+token has read-only contents permission. Checkout does not persist credentials,
+and mise-action does not export its token. Test bundles and instrumentation
+reports are uploaded from synthetic-evidence paths only. No owner session, real
+transcript, pairing token or signing credential is an acceptable fixture or
+artifact.
+
+The runner selections in `.github/workflows/ci.yml` are authoritative. Do not
+fall back silently when a configured environment disappears. Hosted results are
+evidence only for the commit that ran them.
+
+## Plugin bridge transport
+
+`BridgeClient` (`URLSession` and `URLSessionWebSocketTask` on iPhone, OkHttp on
+Android) talks to the standalone Rust Tokio and axum process in `services/bridge`.
+Herdr's plugin manifest starts this executable for its startup hook and actions.
+The process is not loaded into Herdr or into an agent.
+
+The bridge calls the local Herdr socket (`HERDR_SOCKET_PATH`) with NDJSON RPC.
+It maps `agent.list`, including unnamed panes. It validates each Pi session path
+that Herdr reports against Pi's canonical session store. It serves conversation
+history from the Pi, Claude Code and Agy stores, and exposes a read-only pane-line
+WebSocket stream. Its routes are listed in [architecture](architecture.md).
+
+The prompt route writes text followed by Enter into the pane. Herdr's acknowledgement
+and optional lifecycle wait do not select Pi's `steer` or `follow_up` queue. They do
+not return a correlated Pi receipt. The bridge does not map this to a delivered or
+confirmed state, and it implements no receipt contract. Owner-reconciled acceptance
+is required first. The bridge implements no authentication challenge. The shared
+client still maps an HTTP 401 response to its generic unauthorized error, but that
+is not a bridge token flow.
+
+## Native design rules
+
+- **Frameworks.** Use SwiftUI and standard platform APIs first, and Compose with
+  Material 3 on Android. Primitive view state stays in `@State` or the equivalent.
+  Introduce an observation model when the connected flow needs shared state. Keep
+  UI state on the main actor. Use actor isolation only for genuinely shared mutable
+  connection state. An actor does not provide server-side approval atomicity or
+  durable receipts.
+- **Dependencies.** No TCA, dependency container, persistence framework or
+  transport library is adopted. Evaluate a maintained library only against a
+  demonstrated need, its supported platforms, maintenance and license, concurrency
+  behavior and testability. Native Foundation networking is used for HTTP and
+  WebSocket. It is not an SSH client.
+- **Security.** The bridge has no per-request authentication, by owner decision. The
+  tailnet is the boundary. Do not invent cryptography or add credentials without an
+  owner decision.
+- **Mac.** There is no macOS app. Herdr covers the desktop.
 
 ## Behavior and security acceptance
 
-Formatting and compilation are prerequisites, not proofs of safe remote control. The attachment slice must test active-branch history, cancellation, ordered reconciliation, ambiguous delivery/duplicate prevention, stale actions, local/remote approval races, pending/denied non-execution and exact-grant invalidation. Keep these checks hermetic where possible, followed by an explicitly task-owned runtime journey.
+The attachment work must test active-branch history, cancellation, ordered
+reconciliation, ambiguous delivery and duplicate prevention, stale actions,
+local and remote approval races, pending or denied requests that do not execute,
+and exact-grant invalidation. Keep these checks hermetic where possible. Follow
+them with an explicitly task-owned runtime journey.
 
-Before calling the connected UI usable, verify VoiceOver, Dynamic Type, keyboard interaction, reduced motion and long transcript/tool-detail performance. Add Mac runtime evidence with Mac-specific behavior. Do not invent a coverage percentage before those meaningful behaviors exist; do not skip critical-path tests to obtain a number.
+Before the connected UI is called usable, verify VoiceOver, Dynamic Type, keyboard
+interaction, reduced motion and performance on long transcripts and tool details.
+Do not invent a coverage percentage for behavior that is not yet covered. Do not
+skip critical-path tests to obtain a number.
 
 ## Sources
 
-- [AGP built-in Kotlin](https://developer.android.com/build/migrate-to-built-in-kotlin), [Kotlin Gradle compatibility](https://kotlinlang.org/docs/gradle-configure-project.html), and [Compose compiler](https://developer.android.com/develop/ui/compose/compiler).
-- [AndroidX platform test storage](https://developer.android.com/reference/androidx/test/platform/io/PlatformTestStorageRegistry): AGP 8+ default output collection; app-private screenshots cannot be pulled after test cleanup uninstalls the app.
-- [Android backup/transfer rules](https://developer.android.com/about/versions/12/backup-restore#xml-changes): modern device transfer needs explicit exclusions; `allowBackup=false` alone is insufficient across devices.
-- [Gradle wrapper checksums](https://gradle.org/release-checksums/) and [Android emulator runner](https://github.com/ReactiveCircus/android-emulator-runner/tree/v2.38.0).
-- [Apple SwiftUI model data](https://developer.apple.com/documentation/swiftui/managing-model-data-in-your-app) and [Mac app tutorial](https://developer.apple.com/tutorials/swiftui/creating-a-macos-app).
-- [Swift 6 data-race safety](https://www.swift.org/migration/documentation/swift-6-concurrency-migration-guide/dataracesafety/).
-- [Hosted macOS 26 image](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-Readme.md): runner selections must be checked against the actual job, not inferred from this moving document.
-- [mise-action v5.1.1](https://github.com/jdx/mise-action/releases/tag/v5.1.1): token persistence is opt-in; retain the safer default.
+- [AGP built-in Kotlin](https://developer.android.com/build/migrate-to-built-in-kotlin),
+  [Kotlin Gradle configuration](https://kotlinlang.org/docs/gradle-configure-project.html)
+  and [Compose compiler](https://developer.android.com/develop/ui/compose/compiler).
+- [AndroidX platform test storage](https://developer.android.com/reference/androidx/test/platform/io/PlatformTestStorageRegistry):
+  AGP 8 and later collect outputs by default. App-private screenshots cannot be
+  pulled after test cleanup uninstalls the app.
+- [Android backup and transfer rules](https://developer.android.com/about/versions/12/backup-restore#xml-changes):
+  modern device transfer needs explicit exclusions. `allowBackup=false` alone is not
+  enough.
+- [Gradle wrapper checksums](https://gradle.org/release-checksums/) and the
+  [Android emulator runner](https://github.com/ReactiveCircus/android-emulator-runner).
+- [SwiftUI model data](https://developer.apple.com/documentation/swiftui/managing-model-data-in-your-app)
+  and [Swift 6 data-race safety](https://www.swift.org/migration/documentation/swift-6-concurrency-migration-guide/dataracesafety/).
+- [Hosted macOS 26 image](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-Readme.md).
+  Runner selections must be checked against the actual job, not inferred from this
+  document.
+- [mise-action](https://github.com/jdx/mise-action): token persistence is opt-in.
+  Keep the safer default.
