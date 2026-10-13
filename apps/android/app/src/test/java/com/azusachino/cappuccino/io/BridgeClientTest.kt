@@ -369,6 +369,13 @@ class BridgeClientTest {
       assertEquals("/api/agents/s-1/prompt", req1.url.encodedPath)
       assertEquals("POST", req1.method)
       assertTrue(req1.body?.utf8()?.contains(""""text":"hello world"""") == true)
+      assertTrue(req1.body?.utf8()?.contains("confirmed") == false)
+
+      server.enqueue(MockResponse.Builder().body("""{"status":"delivered"}""").build())
+      client.submitPrompt("s-1", "/model\topus", confirmed = true)
+      val command = server.takeRequest().body?.utf8() ?: ""
+      assertTrue(command, command.contains(""""text":"/model\topus""""))
+      assertTrue(command, command.contains(""""confirmed":true"""))
 
       client.answerPrompt("s-1", "p-1", 0, "opt-1", "select_option")
       val req2 = server.takeRequest()

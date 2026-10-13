@@ -158,12 +158,12 @@ extension BridgeClientTests {
 
 }
 
-private final class BodyRecorder: @unchecked Sendable {
+final class BodyRecorder: @unchecked Sendable {
   var bodies: [Data] = []
 }
 
 /// URLSession hands a stubbed request its body as a stream, not as httpBody.
-private func requestBody(_ request: URLRequest) -> Data {
+func requestBody(_ request: URLRequest) -> Data {
   guard let stream = request.httpBodyStream else { return request.httpBody ?? Data() }
   stream.open()
   defer { stream.close() }

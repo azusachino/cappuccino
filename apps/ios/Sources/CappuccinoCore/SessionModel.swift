@@ -9,7 +9,7 @@ public protocol AgentSessionServing: Sendable {
   func events(base: URL, session: String) -> AsyncThrowingStream<AgentStreamEvent, Error>
   func controlAgent(base: URL, session: String, action: String, capabilities: [String: Bool]?)
     async throws
-  func submitPrompt(base: URL, session: String, text: String) async throws
+  func submitPrompt(base: URL, session: String, text: String, confirmed: Bool) async throws
   func answerPrompt(
     base: URL, session: String, promptID: String, optionIndex: Int?, optionID: String?,
     action: String?
@@ -199,12 +199,13 @@ public final class SessionModel {
 
   /// Sends a prompt to the selected agent.
   /// `true` once the bridge accepted it, so the composer keeps the text until then.
-  @discardableResult public func sendPrompt(_ text: String) async -> Bool {
+  @discardableResult public func sendPrompt(_ text: String, confirmed: Bool = false) async -> Bool {
     await perform(
       "Failed to submit prompt", supported: capabilities?["prompt_input"] != false,
       unsupported: "Prompt input unsupported by this bridge"
     ) { client, base, session in
-      try await client.submitPrompt(base: base, session: session, text: text)
+      try await client.submitPrompt(
+        base: base, session: session, text: text, confirmed: confirmed)
     }
   }
 

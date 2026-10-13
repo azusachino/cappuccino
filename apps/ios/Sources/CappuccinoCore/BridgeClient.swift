@@ -89,10 +89,14 @@ public struct BridgeClient: Sendable {
     return try await get(endpoint)
   }
 
-  /// Sends a user prompt to an agent session via Bridge V2
-  public func submitPrompt(base url: URL, session: String, text: String) async throws {
+  /// Sends a user prompt to an agent session via Bridge V2. `confirmed` says the owner approved
+  /// the agent command it starts with; the bridge refuses an unconfirmed command with 409.
+  public func submitPrompt(
+    base url: URL, session: String, text: String, confirmed: Bool = false
+  ) async throws {
     let endpoint = agentURL(url, session: session, "prompt")
-    let body: [String: Any] = ["type": "prompt", "text": text]
+    var body: [String: Any] = ["type": "prompt", "text": text]
+    if confirmed { body["confirmed"] = true }
     _ = try await post(endpoint, body: body)
   }
 

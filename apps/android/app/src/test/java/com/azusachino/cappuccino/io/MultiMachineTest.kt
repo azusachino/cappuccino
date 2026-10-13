@@ -82,7 +82,7 @@ class MultiMachineTest {
               return emptyList()
             }
 
-            override suspend fun submitPrompt(sessionId: String, text: String) {
+            override suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean) {
               error("No prompts permitted in this fixture")
             }
 

@@ -472,13 +472,13 @@ pub async fn agent_conversation(
     }
 }
 
-/// The command an agent itself uses to start a fresh conversation in the same process.
+/// Pi, Claude Code and Agy all start a fresh conversation in the same process with `/new`.
 pub fn new_session_command(agent: &str) -> Option<&'static str> {
-    match agent {
-        "pi" => Some("/new"),
-        "claude" | "agy" | "antigravity" | "antigravity-cli" => Some("/clear"),
-        _ => None,
-    }
+    matches!(
+        agent,
+        "pi" | "claude" | "agy" | "antigravity" | "antigravity-cli"
+    )
+    .then_some("/new")
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -573,12 +573,21 @@ pub async fn submit_agent_prompt(
     };
 
     match submission {
-        prompt::PromptSubmission::Prompt { text } => {
+        prompt::PromptSubmission::Prompt { text, confirmed } => {
             if text.trim().is_empty() {
                 return error_response(
                     StatusCode::BAD_REQUEST,
                     "bad_request",
                     "prompt text cannot be empty",
+                );
+            }
+            // A command can cost far more than a message (`/model` drops the prompt cache, `/new`
+            // ends the conversation), so the owner must have confirmed it.
+            if let Some(command) = prompt::slash_command(&text).filter(|_| !confirmed) {
+                return error_response(
+                    StatusCode::CONFLICT,
+                    "confirm_command",
+                    &format!("{command} is an agent command; confirm it to run it"),
                 );
             }
             match herdr::agent_prompt(&session_id, &text).await {
@@ -781,11 +790,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_session_uses_each_agents_own_command() {
+    fn new_session_is_slash_new_for_every_known_agent() {
         assert_eq!(new_session_command("pi"), Some("/new"));
-        assert_eq!(new_session_command("claude"), Some("/clear"));
-        assert_eq!(new_session_command("agy"), Some("/clear"));
-        assert_eq!(new_session_command("antigravity-cli"), Some("/clear"));
+        assert_eq!(new_session_command("claude"), Some("/new"));
+        assert_eq!(new_session_command("agy"), Some("/new"));
+        assert_eq!(new_session_command("antigravity-cli"), Some("/new"));
         assert_eq!(new_session_command("codex"), None);
     }
 

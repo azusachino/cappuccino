@@ -646,7 +646,7 @@ class CappuccinoShellTest {
       state.value = state.value.copy(themeMode = mode)
     }
 
-    override fun submitPrompt(text: String) = Unit
+    override fun submitPrompt(text: String, confirmed: Boolean) = Unit
 
     override fun answerPrompt(
       promptId: String,
