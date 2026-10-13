@@ -1,6 +1,6 @@
 # Cappuccino intent
 
-Confirmed by the owner on 2026-10-05 after grilling; repository skeleton initialization was authorized separately. The owner subsequently selected iPhone first, native Android next, then Mac-specific UX. The owner later approved buildable Android/iOS/macOS skeletons in one PR. Current implementation remains disconnected; that scaffold approval does not authorize connected features, physical-device installation or deployment.
+Confirmed by the owner on 2026-10-05 after grilling; repository skeleton initialization was authorized separately. The owner subsequently selected iPhone first, native Android next, then Mac-specific UX. The owner later approved buildable Android/iOS/macOS skeletons in one PR. On 2026-10-13 the owner dropped the macOS app: Herdr covers the desktop, so `apps/macos/` and the `CappuccinoMac` target are removed; the Swift package keeps `.macOS(.v26)` only so core tests run on the Mac host. Current implementation remains disconnected; that scaffold approval does not authorize connected features, physical-device installation or deployment.
 
 ## Outcome
 
@@ -10,7 +10,7 @@ Herdr and Pi own process/session lifetime. Opening the app never launches, repla
 
 ## First prototype
 
-- Personal use, Pi first, mostly coding tasks. Prove the existing-session bridge and connected iPhone journey first; Android follows before Mac-specific UX. The existing Mac build target stays intact.
+- Personal use, Pi first, mostly coding tasks. Prove the existing-session bridge and connected iPhone journey first; Android follows before Mac-specific UX. No Mac app is planned (2026-10-13).
 - Manually register machines on private tailnet connections; the owner selected a no-auth bridge with tailnet membership as the network boundary on 2026-10-06. No public ingress or cloud relay.
 - Direct agent conversations and one cross-machine attention inbox; no coordinating assistant.
 - Full history of the selected session's active branch, with code blocks and expandable tool details.

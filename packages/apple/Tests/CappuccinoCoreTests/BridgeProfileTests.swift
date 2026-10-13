@@ -32,7 +32,7 @@ struct BridgeProfileTests {
       "http://remote.example", "https://user:password@mini.example",
       "https://mini.example?token=value", "https://mini.example#fragment", "file:///tmp/bridge",
     ] {
-      #expect(throws: DaemonClientError.self) {
+      #expect(throws: BridgeError.self) {
         try BridgeProfile(machineID: UUID(), endpoint: URL(string: endpoint)!, name: "Mini")
       }
     }
@@ -44,7 +44,7 @@ struct BridgeProfileTests {
     let data = try encoder.encode(valid)
     let invalid = String(decoding: data, as: UTF8.self).replacingOccurrences(
       of: "http://127.0.0.1:7392", with: "http://remote.example")
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try JSONDecoder().decode(BridgeProfile.self, from: Data(invalid.utf8))
     }
   }
@@ -58,7 +58,7 @@ struct BridgeProfileTests {
       machineID: machine, endpoint: URL(string: "https://first.example")!, name: "First")
     let second = try BridgeProfile(
       machineID: machine, endpoint: URL(string: "https://second.example")!, name: "Second")
-    #expect(throws: DaemonClientError.self) {
+    #expect(throws: BridgeError.self) {
       try BridgeProfileStore(defaults: defaults).save([first, second])
     }
     #expect(try BridgeProfileStore(defaults: defaults).read().isEmpty)

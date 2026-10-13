@@ -16,7 +16,7 @@ public struct BridgeProfile: Identifiable, Codable, Hashable, Sendable {
         || (components.scheme?.lowercased() == "http"
           && ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host.lowercased()))
     else {
-      throw DaemonClientError.protocolError(
+      throw BridgeError.protocolError(
         "Use HTTPS or a local loopback URL without credentials or query parameters")
     }
     self.id = id
@@ -61,7 +61,7 @@ public struct BridgeProfileStore {
     guard Set(profiles.map(\.id)).count == profiles.count,
       Set(profiles.map(\.machineID)).count == profiles.count
     else {
-      throw DaemonClientError.protocolError("Duplicate saved profile or machine identity")
+      throw BridgeError.protocolError("Duplicate saved profile or machine identity")
     }
   }
 }

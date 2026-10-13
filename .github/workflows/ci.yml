@@ -41,7 +41,6 @@ jobs:
             apple:
               - *global
               - 'apps/ios/**'
-              - 'apps/macos/**'
               - 'packages/apple/**'
             android:
               - *global
@@ -53,7 +52,7 @@ jobs:
               - 'services/**'
 
   apple:
-    name: Apple platform (macOS + iOS)
+    name: Apple platform (iOS)
     needs: [changes]
     if: github.event_name != 'pull_request' || needs.changes.outputs.global == 'true' || needs.changes.outputs.apple == 'true'
     runs-on: macos-26

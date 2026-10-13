@@ -2,7 +2,7 @@
 
 ## Platform and framework choices
 
-The owner selected macOS 26 as the Mac minimum; iOS remains 17+. SwiftPM uses tools 6.2 and Xcode 26+ supplies the required toolchain. Share pure models and reusable views, not every navigation or lifecycle decision.
+iOS is 17+; the macOS app was retired on 2026-10-13, and the package keeps macOS 26 only for host tests. SwiftPM uses tools 6.2 and Xcode 26+ supplies the required toolchain. Share pure models and reusable views, not every navigation or lifecycle decision.
 
 Use SwiftUI and standard platform APIs first. Primitive view state stays in `@State`; introduce Observation models when the connected flow actually needs shared state. Keep UI state main-actor isolated; use structured concurrency and actor isolation for genuinely shared mutable connection state. An actor does not itself provide server-side approval atomicity or durable receipts.
 

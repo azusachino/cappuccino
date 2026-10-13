@@ -4,7 +4,7 @@ import Testing
 @testable import CappuccinoCore
 
 /// Hermetic BridgeClient tests over a URLProtocol stub: the bridge's JSON
-/// shapes must map to the same AgentRow values the daemon wire and the shared
+/// shapes must map to the same AgentRow values the bridge wire and the shared
 /// fixture produce (fixture/live equivalence, issue #16).
 
 /// Bridge-shaped superset of fixtures/agents-list.json (adds pane_id and
@@ -71,7 +71,7 @@ final class StubURLProtocol: URLProtocol {
       #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"wrong"}"#,
     ] {
       StubURLProtocol.handler = { _ in (200, Data(payload.utf8)) }
-      await #expect(throws: DaemonClientError.self) {
+      await #expect(throws: BridgeError.self) {
         try await stubbedClient().verifyMachine(baseURL: base)
       }
     }
@@ -83,7 +83,7 @@ final class StubURLProtocol: URLProtocol {
             .utf8)
       )
     }
-    await #expect(throws: DaemonClientError.self) {
+    await #expect(throws: BridgeError.self) {
       try await stubbedClient().verifyMachine(
         baseURL: base, expectedID: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!)
     }
@@ -98,12 +98,12 @@ final class StubURLProtocol: URLProtocol {
       let payload =
         "{\"event\":\"agents\",\"machine_id\":\"11111111-1111-4111-8111-111111111111\",\"agents\":[\(row)]}"
       StubURLProtocol.handler = { _ in (200, Data(payload.utf8)) }
-      await #expect(throws: DaemonClientError.self) {
+      await #expect(throws: BridgeError.self) {
         try await stubbedClient().listAgents(baseURL: base)
       }
     }
     StubURLProtocol.handler = { _ in (200, Data(agentsEventJSON.utf8)) }
-    await #expect(throws: DaemonClientError.self) {
+    await #expect(throws: BridgeError.self) {
       try await stubbedClient().listAgents(
         baseURL: base, expectedMachineID: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!)
     }
@@ -120,7 +120,7 @@ final class StubURLProtocol: URLProtocol {
     do {
       _ = try await stubbedClient().pair(baseURL: URL(string: "http://127.0.0.1:7392")!)
       Issue.record("pairing must fail visibly")
-    } catch let error as DaemonClientError {
+    } catch let error as BridgeError {
       #expect(error == .unauthorized)
     } catch {
       Issue.record("unexpected error \(error)")
@@ -135,9 +135,17 @@ final class StubURLProtocol: URLProtocol {
       .deletingLastPathComponent()
       .deletingLastPathComponent()
       .appendingPathComponent("fixtures/agents-list.json")
-    let (_, fixtureRows) = try DaemonWire.rowsFromFixture(try Data(contentsOf: fixtureURL))
+    let fixture =
+      try JSONSerialization.jsonObject(with: Data(contentsOf: fixtureURL)) as? [String: Any]
+    let fixtureRows = (fixture?["agents"] as? [[String: Any]] ?? []).map { row in
+      AgentRow(
+        machineID: row["machine_id"] as? String ?? "",
+        sessionID: row["session_id"] as? String ?? "",
+        label: row["label"] as? String ?? "", branch: row["active_branch"] as? String,
+        working: row["working"] as? Bool ?? false)
+    }
 
-    // The bridge serves the same documents the daemon does; this response is
+    // The bridge serves the same documents the fixture does; this response is
     // the bridge-shaped superset (pane_id, branch_source) of the fixture.
     StubURLProtocol.handler = { _ in
       (
@@ -146,7 +154,25 @@ final class StubURLProtocol: URLProtocol {
       )
     }
     let rows = try await stubbedClient().listAgents(baseURL: URL(string: "http://127.0.0.1:7392")!)
-    #expect(rows == fixtureRows, "bridge and daemon transports render the fixture identically")
+    // `provider` is bridge-only metadata; the fixture's rendered fields must match.
+    func rendered(_ row: AgentRow) -> String {
+      "\(row.machineID)|\(row.sessionID)|\(row.label)|\(row.branch ?? "")|\(row.working)"
+    }
+    #expect(
+      rows.map(rendered) == fixtureRows.map(rendered),
+      "bridge transports render the fixture identically")
+    // Herdr's own status and the working folder reach the rows (blocked is not idle).
+    #expect(rows.map(\.status) == ["working", "idle"])
+    #expect(rows.map(\.cwd) == ["/tmp/a", "/tmp/b"])
+  }
+
+  @Test func oversizedResponsesAreRefused() async {
+    // Valid JSON, but past the 2 MB cap: refused, as Android refuses it.
+    let padding = String(repeating: "x", count: maxHTTPBodyBytes)
+    StubURLProtocol.handler = { _ in (200, Data(#"{"pad":"\#(padding)"}"#.utf8)) }
+    await #expect(throws: BridgeError.protocolError("bridge response is larger than 2 MB")) {
+      try await stubbedClient().listAgents(baseURL: URL(string: "http://127.0.0.1:7392")!)
+    }
   }
 
   @Test func httpErrorSurfacesAsProtocolError() async {
@@ -160,7 +186,7 @@ final class StubURLProtocol: URLProtocol {
     do {
       _ = try await stubbedClient().listAgents(baseURL: URL(string: "http://127.0.0.1:7392")!)
       Issue.record("expected an error")
-    } catch let error as DaemonClientError {
+    } catch let error as BridgeError {
       #expect(error.message.contains("cannot connect"))
     } catch {
       Issue.record("unexpected error \(error)")

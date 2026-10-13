@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 public protocol BridgeMachineServing: Sendable {
-  func verifyMachine(baseURL: URL, expectedID: UUID?) async throws -> BridgeMachine
+  func verifyMachine(baseURL: URL, expectedID: UUID?) async throws -> VerifiedMachine
   func listAgents(baseURL: URL, expectedMachineID: UUID?) async throws -> [AgentRow]
 }
 
@@ -19,6 +19,9 @@ public struct MachineConnection: Equatable, Sendable {
   public var phase: MachineConnectionPhase = .disconnected
   public var agents: [AgentRow] = []
   public var refreshing = false
+  /// Advertisements from the last verified handshake; nil until connected.
+  public var details: BridgeDetails?
+  public var name: String?
 
   public init() {}
 }
@@ -53,7 +56,7 @@ public final class MachineConnections {
   /// Called only with a profile constructed after pairing. Refresh re-verifies its UUID.
   public func saveVerifiedProfile(_ profile: BridgeProfile) throws {
     guard storageError == nil else {
-      throw DaemonClientError.protocolError(
+      throw BridgeError.protocolError(
         "Resolve unreadable saved profiles before replacing them")
     }
     var updated = profiles
@@ -61,7 +64,7 @@ public final class MachineConnections {
       guard updated[index].machineID == profile.machineID,
         updated[index].endpoint == profile.endpoint
       else {
-        throw DaemonClientError.protocolError("Rename cannot change machine ownership")
+        throw BridgeError.protocolError("Rename cannot change machine ownership")
       }
       updated[index] = profile
     } else {
@@ -72,10 +75,34 @@ public final class MachineConnections {
     if foreground { refresh(profile.id) }
   }
 
+  /// Verifies the bridge at `address` and saves it bound to the verified machine.
+  public func addMachine(address: String, label: String) async throws {
+    guard
+      let url = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)),
+      url.host != nil
+    else {
+      throw BridgeError.protocolError(
+        "Enter the machine's base URL, e.g. http://127.0.0.1:7392")
+    }
+    let verified = try await client.verifyMachine(baseURL: url, expectedID: nil)
+    let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+    let name = trimmed.isEmpty ? (verified.name ?? url.host ?? "Machine") : trimmed
+    try saveVerifiedProfile(
+      try BridgeProfile(machineID: verified.machine.id, endpoint: url, name: name))
+  }
+
+  /// Renames a saved machine. Its verified identity and endpoint are unchanged.
+  public func rename(_ id: UUID, to label: String) throws {
+    guard let profile = profiles.first(where: { $0.id == id }) else { return }
+    try saveVerifiedProfile(
+      try BridgeProfile(
+        id: id, machineID: profile.machineID, endpoint: profile.endpoint, name: label))
+  }
+
   public func remove(_ id: UUID) throws {
     let updated = profiles.filter { $0.id != id }
     guard storageError == nil else {
-      throw DaemonClientError.protocolError(
+      throw BridgeError.protocolError(
         "Resolve unreadable saved profiles before replacing them")
     }
     try store.save(updated)
@@ -126,7 +153,8 @@ public final class MachineConnections {
     connections[id] = connection
     jobs[id] = Task { [weak self, client] in
       do {
-        _ = try await client.verifyMachine(baseURL: profile.endpoint, expectedID: profile.machineID)
+        let verified = try await client.verifyMachine(
+          baseURL: profile.endpoint, expectedID: profile.machineID)
         try Task.checkCancellation()
         let agents = try await client.listAgents(
           baseURL: profile.endpoint, expectedMachineID: profile.machineID)
@@ -136,19 +164,21 @@ public final class MachineConnections {
             UUID(uuidString: $0.machineID) == profile.machineID && !$0.sessionID.isEmpty
           })
         else {
-          throw DaemonClientError.protocolError("Agent ownership does not match this machine")
+          throw BridgeError.protocolError("Agent ownership does not match this machine")
         }
         guard let self, self.generations[id] == generation, self.foreground else { return }
         var result = MachineConnection()
         result.phase = .connected
         result.agents = agents
+        result.details = verified.details
+        result.name = verified.name
         self.connections[id] = result
         self.jobs.removeValue(forKey: id)
       } catch {
         guard let self, self.generations[id] == generation, self.foreground else { return }
         if error is CancellationError { return }
         var result = MachineConnection()
-        result.phase = .failed((error as? DaemonClientError)?.message ?? error.localizedDescription)
+        result.phase = .failed((error as? BridgeError)?.message ?? error.localizedDescription)
         self.connections[id] = result
         self.jobs.removeValue(forKey: id)
       }

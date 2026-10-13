@@ -12,3 +12,12 @@ public struct BridgeMachine: Equatable, Sendable {
     self.version = version
   }
 }
+
+/// A verified handshake: the machine identity plus the advertisements the app gates actions on.
+public struct VerifiedMachine: Equatable, Sendable {
+  public let machine: BridgeMachine
+  public let details: BridgeDetails
+
+  /// The machine's own name from /api/session, if it reported one.
+  public var name: String? { details.machineName }
+}
