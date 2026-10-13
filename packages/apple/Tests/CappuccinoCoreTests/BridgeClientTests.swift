@@ -161,6 +161,9 @@ final class StubURLProtocol: URLProtocol {
     #expect(
       rows.map(rendered) == fixtureRows.map(rendered),
       "bridge transports render the fixture identically")
+    // Herdr's own status and the working folder reach the rows (blocked is not idle).
+    #expect(rows.map(\.status) == ["working", "idle"])
+    #expect(rows.map(\.cwd) == ["/tmp/a", "/tmp/b"])
   }
 
   @Test func httpErrorSurfacesAsProtocolError() async {

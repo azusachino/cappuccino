@@ -28,12 +28,15 @@ public struct AgentRow: Identifiable, Equatable, Sendable {
   public let label: String
   public let branch: String?
   public let working: Bool
+  /// Herdr's own status: `idle`, `working`, `blocked`, `done` or `unknown`.
+  public let status: String
+  public let cwd: String?
   /// The agent kind (`pi`, `claude`, `agy`); a canonical conversation id must carry it.
   public let provider: String?
 
   public init(
     machineID: String, sessionID: String, label: String, branch: String?, working: Bool,
-    provider: String? = nil
+    provider: String? = nil, status: String? = nil, cwd: String? = nil
   ) {
     self.machineID = machineID
     self.sessionID = sessionID
@@ -41,6 +44,8 @@ public struct AgentRow: Identifiable, Equatable, Sendable {
     self.branch = branch
     self.working = working
     self.provider = provider
+    self.status = status ?? (working ? "working" : "idle")
+    self.cwd = cwd
   }
 }
 

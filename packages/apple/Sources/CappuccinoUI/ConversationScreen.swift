@@ -108,16 +108,44 @@ import SwiftUI
     liveStatus(
       pendingPrompt: session.stream.pendingPrompt != nil,
       streamStatus: session.stream.agentStatus,
-      listedStatus: session.selectedAgent?.working == true ? "working" : "idle")
+      listedStatus: session.selectedAgent?.status ?? "idle")
   }
 
   private var headerDetail: String {
-    let state = statusWord(liveStatusWord)
+    let state = statusLabel(liveStatusWord)
     let machine = session.selectedProfile?.name ?? ""
+    let folder = folderName(session.selectedAgent?.cwd)
     let branch = session.selectedAgent?.branch
-    return [state, machine, branch].compactMap { $0 }.filter { !$0.isEmpty }.joined(
+    return [state, machine, folder, branch].compactMap { $0 }.filter { !$0.isEmpty }.joined(
       separator: " · ")
   }
+}
+
+/// The badge word for a status, as in the header and agent rows (Android's status labels).
+func statusLabel(_ status: String) -> String {
+  switch status {
+  case "working": "Working"
+  case "blocked": "Blocked"
+  case "done": "Done"
+  default: "Idle"
+  }
+}
+
+/// The square's colour beside a status word.
+func statusColor(_ status: String) -> Color {
+  switch status {
+  case "working": .blue
+  case "blocked": .orange
+  case "done": .green
+  default: .secondary
+  }
+}
+
+/// The last folder of a working directory, as Android's header shows it.
+func folderName(_ cwd: String?) -> String? {
+  guard let cwd, !cwd.isEmpty else { return nil }
+  let folder = (cwd.hasSuffix("/") ? String(cwd.dropLast()) : cwd).split(separator: "/").last
+  return folder.map(String.init)
 }
 
 /// The word for a live status. Colour never carries it alone.

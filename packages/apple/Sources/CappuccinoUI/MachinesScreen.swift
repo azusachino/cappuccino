@@ -152,7 +152,7 @@ private struct ConnectionStatusRow: View {
   }
 }
 
-/// An agent in a machine's list: its kind, label, status word and branch.
+/// An agent in a machine's list: its kind, label, status word, folder and branch.
 struct AgentRowLabel: View {
   let agent: AgentRow
 
@@ -165,12 +165,13 @@ struct AgentRowLabel: View {
         Text(agent.label).font(.headline)
         HStack(spacing: 6) {
           Rectangle()
-            .fill(agent.working ? Color.green : Color.secondary)
+            .fill(statusColor(agent.status))
             .frame(width: 8, height: 8)
-          Text(agent.working ? "Working" : "Idle")
-          if let branch = agent.branch {
-            Text("· \(branch)").lineLimit(1)
-          }
+          Text(
+            [statusLabel(agent.status), folderName(agent.cwd), agent.branch]
+              .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+          )
+          .lineLimit(1)
         }
         .font(.subheadline)
         .foregroundStyle(.secondary)

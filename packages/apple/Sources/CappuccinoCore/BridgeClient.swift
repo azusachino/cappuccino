@@ -67,7 +67,9 @@ public struct BridgeClient: Sendable {
         label: agent["label"] as? String ?? agent["agent"] as? String ?? "",
         branch: agent["active_branch"] as? String,
         working: agent["working"] as? Bool ?? false,
-        provider: agent["agent"] as? String
+        provider: agent["agent"] as? String,
+        status: agent["status"] as? String,
+        cwd: agent["cwd"] as? String
       )
     }
   }

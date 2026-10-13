@@ -92,7 +92,7 @@ import SwiftUI
     liveStatus(
       pendingPrompt: session.stream.pendingPrompt != nil,
       streamStatus: session.stream.agentStatus,
-      listedStatus: session.selectedAgent?.working == true ? "working" : "idle")
+      listedStatus: session.selectedAgent?.status ?? "idle")
   }
 }
 

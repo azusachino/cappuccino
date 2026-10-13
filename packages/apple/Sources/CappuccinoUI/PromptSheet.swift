@@ -13,7 +13,13 @@ struct PromptSheet: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
           if !prompt.questions.isEmpty {
+            // "Question 1 of 2": the terminal form shows one question at a time.
+            if let progress = prompt.message {
+              Text(progress).font(.caption).foregroundStyle(.secondary)
+            }
+            // Each card is its own question; a fresh draft per card, never the last one's.
             QuestionForm(session: session, prompt: prompt, enabled: answersEnabled)
+              .id(prompt.promptID)
           } else {
             ScreenPrompt(session: session, prompt: prompt, enabled: answersEnabled)
           }
