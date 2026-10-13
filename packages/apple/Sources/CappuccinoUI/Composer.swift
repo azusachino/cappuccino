@@ -22,8 +22,8 @@ import SwiftUI
 
         HStack(spacing: 8) {
           if session.canControl {
-            Button {
-              confirmingNewSession = true
+            Menu {
+              Button("New session") { confirmingNewSession = true }
             } label: {
               Image(systemName: "square.grid.2x2").frame(width: 32, height: 32)
             }

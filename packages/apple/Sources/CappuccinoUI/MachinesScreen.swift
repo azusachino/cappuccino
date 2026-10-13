@@ -198,6 +198,7 @@ private struct AddMachineSheet: View {
           TextField("Bridge address", text: $address, prompt: Text("http://127.0.0.1:7392"))
             .urlEntry()
             .autocorrectionDisabled()
+            .accessibilityLabel("Bridge address")
           TextField("Label (optional)", text: $label)
         } footer: {
           Text("The bridge has no login: your tailnet is the boundary.")
