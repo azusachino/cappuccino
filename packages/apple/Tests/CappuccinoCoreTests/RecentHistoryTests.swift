@@ -162,3 +162,30 @@ struct RecentHistoryTests {
     #expect(!answerComplete(multi, QuestionAnswer(selected: [], other: nil)))
   }
 }
+
+@Suite struct SessionStatusLineTests {
+  @Test func contextShowsPercentAndWindowWhenKnown() {
+    let known = SessionStats(
+      model: "claude-opus-5-5", thinkingLevel: "low", contextTokens: 76_000,
+      contextWindow: 200_000, cachePercent: 60)
+    #expect(contextSummary(known) == "38% · 76K / 200K")
+    #expect(modelChip(known) == "opus 5.5 · low")
+  }
+
+  @Test func contextShowsTokensAloneWhenWindowIsUnknownAndNothingWithoutTokens() {
+    let unknown = SessionStats(
+      model: nil, thinkingLevel: nil, contextTokens: 1_100, contextWindow: nil, cachePercent: nil)
+    #expect(contextSummary(unknown) == "1.1K")
+    #expect(modelChip(unknown) == nil)
+    let none = SessionStats(
+      model: nil, thinkingLevel: nil, contextTokens: nil, contextWindow: nil, cachePercent: nil)
+    #expect(contextSummary(none) == nil)
+  }
+
+  @Test func onlyWorkingAndBlockedAreNotIdle() {
+    #expect(!isIdle("working"))
+    #expect(!isIdle("blocked"))
+    #expect(isIdle("idle"))
+    #expect(isIdle(""))
+  }
+}

@@ -25,3 +25,30 @@ public func formatTokens(_ count: Int64) -> String {
   }
   return text.replacingOccurrences(of: ".0", with: "")
 }
+
+/// The context meter under the composer: percent and `tokens / window` when the window is known,
+/// tokens alone otherwise. Nil when the bridge reported no token count.
+public func contextSummary(_ stats: SessionStats) -> String? {
+  guard let tokens = stats.contextTokens else { return nil }
+  var pieces: [String] = []
+  if let window = stats.contextWindow, window > 0 {
+    let percent = min(max(tokens * 100 / window, 0), 100)
+    pieces.append("\(percent)%")
+    pieces.append("\(formatTokens(tokens)) / \(formatTokens(window))")
+  } else {
+    pieces.append(formatTokens(tokens))
+  }
+  return pieces.joined(separator: " · ")
+}
+
+/// The model and effort chip: "opus 5.5 · low", or nil when neither is known.
+public func modelChip(_ stats: SessionStats?) -> String? {
+  guard let stats else { return nil }
+  let pieces = [stats.model.map(shortModel), stats.thinkingLevel].compactMap { $0 }
+  return pieces.isEmpty ? nil : pieces.joined(separator: " · ")
+}
+
+/// An agent is idle when its live status is neither working nor blocked on an answer.
+public func isIdle(_ liveStatus: String) -> Bool {
+  liveStatus != "working" && liveStatus != "blocked"
+}

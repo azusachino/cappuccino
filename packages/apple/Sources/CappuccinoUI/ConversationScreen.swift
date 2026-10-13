@@ -55,6 +55,11 @@ import SwiftUI
           hasNewOutput = true
         }
       }
+      .bottomComposer {
+        Composer(session: session)
+          .padding(.horizontal, 12)
+          .padding(.bottom, 4)
+      }
       .overlay(alignment: .bottomTrailing) {
         if !follow.following {
           JumpToLatestButton(hasNewOutput: hasNewOutput) {
