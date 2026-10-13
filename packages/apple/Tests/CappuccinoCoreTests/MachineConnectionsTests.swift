@@ -12,11 +12,15 @@ private actor ControlledDiscovery: BridgeMachineServing {
     machines = Dictionary(uniqueKeysWithValues: profiles.map { ($0.endpoint.host!, $0.machineID) })
   }
 
-  func verifyMachine(baseURL: URL, expectedID: UUID?) async throws -> BridgeMachine {
+  func verifyMachine(baseURL: URL, expectedID: UUID?) async throws -> VerifiedMachine {
     guard let id = machines[baseURL.host!], expectedID == id else {
       throw DaemonClientError.protocolError("Wrong machine")
     }
-    return BridgeMachine(id: id, name: nil, version: nil)
+    return VerifiedMachine(
+      machine: BridgeMachine(id: id, name: nil, version: nil),
+      details: BridgeDetails(
+        machineID: id, machineName: nil, version: nil, protocolVersion: 1,
+        capabilities: ["agent_control": true]))
   }
 
   func listAgents(baseURL: URL, expectedMachineID: UUID?) async throws -> [AgentRow] {

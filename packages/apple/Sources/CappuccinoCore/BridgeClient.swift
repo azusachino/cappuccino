@@ -22,28 +22,21 @@ public struct BridgeClient: DaemonServing {
   }
 
   public func pair(baseURL: URL) async throws -> PairedMachine {
-    let machine = try await verifyMachine(baseURL: baseURL)
-    return PairedMachine(machineID: machine.id.uuidString.lowercased())
+    let verified = try await verifyMachine(baseURL: baseURL)
+    return PairedMachine(machineID: verified.machine.id.uuidString.lowercased())
   }
 
-  public func verifyMachine(baseURL: URL, expectedID: UUID? = nil) async throws -> BridgeMachine {
-    let event = try await get(baseURL.appendingPathComponent("/api/session"))
-    guard event["event"] as? String == "paired",
-      event["plugin"] as? String == "cappuccino-bridge",
-      let protocolNumber = event["protocol"] as? NSNumber,
-      CFGetTypeID(protocolNumber) != CFBooleanGetTypeID(),
-      protocolNumber.doubleValue == 1,
-      let rawID = event["machine_id"] as? String,
-      let id = UUID(uuidString: rawID)
-    else {
-      throw DaemonClientError.protocolError(
-        "Invalid bridge identity or incompatible protocol; requires 1")
-    }
-    guard expectedID == nil || id == expectedID else {
+  /// Verifies /api/session and keeps its advertisements, so a connection can gate its actions.
+  public func verifyMachine(baseURL: URL, expectedID: UUID? = nil) async throws -> VerifiedMachine {
+    let json = BridgeJSON(try await get(baseURL.appendingPathComponent("/api/session")))
+    let details = try parseBridgeDetails(json)
+    guard expectedID == nil || details.machineID == expectedID else {
       throw DaemonClientError.protocolError("Bridge machine identity changed")
     }
-    return BridgeMachine(
-      id: id, name: event["machine_name"] as? String, version: event["bridge_version"] as? String)
+    return VerifiedMachine(
+      machine: BridgeMachine(
+        id: details.machineID, name: details.machineName, version: details.version),
+      details: details)
   }
 
   public func listAgents(baseURL: URL) async throws -> [AgentRow] {
@@ -74,7 +67,8 @@ public struct BridgeClient: DaemonServing {
         sessionID: locator,
         label: agent["label"] as? String ?? agent["agent"] as? String ?? "",
         branch: agent["active_branch"] as? String,
-        working: agent["working"] as? Bool ?? false
+        working: agent["working"] as? Bool ?? false,
+        provider: agent["agent"] as? String
       )
     }
   }

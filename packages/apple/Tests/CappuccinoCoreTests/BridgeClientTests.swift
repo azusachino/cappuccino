@@ -146,7 +146,13 @@ final class StubURLProtocol: URLProtocol {
       )
     }
     let rows = try await stubbedClient().listAgents(baseURL: URL(string: "http://127.0.0.1:7392")!)
-    #expect(rows == fixtureRows, "bridge and daemon transports render the fixture identically")
+    // `provider` is bridge-only metadata; the fixture's rendered fields must match.
+    func rendered(_ row: AgentRow) -> String {
+      "\(row.machineID)|\(row.sessionID)|\(row.label)|\(row.branch ?? "")|\(row.working)"
+    }
+    #expect(
+      rows.map(rendered) == fixtureRows.map(rendered),
+      "bridge and daemon transports render the fixture identically")
   }
 
   @Test func httpErrorSurfacesAsProtocolError() async {

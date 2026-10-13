@@ -29,13 +29,19 @@ public struct AgentRow: Identifiable, Equatable, Sendable {
   public let label: String
   public let branch: String?
   public let working: Bool
+  /// The agent kind (`pi`, `claude`, `agy`); a canonical conversation id must carry it.
+  public let provider: String?
 
-  public init(machineID: String, sessionID: String, label: String, branch: String?, working: Bool) {
+  public init(
+    machineID: String, sessionID: String, label: String, branch: String?, working: Bool,
+    provider: String? = nil
+  ) {
     self.machineID = machineID
     self.sessionID = sessionID
     self.label = label
     self.branch = branch
     self.working = working
+    self.provider = provider
   }
 }
 

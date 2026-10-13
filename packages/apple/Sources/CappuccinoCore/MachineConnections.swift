@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 public protocol BridgeMachineServing: Sendable {
-  func verifyMachine(baseURL: URL, expectedID: UUID?) async throws -> BridgeMachine
+  func verifyMachine(baseURL: URL, expectedID: UUID?) async throws -> VerifiedMachine
   func listAgents(baseURL: URL, expectedMachineID: UUID?) async throws -> [AgentRow]
 }
 
@@ -19,6 +19,9 @@ public struct MachineConnection: Equatable, Sendable {
   public var phase: MachineConnectionPhase = .disconnected
   public var agents: [AgentRow] = []
   public var refreshing = false
+  /// Advertisements from the last verified handshake; nil until connected.
+  public var details: BridgeDetails?
+  public var name: String?
 
   public init() {}
 }
@@ -126,7 +129,8 @@ public final class MachineConnections {
     connections[id] = connection
     jobs[id] = Task { [weak self, client] in
       do {
-        _ = try await client.verifyMachine(baseURL: profile.endpoint, expectedID: profile.machineID)
+        let verified = try await client.verifyMachine(
+          baseURL: profile.endpoint, expectedID: profile.machineID)
         try Task.checkCancellation()
         let agents = try await client.listAgents(
           baseURL: profile.endpoint, expectedMachineID: profile.machineID)
@@ -142,6 +146,8 @@ public final class MachineConnections {
         var result = MachineConnection()
         result.phase = .connected
         result.agents = agents
+        result.details = verified.details
+        result.name = verified.name
         self.connections[id] = result
         self.jobs.removeValue(forKey: id)
       } catch {
