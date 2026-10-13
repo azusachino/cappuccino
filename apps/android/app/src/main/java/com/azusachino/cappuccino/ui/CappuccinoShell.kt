@@ -82,6 +82,8 @@ import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.OutputRow
 import com.azusachino.cappuccino.core.PromptCard
 import com.azusachino.cappuccino.core.TranscriptSegment
+import com.azusachino.cappuccino.core.slashCommand
+import com.azusachino.cappuccino.core.slashCommandWarning
 import com.azusachino.cappuccino.core.transcriptSegments
 import com.azusachino.cappuccino.core.visibleInChat
 import com.azusachino.cappuccino.io.ConnectedActions
@@ -743,7 +745,7 @@ fun CappuccinoScreen(
               if (state.offlineSavedAt == null)
                 composerState.SaveableStateProvider(conversationKey) {
                   PromptInputBar(
-                    onSend = { text -> actions.submitPrompt(text) },
+                    onSend = { text, confirmed -> actions.submitPrompt(text, confirmed) },
                     onStop =
                       if (agentControl && selectedStatus == "working") {
                         { actions.controlAgent("interrupt") }
@@ -1372,7 +1374,10 @@ fun PromptCardView(
 
 @Composable
 fun PromptInputBar(
-  onSend: (String) -> Unit,
+  /**
+   * Sends the draft; the flag is true once the owner confirmed the agent command it starts with.
+   */
+  onSend: (String, Boolean) -> Unit,
   enabled: Boolean,
   modifier: Modifier = Modifier,
   placeholder: String = "Message agent…",
@@ -1384,6 +1389,27 @@ fun PromptInputBar(
 ) {
   var input by rememberSaveable { mutableStateOf("") }
   var commandsOpen by remember { mutableStateOf(false) }
+  // An agent command can cost far more than a message; it waits here, draft kept, until confirmed.
+  var confirmingCommand by rememberSaveable { mutableStateOf<String?>(null) }
+  confirmingCommand?.let { command ->
+    AlertDialog(
+      onDismissRequest = { confirmingCommand = null },
+      title = { Text("Run $command?") },
+      text = { Text(slashCommandWarning(command)) },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            onSend(input, true)
+            input = ""
+            confirmingCommand = null
+          }
+        ) {
+          Text("Run $command")
+        }
+      },
+      dismissButton = { TextButton(onClick = { confirmingCommand = null }) { Text("Cancel") } },
+    )
+  }
   val colors = MaterialTheme.appColors
   val canSend = enabled && input.isNotBlank()
   Column(
@@ -1467,8 +1493,12 @@ fun PromptInputBar(
       IconButton(
         onClick = {
           if (input.isNotBlank()) {
-            onSend(input)
-            input = ""
+            val command = slashCommand(input)
+            if (command != null) confirmingCommand = command
+            else {
+              onSend(input, false)
+              input = ""
+            }
           }
         },
         enabled = canSend,

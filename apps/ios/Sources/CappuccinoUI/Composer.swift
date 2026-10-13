@@ -8,6 +8,9 @@ import SwiftUI
   let session: SessionModel
   @State private var draft = ""
   @State private var confirmingNewSession = false
+  @State private var confirmingCommand = false
+  /// Kept after the dialog closes so its title does not change while it animates away.
+  @State private var commandToConfirm = ""
 
   var body: some View {
     let status = currentStatus
@@ -48,15 +51,7 @@ import SwiftUI
             .accessibilityLabel("Stop")
           }
           Button {
-            let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-            Task {
-              // Keep the text until the bridge accepts it; a refusal leaves it to retry.
-              if await session.sendPrompt(text),
-                draft.trimmingCharacters(in: .whitespacesAndNewlines) == text
-              {
-                draft = ""
-              }
-            }
+            submitDraft()
           } label: {
             Image(systemName: "arrow.up").frame(width: 32, height: 32)
           }
@@ -92,6 +87,36 @@ import SwiftUI
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("\(agentName) starts a fresh conversation in the same terminal.")
+    }
+    .confirmationDialog(
+      "Run \(commandToConfirm)?", isPresented: $confirmingCommand, titleVisibility: .visible
+    ) {
+      Button("Run \(commandToConfirm)") { send(confirmed: true) }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text(slashCommandWarning(commandToConfirm))
+    }
+  }
+
+  /// Ordinary text sends at once; an agent command waits for the owner to confirm it.
+  private func submitDraft() {
+    if let command = slashCommand(draft) {
+      commandToConfirm = command
+      confirmingCommand = true
+    } else {
+      send(confirmed: false)
+    }
+  }
+
+  /// Keeps the text until the bridge accepts it; a refusal leaves it to retry.
+  private func send(confirmed: Bool) {
+    let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    Task {
+      if await session.sendPrompt(text, confirmed: confirmed),
+        draft.trimmingCharacters(in: .whitespacesAndNewlines) == text
+      {
+        draft = ""
+      }
     }
   }
 

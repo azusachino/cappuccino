@@ -1052,7 +1052,7 @@ class ConnectedViewModelTest {
               conversationMachine,
             )
 
-          override suspend fun submitPrompt(sessionId: String, text: String) {}
+          override suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean) {}
 
           override suspend fun answerPrompt(
             sessionId: String,

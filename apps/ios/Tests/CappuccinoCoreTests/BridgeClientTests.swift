@@ -209,13 +209,24 @@ final class StubURLProtocol: URLProtocol {
   }
 
   @Test func submitPromptSendsJsonBody() async throws {
+    let base = URL(string: "http://127.0.0.1:7392")!
+    let recorder = BodyRecorder()
     StubURLProtocol.handler = { request in
       #expect(request.url?.path == "/api/agents/s-aurora/prompt")
       #expect(request.httpMethod == "POST")
+      recorder.bodies.append(requestBody(request))
       return (200, #"{"status":"delivered"}"#.data(using: .utf8)!)
     }
     try await stubbedClient().submitPrompt(
-      base: URL(string: "http://127.0.0.1:7392")!, session: "s-aurora", text: "test input")
+      base: base, session: "s-aurora", text: "test input")
+    try await stubbedClient().submitPrompt(
+      base: base, session: "s-aurora", text: "/new", confirmed: true)
+    let unconfirmed = try JSONSerialization.jsonObject(with: recorder.bodies[0]) as? [String: Any]
+    let confirmed = try JSONSerialization.jsonObject(with: recorder.bodies[1]) as? [String: Any]
+    #expect(unconfirmed?["text"] as? String == "test input")
+    #expect(unconfirmed?["confirmed"] == nil)
+    #expect(confirmed?["text"] as? String == "/new")
+    #expect(confirmed?["confirmed"] as? Bool == true)
   }
 
   @Test func answerPromptSendsSelection() async throws {

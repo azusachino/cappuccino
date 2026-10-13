@@ -99,7 +99,7 @@ interface ConnectedActions {
 
   fun setAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette)
 
-  fun submitPrompt(text: String)
+  fun submitPrompt(text: String, confirmed: Boolean = false)
 
   fun controlAgent(action: String) = Unit
 
@@ -603,7 +603,7 @@ internal constructor(
     }
   }
 
-  override fun submitPrompt(text: String) {
+  override fun submitPrompt(text: String, confirmed: Boolean) {
     if (mutableState.value.offlineSavedAt != null) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
@@ -611,7 +611,7 @@ internal constructor(
     val requestEpoch = epoch
     viewModelScope.launch {
       try {
-        client.submitPrompt(agent.sessionId, text)
+        client.submitPrompt(agent.sessionId, text, confirmed)
       } catch (error: Exception) {
         if (error is kotlinx.coroutines.CancellationException) throw error
         if (requestEpoch != epoch || mutableState.value.activeProfileId != profile.id) return@launch

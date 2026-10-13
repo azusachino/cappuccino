@@ -200,6 +200,8 @@ Returns paginated, structured conversation turns (markdown-ready).
 
 Submits a user prompt or answers an interactive prompt card.
 
+Text that starts with an agent command (`/` then a word, ending at a space or the end of the text, such as `/model opus`) is refused with `409 confirm_command` and nothing is typed, unless the request has `"confirmed": true`. Clients ask the owner first, because commands can cost far more than a message: `/model` drops the prompt cache, and `/new` ends the conversation. A path such as `/Users/me/notes.md` is ordinary text.
+
 ```json
 // Prompt submission
 {

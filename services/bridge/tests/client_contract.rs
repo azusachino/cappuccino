@@ -674,6 +674,32 @@ async fn submit_agent_prompt_delivers_input() {
 
     assert_eq!(err_exchange.status, 400);
 
+    // 3. An agent command waits for the owner's confirmation; a path is just text.
+    let options = probe_options(&bridge.base_url());
+    let send = |body: Value| {
+        let options = options.clone();
+        async move {
+            probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+                .await
+                .expect("prompt request")
+        }
+    };
+    let delivered = herdr.requests("agent.prompt").len();
+    let unconfirmed = send(json!({"type": "prompt", "text": "/model claude-haiku-5-5"})).await;
+    assert_eq!(unconfirmed.status, 409, "payload: {}", unconfirmed.body);
+    assert_eq!(unconfirmed.body["code"], "confirm_command");
+    assert_eq!(
+        herdr.requests("agent.prompt").len(),
+        delivered,
+        "nothing typed"
+    );
+    let confirmed =
+        send(json!({"type": "prompt", "text": "/model claude-haiku-5-5", "confirmed": true})).await;
+    assert_eq!(confirmed.status, 200, "payload: {}", confirmed.body);
+    let path = send(json!({"type": "prompt", "text": "/Users/me/notes.md summarize"})).await;
+    assert_eq!(path.status, 200, "payload: {}", path.body);
+    assert_eq!(herdr.requests("agent.prompt").len(), delivered + 2);
+
     bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();
@@ -721,7 +747,7 @@ async fn control_route_sends_each_agents_own_keys_and_refuses_busy_new_sessions(
     assert_eq!(control("s-probe", "new_session").await.status, 409);
     assert!(herdr.requests("agent.prompt").is_empty());
 
-    for (kind, command) in [("claude", "/clear"), ("pi", "/new"), ("agy", "/clear")] {
+    for (kind, command) in [("claude", "/new"), ("pi", "/new"), ("agy", "/new")] {
         herdr.set_agent(kind, "idle");
         let fresh = control("s-probe", "new_session").await;
         assert_eq!(fresh.status, 200, "{kind}: {}", fresh.body);

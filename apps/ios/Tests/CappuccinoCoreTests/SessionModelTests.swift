@@ -33,7 +33,7 @@ private final class FakeBridge: AgentSessionServing, @unchecked Sendable {
     try await act("control:\(action)")
   }
 
-  func submitPrompt(base: URL, session: String, text: String) async throws {
+  func submitPrompt(base: URL, session: String, text: String, confirmed: Bool) async throws {
     try await act("prompt:\(text)")
   }
 
