@@ -10,6 +10,7 @@ import SwiftUI
   @State private var renaming: BridgeProfile?
   @State private var inspecting: BridgeProfile?
   @State private var removing: BridgeProfile?
+  @State private var openAgent = false
 
   public init(machines: MachineConnections, session: SessionModel) {
     self.machines = machines
@@ -31,10 +32,20 @@ import SwiftUI
             profile: profile, state: machines.connections[profile.id] ?? MachineConnection(),
             session: session, machines: machines,
             onRename: { renaming = profile }, onInspect: { inspecting = profile },
-            onRemove: { removing = profile })
+            onRemove: { removing = profile },
+            onOpen: { agent in
+              session.select(profileID: profile.id, agent: agent)
+              openAgent = true
+            })
         }
       }
       .navigationTitle("Machines")
+      .navigationDestination(isPresented: $openAgent) {
+        ConversationScreen(machines: machines, session: session)
+      }
+      .onChange(of: openAgent) { _, open in
+        if !open { session.clearSelection() }
+      }
       .toolbar {
         ToolbarItem(placement: .primaryAction) {
           Button {
@@ -86,13 +97,14 @@ private struct MachineSection: View {
   let onRename: () -> Void
   let onInspect: () -> Void
   let onRemove: () -> Void
+  let onOpen: (AgentRow) -> Void
 
   var body: some View {
     Section {
       ConnectionStatusRow(phase: state.phase, refreshing: state.refreshing)
       ForEach(state.agents) { agent in
         Button {
-          session.select(profileID: profile.id, agent: agent)
+          onOpen(agent)
         } label: {
           AgentRowLabel(agent: agent)
         }
@@ -253,7 +265,7 @@ private struct RenameMachineSheet: View {
   }
 }
 
-private struct ConnectionDetailsSheet: View {
+struct ConnectionDetailsSheet: View {
   let profile: BridgeProfile
   let state: MachineConnection?
   @Environment(\.dismiss) private var dismiss

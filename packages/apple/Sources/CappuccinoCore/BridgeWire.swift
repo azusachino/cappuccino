@@ -336,3 +336,5 @@ private func toolInput(_ value: Any?) throws -> String {
     withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed])
   return String(decoding: data, as: UTF8.self)
 }
+
+extension ConversationTurn: Identifiable {}

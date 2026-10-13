@@ -19,7 +19,7 @@ extension ConversationPart {
   }
 }
 
-func transcriptSegments(_ parts: [ConversationPart]) -> [TranscriptSegment] {
+public func transcriptSegments(_ parts: [ConversationPart]) -> [TranscriptSegment] {
   var segments: [TranscriptSegment] = []
   var activity: [ConversationPart] = []
   for part in parts {
@@ -50,7 +50,7 @@ public enum ToolKind: Equatable, Sendable {
   }
 }
 
-func toolKind(_ name: String) -> ToolKind {
+public func toolKind(_ name: String) -> ToolKind {
   switch name.lowercased() {
   case "read", "view", "notebookread": .read
   case "edit", "multiedit", "notebookedit", "apply_patch": .edit
@@ -301,7 +301,7 @@ func shortError(_ output: String?) -> String {
 }
 
 /// What a call came to, from what it recorded. nil when nothing is recorded or worth saying.
-func stepOutcome(_ call: ToolCall) -> StepOutcome? {
+public func stepOutcome(_ call: ToolCall) -> StepOutcome? {
   switch call.activityState {
   case .failed:
     return StepOutcome(shortError(call.output), tone: .err)
@@ -374,7 +374,7 @@ private func editPairs(_ args: BridgeJSON?) -> [(old: String, new: String)] {
 }
 
 /// Wall time from the first recorded start to the last recorded result, in milliseconds.
-func activityDurationMillis(_ parts: [ConversationPart]) -> Int? {
+public func activityDurationMillis(_ parts: [ConversationPart]) -> Int? {
   let tools = parts.compactMap { part -> ToolCall? in
     if case .toolCall(let call) = part { return call }
     return nil
@@ -385,7 +385,7 @@ func activityDurationMillis(_ parts: [ConversationPart]) -> Int? {
   return durationMillis(from: start, to: end)
 }
 
-func toolDurationMillis(_ call: ToolCall) -> Int? {
+public func toolDurationMillis(_ call: ToolCall) -> Int? {
   guard let start = instant(call.startedAt), let end = instant(call.finishedAt) else { return nil }
   return durationMillis(from: start, to: end)
 }
@@ -395,7 +395,7 @@ private func durationMillis(from start: Date, to end: Date) -> Int? {
   return millis < 0 ? nil : millis
 }
 
-func compactDuration(millis: Int) -> String {
+public func compactDuration(millis: Int) -> String {
   switch millis {
   case ..<1_000: return "\(millis)ms"
   case ..<10_000: return String(format: "%.1fs", Double(millis) / 1_000)

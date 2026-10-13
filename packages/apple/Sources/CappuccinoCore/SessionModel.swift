@@ -71,16 +71,16 @@ public final class SessionModel {
   /// Stop and New session are offered only when the bridge advertises agent control.
   public var canControl: Bool { capabilities?["agent_control"] == true }
 
-  /// Select an agent on a machine (or none). Switching bumps the epoch and drops the old
-  /// stream, conversation and action result.
-  public func select(profileID: UUID, agent: AgentRow?) {
+  /// Leaves the agent: its stream and conversation stop, its results are dropped, and the
+  /// transcript is cleared. Switching agents bumps the same epoch.
+  public func clearSelection(profileID: UUID? = nil) {
     epoch += 1
     streamTask?.cancel()
     conversationTask?.cancel()
     streamTask = nil
     conversationTask = nil
     conversationRequested = false
-    selectedProfileID = profileID
+    selectedProfileID = profileID ?? selectedProfileID
     selectedAgent = nil
     turns = []
     omittedTurns = 0
@@ -91,6 +91,11 @@ public final class SessionModel {
     stream = StreamState()
     streamError = nil
     actionError = nil
+  }
+
+  /// Select an agent on a machine. A foreign machine's agent is refused.
+  public func select(profileID: UUID, agent: AgentRow?) {
+    clearSelection(profileID: profileID)
     guard let agent, let profile = selectedProfile else { return }
     guard UUID(uuidString: agent.machineID) == profile.machineID else {
       streamError = "Agent belongs to a different machine"
