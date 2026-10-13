@@ -66,7 +66,7 @@ Saved SSH machine forwarding already exists in the installed CLI. This helps rea
 
 ## Pi and Apple follow-up research
 
-Installed Pi documentation and source were inspected at version 1.0.2 under `/Users/azusachino/.luna/agent/install/releases/1.0.2/node_modules/@earendil-works/pi-coding-agent/`.
+Installed Pi documentation and source were inspected at version 1.0.2 under the install directory of a custom `PI_CODING_AGENT_DIR` (`install/releases/1.0.2/node_modules/@earendil-works/pi-coding-agent/`).
 
 - `docs/sessions.md` describes active-branch context and retained historical branches. `docs/session-format.md` is the reference for implementing a history reader; concatenating a whole JSONL file would mix alternative histories.
 - `docs/slash-commands.md` explicitly supports `/reload` after adding discovered extensions. `docs/extensions.md` exposes `pi.sendUserMessage()`, lifecycle/message events and asynchronous `tool_call` handlers that can block execution.

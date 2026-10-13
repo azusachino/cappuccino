@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 /// Explicit store/config overrides are exclusive. Otherwise accept reported
-/// paths in either supported installation; never infer session identity from cwd.
+/// paths in Pi's default store; never infer session identity from cwd.
 fn session_stores(
     home: &Path,
     session_dir: Option<PathBuf>,
@@ -18,10 +18,7 @@ fn session_stores(
     if let Some(dir) = agent_dir {
         return vec![dir.join("sessions")];
     }
-    vec![
-        home.join(".luna/agent/sessions"),
-        home.join(".pi/agent/sessions"),
-    ]
+    vec![home.join(".pi/agent/sessions")]
 }
 
 fn pi_session_stores() -> Vec<PathBuf> {
@@ -503,6 +500,10 @@ mod tests {
         assert_eq!(
             session_stores(home, None, Some(config.clone())),
             vec![config.join("sessions")]
+        );
+        assert_eq!(
+            session_stores(home, None, None),
+            vec![home.join(".pi/agent/sessions")]
         );
     }
 

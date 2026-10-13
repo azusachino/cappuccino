@@ -243,9 +243,8 @@ For the tested behavior and its limits, see [verification](docs/verification.md)
   [Android Material 3](docs/design/android-material3.md),
   [conversation rework](docs/design/conversation-rework.md),
   [offline conversation identity](docs/design/offline-conversation-identity.md),
-  [Pi phone reader](docs/design/pi-phone-reader.md),
-  [Mihon shell and terminal session](docs/design/mihon-shell-terminal-session.md)
-  and [Herdr and Pi capability audit](docs/design/herdr-pi-capability-audit.md).
+  [Pi phone reader](docs/design/pi-phone-reader.md) and
+  [Herdr and Pi capability audit](docs/design/herdr-pi-capability-audit.md).
 - [docs/research/](docs/research): source studies and research notes behind
   the design, including [discovery](docs/research/discovery.md).
 - [docs/licenses/](docs/licenses): notices for bundled third-party fonts and

@@ -74,7 +74,7 @@ bridges, without sending input or changing agents:
 
 - Mini CLI and running server: Herdr `0.9.3`, compatible private protocol `22`;
   Pi reports `1.1.0`. The running Pi foreground PID's environment confirms the
-  effective `.luna/agent` directory and discovered `w1:p21` pane binding.
+  effective custom `PI_CODING_AGENT_DIR` and discovered `w1:p21` pane binding.
 - Effective Mini Pi integration status is current `v9`; its discovered live Pi
   agent has a canonical session report. The private bridge conversation GET
   verifies canonical source, conversation ID and expected machine/locator
@@ -93,7 +93,7 @@ bridges, without sending input or changing agents:
   This was source-verified, not exercised against the owner's running agent,
   and is not proof for custom editors/keybindings.
 
-Private raw records are under `.tmp/cappuccino-mihon-preview/runtime/`; no
+Private raw records are under `.tmp/cappuccino-preview/runtime/`; no
 credentials, real transcript text or private network URLs are promoted here.
 
 ## Concrete current defects / overclaims

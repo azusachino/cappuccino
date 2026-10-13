@@ -51,11 +51,12 @@ Ordinary JSON responses negotiate gzip with `Accept-Encoding`; SSE and WebSocket
 ### Pi transcript identity
 
 Pi resolution requires Herdr's exact path-kind `agent_session` report. Without
-an explicit override, paths inside either `~/.luna/agent/sessions` or
-`~/.pi/agent/sessions` are accepted after canonical containment checks.
-`PI_CODING_AGENT_SESSION_DIR` restricts resolution to that store;
-`PI_CODING_AGENT_DIR` otherwise restricts it to that config directory's
-`sessions` subdirectory. Missing, invalid or ambiguous locators remain
+an override, paths inside `~/.pi/agent/sessions` are accepted after canonical
+containment checks. `PI_CODING_AGENT_SESSION_DIR` or `PI_CODING_AGENT_DIR`, read
+from the bridge's environment (which it inherits from Herdr), selects the store
+instead: `PI_CODING_AGENT_SESSION_DIR` restricts resolution to that store, and
+`PI_CODING_AGENT_DIR` restricts it to that config directory's `sessions`
+subdirectory. Missing, invalid or ambiguous locators remain
 unavailable: cwd, terminal titles and newest-file timestamps never establish
 the selected Pi session's identity.
 
@@ -73,17 +74,19 @@ readiness. Installation in the wrong agent config directory does not count.
 
 For Pi, establish the **running Pi process's effective** `PI_CODING_AGENT_DIR`
 first. Run Herdr's installer and status check with that same directory. For
-example, only when Pi actually uses `~/.luna/agent`:
+example, only when Pi actually uses a custom config directory, `<pi-config-dir>`:
 
 ```sh
-env PI_CODING_AGENT_DIR="$HOME/.luna/agent" herdr integration install pi
-env PI_CODING_AGENT_DIR="$HOME/.luna/agent" herdr integration status
+env PI_CODING_AGENT_DIR="<pi-config-dir>" herdr integration install pi
+env PI_CODING_AGENT_DIR="<pi-config-dir>" herdr integration status
 ```
 
 Without this override, Herdr may install into `~/.pi/agent` while the running
-Pi loads extensions from `~/.luna/agent`. This mismatch was observed on one Herdr machine:
+Pi loads extensions from `<pi-config-dir>`. This mismatch has been observed:
 restarting Pi did not help because its effective directory lacked the
 integration. `current (v9)` in the default directory was not runtime proof.
+If Pi runs with a custom `PI_CODING_AGENT_DIR`, Herdr's environment must export
+the same value so the bridge reads that store.
 For other agent types, use their corresponding supported Herdr integration
 and verify their effective configuration location; do not install all
 integrations indiscriminately.
