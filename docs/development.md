@@ -143,6 +143,13 @@ Choose the `Cappuccino` scheme for an iPhone or iPad Simulator. Use a
 task-owned simulator for `make ui-test`. No API keys, Herdr runtime or Apple
 Developer membership is needed for tests or unsigned Simulator builds.
 
+### Unsigned iPhone IPA
+
+`make ipa` builds the app for an iPhone and packages it as
+`.build/ipa/Cappuccino.ipa`. The app is unsigned, so SideStore or AltStore
+re-signs it with your own Apple ID when you install it. Nothing is signed or
+uploaded by the build. Install routes are in [install-iphone.md](install-iphone.md).
+
 ## Android development
 
 ```sh
