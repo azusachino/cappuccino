@@ -9,7 +9,7 @@ Native Android/Apple companion for existing, long-running Herdr/Pi agents. Read 
 - Apple code lives in `apps/ios/`: the SwiftPM package (`Sources/`, hermetic `Tests/`), the iPhone entry in `App/` and UI tests in `UITests/`. There is no macOS app (owner decision 2026-10-13; Herdr covers the desktop). The core target stays independent of the shared SwiftUI target.
 - Android is one Gradle app module at `apps/android/`; keep pure Kotlin logic in `core`, platform I/O in the activity/adapters, and Compose presentation in `ui`. No cross-platform runtime or generated SDK is adopted.
 - Use Swift 6/Kotlin, two-space indentation and platform `make fmt-*` targets. Comments explain non-obvious constraints; names explain behavior. Prefer standard SwiftUI/Compose APIs and concrete types to speculative services or factories.
-- Edit `project.yml`, not generated `Cappuccino.xcodeproj`. Xcode supplies Swift; `.mise.toml` pins the tools Make invokes.
+- Edit `project.yml`, not generated `Cappuccino.xcodeproj`. Xcode supplies Swift; `.mise.toml` pins the tools Make invokes. The `Cappuccino` package product (target `CappuccinoApp`, sources `apps/ios/App`) is the xtool app; `apps/ios/xtool.yml` and `App/Info.plist` define its bundle, and `project.yml` stays the Xcode and UI-test host.
 
 ## Verify
 

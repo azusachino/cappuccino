@@ -1,5 +1,6 @@
 SHELL := bash
 MISE := mise exec --
+XTOOL := $(MISE) xtool
 SWIFT := xcrun swift
 FORMAT := xcrun swift-format
 SWIFT_PATHS := apps/ios
@@ -9,7 +10,7 @@ ANDROID_TEST_OUTPUT := apps/android/app/build/outputs/connected_android_test_add
 DESTINATION ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help setup generate fmt fmt-apple fmt-android fmt-check fmt-check-apple fmt-check-android md-format md-check test test-apple test-android lint-android check check-apple check-android build-ios ipa build-android ui-test ui-test-android validate validate-apple validate-android check-bridge bench-bridge-client resource-bridge-client
+.PHONY: help setup generate fmt fmt-apple fmt-android fmt-check fmt-check-apple fmt-check-android md-format md-check test test-apple test-android lint-android check check-apple check-android build-ios ipa dev build-android ui-test ui-test-android validate validate-apple validate-android check-bridge bench-bridge-client resource-bridge-client
 
 CARGO ?= cargo
 BRIDGE_MANIFEST := services/bridge/Cargo.toml
@@ -84,8 +85,11 @@ check-android: ## Focused Android gate: format, unit tests and lint in one Gradl
 build-ios: generate ## Build an unsigned iOS Simulator app
 	$(XCODEBUILD) -scheme Cappuccino -destination 'generic/platform=iOS Simulator' build
 
-ipa: generate ## Build an unsigned iPhone .ipa for SideStore or AltStore to re-sign
-	scripts/build-ipa.sh $(XCODEBUILD)
+ipa: ## Build an unsigned release iPhone .ipa with xtool (apps/ios/xtool/Cappuccino.ipa)
+	cd apps/ios && $(XTOOL) dev build --configuration release --ipa
+
+dev: ## Build, sign and install on a connected iPhone with xtool (run xtool setup once first)
+	cd apps/ios && $(XTOOL) dev
 
 build-android: ## Build debug app and instrumentation APKs
 	$(ANDROID) :app:assembleDebug :app:assembleDebugAndroidTest
