@@ -174,15 +174,14 @@ actions.
 
 ```sh
 make setup
-make generate
+make dev
 ```
 
-Open the generated `Cappuccino.xcodeproj`, select the `Cappuccino` scheme and
-your iPhone as the destination, then run it. Sign it with your own team. With
-free provisioning, the installed app must be re-signed about every seven days.
-There is no App Store or TestFlight build.
-
-`make ipa` builds an unsigned `.ipa` for SideStore or AltStore, as an alternative to running from Xcode. The step-by-step routes are in [the iPhone install guide](docs/install-iphone.md).
+xtool builds the app, signs it with your own Apple ID and installs it on a USB-connected
+iPhone. `make ipa` builds an unsigned `.ipa` (`apps/ios/xtool/Cappuccino.ipa`) for SideStore or
+AltStore to re-sign. Running from Xcode is the fallback. The one-time xtool setup and every
+route are in [the iPhone install guide](docs/install-iphone.md). With free provisioning, the
+installed app must be re-signed about every seven days. There is no App Store or TestFlight build.
 
 ### 5. Build and install the Android app
 
@@ -234,7 +233,7 @@ For the tested behavior and its limits, see [verification](docs/verification.md)
 - [docs/user-stories.md](docs/user-stories.md): the MVP stories and setup for
   two Herdr machines.
 - [docs/install-iphone.md](docs/install-iphone.md): installing the iPhone app
-  with Xcode or SideStore, and the free Apple ID limits.
+  with xtool, SideStore or the Xcode fallback, and the free Apple ID limits.
 - [docs/verification.md](docs/verification.md): what has been exercised and
   the current limits.
 - [docs/development.md](docs/development.md): toolchains, gates and CI for

@@ -14,3 +14,4 @@ local.properties
 *.keystore
 .env.local
 .env.local.*
+apps/ios/xtool/
