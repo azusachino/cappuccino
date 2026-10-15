@@ -18,7 +18,10 @@ fn session_stores(
     if let Some(dir) = agent_dir {
         return vec![dir.join("sessions")];
     }
-    vec![home.join(".pi/agent/sessions")]
+    vec![
+        home.join(".pi/agent/sessions"),
+        home.join(".luna/agent/sessions"),
+    ]
 }
 
 fn pi_session_stores() -> Vec<PathBuf> {
@@ -76,6 +79,38 @@ fn reported_claude_transcript(agent_info: &Value, projects: &Path) -> Option<Pat
         .filter_map(|candidate| transcript_in_store(&candidate, projects));
     let found = matches.next()?;
     matches.next().is_none().then_some(found)
+}
+
+/// Agy session IDs are UUIDs; anything with separators or dots could name another file.
+fn is_agy_session_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// Resolves reported agy session from Herdr's antigravity_cli integration.
+fn reported_agy_transcript(agent_info: &Value, brain_dir: &Path) -> Option<PathBuf> {
+    let report = &agent_info["agent_session"];
+    if report["source"].as_str() != Some("herdr:antigravity_cli")
+        || report["agent"].as_str() != Some("agy")
+    {
+        return None;
+    }
+    match report["kind"].as_str() {
+        Some("id") => {
+            let id = report["value"].as_str()?;
+            if !is_agy_session_id(id) {
+                return None;
+            }
+            let path = brain_dir
+                .join(id)
+                .join(".system_generated/logs/transcript.jsonl");
+            transcript_in_store(&path, brain_dir)
+        }
+        Some("path") => {
+            let path = Path::new(report["value"].as_str()?);
+            transcript_in_store(path, brain_dir)
+        }
+        _ => None,
+    }
 }
 
 /// agy's brain store: `ANTIGRAVITY_APP_DATA_DIR` moves it; otherwise
@@ -206,6 +241,10 @@ pub async fn resolve_session_transcript(
         }
     }
 
+    if let Some(path) = reported_agy_transcript(agent_info, &agy_brain_dir()) {
+        return Ok(Some(ResolvedTranscript::Agy(path)));
+    }
+
     // If agent is agy (or pane runs agy), attempt agy resolution
     if agent_name == "agy" || is_agy_pane(pane_id, agent_info) {
         if let Some(path) = resolve_agy_transcript_for_pane(pane_id).await {
@@ -262,11 +301,16 @@ fn agy_open_transcript(files: &str, brain_dir: &Path) -> Option<PathBuf> {
         if path.extension().and_then(|ext| ext.to_str()) != Some("lock") {
             continue;
         }
-        let canonical = std::fs::canonicalize(path).ok()?;
+        let canonical = match std::fs::canonicalize(path) {
+            Ok(canonical) => canonical,
+            Err(_) => continue,
+        };
         if canonical.parent() != Some(presence.as_path()) {
             continue;
         }
-        let session = canonical.file_stem()?.to_str()?;
+        let Some(session) = canonical.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
         sessions.insert(session.to_string());
     }
     if sessions.len() != 1 {
@@ -289,7 +333,7 @@ async fn resolve_agy_transcript_for_pane(pane_id: &str) -> Option<PathBuf> {
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         tokio::process::Command::new("lsof")
-            .args(["-a", "-p", &pid.to_string(), "-Fn"])
+            .args(["-a", "-n", "-p", &pid.to_string(), "-Fn"])
             .kill_on_drop(true)
             .output(),
     )
@@ -503,8 +547,89 @@ mod tests {
         );
         assert_eq!(
             session_stores(home, None, None),
-            vec![home.join(".pi/agent/sessions")]
+            vec![
+                home.join(".pi/agent/sessions"),
+                home.join(".luna/agent/sessions"),
+            ]
         );
+    }
+
+    #[test]
+    fn reported_agy_session_resolves_inside_brain_dir() {
+        let home = TempStore::new("agy-reported");
+        let brain = home.path.join("brain");
+        let session = "925039ca-99d9-499b-9485-7a7b0ed89cd5";
+        let logs = brain.join(session).join(".system_generated/logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        let transcript = logs.join("transcript.jsonl");
+        std::fs::write(&transcript, "{}\n").unwrap();
+        let expected = std::fs::canonicalize(&transcript).unwrap();
+
+        let id_info = serde_json::json!({
+            "agent": "agy",
+            "agent_session": {
+                "source": "herdr:antigravity_cli",
+                "agent": "agy",
+                "kind": "id",
+                "value": session,
+            }
+        });
+        assert_eq!(
+            reported_agy_transcript(&id_info, &brain),
+            Some(expected.clone())
+        );
+
+        let path_info = serde_json::json!({
+            "agent": "agy",
+            "agent_session": {
+                "source": "herdr:antigravity_cli",
+                "agent": "agy",
+                "kind": "path",
+                "value": transcript.to_str().unwrap(),
+            }
+        });
+        assert_eq!(reported_agy_transcript(&path_info, &brain), Some(expected));
+
+        let bad_id = serde_json::json!({
+            "agent": "agy",
+            "agent_session": {
+                "source": "herdr:antigravity_cli",
+                "agent": "agy",
+                "kind": "id",
+                "value": "../escaping-id",
+            }
+        });
+        assert_eq!(reported_agy_transcript(&bad_id, &brain), None);
+
+        let wrong_source = serde_json::json!({
+            "agent": "agy",
+            "agent_session": {
+                "source": "herdr:other",
+                "agent": "agy",
+                "kind": "id",
+                "value": session,
+            }
+        });
+        assert_eq!(reported_agy_transcript(&wrong_source, &brain), None);
+    }
+
+    #[test]
+    fn agy_open_transcript_ignores_missing_and_foreign_locks() {
+        let home = TempStore::new("agy-foreign-locks");
+        let brain = home.path.join("brain");
+        let presence = home.path.join("presence");
+        std::fs::create_dir_all(&presence).unwrap();
+        let logs = brain.join("active-session").join(".system_generated/logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("transcript.jsonl"), "{}\n").unwrap();
+        std::fs::write(presence.join("active-session.lock"), "").unwrap();
+
+        let lsof_output = format!(
+            "p123\nfcwd\nn/some/cwd\nn{}\nn/nonexistent/missing.lock\nn/path/to/packed-refs.lock\n",
+            presence.join("active-session.lock").display()
+        );
+        let expected = std::fs::canonicalize(logs.join("transcript.jsonl")).unwrap();
+        assert_eq!(agy_open_transcript(&lsof_output, &brain), Some(expected));
     }
 
     #[test]
