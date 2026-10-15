@@ -16,7 +16,8 @@ fun slashCommandWarning(command: String): String =
         "conversation uncached, which is slower and costs more."
     "/new",
     "/clear",
-    "/reset" -> "This starts a fresh conversation; the current one leaves the agent's context."
+    "/reset" ->
+      "This starts a fresh conversation; the current one is preserved in conversation history."
     "/compact" -> "This replaces the conversation history with a summary."
     "/exit",
     "/quit" -> "This exits the agent. Its terminal session ends."
@@ -41,7 +42,6 @@ val COMMON_SLASH_COMMANDS: List<AgentSlashCommand> =
     AgentSlashCommand("/compact", "Summarize and shrink conversation history"),
     AgentSlashCommand("/model", "Change the active model"),
     AgentSlashCommand("/clear", "Reset conversation and clear context"),
-    AgentSlashCommand("/new", "Start a fresh agent session"),
     AgentSlashCommand("/exit", "Exit the agent terminal session"),
   )
 

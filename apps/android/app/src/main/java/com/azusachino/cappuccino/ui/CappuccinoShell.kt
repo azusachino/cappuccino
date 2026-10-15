@@ -9,6 +9,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -190,6 +191,8 @@ fun CappuccinoScreen(
   var machineMenuId by remember { mutableStateOf<String?>(null) }
   var confirmingNewSession by rememberSaveable { mutableStateOf(false) }
   var showingConnection by rememberSaveable { mutableStateOf(false) }
+  var showingHistory by rememberSaveable { mutableStateOf(false) }
+  var historyMachineId by rememberSaveable { mutableStateOf<java.util.UUID?>(null) }
   var showingTechnical by rememberSaveable { mutableStateOf(false) }
   var detailsProfileId by rememberSaveable { mutableStateOf<String?>(null) }
   var namingProfileId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -343,7 +346,14 @@ fun CappuccinoScreen(
   BackHandler(enabled = selected == null && destination == Destination.APPEARANCE) {
     destination = Destination.SETTINGS
   }
-  BackHandler(enabled = selected != null && !showingConnection) { actions.selectAgent(null) }
+  BackHandler(enabled = selected != null && !showingConnection && !showingHistory) {
+    if (state.offlineSavedAt != null && selectedProfile != null) {
+      actions.selectProfile(selectedProfile.id)
+      actions.selectAgent(selected)
+    } else {
+      actions.selectAgent(null)
+    }
+  }
   if (showingConnection && detailsProfile != null) {
     if (showingTechnical) {
       TechnicalConnectionScreen(detailsProfile, state, onBack = { showingTechnical = false })
@@ -362,6 +372,36 @@ fun CappuccinoScreen(
         namingProfileId = detailsProfile.id
         machineNameDraft = detailsProfile.label
         namingMachine = true
+      },
+    )
+  }
+
+  if (showingHistory) {
+    val historyForAgent = selected?.let { agent ->
+      state.savedConversations.filter {
+        it.agent.machineId == agent.machineId && it.agent.agent == agent.agent
+      }
+    }
+    val targetMachineId = selected?.machineId ?: historyMachineId
+    val conversationsToShow =
+      if (!historyForAgent.isNullOrEmpty()) historyForAgent
+      else if (targetMachineId != null)
+        state.savedConversations.filter { it.agent.machineId == targetMachineId }
+      else state.savedConversations
+
+    ConversationHistoryDialog(
+      conversations = conversationsToShow,
+      savedMachineNames = state.profiles.associate { it.machineId to it.label },
+      currentConversationId = state.conversationId,
+      timeZone = timeZone,
+      onSelect = { machineId, conversationId ->
+        showingHistory = false
+        historyMachineId = null
+        savedHistoryAction?.invoke(machineId, conversationId)
+      },
+      onDismiss = {
+        showingHistory = false
+        historyMachineId = null
       },
     )
   }
@@ -400,7 +440,7 @@ fun CappuccinoScreen(
       text = {
         Text(
           "${selected.agent.replaceFirstChar { it.uppercase() }} starts a fresh conversation in " +
-            "the same terminal."
+            "the same terminal. The current conversation will be preserved in conversation history."
         )
       },
       confirmButton = {
@@ -453,22 +493,31 @@ fun CappuccinoScreen(
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                  StatusSquare(status.background)
-                  Text(
-                    listOfNotNull(
-                        status.label,
-                        selectedProfile?.label,
-                        selected.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf {
-                          it.isNotBlank()
-                        },
-                        selected.branch?.takeIf { it.isNotBlank() },
-                      )
-                      .joinToString(" · "),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.appColors.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                  )
+                  if (state.offlineSavedAt != null) {
+                    StatusSquare(MaterialTheme.appColors.muted)
+                    Text(
+                      "Saved history · Read-only",
+                      style = MaterialTheme.typography.labelSmall,
+                      color = MaterialTheme.appColors.muted,
+                    )
+                  } else {
+                    StatusSquare(status.background)
+                    Text(
+                      listOfNotNull(
+                          status.label,
+                          selectedProfile?.label,
+                          selected.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf {
+                            it.isNotBlank()
+                          },
+                          selected.branch?.takeIf { it.isNotBlank() },
+                        )
+                        .joinToString(" · "),
+                      style = MaterialTheme.typography.labelSmall,
+                      color = MaterialTheme.appColors.muted,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                    )
+                  }
                 }
               }
             } else {
@@ -487,10 +536,20 @@ fun CappuccinoScreen(
                 )
               }
             } else if (selected != null) {
-              IconButton(onClick = { actions.selectAgent(null) }) {
+              IconButton(
+                onClick = {
+                  if (state.offlineSavedAt != null && selectedProfile != null) {
+                    actions.selectProfile(selectedProfile.id)
+                    actions.selectAgent(selected)
+                  } else {
+                    actions.selectAgent(null)
+                  }
+                }
+              ) {
                 Icon(
                   painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
-                  contentDescription = "Back",
+                  contentDescription =
+                    if (state.offlineSavedAt != null) "Back to live session" else "Back",
                 )
               }
             }
@@ -506,6 +565,15 @@ fun CappuccinoScreen(
               }
             }
             if (selectedProfile != null && selected != null) {
+              IconButton(
+                onClick = { showingHistory = true },
+                modifier = Modifier.testTag("conversationHistoryButton"),
+              ) {
+                Icon(
+                  painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
+                  contentDescription = "Conversation history",
+                )
+              }
               IconButton(
                 onClick = {
                   detailsProfileId = selectedProfile.id
@@ -547,12 +615,44 @@ fun CappuccinoScreen(
         when {
           selected != null -> {
             state.offlineSavedAt?.let { savedAt ->
-              Text(
-                "Saved on this device · ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(savedAt).toString(), timeZone)} · Read-only",
-                Modifier.padding(horizontal = 16.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
+              val colors = MaterialTheme.appColors
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = colors.card2,
+                border = BorderStroke(1.dp, colors.line),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                      "Viewing saved conversation",
+                      style = MaterialTheme.typography.labelMedium,
+                      fontWeight = FontWeight.SemiBold,
+                      color = colors.text,
+                    )
+                    Text(
+                      "Saved ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(savedAt).toString(), timeZone) ?: "earlier"} · Read-only",
+                      style = MaterialTheme.typography.bodySmall,
+                      color = colors.muted,
+                    )
+                  }
+                  FilledTonalButton(
+                    onClick = {
+                      selectedProfile?.let { profile ->
+                        actions.selectProfile(profile.id)
+                        actions.selectAgent(selected)
+                      }
+                    },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                  ) {
+                    Text("Live session")
+                  }
+                }
+              }
             }
             // Transcript metadata as plain text lines under the app bar; cardless
             // (android-material3.md region 2).
@@ -766,7 +866,6 @@ fun CappuccinoScreen(
                 "${state.activeProfileId}|${selected.machineId}|${selected.sessionId}"
               if (state.offlineSavedAt == null)
                 composerState.SaveableStateProvider(composerKey) {
-                  state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                   PromptInputBar(
                     onSend = { text, confirmed -> actions.submitPrompt(text, confirmed) },
                     onStop =
@@ -789,6 +888,7 @@ fun CappuccinoScreen(
                     draft = state.drafts[agentDraftKey] ?: "",
                     onDraftChange = { text -> actions.setDraft(agentDraftKey, text) },
                   )
+                  state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                 }
             }
           }
@@ -948,6 +1048,14 @@ fun CappuccinoScreen(
                                   onClick = {
                                     detailsProfileId = profile.id
                                     showingConnection = true
+                                    machineMenuId = null
+                                  },
+                                )
+                                DropdownMenuItem(
+                                  text = { Text("Conversation history") },
+                                  onClick = {
+                                    historyMachineId = profile.machineId
+                                    showingHistory = true
                                     machineMenuId = null
                                   },
                                 )
@@ -1739,8 +1847,15 @@ fun PromptInputBar(
                 promptHistory = (listOf(trimmed) + promptHistory.filter { it != trimmed }).take(20)
               }
               val command = slashCommand(input)
-              if (command != null) confirmingCommand = command
-              else {
+              if (command != null) {
+                if (command.lowercase() in setOf("/new", "/reset") && onNewSession != null) {
+                  input = ""
+                  onDraftChange?.invoke("")
+                  onNewSession()
+                } else {
+                  confirmingCommand = command
+                }
+              } else {
                 onSend(input, false)
                 input = ""
                 onDraftChange?.invoke("")
@@ -1804,7 +1919,7 @@ private fun QuickActionChip(
 internal fun shortModel(model: String): String =
   model.removePrefix("claude-").replace(Regex("-(\\d+)-(\\d+)$"), " $1.$2")
 
-/** Above the message box: how full the context is as an informative percentage and progress bar. */
+/** Under the message box: how full the context is as an informative percentage and progress bar. */
 @Composable
 internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
   val tokens = stats.contextTokens ?: return
@@ -1819,7 +1934,7 @@ internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
   Row(
     Modifier.fillMaxWidth()
       .horizontalScroll(rememberScrollState())
-      .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 4.dp),
+      .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
