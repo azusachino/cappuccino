@@ -1,4 +1,13 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-  <!-- A radiating starburst for Claude; drawn for Cappuccino, not Anthropic's logo artwork. -->
-  <path android:strokeColor="#000000" android:strokeWidth="2.2" android:strokeLineCap="round" android:pathData="M12.00,9.40L12.00,2.00M13.30,9.75L15.75,5.50M14.25,10.70L20.66,7.00M14.60,12.00L19.50,12.00M14.25,13.30L20.66,17.00M13.30,14.25L15.75,18.50M12.00,14.60L12.00,22.00M10.70,14.25L8.25,18.50M9.75,13.30L3.34,17.00M9.40,12.00L4.50,12.00M9.75,10.70L3.34,7.00M10.70,9.75L8.25,5.50" />
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+  android:width="24dp"
+  android:height="24dp"
+  android:viewportWidth="24"
+  android:viewportHeight="24">
+  <!-- Google Material Symbols (Rounded): asterisk / radiating spark -->
+  <path
+    android:fillColor="#00000000"
+    android:strokeColor="#FF000000"
+    android:strokeWidth="2.5"
+    android:strokeLineCap="round"
+    android:pathData="M12,3v18M3,12h18M5.64,5.64l12.72,12.72M5.64,18.36L18.36,5.64" />
 </vector>
