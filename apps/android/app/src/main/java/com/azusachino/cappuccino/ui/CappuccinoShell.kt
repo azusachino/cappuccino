@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,6 +28,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -758,8 +760,11 @@ fun CappuccinoScreen(
               ) {
                 Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
               }
+              val agentDraftKey = "${selected.machineId}:${selected.sessionId}"
+              val composerKey =
+                "${state.activeProfileId}|${selected.machineId}|${selected.sessionId}"
               if (state.offlineSavedAt == null)
-                composerState.SaveableStateProvider(conversationKey) {
+                composerState.SaveableStateProvider(composerKey) {
                   PromptInputBar(
                     onSend = { text, confirmed -> actions.submitPrompt(text, confirmed) },
                     onStop =
@@ -779,8 +784,10 @@ fun CappuccinoScreen(
                         state.bridgeDetails[state.activeProfileId]
                           ?.capabilities
                           ?.get("prompt_input") != false,
+                    draft = state.drafts[agentDraftKey] ?: "",
+                    onDraftChange = { text -> actions.setDraft(agentDraftKey, text) },
                   )
-                  state.sessionStats?.let { SessionStatusLine(it) }
+                  state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                 }
             }
           }
@@ -1298,7 +1305,8 @@ fun PromptCardView(
   // Approval stays prominent as a default ElevatedCard — no custom border (region 6).
   ElevatedCard(modifier = modifier.fillMaxWidth()) {
     Column(
-      modifier = Modifier.padding(16.dp),
+      modifier =
+        Modifier.padding(16.dp).heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
       Row(
@@ -1333,14 +1341,14 @@ fun PromptCardView(
         Surface(
           shape = MaterialTheme.shapes.small,
           color = MaterialTheme.colorScheme.surfaceContainer,
-          modifier = Modifier.fillMaxWidth(),
+          modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp),
         ) {
           Text(
             text = cmd,
             fontFamily = JetBrainsMono,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(12.dp).horizontalScroll(rememberScrollState()),
           )
         }
       }
@@ -1401,8 +1409,11 @@ fun PromptInputBar(
   newSessionEnabled: Boolean = true,
   model: String? = null,
   thinkingLevel: String? = null,
+  draft: String = "",
+  onDraftChange: ((String) -> Unit)? = null,
 ) {
-  var input by rememberSaveable { mutableStateOf("") }
+  var input by rememberSaveable(draft) { mutableStateOf(draft) }
+  LaunchedEffect(draft) { if (input != draft) input = draft }
   var commandsOpen by remember { mutableStateOf(false) }
   var historyOpen by remember { mutableStateOf(false) }
   var isFocused by remember { mutableStateOf(false) }
@@ -1425,6 +1436,7 @@ fun PromptInputBar(
             }
             onSend(textToSend, true)
             input = ""
+            onDraftChange?.invoke("")
             confirmingCommand = null
           }
         ) {
@@ -1503,11 +1515,18 @@ fun PromptInputBar(
         shadowElevation = 3.dp,
         modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
       ) {
-        Column(Modifier.padding(vertical = 4.dp)) {
-          slashSuggestions.take(4).forEach { item ->
+        Column(
+          Modifier.padding(vertical = 4.dp)
+            .heightIn(max = 200.dp)
+            .verticalScroll(rememberScrollState())
+        ) {
+          slashSuggestions.forEach { item ->
             Row(
               Modifier.fillMaxWidth()
-                .clickable { input = "${item.command} " }
+                .clickable {
+                  input = "${item.command} "
+                  onDraftChange?.invoke(input)
+                }
                 .padding(horizontal = 12.dp, vertical = 8.dp),
               verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1544,7 +1563,10 @@ fun PromptInputBar(
       ) {
         androidx.compose.foundation.text.BasicTextField(
           value = input,
-          onValueChange = { input = it },
+          onValueChange = {
+            input = it
+            onDraftChange?.invoke(it)
+          },
           modifier =
             Modifier.weight(1f).onFocusChanged { isFocused = it.isFocused }.testTag("promptInput"),
           enabled = enabled,
@@ -1564,7 +1586,13 @@ fun PromptInputBar(
           },
         )
         if (input.isNotEmpty()) {
-          IconButton(onClick = { input = "" }, modifier = Modifier.size(28.dp)) {
+          IconButton(
+            onClick = {
+              input = ""
+              onDraftChange?.invoke("")
+            },
+            modifier = Modifier.size(28.dp),
+          ) {
             Icon(
               painterResource(com.azusachino.cappuccino.R.drawable.ic_close),
               contentDescription = "Clear draft",
@@ -1661,6 +1689,7 @@ fun PromptInputBar(
                   onClick = {
                     historyOpen = false
                     input = item
+                    onDraftChange?.invoke(item)
                   },
                 )
               }
@@ -1715,6 +1744,7 @@ fun PromptInputBar(
               else {
                 onSend(input, false)
                 input = ""
+                onDraftChange?.invoke("")
               }
             }
           },
@@ -1777,13 +1807,20 @@ internal fun shortModel(model: String): String =
 
 /** Under the message box: how full the context is as an informative percentage and progress bar. */
 @Composable
-internal fun SessionStatusLine(stats: SessionStats) {
+internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
   val tokens = stats.contextTokens ?: return
   val colors = MaterialTheme.appColors
-  val window = stats.contextWindow ?: defaultContextWindow(stats.model)
+  val window = stats.contextWindow ?: defaultContextWindow(stats.model, agent)
   val percent = (tokens * 100 / window).coerceIn(0, 100).toInt()
+  val modelLabel =
+    stats.model?.let { shortModel(it) }
+      ?: agent?.let {
+        if (it.lowercase() in setOf("agy", "antigravity", "antigravity-cli")) "gemini" else null
+      }
   Row(
-    Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+    Modifier.fillMaxWidth()
+      .horizontalScroll(rememberScrollState())
+      .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
@@ -1819,15 +1856,25 @@ internal fun SessionStatusLine(stats: SessionStats) {
       style = MaterialTheme.typography.labelSmall,
       color = colors.muted,
     )
+    if (modelLabel != null) {
+      Text("·", style = MaterialTheme.typography.labelSmall, color = colors.faint)
+      Text(
+        listOfNotNull(modelLabel, stats.thinkingLevel).joinToString(" · "),
+        style = MaterialTheme.typography.labelSmall,
+        color = colors.muted,
+      )
+    }
   }
 }
 
-internal fun defaultContextWindow(model: String?): Long {
-  val m = model?.lowercase() ?: return 200_000L
+internal fun defaultContextWindow(model: String?, agent: String? = null): Long {
+  val m = model?.lowercase()
+  val a = agent?.lowercase()
   return when {
-    "gemini" in m -> 1_000_000L
-    "deepseek" in m -> 64_000L
-    "gpt-4" in m || "o1" in m || "o3" in m -> 128_000L
+    m != null && "gemini" in m -> 1_000_000L
+    m != null && "deepseek" in m -> 64_000L
+    m != null && ("gpt-4" in m || "o1" in m || "o3" in m) -> 128_000L
+    a in setOf("agy", "antigravity", "antigravity-cli") -> 1_000_000L
     else -> 200_000L
   }
 }

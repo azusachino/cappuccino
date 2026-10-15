@@ -70,6 +70,7 @@ data class ConnectedUiState(
     com.azusachino.cappuccino.ui.ThemeMode.SYSTEM,
   val appPalette: com.azusachino.cappuccino.ui.AppPalette =
     com.azusachino.cappuccino.ui.AppPalette.CATPPUCCIN,
+  val drafts: Map<String, String> = emptyMap(),
 )
 
 interface ConnectedActions {
@@ -100,6 +101,8 @@ interface ConnectedActions {
   fun setAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette)
 
   fun submitPrompt(text: String, confirmed: Boolean = false)
+
+  fun setDraft(key: String, text: String) = Unit
 
   fun controlAgent(action: String) = Unit
 
@@ -604,10 +607,18 @@ internal constructor(
     }
   }
 
+  override fun setDraft(key: String, text: String) {
+    val updated =
+      if (text.isEmpty()) mutableState.value.drafts - key
+      else mutableState.value.drafts + (key to text)
+    mutableState.value = mutableState.value.copy(drafts = updated)
+  }
+
   override fun submitPrompt(text: String, confirmed: Boolean) {
     if (mutableState.value.offlineSavedAt != null) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
+    setDraft("${agent.machineId}:${agent.sessionId}", "")
     val client = bridgeFor(profile.endpoint)
     val requestEpoch = epoch
     viewModelScope.launch {

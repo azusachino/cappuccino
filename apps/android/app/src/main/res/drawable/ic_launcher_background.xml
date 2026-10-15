@@ -4,7 +4,18 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Terminal console body (Catppuccin Crust) filling full canvas -->
+    <path
+        android:fillColor="#11111B"
+        android:pathData="M0,0h108v108h-108z" />
+    <!-- Terminal title bar (Catppuccin Base) full width -->
     <path
         android:fillColor="#1E1E2E"
-        android:pathData="M0,0h108v108h-108z" />
+        android:pathData="M0,0h108v40h-108z" />
+    <!-- Subtle title bar separator line -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#313244"
+        android:strokeWidth="1.5"
+        android:pathData="M0,40h108" />
 </vector>

@@ -1008,6 +1008,41 @@ class ConnectedViewModelTest {
       }
     }
 
+  @Test
+  fun draftsPersistAcrossAgentNavigationAndClearOnSubmit() =
+    runTest(dispatcher) {
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID = machine
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
+
+          override fun stream(sessionId: String): Flow<StreamEvent> =
+            kotlinx.coroutines.flow.emptyFlow()
+
+          override suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean) =
+            Unit
+        }
+      viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.selectProfile(profile.id)
+      viewModel.selectAgent(agent)
+      val key = "${agent.machineId}:${agent.sessionId}"
+      viewModel.setDraft(key, "my draft text")
+      assertEquals("my draft text", viewModel.state.value.drafts[key])
+
+      // Navigating away from agent does not discard draft
+      viewModel.selectAgent(null)
+      assertEquals("my draft text", viewModel.state.value.drafts[key])
+
+      // Reselecting agent keeps draft
+      viewModel.selectAgent(agent)
+      assertEquals("my draft text", viewModel.state.value.drafts[key])
+
+      // Submitting prompt clears draft
+      viewModel.submitPrompt("my draft text")
+      assertNull(viewModel.state.value.drafts[key])
+    }
+
   private fun offlineViewModel(cache: OfflineConversations) =
     ConnectedViewModel(
       store,

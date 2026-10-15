@@ -25,6 +25,8 @@ class SessionStatusTest {
     assertEquals(200_000L, defaultContextWindow("claude-opus-5-5"))
     assertEquals(200_000L, defaultContextWindow(null))
     assertEquals(1_000_000L, defaultContextWindow("gemini-2.5-pro"))
+    assertEquals(1_000_000L, defaultContextWindow(null, "agy"))
+    assertEquals(1_000_000L, defaultContextWindow(null, "antigravity-cli"))
     assertEquals(64_000L, defaultContextWindow("deepseek-chat"))
     assertEquals(128_000L, defaultContextWindow("gpt-4o"))
   }
