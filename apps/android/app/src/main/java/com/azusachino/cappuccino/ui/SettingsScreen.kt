@@ -37,12 +37,6 @@ internal fun SettingsScreen(
   onConnectionDetails: (String) -> Unit,
   appPalette: AppPalette = AppPalette.CATPPUCCIN,
   onOpenAppearance: (() -> Unit)? = null,
-  savedConversations: List<com.azusachino.cappuccino.io.SavedConversationInfo> = emptyList(),
-  savedMachineNames: Map<java.util.UUID, String> = emptyMap(),
-  offlineBytes: Long? = null,
-  offlineProblem: String? = null,
-  onOpenSaved: ((java.util.UUID, String) -> Unit)? = null,
-  timeZone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
 ) {
   val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }

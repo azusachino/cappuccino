@@ -34,12 +34,15 @@ internal data class SavedConversation(
 /** Private app files, separate from temporary cache. Saved content never establishes live state. */
 internal class OfflineConversations(
   private val directory: File,
-  private val maxEntries: Int = 20,
-  private val maxBytes: Long = 32L * 1024 * 1024,
+  private val maxEntries: Int = 50,
+  private val maxBytes: Long = 64L * 1024 * 1024,
   private val maxEntryBytes: Int = 4 * 1024 * 1024,
+  private val maxRetentionMillis: Long = 30L * 24 * 60 * 60 * 1000L,
 ) {
   init {
-    require(maxEntries > 0 && maxEntryBytes > 0 && maxBytes >= maxEntryBytes)
+    require(
+      maxEntries > 0 && maxEntryBytes > 0 && maxBytes >= maxEntryBytes && maxRetentionMillis > 0
+    )
   }
 
   @Synchronized
@@ -97,18 +100,58 @@ internal class OfflineConversations(
   }
 
   @Synchronized
-  fun list(machineIds: Set<UUID>): List<SavedConversation> =
-    files()
-      .map { file ->
-        require(file.length() <= maxEntryBytes) { "Invalid saved conversation size" }
-        decodeSavedConversation(file.readText(Charsets.UTF_8)).also {
-          require(file.name == key(it.agent.machineId, it.conversationId)) {
-            "Saved conversation identity mismatch"
+  fun delete(machineId: UUID, conversationId: String): Boolean {
+    if (!root()) return false
+    val file = File(directory, key(machineId, conversationId))
+    if (
+      Files.exists(file.toPath(), NOFOLLOW_LINKS) &&
+        Files.isRegularFile(file.toPath(), NOFOLLOW_LINKS)
+    ) {
+      return file.delete()
+    }
+    return false
+  }
+
+  @Synchronized
+  fun clearAll(machineIds: Set<UUID>? = null): Int {
+    if (!root()) return 0
+    var count = 0
+    for (file in files()) {
+      if (machineIds == null) {
+        if (file.delete()) count++
+      } else {
+        try {
+          val snapshot = decodeSavedConversation(file.readText(Charsets.UTF_8))
+          if (snapshot.agent.machineId in machineIds) {
+            if (file.delete()) count++
           }
+        } catch (_: Exception) {
+          if (file.delete()) count++
+        }
+      }
+    }
+    return count
+  }
+
+  @Synchronized
+  fun list(machineIds: Set<UUID>): List<SavedConversation> {
+    prune(null)
+    return files()
+      .mapNotNull { file ->
+        try {
+          require(file.length() <= maxEntryBytes) { "Invalid saved conversation size" }
+          decodeSavedConversation(file.readText(Charsets.UTF_8)).also {
+            require(file.name == key(it.agent.machineId, it.conversationId)) {
+              "Saved conversation identity mismatch"
+            }
+          }
+        } catch (_: Exception) {
+          null
         }
       }
       .filter { it.agent.machineId in machineIds }
       .sortedByDescending { it.savedAt }
+  }
 
   @Synchronized fun bytes(): Long = files().sumOf { it.length() }
 
@@ -144,7 +187,14 @@ internal class OfflineConversations(
       }
   }
 
-  private fun prune(protected: File) {
+  private fun prune(protected: File?) {
+    val now = System.currentTimeMillis()
+    val allFiles = files()
+    for (file in allFiles) {
+      if (file != protected && (now - file.lastModified() > maxRetentionMillis)) {
+        file.delete()
+      }
+    }
     val candidates =
       files()
         .sortedWith(
@@ -154,8 +204,12 @@ internal class OfflineConversations(
     var total = candidates.sumOf { it.length() }
     while (candidates.size > maxEntries || total > maxBytes) {
       val oldest = candidates.removeAt(0)
-      check(oldest != protected && oldest.delete()) { "Could not enforce offline storage limit" }
-      total -= oldest.length()
+      if (oldest != protected) {
+        check(oldest.delete()) { "Could not enforce offline storage limit" }
+        total -= oldest.length()
+      } else {
+        break
+      }
     }
   }
 

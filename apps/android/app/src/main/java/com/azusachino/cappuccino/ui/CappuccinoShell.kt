@@ -37,7 +37,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -119,6 +118,10 @@ private enum class Destination(val title: Int, val icon: Int) {
     com.azusachino.cappuccino.R.string.machines,
     com.azusachino.cappuccino.R.drawable.ic_machine,
   ),
+  HISTORY(
+    com.azusachino.cappuccino.R.string.history,
+    com.azusachino.cappuccino.R.drawable.ic_history,
+  ),
   APPEARANCE(
     com.azusachino.cappuccino.R.string.appearance,
     com.azusachino.cappuccino.R.drawable.ic_settings,
@@ -189,7 +192,6 @@ fun CappuccinoScreen(
   val composerState = rememberSaveableStateHolder()
   val readerState = rememberSaveableStateHolder()
   var machineMenuId by remember { mutableStateOf<String?>(null) }
-  var confirmingNewSession by rememberSaveable { mutableStateOf(false) }
   var showingConnection by rememberSaveable { mutableStateOf(false) }
   var showingHistory by rememberSaveable { mutableStateOf(false) }
   var historyMachineId by rememberSaveable { mutableStateOf<java.util.UUID?>(null) }
@@ -346,8 +348,13 @@ fun CappuccinoScreen(
   BackHandler(enabled = selected == null && destination == Destination.APPEARANCE) {
     destination = Destination.SETTINGS
   }
+  BackHandler(enabled = selected == null && destination == Destination.HISTORY) {
+    destination = Destination.MACHINES
+  }
   BackHandler(enabled = selected != null && !showingConnection && !showingHistory) {
-    if (state.offlineSavedAt != null && selectedProfile != null) {
+    if (
+      state.offlineSavedAt != null && selectedProfile != null && destination == Destination.MACHINES
+    ) {
       actions.selectProfile(selectedProfile.id)
       actions.selectAgent(selected)
     } else {
@@ -430,31 +437,6 @@ fun CappuccinoScreen(
         }
       },
       dismissButton = { TextButton(onClick = { namingMachine = false }) { Text("Cancel") } },
-    )
-  }
-
-  if (confirmingNewSession && selected != null) {
-    AlertDialog(
-      onDismissRequest = { confirmingNewSession = false },
-      title = { Text("Start a new session?") },
-      text = {
-        Text(
-          "${selected.agent.replaceFirstChar { it.uppercase() }} starts a fresh conversation in " +
-            "the same terminal. The current conversation will be preserved in conversation history."
-        )
-      },
-      confirmButton = {
-        TextButton(
-          enabled = agentControl && selectedIdle,
-          onClick = {
-            actions.controlAgent("new_session")
-            confirmingNewSession = false
-          },
-        ) {
-          Text("New session")
-        }
-      },
-      dismissButton = { TextButton(onClick = { confirmingNewSession = false }) { Text("Cancel") } },
     )
   }
 
@@ -592,7 +574,8 @@ fun CappuccinoScreen(
       bottomBar = {
         if (selected == null)
           NavigationBar {
-            listOf(Destination.MACHINES, Destination.SETTINGS).forEach { item ->
+            listOf(Destination.MACHINES, Destination.HISTORY, Destination.SETTINGS).forEach { item
+              ->
               NavigationBarItem(
                 selected =
                   destination == item ||
@@ -872,11 +855,6 @@ fun CappuccinoScreen(
                       if (agentControl && selectedStatus == "working") {
                         { actions.controlAgent("interrupt") }
                       } else null,
-                    onNewSession =
-                      if (agentControl) {
-                        { confirmingNewSession = true }
-                      } else null,
-                    newSessionEnabled = selectedIdle,
                     model = state.sessionStats?.model,
                     thinkingLevel = state.sessionStats?.thinkingLevel,
                     placeholder = "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
@@ -891,6 +869,19 @@ fun CappuccinoScreen(
                   state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                 }
             }
+          }
+          destination == Destination.HISTORY -> {
+            HistoryScreen(
+              conversations = state.savedConversations,
+              savedMachineNames = state.profiles.associate { it.machineId to it.label },
+              currentConversationId = state.conversationId,
+              timeZone = timeZone,
+              onOpenSaved = { machineId, convoId ->
+                savedHistoryAction?.invoke(machineId, convoId)
+              },
+              onDeleteSaved = actions::deleteSavedConversation,
+              onClearAll = actions::clearSavedConversations,
+            )
           }
           destination == Destination.APPEARANCE -> {
             AppAppearanceSettings(
@@ -907,12 +898,6 @@ fun CappuccinoScreen(
               onOpenAppearance = { destination = Destination.APPEARANCE },
               onSelectTheme = actions::setThemeMode,
               onReloadMachines = actions::refreshAll,
-              savedConversations = state.savedConversations,
-              savedMachineNames = state.profiles.associate { it.machineId to it.label },
-              offlineBytes = state.offlineBytes,
-              offlineProblem = state.offlineProblem,
-              onOpenSaved = savedHistoryAction,
-              timeZone = timeZone,
               connections =
                 state.profiles.map { profile ->
                   SettingsConnection(
@@ -1514,8 +1499,6 @@ fun PromptInputBar(
   modifier: Modifier = Modifier,
   placeholder: String = "Message agent…",
   onStop: (() -> Unit)? = null,
-  onNewSession: (() -> Unit)? = null,
-  newSessionEnabled: Boolean = true,
   model: String? = null,
   thinkingLevel: String? = null,
   draft: String = "",
@@ -1603,14 +1586,6 @@ fun PromptInputBar(
         onClick = { confirmingCommand = "/compact" },
         colors = colors,
       )
-      if (onNewSession != null) {
-        QuickActionChip(
-          label = "New Session",
-          enabled = newSessionEnabled,
-          onClick = onNewSession,
-          colors = colors,
-        )
-      }
     }
 
     // 2. Slash command suggestions overlay (when typing '/')
@@ -1726,17 +1701,6 @@ fun PromptInputBar(
             )
           }
           DropdownMenu(expanded = commandsOpen, onDismissRequest = { commandsOpen = false }) {
-            if (onNewSession != null) {
-              DropdownMenuItem(
-                text = { Text("New session") },
-                enabled = newSessionEnabled,
-                onClick = {
-                  commandsOpen = false
-                  onNewSession()
-                },
-              )
-              HorizontalDivider(color = colors.line)
-            }
             COMMON_SLASH_COMMANDS.forEach { item ->
               DropdownMenuItem(
                 text = {
@@ -1848,13 +1812,7 @@ fun PromptInputBar(
               }
               val command = slashCommand(input)
               if (command != null) {
-                if (command.lowercase() in setOf("/new", "/reset") && onNewSession != null) {
-                  input = ""
-                  onDraftChange?.invoke("")
-                  onNewSession()
-                } else {
-                  confirmingCommand = command
-                }
+                confirmingCommand = command
               } else {
                 onSend(input, false)
                 input = ""

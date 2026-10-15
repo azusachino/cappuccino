@@ -204,4 +204,61 @@ class OfflineConversationsTest {
       root.deleteRecursively()
     }
   }
+
+  @Test
+  fun retentionPruningRemovesExpiredSnapshots() {
+    val root = Files.createTempDirectory("offline-retention").toFile()
+    try {
+      val oneDayMillis = 24L * 60 * 60 * 1000L
+      // 10 days retention for testing
+      val store = OfflineConversations(root, maxRetentionMillis = 10 * oneDayMillis)
+      store.save(machine, agent(), history(), identity('a'))
+      store.save(machine, agent(), history(), identity('b'))
+
+      // Artificially age identity 'a' file to 15 days ago
+      val fileA =
+        root.listFiles()!!.single {
+          it.name.endsWith(".json") && it.readText().contains(identity('a'))
+        }
+      fileA.setLastModified(System.currentTimeMillis() - 15 * oneDayMillis)
+
+      // Listing triggers prune
+      val remaining = store.list(setOf(machine))
+      assertEquals(1, remaining.size)
+      assertEquals(identity('b'), remaining.first().conversationId)
+    } finally {
+      root.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun deleteAndClearAllRemoveTargetedFiles() {
+    val root = Files.createTempDirectory("offline-delete").toFile()
+    try {
+      val store = OfflineConversations(root)
+      store.save(machine, agent(), history(), identity('a'))
+      store.save(machine, agent(), history(), identity('b'))
+      store.save(other, agent(id = other), history(), identity('c'))
+
+      assertEquals(3, store.list(setOf(machine, other)).size)
+
+      // Delete single conversation
+      assertTrue(store.delete(machine, identity('a')))
+      assertFalse(store.delete(machine, identity('a'))) // already deleted
+      assertEquals(2, store.list(setOf(machine, other)).size)
+
+      // Clear all for machine
+      val clearedMachine = store.clearAll(setOf(machine))
+      assertEquals(1, clearedMachine)
+      assertEquals(1, store.list(setOf(machine, other)).size)
+      assertEquals(other, store.list(setOf(other)).first().agent.machineId)
+
+      // Clear all
+      val clearedAll = store.clearAll(null)
+      assertEquals(1, clearedAll)
+      assertEquals(0, store.list(setOf(machine, other)).size)
+    } finally {
+      root.deleteRecursively()
+    }
+  }
 }

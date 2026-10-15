@@ -4,6 +4,7 @@
   <string name="chats">Chats</string>
   <string name="attention">Attention</string>
   <string name="machines">Machines</string>
+  <string name="history">History</string>
   <string name="settings">Settings</string>
   <string name="appearance">Appearance</string>
 </resources>

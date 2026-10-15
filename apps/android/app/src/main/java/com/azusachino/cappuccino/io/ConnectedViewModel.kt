@@ -114,6 +114,10 @@ interface ConnectedActions {
   fun answerPrompt(promptId: String, optionIndex: Int?, optionId: String?, action: String?)
 
   fun loadConversation()
+
+  fun deleteSavedConversation(machineId: UUID, conversationId: String) = Unit
+
+  fun clearSavedConversations(machineId: UUID? = null) = Unit
 }
 
 class ConnectedViewModel
@@ -219,6 +223,48 @@ internal constructor(
           mutableState.value =
             mutableState.value.copy(offlineProblem = "Couldn't open this saved conversation.")
       }
+    }
+  }
+
+  override fun deleteSavedConversation(machineId: UUID, conversationId: String) {
+    val history = offlineHistory ?: return
+    viewModelScope.launch {
+      withContext(offlineDispatcher) { history.delete(machineId, conversationId) }
+      val current = mutableState.value
+      if (current.offlineSavedAt != null && current.conversationId == conversationId) {
+        clearSavedSelection()
+        mutableState.value =
+          current.copy(
+            selectedAgent = null,
+            offlineSavedAt = null,
+            conversationId = null,
+            conversationTurns = emptyList(),
+          )
+      }
+      reloadSavedHistory()
+    }
+  }
+
+  override fun clearSavedConversations(machineId: UUID?) {
+    val history = offlineHistory ?: return
+    viewModelScope.launch {
+      val machineIds = if (machineId != null) setOf(machineId) else null
+      withContext(offlineDispatcher) { history.clearAll(machineIds) }
+      val current = mutableState.value
+      if (
+        current.offlineSavedAt != null &&
+          (machineId == null || current.selectedAgent?.machineId == machineId)
+      ) {
+        clearSavedSelection()
+        mutableState.value =
+          current.copy(
+            selectedAgent = null,
+            offlineSavedAt = null,
+            conversationId = null,
+            conversationTurns = emptyList(),
+          )
+      }
+      reloadSavedHistory()
     }
   }
 

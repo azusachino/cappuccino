@@ -39,6 +39,7 @@ data class AgentSlashCommand(val command: String, val description: String)
 
 val COMMON_SLASH_COMMANDS: List<AgentSlashCommand> =
   listOf(
+    AgentSlashCommand("/new", "Start a fresh agent session"),
     AgentSlashCommand("/compact", "Summarize and shrink conversation history"),
     AgentSlashCommand("/model", "Change the active model"),
     AgentSlashCommand("/clear", "Reset conversation and clear context"),
