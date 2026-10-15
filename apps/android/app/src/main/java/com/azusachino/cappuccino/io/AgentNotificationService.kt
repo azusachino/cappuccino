@@ -58,7 +58,7 @@ class AgentNotificationService : Service() {
     startForeground(
       1,
       NotificationCompat.Builder(this, MONITOR)
-        .setSmallIcon(R.drawable.ic_launcher)
+        .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle("Cappuccino agent monitoring")
         .setContentText("Watching configured machines for completion and input requests")
         .setContentIntent(openApp())
@@ -198,7 +198,7 @@ class AgentNotificationService : Service() {
     if (manager.getNotificationChannel(ALERTS)?.importance == NotificationManager.IMPORTANCE_NONE)
       return
     if (preferences.wasNotified(key)) return
-    val icon = agent?.let { agentIconResource(it) } ?: R.drawable.ic_launcher
+    val icon = agent?.let { agentIconResource(it) } ?: R.drawable.ic_notification
     val publicVersion =
       NotificationCompat.Builder(this, ALERTS)
         .setSmallIcon(icon)

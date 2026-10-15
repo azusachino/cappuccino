@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Terminal window ambient drop shadow -->
+    <path
+        android:fillColor="#0D0D15"
+        android:pathData="M26,38 A10,10 0 0,1 36,28 H72 A10,10 0 0,1 82,38 V74 A10,10 0 0,1 72,84 H36 A10,10 0 0,1 26,74 Z" />
+
+    <!-- Terminal window outer card (Catppuccin Base) -->
+    <path
+        android:fillColor="#1E1E2E"
+        android:strokeColor="#313244"
+        android:strokeWidth="1.5"
+        android:pathData="M26,36 A10,10 0 0,1 36,26 H72 A10,10 0 0,1 82,36 V72 A10,10 0 0,1 72,82 H36 A10,10 0 0,1 26,72 Z" />
+
+    <!-- Title bar dots -->
+    <!-- Red dot -->
+    <path
+        android:fillColor="#F38BA8"
+        android:pathData="M34,33 A2,2 0 1,1 33.99,33 Z" />
+    <!-- Yellow dot -->
+    <path
+        android:fillColor="#F9E2AF"
+        android:pathData="M40,33 A2,2 0 1,1 39.99,33 Z" />
+    <!-- Green dot -->
+    <path
+        android:fillColor="#A6E3A1"
+        android:pathData="M46,33 A2,2 0 1,1 45.99,33 Z" />
+
+    <!-- Inner console display area (Catppuccin Crust) -->
+    <path
+        android:fillColor="#11111B"
+        android:pathData="M31,45 A6,6 0 0,1 37,39 H71 A6,6 0 0,1 77,45 V71 A6,6 0 0,1 71,77 H37 A6,6 0 0,1 31,71 Z" />
+
+    <!-- Ambient prompt glow behind prompt -->
+    <path
+        android:fillColor="#251E2E"
+        android:pathData="M54,43 A15,15 0 1,1 53.99,43 Z" />
+
+    <!-- Monospace Prompt Chevron `>` (Peach tone) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FAB387"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M41,53 L47,58 L41,63" />
+
+    <!-- Monospace Prompt Cursor `_` (Mauve tone) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#CBA6F7"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M52,63 L64,63" />
+
+</vector>
