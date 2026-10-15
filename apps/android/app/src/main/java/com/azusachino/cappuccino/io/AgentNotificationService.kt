@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import com.azusachino.cappuccino.MainActivity
 import com.azusachino.cappuccino.R
 import com.azusachino.cappuccino.core.AgentCompletions
+import com.azusachino.cappuccino.ui.agentIconResource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,7 +58,7 @@ class AgentNotificationService : Service() {
     startForeground(
       1,
       NotificationCompat.Builder(this, MONITOR)
-        .setSmallIcon(R.drawable.ic_agent_pi)
+        .setSmallIcon(R.drawable.ic_launcher)
         .setContentTitle("Cappuccino agent monitoring")
         .setContentText("Watching configured machines for completion and input requests")
         .setContentIntent(openApp())
@@ -118,6 +119,7 @@ class AgentNotificationService : Service() {
                           profile.id,
                           event.agent.paneId,
                           event.agent.nativeSessionRef,
+                          event.agent.agent,
                         )
                       }
                       val current = mutableMapOf<String, String>()
@@ -143,6 +145,7 @@ class AgentNotificationService : Service() {
                               profile.id,
                               pane,
                               reference,
+                              agent.agent,
                             )
                           }
                         }
@@ -182,6 +185,7 @@ class AgentNotificationService : Service() {
     profileId: String,
     pane: String?,
     reference: String?,
+    agent: String? = null,
   ) {
     if (
       !preferences.enabled ||
@@ -194,16 +198,17 @@ class AgentNotificationService : Service() {
     if (manager.getNotificationChannel(ALERTS)?.importance == NotificationManager.IMPORTANCE_NONE)
       return
     if (preferences.wasNotified(key)) return
+    val icon = agent?.let { agentIconResource(it) } ?: R.drawable.ic_launcher
     val publicVersion =
       NotificationCompat.Builder(this, ALERTS)
-        .setSmallIcon(R.drawable.ic_agent_pi)
+        .setSmallIcon(icon)
         .setContentTitle("Cappuccino agent alert")
         .build()
     manager.notify(
       key,
       2,
       NotificationCompat.Builder(this, ALERTS)
-        .setSmallIcon(R.drawable.ic_agent_pi)
+        .setSmallIcon(icon)
         .setContentTitle(title)
         .setContentText(text.take(240))
         .setContentIntent(
