@@ -93,6 +93,7 @@ import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.OutputRow
 import com.azusachino.cappuccino.core.PromptCard
 import com.azusachino.cappuccino.core.TranscriptSegment
+import com.azusachino.cappuccino.core.disallowedSlashCommandReason
 import com.azusachino.cappuccino.core.matchingSlashCommands
 import com.azusachino.cappuccino.core.slashCommand
 import com.azusachino.cappuccino.core.slashCommandWarning
@@ -765,6 +766,7 @@ fun CappuccinoScreen(
                 "${state.activeProfileId}|${selected.machineId}|${selected.sessionId}"
               if (state.offlineSavedAt == null)
                 composerState.SaveableStateProvider(composerKey) {
+                  state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                   PromptInputBar(
                     onSend = { text, confirmed -> actions.submitPrompt(text, confirmed) },
                     onStop =
@@ -787,7 +789,6 @@ fun CappuccinoScreen(
                     draft = state.drafts[agentDraftKey] ?: "",
                     onDraftChange = { text -> actions.setDraft(agentDraftKey, text) },
                   )
-                  state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                 }
             }
           }
@@ -1421,30 +1422,40 @@ fun PromptInputBar(
   // An agent command can cost far more than a message; it waits here, draft kept, until confirmed.
   var confirmingCommand by rememberSaveable { mutableStateOf<String?>(null) }
   confirmingCommand?.let { command ->
-    AlertDialog(
-      onDismissRequest = { confirmingCommand = null },
-      title = { Text("Run $command?") },
-      text = { Text(slashCommandWarning(command)) },
-      confirmButton = {
-        TextButton(
-          onClick = {
-            val textToSend =
-              if (input.isNotBlank() && slashCommand(input) == command) input else command
-            if (promptHistory.firstOrNull() != textToSend) {
-              promptHistory =
-                (listOf(textToSend) + promptHistory.filter { it != textToSend }).take(20)
+    val disallowedReason = disallowedSlashCommandReason(command)
+    if (disallowedReason != null) {
+      AlertDialog(
+        onDismissRequest = { confirmingCommand = null },
+        title = { Text("Command Not Supported") },
+        text = { Text(disallowedReason) },
+        confirmButton = { TextButton(onClick = { confirmingCommand = null }) { Text("OK") } },
+      )
+    } else {
+      AlertDialog(
+        onDismissRequest = { confirmingCommand = null },
+        title = { Text("Run $command?") },
+        text = { Text(slashCommandWarning(command)) },
+        confirmButton = {
+          TextButton(
+            onClick = {
+              val textToSend =
+                if (input.isNotBlank() && slashCommand(input) == command) input else command
+              if (promptHistory.firstOrNull() != textToSend) {
+                promptHistory =
+                  (listOf(textToSend) + promptHistory.filter { it != textToSend }).take(20)
+              }
+              onSend(textToSend, true)
+              input = ""
+              onDraftChange?.invoke("")
+              confirmingCommand = null
             }
-            onSend(textToSend, true)
-            input = ""
-            onDraftChange?.invoke("")
-            confirmingCommand = null
+          ) {
+            Text("Run $command")
           }
-        ) {
-          Text("Run $command")
-        }
-      },
-      dismissButton = { TextButton(onClick = { confirmingCommand = null }) { Text("Cancel") } },
-    )
+        },
+        dismissButton = { TextButton(onClick = { confirmingCommand = null }) { Text("Cancel") } },
+      )
+    }
   }
   val colors = MaterialTheme.appColors
   val canSend = enabled && input.isNotBlank()
@@ -1492,18 +1503,6 @@ fun PromptInputBar(
           colors = colors,
         )
       }
-      QuickActionChip(
-        label = "Status",
-        enabled = enabled,
-        onClick = { confirmingCommand = "/status" },
-        colors = colors,
-      )
-      QuickActionChip(
-        label = "Help",
-        enabled = enabled,
-        onClick = { confirmingCommand = "/help" },
-        colors = colors,
-      )
     }
 
     // 2. Slash command suggestions overlay (when typing '/')
@@ -1805,7 +1804,7 @@ private fun QuickActionChip(
 internal fun shortModel(model: String): String =
   model.removePrefix("claude-").replace(Regex("-(\\d+)-(\\d+)$"), " $1.$2")
 
-/** Under the message box: how full the context is as an informative percentage and progress bar. */
+/** Above the message box: how full the context is as an informative percentage and progress bar. */
 @Composable
 internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
   val tokens = stats.contextTokens ?: return
@@ -1820,7 +1819,7 @@ internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
   Row(
     Modifier.fillMaxWidth()
       .horizontalScroll(rememberScrollState())
-      .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+      .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 4.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {

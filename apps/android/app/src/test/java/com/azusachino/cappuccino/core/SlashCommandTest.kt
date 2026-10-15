@@ -36,4 +36,13 @@ class SlashCommandTest {
     val notSlash = matchingSlashCommands("hello")
     assertTrue(notSlash.isEmpty())
   }
+
+  @Test
+  fun interactiveCommandsAreDisallowedOnMobile() {
+    assertTrue(disallowedSlashCommandReason("/status")?.contains("Esc") == true)
+    assertTrue(disallowedSlashCommandReason(" /STATUS ")?.contains("Esc") == true)
+    assertNull(disallowedSlashCommandReason("/model"))
+    assertNull(disallowedSlashCommandReason("/clear"))
+    assertNull(disallowedSlashCommandReason("/exit"))
+  }
 }

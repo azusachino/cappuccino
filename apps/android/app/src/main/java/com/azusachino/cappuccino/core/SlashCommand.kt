@@ -23,6 +23,17 @@ fun slashCommandWarning(command: String): String =
     else -> "$command is an agent command, not a message. It runs in the terminal as typed."
   }
 
+/**
+ * If [command] is disallowed on mobile (e.g. because it requires physical keys like Esc to exit),
+ * returns the user-facing explanation why it cannot be run; null if permitted.
+ */
+fun disallowedSlashCommandReason(command: String): String? =
+  when (command.lowercase().trim()) {
+    "/status" ->
+      "The /status command opens an interactive full-screen curses overlay that requires pressing the physical Esc key to quit. Because mobile keyboards lack an Escape key, this command is disabled to prevent locking the session."
+    else -> null
+  }
+
 data class AgentSlashCommand(val command: String, val description: String)
 
 val COMMON_SLASH_COMMANDS: List<AgentSlashCommand> =
@@ -31,8 +42,6 @@ val COMMON_SLASH_COMMANDS: List<AgentSlashCommand> =
     AgentSlashCommand("/model", "Change the active model"),
     AgentSlashCommand("/clear", "Reset conversation and clear context"),
     AgentSlashCommand("/new", "Start a fresh agent session"),
-    AgentSlashCommand("/status", "Display agent and session stats"),
-    AgentSlashCommand("/help", "List available tools and commands"),
     AgentSlashCommand("/exit", "Exit the agent terminal session"),
   )
 
