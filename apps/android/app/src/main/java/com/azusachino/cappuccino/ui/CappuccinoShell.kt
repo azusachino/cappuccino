@@ -1877,18 +1877,33 @@ private fun QuickActionChip(
 internal fun shortModel(model: String): String =
   model.removePrefix("claude-").replace(Regex("-(\\d+)-(\\d+)$"), " $1.$2")
 
-/** Under the message box: how full the context is as an informative percentage and progress bar. */
+/** Under the message box: how full the context is and active rate limit quotas. */
 @Composable
 internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
-  val tokens = stats.contextTokens ?: return
   val colors = MaterialTheme.appColors
+  val tokens = stats.contextTokens
   val window = stats.contextWindow ?: defaultContextWindow(stats.model, agent)
-  val percent = (tokens * 100 / window).coerceIn(0, 100).toInt()
+  val percent =
+    when {
+      tokens != null -> (tokens * 100 / window).coerceIn(0, 100).toInt()
+      else ->
+        stats.rateLimits?.windows?.firstOrNull { it.window == "session" }?.usedPercent?.toInt()
+    }
+
   val modelLabel =
     stats.model?.let { shortModel(it) }
       ?: agent?.let {
         if (it.lowercase() in setOf("agy", "antigravity", "antigravity-cli")) "gemini" else null
       }
+  val modelParts = listOfNotNull(modelLabel, stats.thinkingLevel, stats.rateLimits?.planTier)
+
+  val rateLimitWindows =
+    stats.rateLimits?.windows?.filterNot {
+      it.window == "session" && percent != null && tokens == null
+    } ?: emptyList()
+
+  if (percent == null && modelParts.isEmpty() && rateLimitWindows.isEmpty()) return
+
   Row(
     Modifier.fillMaxWidth()
       .horizontalScroll(rememberScrollState())
@@ -1896,44 +1911,72 @@ internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
-    Box(
-      Modifier.size(width = 52.dp, height = 4.dp)
-        .background(colors.card2, RoundedCornerShape(2.dp))
-        .clip(RoundedCornerShape(2.dp))
-    ) {
+    if (percent != null) {
       Box(
-        Modifier.fillMaxHeight()
-          .fillMaxWidth(percent / 100f)
-          .background(
-            when {
-              percent >= 85 -> MaterialTheme.colorScheme.error
-              percent >= 70 -> colors.warn
-              else -> colors.accent
-            }
-          )
+        Modifier.size(width = 52.dp, height = 4.dp)
+          .background(colors.card2, RoundedCornerShape(2.dp))
+          .clip(RoundedCornerShape(2.dp))
+      ) {
+        Box(
+          Modifier.fillMaxHeight()
+            .fillMaxWidth(percent / 100f)
+            .background(
+              when {
+                percent >= 85 -> MaterialTheme.colorScheme.error
+                percent >= 70 -> colors.warn
+                else -> colors.accent
+              }
+            )
+        )
+      }
+      Text(
+        "$percent%",
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+        color =
+          when {
+            percent >= 85 -> MaterialTheme.colorScheme.error
+            percent >= 70 -> colors.warn
+            else -> colors.text
+          },
       )
     }
-    Text(
-      "$percent%",
-      style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-      color =
-        when {
-          percent >= 85 -> MaterialTheme.colorScheme.error
-          percent >= 70 -> colors.warn
-          else -> colors.text
-        },
-    )
-    Text(
-      "${formatTokens(tokens)} / ${formatTokens(window)}",
-      style = MaterialTheme.typography.labelSmall,
-      color = colors.muted,
-    )
-    if (modelLabel != null) {
-      Text("·", style = MaterialTheme.typography.labelSmall, color = colors.faint)
+
+    if (tokens != null) {
       Text(
-        listOfNotNull(modelLabel, stats.thinkingLevel).joinToString(" · "),
+        "${formatTokens(tokens)} / ${formatTokens(window)}",
         style = MaterialTheme.typography.labelSmall,
         color = colors.muted,
+      )
+    }
+
+    if (modelParts.isNotEmpty()) {
+      if (percent != null || tokens != null) {
+        Text("·", style = MaterialTheme.typography.labelSmall, color = colors.faint)
+      }
+      Text(
+        modelParts.joinToString(" · "),
+        style = MaterialTheme.typography.labelSmall,
+        color = colors.muted,
+      )
+    }
+
+    for (win in rateLimitWindows) {
+      Text("·", style = MaterialTheme.typography.labelSmall, color = colors.faint)
+      val prefix = if (win.window == "quota") stats.rateLimits?.provider ?: "quota" else win.window
+      val resetText =
+        win.resetsIn?.let { if (it.startsWith("~") || it.startsWith("↻")) " $it" else " ~$it" }
+          ?: ""
+      val label = "$prefix: ${win.usedPercent}%$resetText"
+      val winColor =
+        when {
+          win.usedPercent >= 85 -> MaterialTheme.colorScheme.error
+          win.usedPercent >= 70 -> colors.warn
+          else -> colors.muted
+        }
+      Text(
+        label,
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+        color = winColor,
       )
     }
   }

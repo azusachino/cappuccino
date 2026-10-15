@@ -34,13 +34,30 @@ data class ConversationSnapshot(
   val stats: SessionStats? = null,
 )
 
-/** The session's model and context use; the window is known only for some models. */
+/** A quota window such as 5h or 7d and its current consumption. */
+data class RateLimitWindow(
+  val window: String,
+  val usedPercent: Long,
+  val resetsAt: Long? = null,
+  val resetsIn: String? = null,
+)
+
+/** Upstream or proxy rate limit quotas. */
+data class RateLimitStats(
+  val provider: String,
+  val planTier: String? = null,
+  val windows: List<RateLimitWindow> = emptyList(),
+  val status: String? = null,
+)
+
+/** The session's model, context use, and rate limit quotas. */
 data class SessionStats(
   val model: String?,
   val thinkingLevel: String?,
   val contextTokens: Long?,
   val contextWindow: Long?,
   val cachePercent: Long?,
+  val rateLimits: RateLimitStats? = null,
 )
 
 interface BridgeTransport {
@@ -126,12 +143,31 @@ class BridgeClient(
         throw ProtocolException("Invalid canonical conversation identity")
       val stats =
         json.optionalObject("stats")?.let {
+          val rateLimits =
+            it.optionalObject("rate_limits")?.let { rl ->
+              val windows =
+                rl.optionalArray("windows")?.map { w ->
+                  RateLimitWindow(
+                    window = w.string("window"),
+                    usedPercent = w.long("used_percent"),
+                    resetsAt = w.optionalLong("resets_at"),
+                    resetsIn = w.optionalString("resets_in"),
+                  )
+                } ?: emptyList()
+              RateLimitStats(
+                provider = rl.string("provider"),
+                planTier = rl.optionalString("plan_tier"),
+                windows = windows,
+                status = rl.optionalString("status"),
+              )
+            }
           SessionStats(
             it.optionalString("model"),
             it.optionalString("thinking_level"),
             it.optionalLong("context_tokens"),
             it.optionalLong("context_window"),
             it.optionalLong("cache_percent"),
+            rateLimits,
           )
         }
       ConversationSnapshot(parseConversationResponse(json), source, identity, machine, stats)

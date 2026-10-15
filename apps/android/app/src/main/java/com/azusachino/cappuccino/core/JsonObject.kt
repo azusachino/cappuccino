@@ -41,6 +41,9 @@ data class JsonObject(val fields: Map<String, JsonValue>) {
     }
 
   fun optionalObject(key: String): JsonObject? = (fields[key] as? JsonValue.Object)?.value
+
+  fun optionalArray(key: String): List<JsonObject>? =
+    (fields[key] as? JsonValue.Array)?.value?.mapNotNull { (it as? JsonValue.Object)?.value }
 }
 
 sealed interface JsonValue {

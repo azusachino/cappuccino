@@ -162,12 +162,38 @@ Returns active agents, their execution status, git branch, and pending interacti
 
 #### `GET /api/agents/:sessionId/conversation`
 
-Returns paginated, structured conversation turns (markdown-ready).
+Returns paginated, structured conversation turns (markdown-ready), along with model info, context tokens, and provider rate limit quotas.
 
 ```json
 {
   "session_id": "cap-lead",
   "source": "canonical_log",
+  "stats": {
+    "model": "claude-haiku-5-5",
+    "thinking_level": "high",
+    "context_tokens": 110000,
+    "context_window": 1000000,
+    "cache_percent": 89,
+    "rate_limits": {
+      "provider": "anthropic",
+      "plan_tier": null,
+      "windows": [
+        {
+          "window": "5h",
+          "used_percent": 2,
+          "resets_at": null,
+          "resets_in": null
+        },
+        {
+          "window": "7d",
+          "used_percent": 81,
+          "resets_at": null,
+          "resets_in": "17h43m"
+        }
+      ],
+      "status": "warning"
+    }
+  },
   "turns": [
     {
       "id": "t-001",
