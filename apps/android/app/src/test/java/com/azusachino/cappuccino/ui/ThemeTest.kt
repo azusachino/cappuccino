@@ -73,7 +73,8 @@ class ThemeTest {
   @Test
   fun agentIconsAreDistinctAndUnknownAgentsHaveANeutralFallback() {
     assertTrue(agentIconResource("pi") != agentIconResource("agy"))
-    assertTrue(agentIconResource("claude") != agentIconResource("codex"))
+    assertTrue(agentIconResource("claude") != agentIconResource("pi"))
+    assertTrue(agentIconResource("claude") != agentIconResource("agy"))
     assertEquals(agentIconResource("agy"), agentIconResource("antigravity-cli"))
     assertEquals(com.azusachino.cappuccino.R.drawable.ic_machine, agentIconResource("unknown"))
   }

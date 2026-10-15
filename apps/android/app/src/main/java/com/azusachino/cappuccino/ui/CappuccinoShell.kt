@@ -1259,7 +1259,6 @@ internal fun agentIconResource(agent: String): Int =
     "antigravity",
     "antigravity-cli" -> com.azusachino.cappuccino.R.drawable.ic_agent_spark
     "claude" -> com.azusachino.cappuccino.R.drawable.ic_agent_claude
-    "codex" -> com.azusachino.cappuccino.R.drawable.ic_agent_code
     else -> com.azusachino.cappuccino.R.drawable.ic_machine
   }
 
