@@ -298,7 +298,13 @@ fun CappuccinoScreen(
         }
       }
   }
-  LaunchedEffect(followContent, textLayoutRevision, outputIdentity, followingOutput) {
+  LaunchedEffect(
+    followContent,
+    displayedContent.size,
+    textLayoutRevision,
+    outputIdentity,
+    followingOutput,
+  ) {
     val newContent = observedFollowContent != followContent
     observedFollowContent = followContent
     if (selected != null && followContent.isNotEmpty()) {
@@ -306,7 +312,7 @@ fun CappuccinoScreen(
         automaticScroll = true
         try {
           // A bottom marker handles tall last turns and collapsed stream rows alike.
-          outputListState.scrollToItem(displayedContent.size)
+          outputListState.scrollToItem(displayedContent.size, 10000)
           hasNewOutput = false
         } finally {
           automaticScroll = false
@@ -693,7 +699,7 @@ fun CappuccinoScreen(
                           followingOutput = true
                           automaticScroll = true
                           try {
-                            outputListState.scrollToItem(displayedContent.size)
+                            outputListState.scrollToItem(displayedContent.size, 10000)
                             hasNewOutput = false
                           } finally {
                             automaticScroll = false
@@ -1839,7 +1845,7 @@ fun ConversationTurnRow(
   val segments = remember(shownParts) { transcriptSegments(shownParts) }
   if (segments.isEmpty()) return
   Column(
-    modifier.fillMaxWidth().semantics {
+    modifier.fillMaxWidth().then(textModifier).semantics {
       contentDescription = if (isUser) "You" else assistantLabel
     },
     verticalArrangement = Arrangement.spacedBy(10.dp),
