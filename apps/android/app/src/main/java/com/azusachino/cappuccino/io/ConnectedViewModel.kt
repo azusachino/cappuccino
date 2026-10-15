@@ -405,7 +405,8 @@ internal constructor(
             (id to
               previous.copy(
                 connection =
-                  if (previous.connection == ConnectionState.Connected) previous.connection
+                  if (previous.connection == ConnectionState.Connected || background)
+                    previous.connection
                   else ConnectionState.Connecting,
                 busy = !background,
               ))
