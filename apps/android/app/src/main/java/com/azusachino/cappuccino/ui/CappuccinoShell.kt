@@ -1775,39 +1775,60 @@ private fun QuickActionChip(
 internal fun shortModel(model: String): String =
   model.removePrefix("claude-").replace(Regex("-(\\d+)-(\\d+)$"), " $1.$2")
 
-/** Under the message box: how full the context is and how much came from the cache. */
+/** Under the message box: how full the context is as an informative percentage and progress bar. */
 @Composable
 internal fun SessionStatusLine(stats: SessionStats) {
   val tokens = stats.contextTokens ?: return
   val colors = MaterialTheme.appColors
-  val window = stats.contextWindow
-  val percent = window?.let { (tokens * 100 / it).coerceIn(0, 100).toInt() }
+  val window = stats.contextWindow ?: defaultContextWindow(stats.model)
+  val percent = (tokens * 100 / window).coerceIn(0, 100).toInt()
   Row(
     Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
-    Text("context", style = MaterialTheme.typography.labelSmall, color = colors.muted)
-    if (percent != null)
-      Box(Modifier.size(width = 48.dp, height = 4.dp).background(colors.card2)) {
-        Box(
-          Modifier.fillMaxHeight()
-            .fillMaxWidth(percent / 100f)
-            .background(if (percent >= 80) colors.warn else colors.accent)
-        )
-      }
+    Box(
+      Modifier.size(width = 52.dp, height = 4.dp)
+        .background(colors.card2, RoundedCornerShape(2.dp))
+        .clip(RoundedCornerShape(2.dp))
+    ) {
+      Box(
+        Modifier.fillMaxHeight()
+          .fillMaxWidth(percent / 100f)
+          .background(
+            when {
+              percent >= 85 -> MaterialTheme.colorScheme.error
+              percent >= 70 -> colors.warn
+              else -> colors.accent
+            }
+          )
+      )
+    }
     Text(
-      listOfNotNull(
-          percent?.let { "$it%" },
-          formatTokens(tokens) + (window?.let { " / " + formatTokens(it) } ?: ""),
-        )
-        .joinToString(" · "),
+      "$percent%",
+      style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+      color =
+        when {
+          percent >= 85 -> MaterialTheme.colorScheme.error
+          percent >= 70 -> colors.warn
+          else -> colors.text
+        },
+    )
+    Text(
+      "${formatTokens(tokens)} / ${formatTokens(window)}",
       style = MaterialTheme.typography.labelSmall,
       color = colors.muted,
     )
-    stats.cachePercent?.let {
-      Text("cache $it%", style = MaterialTheme.typography.labelSmall, color = colors.muted)
-    }
+  }
+}
+
+internal fun defaultContextWindow(model: String?): Long {
+  val m = model?.lowercase() ?: return 200_000L
+  return when {
+    "gemini" in m -> 1_000_000L
+    "deepseek" in m -> 64_000L
+    "gpt-4" in m || "o1" in m || "o3" in m -> 128_000L
+    else -> 200_000L
   }
 }
 
