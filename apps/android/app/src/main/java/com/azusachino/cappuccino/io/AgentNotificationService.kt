@@ -31,10 +31,18 @@ class AgentNotificationService : Service() {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val jobs = mutableMapOf<String, Pair<MachineProfile, Job>>()
 
+  @Volatile private var lastActivityTimestamp = System.currentTimeMillis()
+
   override fun onBind(intent: Intent?): IBinder? = null
+
+  override fun onTaskRemoved(rootIntent: Intent?) {
+    stopSelf()
+    super.onTaskRemoved(rootIntent)
+  }
 
   override fun onCreate() {
     super.onCreate()
+    lastActivityTimestamp = System.currentTimeMillis()
     val manager = getSystemService(NotificationManager::class.java)
     manager.createNotificationChannel(
       NotificationChannel(MONITOR, "Agent monitoring", NotificationManager.IMPORTANCE_LOW)
@@ -70,6 +78,12 @@ class AgentNotificationService : Service() {
           break
         }
         val profiles = store.read().filter { it.id !in preferences.paused() }.associateBy { it.id }
+        if (
+          profiles.isEmpty() || System.currentTimeMillis() - lastActivityTimestamp > IDLE_TIMEOUT_MS
+        ) {
+          stopSelf()
+          break
+        }
         jobs.keys.toList().forEach { id ->
           if (profiles[id] != jobs[id]?.first) {
             jobs.remove(id)?.second?.cancel()
@@ -83,11 +97,19 @@ class AgentNotificationService : Service() {
                   val client = BridgeClient(profile.endpoint)
                   val completions = AgentCompletions()
                   val blocked = mutableMapOf<String, String>()
+                  var consecutiveErrors = 0
                   while (isActive) {
+                    var anyActive = false
                     try {
                       client.verify(profile.machineId)
                       val agents = client.agents(profile.machineId)
+                      consecutiveErrors = 0
+                      anyActive = agents.any { it.working || it.status == "blocked" }
+                      if (anyActive) {
+                        lastActivityTimestamp = System.currentTimeMillis()
+                      }
                       completions.observe(profile.machineId, agents).forEach { event ->
+                        lastActivityTimestamp = System.currentTimeMillis()
                         post(
                           preferences,
                           "done:${event.key}",
@@ -111,7 +133,8 @@ class AgentNotificationService : Service() {
                         ) {
                           val key = "input:${agent.machineId}:$pane:$reference:$sequence"
                           current[pane] = key
-                          if (blocked[pane] != key)
+                          if (blocked[pane] != key) {
+                            lastActivityTimestamp = System.currentTimeMillis()
                             post(
                               preferences,
                               key,
@@ -121,6 +144,7 @@ class AgentNotificationService : Service() {
                               pane,
                               reference,
                             )
+                          }
                         }
                       }
                       blocked.clear()
@@ -128,11 +152,19 @@ class AgentNotificationService : Service() {
                     } catch (error: Exception) {
                       if (error is CancellationException) throw error
                       completions.reset(profile.machineId)
+                      consecutiveErrors++
                       // No error body, endpoint, native reference, transcript or token goes into
                       // logs.
                       android.util.Log.w("CappuccinoAlerts", "monitor_unavailable")
                     }
-                    delay(2000)
+                    val delayMs =
+                      when {
+                        consecutiveErrors > 0 ->
+                          minOf(MAX_BACKOFF_MS, 2_000L * (1L shl minOf(consecutiveErrors, 5)))
+                        anyActive -> ACTIVE_POLL_INTERVAL_MS
+                        else -> IDLE_POLL_INTERVAL_MS
+                      }
+                    delay(delayMs)
                   }
                 }
           }
@@ -203,7 +235,10 @@ class AgentNotificationService : Service() {
       PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
+  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    lastActivityTimestamp = System.currentTimeMillis()
+    return START_NOT_STICKY
+  }
 
   override fun onDestroy() {
     scope.cancel()
@@ -213,6 +248,10 @@ class AgentNotificationService : Service() {
   companion object {
     private const val MONITOR = "agent-monitoring"
     private const val ALERTS = "agent-alerts"
+    private const val ACTIVE_POLL_INTERVAL_MS = 3_000L
+    private const val IDLE_POLL_INTERVAL_MS = 10_000L
+    private const val MAX_BACKOFF_MS = 60_000L
+    private const val IDLE_TIMEOUT_MS = 5 * 60 * 1_000L
 
     fun permissionGranted(context: Context): Boolean =
       Build.VERSION.SDK_INT < 33 ||

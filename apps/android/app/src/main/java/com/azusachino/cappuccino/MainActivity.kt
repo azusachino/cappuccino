@@ -153,7 +153,10 @@ class MainActivity : ComponentActivity() {
         val observer = LifecycleEventObserver { _, event ->
           when (event) {
             Lifecycle.Event.ON_START -> vm.setForeground(true)
-            Lifecycle.Event.ON_STOP -> vm.setForeground(false)
+            Lifecycle.Event.ON_STOP -> {
+              vm.setForeground(false)
+              com.azusachino.cappuccino.io.AgentNotificationService.start(this@MainActivity)
+            }
             else -> Unit
           }
         }
