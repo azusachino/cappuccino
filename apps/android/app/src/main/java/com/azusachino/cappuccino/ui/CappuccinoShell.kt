@@ -1,8 +1,11 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -30,6 +34,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -59,7 +64,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
@@ -68,6 +75,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,11 +85,13 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.azusachino.cappuccino.core.AgentRow
+import com.azusachino.cappuccino.core.COMMON_SLASH_COMMANDS
 import com.azusachino.cappuccino.core.ConversationPart
 import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.OutputRow
 import com.azusachino.cappuccino.core.PromptCard
 import com.azusachino.cappuccino.core.TranscriptSegment
+import com.azusachino.cappuccino.core.matchingSlashCommands
 import com.azusachino.cappuccino.core.slashCommand
 import com.azusachino.cappuccino.core.slashCommandWarning
 import com.azusachino.cappuccino.core.transcriptSegments
@@ -1388,6 +1398,9 @@ fun PromptInputBar(
 ) {
   var input by rememberSaveable { mutableStateOf("") }
   var commandsOpen by remember { mutableStateOf(false) }
+  var historyOpen by remember { mutableStateOf(false) }
+  var isFocused by remember { mutableStateOf(false) }
+  var promptHistory by rememberSaveable { mutableStateOf(listOf<String>()) }
   // An agent command can cost far more than a message; it waits here, draft kept, until confirmed.
   var confirmingCommand by rememberSaveable { mutableStateOf<String?>(null) }
   confirmingCommand?.let { command ->
@@ -1398,7 +1411,13 @@ fun PromptInputBar(
       confirmButton = {
         TextButton(
           onClick = {
-            onSend(input, true)
+            val textToSend =
+              if (input.isNotBlank() && slashCommand(input) == command) input else command
+            if (promptHistory.firstOrNull() != textToSend) {
+              promptHistory =
+                (listOf(textToSend) + promptHistory.filter { it != textToSend }).take(20)
+            }
+            onSend(textToSend, true)
             input = ""
             confirmingCommand = null
           }
@@ -1411,44 +1430,153 @@ fun PromptInputBar(
   }
   val colors = MaterialTheme.appColors
   val canSend = enabled && input.isNotBlank()
-  Column(
-    modifier
-      .fillMaxWidth()
-      .padding(horizontal = 12.dp, vertical = 8.dp)
-      .background(colors.card)
-      .border(1.dp, colors.line)
-  ) {
-    androidx.compose.foundation.text.BasicTextField(
-      value = input,
-      onValueChange = { input = it },
-      modifier =
-        Modifier.fillMaxWidth()
-          .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp)
-          .testTag("promptInput"),
-      enabled = enabled,
-      maxLines = 6,
-      textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
-      cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.accent),
-      decorationBox = { field ->
-        Box {
-          if (input.isEmpty())
-            Text(
-              if (enabled) placeholder else "Not connected",
-              style = MaterialTheme.typography.bodyMedium,
-              color = colors.faint,
-            )
-          field()
-        }
-      },
-    )
+  val slashSuggestions = remember(input) { matchingSlashCommands(input) }
+
+  Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+    // 1. Quick Action Chips Row
     Row(
-      Modifier.fillMaxWidth().padding(start = 4.dp, end = 6.dp, bottom = 6.dp),
+      Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      // Commands sit at the left under the input, where a thumb reaches, as in pi-pocket.
-      if (onNewSession != null)
+      QuickActionChip(
+        label = "Continue",
+        enabled = enabled,
+        onClick = {
+          if (promptHistory.firstOrNull() != "continue") {
+            promptHistory =
+              (listOf("continue") + promptHistory.filter { it != "continue" }).take(20)
+          }
+          onSend("continue", false)
+        },
+        colors = colors,
+      )
+      if (onStop != null) {
+        QuickActionChip(
+          label = "Interrupt",
+          enabled = true,
+          onClick = onStop,
+          colors = colors,
+          isError = true,
+        )
+      }
+      QuickActionChip(
+        label = "Compact",
+        enabled = enabled,
+        onClick = { confirmingCommand = "/compact" },
+        colors = colors,
+      )
+      if (onNewSession != null) {
+        QuickActionChip(
+          label = "New Session",
+          enabled = newSessionEnabled,
+          onClick = onNewSession,
+          colors = colors,
+        )
+      }
+      QuickActionChip(
+        label = "Status",
+        enabled = enabled,
+        onClick = { confirmingCommand = "/status" },
+        colors = colors,
+      )
+      QuickActionChip(
+        label = "Help",
+        enabled = enabled,
+        onClick = { confirmingCommand = "/help" },
+        colors = colors,
+      )
+    }
+
+    // 2. Slash command suggestions overlay (when typing '/')
+    if (slashSuggestions.isNotEmpty() && isFocused) {
+      Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = colors.card,
+        border = BorderStroke(1.dp, colors.line),
+        shadowElevation = 3.dp,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+      ) {
+        Column(Modifier.padding(vertical = 4.dp)) {
+          slashSuggestions.take(4).forEach { item ->
+            Row(
+              Modifier.fillMaxWidth()
+                .clickable { input = "${item.command} " }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text(
+                item.command,
+                style =
+                  MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = colors.accent,
+              )
+              Spacer(Modifier.widthIn(min = 8.dp))
+              Text(
+                item.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Rounded Input Container
+    Column(
+      Modifier.fillMaxWidth()
+        .background(colors.card, RoundedCornerShape(16.dp))
+        .border(1.dp, if (isFocused) colors.accent else colors.line, RoundedCornerShape(16.dp))
+        .clip(RoundedCornerShape(16.dp))
+    ) {
+      Row(
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        androidx.compose.foundation.text.BasicTextField(
+          value = input,
+          onValueChange = { input = it },
+          modifier =
+            Modifier.weight(1f).onFocusChanged { isFocused = it.isFocused }.testTag("promptInput"),
+          enabled = enabled,
+          maxLines = 6,
+          textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
+          cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.accent),
+          decorationBox = { field ->
+            Box {
+              if (input.isEmpty())
+                Text(
+                  if (enabled) placeholder else "Not connected",
+                  style = MaterialTheme.typography.bodyMedium,
+                  color = colors.faint,
+                )
+              field()
+            }
+          },
+        )
+        if (input.isNotEmpty()) {
+          IconButton(onClick = { input = "" }, modifier = Modifier.size(28.dp)) {
+            Icon(
+              painterResource(com.azusachino.cappuccino.R.drawable.ic_close),
+              contentDescription = "Clear draft",
+              modifier = Modifier.size(16.dp),
+              tint = colors.muted,
+            )
+          }
+        }
+      }
+
+      // Bottom control bar inside the rounded card
+      Row(
+        Modifier.fillMaxWidth().padding(start = 6.dp, end = 8.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        // Commands button (slash command picker + new session)
         Box {
-          IconButton(onClick = { commandsOpen = true }, modifier = Modifier.size(40.dp)) {
+          IconButton(onClick = { commandsOpen = true }, modifier = Modifier.size(36.dp)) {
             Icon(
               painterResource(com.azusachino.cappuccino.R.drawable.ic_grid),
               contentDescription = "Commands",
@@ -1457,64 +1585,182 @@ fun PromptInputBar(
             )
           }
           DropdownMenu(expanded = commandsOpen, onDismissRequest = { commandsOpen = false }) {
-            // A new session replaces the conversation, so only between runs.
-            DropdownMenuItem(
-              text = { Text("New session") },
-              enabled = newSessionEnabled,
-              onClick = {
-                commandsOpen = false
-                onNewSession()
-              },
-            )
-          }
-        }
-      if (model != null)
-        Text(
-          listOfNotNull(shortModel(model), thinkingLevel).joinToString(" · "),
-          // No weight: only the spacer takes the slack, so Stop and Send sit at the end.
-          Modifier.padding(horizontal = 6.dp).widthIn(max = 180.dp),
-          style = MaterialTheme.typography.labelSmall,
-          color = colors.muted,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-      Spacer(Modifier.weight(1f))
-      if (onStop != null)
-        IconButton(onClick = onStop, modifier = Modifier.size(40.dp).testTag("stopAgent")) {
-          Box(Modifier.size(32.dp).border(1.dp, colors.line), contentAlignment = Alignment.Center) {
-            Box(
-              Modifier.size(12.dp).background(MaterialTheme.colorScheme.error).semantics {
-                contentDescription = "Stop"
-              }
-            )
-          }
-        }
-      IconButton(
-        onClick = {
-          if (input.isNotBlank()) {
-            val command = slashCommand(input)
-            if (command != null) confirmingCommand = command
-            else {
-              onSend(input, false)
-              input = ""
+            if (onNewSession != null) {
+              DropdownMenuItem(
+                text = { Text("New session") },
+                enabled = newSessionEnabled,
+                onClick = {
+                  commandsOpen = false
+                  onNewSession()
+                },
+              )
+              HorizontalDivider(color = colors.line)
+            }
+            COMMON_SLASH_COMMANDS.forEach { item ->
+              DropdownMenuItem(
+                text = {
+                  Column {
+                    Text(
+                      item.command,
+                      style =
+                        MaterialTheme.typography.labelMedium.copy(
+                          fontFamily = FontFamily.Monospace
+                        ),
+                      color = colors.accent,
+                    )
+                    Text(
+                      item.description,
+                      style = MaterialTheme.typography.bodySmall,
+                      color = colors.muted,
+                    )
+                  }
+                },
+                onClick = {
+                  commandsOpen = false
+                  input = "${item.command} "
+                },
+              )
             }
           }
-        },
-        enabled = canSend,
-        modifier = Modifier.size(40.dp),
-      ) {
-        Box(
-          Modifier.size(32.dp).background(if (canSend) colors.accent else colors.card2),
-          contentAlignment = Alignment.Center,
-        ) {
-          Icon(
-            painterResource(com.azusachino.cappuccino.R.drawable.ic_arrow_downward),
-            modifier = Modifier.size(18.dp).rotate(180f),
-            contentDescription = "Send",
-            tint = if (canSend) MaterialTheme.colorScheme.onPrimary else colors.faint,
+        }
+
+        // Prompt History button (when prompts have been sent)
+        if (promptHistory.isNotEmpty()) {
+          Box {
+            IconButton(onClick = { historyOpen = true }, modifier = Modifier.size(36.dp)) {
+              Icon(
+                painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
+                contentDescription = "Prompt history",
+                modifier = Modifier.size(18.dp),
+                tint = colors.muted,
+              )
+            }
+            DropdownMenu(expanded = historyOpen, onDismissRequest = { historyOpen = false }) {
+              Text(
+                "Recent Prompts",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.muted,
+              )
+              promptHistory.take(8).forEach { item ->
+                DropdownMenuItem(
+                  text = {
+                    Text(
+                      item,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                      style = MaterialTheme.typography.bodySmall,
+                    )
+                  },
+                  onClick = {
+                    historyOpen = false
+                    input = item
+                  },
+                )
+              }
+            }
+          }
+        }
+
+        if (model != null)
+          Text(
+            listOfNotNull(shortModel(model), thinkingLevel).joinToString(" · "),
+            Modifier.padding(horizontal = 6.dp).widthIn(max = 160.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
           )
+
+        Spacer(Modifier.weight(1f))
+
+        if (onStop != null)
+          IconButton(onClick = onStop, modifier = Modifier.size(36.dp).testTag("stopAgent")) {
+            Box(
+              Modifier.size(28.dp)
+                .background(
+                  MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
+                  RoundedCornerShape(8.dp),
+                )
+                .border(
+                  1.dp,
+                  MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
+                  RoundedCornerShape(8.dp),
+                ),
+              contentAlignment = Alignment.Center,
+            ) {
+              Box(
+                Modifier.size(10.dp)
+                  .background(MaterialTheme.colorScheme.error, RoundedCornerShape(2.dp))
+                  .semantics { contentDescription = "Stop" }
+              )
+            }
+          }
+
+        IconButton(
+          onClick = {
+            if (input.isNotBlank()) {
+              val trimmed = input.trim()
+              if (promptHistory.firstOrNull() != trimmed) {
+                promptHistory = (listOf(trimmed) + promptHistory.filter { it != trimmed }).take(20)
+              }
+              val command = slashCommand(input)
+              if (command != null) confirmingCommand = command
+              else {
+                onSend(input, false)
+                input = ""
+              }
+            }
+          },
+          enabled = canSend,
+          modifier = Modifier.size(36.dp),
+        ) {
+          Box(
+            Modifier.size(30.dp)
+              .background(if (canSend) colors.accent else colors.card2, CircleShape),
+            contentAlignment = Alignment.Center,
+          ) {
+            Icon(
+              painterResource(com.azusachino.cappuccino.R.drawable.ic_arrow_downward),
+              modifier = Modifier.size(16.dp).rotate(180f),
+              contentDescription = "Send",
+              tint = if (canSend) MaterialTheme.colorScheme.onPrimary else colors.faint,
+            )
+          }
         }
       }
+    }
+  }
+}
+
+@Composable
+private fun QuickActionChip(
+  label: String,
+  enabled: Boolean,
+  onClick: () -> Unit,
+  colors: AppColors,
+  isError: Boolean = false,
+) {
+  Surface(
+    onClick = onClick,
+    enabled = enabled,
+    shape = RoundedCornerShape(8.dp),
+    color = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.12f) else colors.card2,
+    border =
+      BorderStroke(
+        1.dp,
+        if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else colors.line,
+      ),
+    modifier = Modifier.height(26.dp),
+  ) {
+    Row(Modifier.padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+      Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        color =
+          if (!enabled) colors.faint
+          else if (isError) MaterialTheme.colorScheme.error else colors.text,
+      )
     }
   }
 }
