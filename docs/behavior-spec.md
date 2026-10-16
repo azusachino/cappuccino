@@ -39,10 +39,13 @@ Do not map Herdr's prompt acknowledgement to `sent` or `confirmed`, and do not c
 - Initial load returns the session's durable active-branch history; streaming appends only confirmed-complete entries.
 - Reconciliation handles duplicates (idempotent by entry id), gaps (visible placeholder, never silent), out-of-order delivery (stable order by sequence), and session replacement (fresh stream; old pending actions/grants invalidated).
 - Disconnect shows `unresolved` state for in-flight actions; foreground recovery reconciles without duplicate sends or decisions.
+- Offline History: clients persist canonical session snapshots in a dedicated History tab, retaining snapshots for 30 days ordered date descending with manual wipe options.
+- Statusline and Quotas: real-time context token usage and provider rate limits (e.g. Claude 5h/7d windows, Agy plan tier/session percentage, Pi extension provider quotas) are presented below input with horizontal scroll.
 
 ## Client lifecycle boundaries
 
-- Activity recreation, tab switching and short backgrounding preserve selection and never re-send.
+- Activity recreation, tab switching and short backgrounding preserve selection, message drafts, and never re-send.
+- Interactive curses commands (e.g. `/status`) are disallowed in client input to prevent unescapable terminal deadlocks on mobile.
 - Process death recovers from server state, not client memory; a dead app stores no grants and holds no approval authority.
 - Background sockets, foreground services and FCM are out of scope for the first prototype; generic Telegram alerts come later without previews or approval buttons.
 
