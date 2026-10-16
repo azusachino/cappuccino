@@ -25,7 +25,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.azusachino.cappuccino.BuildConfig
-import kotlinx.coroutines.launch
 
 internal data class SettingsConnection(val id: String, val label: String, val status: String)
 
@@ -38,33 +37,10 @@ internal fun SettingsScreen(
   onConnectionDetails: (String) -> Unit,
   appPalette: AppPalette = AppPalette.CATPPUCCIN,
   onOpenAppearance: (() -> Unit)? = null,
-  savedConversations: List<com.azusachino.cappuccino.io.SavedConversationInfo> = emptyList(),
-  savedMachineNames: Map<java.util.UUID, String> = emptyMap(),
-  offlineBytes: Long? = null,
-  offlineProblem: String? = null,
-  onOpenSaved: ((java.util.UUID, String) -> Unit)? = null,
-  timeZone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
 ) {
   val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }
   var choosingTheme by rememberSaveable { mutableStateOf(false) }
-  var confirmingClear by rememberSaveable { mutableStateOf(false) }
-  var choosingSaved by rememberSaveable { mutableStateOf(false) }
-  var clearing by androidx.compose.runtime.remember { mutableStateOf(false) }
-  var cacheBytes by androidx.compose.runtime.remember { mutableStateOf<Long?>(null) }
-  var cacheResult by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
-  val context = androidx.compose.ui.platform.LocalContext.current
-  val scope = androidx.compose.runtime.rememberCoroutineScope()
-  androidx.compose.runtime.LaunchedEffect(Unit) {
-    cacheBytes =
-      kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        runCatching { com.azusachino.cappuccino.io.temporaryCacheBytes(context.cacheDir) }
-          .getOrNull()
-      }
-  }
-  val formatBytes = { bytes: Long ->
-    android.text.format.Formatter.formatShortFileSize(context, bytes)
-  }
   Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
     SettingsHeading("Appearance")
     SettingRow(
@@ -76,27 +52,6 @@ internal fun SettingsScreen(
     }
     SettingsHeading("Notifications")
     NotificationSettings()
-    SettingsHeading("Storage")
-    SettingRow(
-      "Saved conversations",
-      value =
-        offlineBytes?.let { "${savedConversations.size} · ${formatBytes(it)}" } ?: "Checking…",
-      onClick =
-        if (savedConversations.isNotEmpty() && onOpenSaved != null) ({ choosingSaved = true })
-        else null,
-    )
-    offlineProblem?.let { SettingNote(it, warning = true) }
-    SettingRow(
-      "Temporary cache",
-      value =
-        when {
-          clearing -> "Clearing…"
-          else -> cacheBytes?.let(formatBytes) ?: "Unavailable"
-        },
-      onClick = if (clearing || cacheBytes == 0L) null else ({ confirmingClear = true }),
-    )
-    cacheResult?.let { SettingNote(it) }
-    SettingNote("Keeps the 20 most recent conversations, up to 32 MB, read-only.")
     SettingsHeading("Connections")
     if (connections.isEmpty()) SettingNote("No machines added")
     connections.forEach { connection ->
@@ -109,7 +64,7 @@ internal fun SettingsScreen(
     SettingsHeading("About")
     SettingRow(
       "Version",
-      value = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+      value = BuildConfig.VERSION_NAME,
       onClick = null,
     )
     SettingRow("Setup guide", value = "GitHub") {
@@ -120,65 +75,6 @@ internal fun SettingsScreen(
     }
     helpError?.let { SettingNote(it, warning = true) }
     SettingNote("Agent sessions stay on your machines; this app only reads and relays them.")
-  }
-  if (choosingSaved && onOpenSaved != null) {
-    AlertDialog(
-      onDismissRequest = { choosingSaved = false },
-      title = { Text("Saved conversations") },
-      text = {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-          savedConversations.forEach { saved ->
-            SettingRow(
-              saved.agent.label,
-              detail =
-                "${savedMachineNames[saved.agent.machineId] ?: saved.agent.agent} · Saved ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(saved.savedAt).toString(), timeZone)}",
-            ) {
-              choosingSaved = false
-              onOpenSaved(saved.agent.machineId, saved.conversationId)
-            }
-          }
-        }
-      },
-      confirmButton = { TextButton(onClick = { choosingSaved = false }) { Text("Close") } },
-    )
-  }
-  if (confirmingClear) {
-    AlertDialog(
-      onDismissRequest = { confirmingClear = false },
-      title = { Text("Clear temporary cache?") },
-      text = {
-        Text(
-          "Delete temporary files and refresh machine lists? Saved conversations, machines, drafts and reading preferences stay. Remote sessions are unchanged."
-        )
-      },
-      confirmButton = {
-        TextButton(
-          onClick = {
-            confirmingClear = false
-            clearing = true
-            scope.launch {
-              try {
-                cacheBytes =
-                  kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    com.azusachino.cappuccino.io.temporaryCacheBytes(context.cacheDir, clear = true)
-                    com.azusachino.cappuccino.io.temporaryCacheBytes(context.cacheDir)
-                  }
-                onReloadMachines()
-                cacheResult = "Temporary files cleared."
-              } catch (error: Exception) {
-                if (error is kotlinx.coroutines.CancellationException) throw error
-                cacheResult = "Couldn't clear all temporary files. Try again."
-              } finally {
-                clearing = false
-              }
-            }
-          }
-        ) {
-          Text("Clear cache")
-        }
-      },
-      dismissButton = { TextButton(onClick = { confirmingClear = false }) { Text("Cancel") } },
-    )
   }
   if (choosingTheme) {
     AlertDialog(

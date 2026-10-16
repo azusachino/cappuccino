@@ -8,13 +8,19 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -49,6 +55,25 @@ class MainActivity : ComponentActivity() {
   // surface. enableEdgeToEdge() in onCreate stays the one edge-to-edge enabler; this sync
   // corrects only the icon appearance on top of it.
   internal fun applySystemBarAppearance(isDark: Boolean) {
+    val bgColor = if (isDark) 0xFF1E1E2E.toInt() else 0xFFEFF1F5.toInt()
+    window.decorView.setBackgroundColor(bgColor)
+    window.setBackgroundDrawable(bgColor.toDrawable())
+    enableEdgeToEdge(
+      statusBarStyle =
+        SystemBarStyle.auto(
+          android.graphics.Color.TRANSPARENT,
+          android.graphics.Color.TRANSPARENT,
+        ) {
+          isDark
+        },
+      navigationBarStyle =
+        SystemBarStyle.auto(
+          android.graphics.Color.TRANSPARENT,
+          android.graphics.Color.TRANSPARENT,
+        ) {
+          isDark
+        },
+    )
     val controller = WindowCompat.getInsetsController(window, window.decorView)
     controller.isAppearanceLightStatusBars = !isDark
     controller.isAppearanceLightNavigationBars = !isDark
@@ -153,7 +178,10 @@ class MainActivity : ComponentActivity() {
         val observer = LifecycleEventObserver { _, event ->
           when (event) {
             Lifecycle.Event.ON_START -> vm.setForeground(true)
-            Lifecycle.Event.ON_STOP -> vm.setForeground(false)
+            Lifecycle.Event.ON_STOP -> {
+              vm.setForeground(false)
+              com.azusachino.cappuccino.io.AgentNotificationService.start(this@MainActivity)
+            }
             else -> Unit
           }
         }
@@ -167,16 +195,18 @@ class MainActivity : ComponentActivity() {
         palette = state.appPalette,
         onResolvedDarkChanged = ::applySystemBarAppearance,
       ) {
-        CappuccinoShell(vm, timeZone = deviceTimeZone) { label, url ->
-          if (
-            Build.VERSION.SDK_INT >= 37 &&
-              checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") !=
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-          ) {
-            pendingConnect = label to url
-            localNetworkPermission.launch("android.permission.ACCESS_LOCAL_NETWORK")
-          } else {
-            vm.addMachine(label, url)
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+          CappuccinoShell(vm, timeZone = deviceTimeZone) { label, url ->
+            if (
+              Build.VERSION.SDK_INT >= 37 &&
+                checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") !=
+                  android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+              pendingConnect = label to url
+              localNetworkPermission.launch("android.permission.ACCESS_LOCAL_NETWORK")
+            } else {
+              vm.addMachine(label, url)
+            }
           }
         }
       }

@@ -1,6 +1,7 @@
 [tools]
 xcodegen = "2.46.0"
 rumdl = "0.2.73"
+"github:xtool-org/xtool" = { version = "1.22.2", asset_pattern = "xtool.app.zip", bin_path = "xtool.app/Contents/Resources/bin", os = ["macos"] }
 
 [env]
 _.file = [".env", ".env.local"]

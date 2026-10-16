@@ -23,4 +23,26 @@ class SlashCommandTest {
     assertTrue(slashCommandWarning("/Clear").contains("fresh conversation"))
     assertTrue(slashCommandWarning("/foo").startsWith("/foo is an agent command"))
   }
+
+  @Test
+  fun matchingCommandsFilterPrefixAccurately() {
+    val all = matchingSlashCommands("/")
+    assertEquals(COMMON_SLASH_COMMANDS.size, all.size)
+    val comp = matchingSlashCommands("/co")
+    assertEquals(1, comp.size)
+    assertEquals("/compact", comp[0].command)
+    val empty = matchingSlashCommands("/nonexistent")
+    assertTrue(empty.isEmpty())
+    val notSlash = matchingSlashCommands("hello")
+    assertTrue(notSlash.isEmpty())
+  }
+
+  @Test
+  fun interactiveCommandsAreDisallowedOnMobile() {
+    assertTrue(disallowedSlashCommandReason("/status")?.contains("Esc") == true)
+    assertTrue(disallowedSlashCommandReason(" /STATUS ")?.contains("Esc") == true)
+    assertNull(disallowedSlashCommandReason("/model"))
+    assertNull(disallowedSlashCommandReason("/clear"))
+    assertNull(disallowedSlashCommandReason("/exit"))
+  }
 }

@@ -1,17 +1,22 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,9 +25,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -59,7 +66,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
@@ -68,6 +77,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,11 +87,14 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.azusachino.cappuccino.core.AgentRow
+import com.azusachino.cappuccino.core.COMMON_SLASH_COMMANDS
 import com.azusachino.cappuccino.core.ConversationPart
 import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.OutputRow
 import com.azusachino.cappuccino.core.PromptCard
 import com.azusachino.cappuccino.core.TranscriptSegment
+import com.azusachino.cappuccino.core.disallowedSlashCommandReason
+import com.azusachino.cappuccino.core.matchingSlashCommands
 import com.azusachino.cappuccino.core.slashCommand
 import com.azusachino.cappuccino.core.slashCommandWarning
 import com.azusachino.cappuccino.core.transcriptSegments
@@ -104,6 +117,10 @@ private enum class Destination(val title: Int, val icon: Int) {
   MACHINES(
     com.azusachino.cappuccino.R.string.machines,
     com.azusachino.cappuccino.R.drawable.ic_machine,
+  ),
+  HISTORY(
+    com.azusachino.cappuccino.R.string.history,
+    com.azusachino.cappuccino.R.drawable.ic_history,
   ),
   APPEARANCE(
     com.azusachino.cappuccino.R.string.appearance,
@@ -175,8 +192,9 @@ fun CappuccinoScreen(
   val composerState = rememberSaveableStateHolder()
   val readerState = rememberSaveableStateHolder()
   var machineMenuId by remember { mutableStateOf<String?>(null) }
-  var confirmingNewSession by rememberSaveable { mutableStateOf(false) }
   var showingConnection by rememberSaveable { mutableStateOf(false) }
+  var showingHistory by rememberSaveable { mutableStateOf(false) }
+  var historyMachineId by rememberSaveable { mutableStateOf<java.util.UUID?>(null) }
   var showingTechnical by rememberSaveable { mutableStateOf(false) }
   var detailsProfileId by rememberSaveable { mutableStateOf<String?>(null) }
   var namingProfileId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -288,7 +306,13 @@ fun CappuccinoScreen(
         }
       }
   }
-  LaunchedEffect(followContent, textLayoutRevision, outputIdentity, followingOutput) {
+  LaunchedEffect(
+    followContent,
+    displayedContent.size,
+    textLayoutRevision,
+    outputIdentity,
+    followingOutput,
+  ) {
     val newContent = observedFollowContent != followContent
     observedFollowContent = followContent
     if (selected != null && followContent.isNotEmpty()) {
@@ -296,7 +320,7 @@ fun CappuccinoScreen(
         automaticScroll = true
         try {
           // A bottom marker handles tall last turns and collapsed stream rows alike.
-          outputListState.scrollToItem(displayedContent.size)
+          outputListState.scrollToItem(displayedContent.size, 10000)
           hasNewOutput = false
         } finally {
           automaticScroll = false
@@ -324,7 +348,19 @@ fun CappuccinoScreen(
   BackHandler(enabled = selected == null && destination == Destination.APPEARANCE) {
     destination = Destination.SETTINGS
   }
-  BackHandler(enabled = selected != null && !showingConnection) { actions.selectAgent(null) }
+  BackHandler(enabled = selected == null && destination == Destination.HISTORY) {
+    destination = Destination.MACHINES
+  }
+  BackHandler(enabled = selected != null && !showingConnection && !showingHistory) {
+    if (
+      state.offlineSavedAt != null && selectedProfile != null && destination == Destination.MACHINES
+    ) {
+      actions.selectProfile(selectedProfile.id)
+      actions.selectAgent(selected)
+    } else {
+      actions.selectAgent(null)
+    }
+  }
   if (showingConnection && detailsProfile != null) {
     if (showingTechnical) {
       TechnicalConnectionScreen(detailsProfile, state, onBack = { showingTechnical = false })
@@ -343,6 +379,36 @@ fun CappuccinoScreen(
         namingProfileId = detailsProfile.id
         machineNameDraft = detailsProfile.label
         namingMachine = true
+      },
+    )
+  }
+
+  if (showingHistory) {
+    val historyForAgent = selected?.let { agent ->
+      state.savedConversations.filter {
+        it.agent.machineId == agent.machineId && it.agent.agent == agent.agent
+      }
+    }
+    val targetMachineId = selected?.machineId ?: historyMachineId
+    val conversationsToShow =
+      if (!historyForAgent.isNullOrEmpty()) historyForAgent
+      else if (targetMachineId != null)
+        state.savedConversations.filter { it.agent.machineId == targetMachineId }
+      else state.savedConversations
+
+    ConversationHistoryDialog(
+      conversations = conversationsToShow,
+      savedMachineNames = state.profiles.associate { it.machineId to it.label },
+      currentConversationId = state.conversationId,
+      timeZone = timeZone,
+      onSelect = { machineId, conversationId ->
+        showingHistory = false
+        historyMachineId = null
+        savedHistoryAction?.invoke(machineId, conversationId)
+      },
+      onDismiss = {
+        showingHistory = false
+        historyMachineId = null
       },
     )
   }
@@ -371,31 +437,6 @@ fun CappuccinoScreen(
         }
       },
       dismissButton = { TextButton(onClick = { namingMachine = false }) { Text("Cancel") } },
-    )
-  }
-
-  if (confirmingNewSession && selected != null) {
-    AlertDialog(
-      onDismissRequest = { confirmingNewSession = false },
-      title = { Text("Start a new session?") },
-      text = {
-        Text(
-          "${selected.agent.replaceFirstChar { it.uppercase() }} starts a fresh conversation in " +
-            "the same terminal."
-        )
-      },
-      confirmButton = {
-        TextButton(
-          enabled = agentControl && selectedIdle,
-          onClick = {
-            actions.controlAgent("new_session")
-            confirmingNewSession = false
-          },
-        ) {
-          Text("New session")
-        }
-      },
-      dismissButton = { TextButton(onClick = { confirmingNewSession = false }) { Text("Cancel") } },
     )
   }
 
@@ -434,22 +475,31 @@ fun CappuccinoScreen(
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                  StatusSquare(status.background)
-                  Text(
-                    listOfNotNull(
-                        status.label,
-                        selectedProfile?.label,
-                        selected.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf {
-                          it.isNotBlank()
-                        },
-                        selected.branch?.takeIf { it.isNotBlank() },
-                      )
-                      .joinToString(" · "),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.appColors.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                  )
+                  if (state.offlineSavedAt != null) {
+                    StatusSquare(MaterialTheme.appColors.muted)
+                    Text(
+                      "Saved history · Read-only",
+                      style = MaterialTheme.typography.labelSmall,
+                      color = MaterialTheme.appColors.muted,
+                    )
+                  } else {
+                    StatusSquare(status.background)
+                    Text(
+                      listOfNotNull(
+                          status.label,
+                          selectedProfile?.label,
+                          selected.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf {
+                            it.isNotBlank()
+                          },
+                          selected.branch?.takeIf { it.isNotBlank() },
+                        )
+                        .joinToString(" · "),
+                      style = MaterialTheme.typography.labelSmall,
+                      color = MaterialTheme.appColors.muted,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                    )
+                  }
                 }
               }
             } else {
@@ -468,10 +518,20 @@ fun CappuccinoScreen(
                 )
               }
             } else if (selected != null) {
-              IconButton(onClick = { actions.selectAgent(null) }) {
+              IconButton(
+                onClick = {
+                  if (state.offlineSavedAt != null && selectedProfile != null) {
+                    actions.selectProfile(selectedProfile.id)
+                    actions.selectAgent(selected)
+                  } else {
+                    actions.selectAgent(null)
+                  }
+                }
+              ) {
                 Icon(
                   painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
-                  contentDescription = "Back",
+                  contentDescription =
+                    if (state.offlineSavedAt != null) "Back to live session" else "Back",
                 )
               }
             }
@@ -487,6 +547,15 @@ fun CappuccinoScreen(
               }
             }
             if (selectedProfile != null && selected != null) {
+              IconButton(
+                onClick = { showingHistory = true },
+                modifier = Modifier.testTag("conversationHistoryButton"),
+              ) {
+                Icon(
+                  painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
+                  contentDescription = "Conversation history",
+                )
+              }
               IconButton(
                 onClick = {
                   detailsProfileId = selectedProfile.id
@@ -505,7 +574,8 @@ fun CappuccinoScreen(
       bottomBar = {
         if (selected == null)
           NavigationBar {
-            listOf(Destination.MACHINES, Destination.SETTINGS).forEach { item ->
+            listOf(Destination.MACHINES, Destination.HISTORY, Destination.SETTINGS).forEach { item
+              ->
               NavigationBarItem(
                 selected =
                   destination == item ||
@@ -528,12 +598,44 @@ fun CappuccinoScreen(
         when {
           selected != null -> {
             state.offlineSavedAt?.let { savedAt ->
-              Text(
-                "Saved on this device · ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(savedAt).toString(), timeZone)} · Read-only",
-                Modifier.padding(horizontal = 16.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
+              val colors = MaterialTheme.appColors
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = colors.card2,
+                border = BorderStroke(1.dp, colors.line),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                      "Viewing saved conversation",
+                      style = MaterialTheme.typography.labelMedium,
+                      fontWeight = FontWeight.SemiBold,
+                      color = colors.text,
+                    )
+                    Text(
+                      "Saved ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(savedAt).toString(), timeZone) ?: "earlier"} · Read-only",
+                      style = MaterialTheme.typography.bodySmall,
+                      color = colors.muted,
+                    )
+                  }
+                  FilledTonalButton(
+                    onClick = {
+                      selectedProfile?.let { profile ->
+                        actions.selectProfile(profile.id)
+                        actions.selectAgent(selected)
+                      }
+                    },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                  ) {
+                    Text("Live session")
+                  }
+                }
+              }
             }
             // Transcript metadata as plain text lines under the app bar; cardless
             // (android-material3.md region 2).
@@ -683,7 +785,7 @@ fun CappuccinoScreen(
                           followingOutput = true
                           automaticScroll = true
                           try {
-                            outputListState.scrollToItem(displayedContent.size)
+                            outputListState.scrollToItem(displayedContent.size, 10000)
                             hasNewOutput = false
                           } finally {
                             automaticScroll = false
@@ -742,19 +844,17 @@ fun CappuccinoScreen(
               ) {
                 Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
               }
+              val agentDraftKey = "${selected.machineId}:${selected.sessionId}"
+              val composerKey =
+                "${state.activeProfileId}|${selected.machineId}|${selected.sessionId}"
               if (state.offlineSavedAt == null)
-                composerState.SaveableStateProvider(conversationKey) {
+                composerState.SaveableStateProvider(composerKey) {
                   PromptInputBar(
                     onSend = { text, confirmed -> actions.submitPrompt(text, confirmed) },
                     onStop =
                       if (agentControl && selectedStatus == "working") {
                         { actions.controlAgent("interrupt") }
                       } else null,
-                    onNewSession =
-                      if (agentControl) {
-                        { confirmingNewSession = true }
-                      } else null,
-                    newSessionEnabled = selectedIdle,
                     model = state.sessionStats?.model,
                     thinkingLevel = state.sessionStats?.thinkingLevel,
                     placeholder = "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
@@ -763,10 +863,25 @@ fun CappuccinoScreen(
                         state.bridgeDetails[state.activeProfileId]
                           ?.capabilities
                           ?.get("prompt_input") != false,
+                    draft = state.drafts[agentDraftKey] ?: "",
+                    onDraftChange = { text -> actions.setDraft(agentDraftKey, text) },
                   )
-                  state.sessionStats?.let { SessionStatusLine(it) }
+                  state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                 }
             }
+          }
+          destination == Destination.HISTORY -> {
+            HistoryScreen(
+              conversations = state.savedConversations,
+              savedMachineNames = state.profiles.associate { it.machineId to it.label },
+              currentConversationId = state.conversationId,
+              timeZone = timeZone,
+              onOpenSaved = { machineId, convoId ->
+                savedHistoryAction?.invoke(machineId, convoId)
+              },
+              onDeleteSaved = actions::deleteSavedConversation,
+              onClearAll = actions::clearSavedConversations,
+            )
           }
           destination == Destination.APPEARANCE -> {
             AppAppearanceSettings(
@@ -783,12 +898,6 @@ fun CappuccinoScreen(
               onOpenAppearance = { destination = Destination.APPEARANCE },
               onSelectTheme = actions::setThemeMode,
               onReloadMachines = actions::refreshAll,
-              savedConversations = state.savedConversations,
-              savedMachineNames = state.profiles.associate { it.machineId to it.label },
-              offlineBytes = state.offlineBytes,
-              offlineProblem = state.offlineProblem,
-              onOpenSaved = savedHistoryAction,
-              timeZone = timeZone,
               connections =
                 state.profiles.map { profile ->
                   SettingsConnection(
@@ -924,6 +1033,14 @@ fun CappuccinoScreen(
                                   onClick = {
                                     detailsProfileId = profile.id
                                     showingConnection = true
+                                    machineMenuId = null
+                                  },
+                                )
+                                DropdownMenuItem(
+                                  text = { Text("Conversation history") },
+                                  onClick = {
+                                    historyMachineId = profile.machineId
+                                    showingHistory = true
                                     machineMenuId = null
                                   },
                                 )
@@ -1259,7 +1376,6 @@ internal fun agentIconResource(agent: String): Int =
     "antigravity",
     "antigravity-cli" -> com.azusachino.cappuccino.R.drawable.ic_agent_spark
     "claude" -> com.azusachino.cappuccino.R.drawable.ic_agent_claude
-    "codex" -> com.azusachino.cappuccino.R.drawable.ic_agent_code
     else -> com.azusachino.cappuccino.R.drawable.ic_machine
   }
 
@@ -1283,7 +1399,8 @@ fun PromptCardView(
   // Approval stays prominent as a default ElevatedCard — no custom border (region 6).
   ElevatedCard(modifier = modifier.fillMaxWidth()) {
     Column(
-      modifier = Modifier.padding(16.dp),
+      modifier =
+        Modifier.padding(16.dp).heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
       Row(
@@ -1318,14 +1435,14 @@ fun PromptCardView(
         Surface(
           shape = MaterialTheme.shapes.small,
           color = MaterialTheme.colorScheme.surfaceContainer,
-          modifier = Modifier.fillMaxWidth(),
+          modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp),
         ) {
           Text(
             text = cmd,
             fontFamily = JetBrainsMono,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(12.dp).horizontalScroll(rememberScrollState()),
           )
         }
       }
@@ -1382,74 +1499,200 @@ fun PromptInputBar(
   modifier: Modifier = Modifier,
   placeholder: String = "Message agent…",
   onStop: (() -> Unit)? = null,
-  onNewSession: (() -> Unit)? = null,
-  newSessionEnabled: Boolean = true,
   model: String? = null,
   thinkingLevel: String? = null,
+  draft: String = "",
+  onDraftChange: ((String) -> Unit)? = null,
 ) {
-  var input by rememberSaveable { mutableStateOf("") }
+  var input by rememberSaveable(draft) { mutableStateOf(draft) }
+  LaunchedEffect(draft) { if (input != draft) input = draft }
   var commandsOpen by remember { mutableStateOf(false) }
+  var historyOpen by remember { mutableStateOf(false) }
+  var isFocused by remember { mutableStateOf(false) }
+  var promptHistory by rememberSaveable { mutableStateOf(listOf<String>()) }
   // An agent command can cost far more than a message; it waits here, draft kept, until confirmed.
   var confirmingCommand by rememberSaveable { mutableStateOf<String?>(null) }
   confirmingCommand?.let { command ->
-    AlertDialog(
-      onDismissRequest = { confirmingCommand = null },
-      title = { Text("Run $command?") },
-      text = { Text(slashCommandWarning(command)) },
-      confirmButton = {
-        TextButton(
-          onClick = {
-            onSend(input, true)
-            input = ""
-            confirmingCommand = null
+    val disallowedReason = disallowedSlashCommandReason(command)
+    if (disallowedReason != null) {
+      AlertDialog(
+        onDismissRequest = { confirmingCommand = null },
+        title = { Text("Command Not Supported") },
+        text = { Text(disallowedReason) },
+        confirmButton = { TextButton(onClick = { confirmingCommand = null }) { Text("OK") } },
+      )
+    } else {
+      AlertDialog(
+        onDismissRequest = { confirmingCommand = null },
+        title = { Text("Run $command?") },
+        text = { Text(slashCommandWarning(command)) },
+        confirmButton = {
+          TextButton(
+            onClick = {
+              val textToSend =
+                if (input.isNotBlank() && slashCommand(input) == command) input else command
+              if (promptHistory.firstOrNull() != textToSend) {
+                promptHistory =
+                  (listOf(textToSend) + promptHistory.filter { it != textToSend }).take(20)
+              }
+              onSend(textToSend, true)
+              input = ""
+              onDraftChange?.invoke("")
+              confirmingCommand = null
+            }
+          ) {
+            Text("Run $command")
           }
-        ) {
-          Text("Run $command")
-        }
-      },
-      dismissButton = { TextButton(onClick = { confirmingCommand = null }) { Text("Cancel") } },
-    )
+        },
+        dismissButton = { TextButton(onClick = { confirmingCommand = null }) { Text("Cancel") } },
+      )
+    }
   }
   val colors = MaterialTheme.appColors
   val canSend = enabled && input.isNotBlank()
-  Column(
-    modifier
-      .fillMaxWidth()
-      .padding(horizontal = 12.dp, vertical = 8.dp)
-      .background(colors.card)
-      .border(1.dp, colors.line)
-  ) {
-    androidx.compose.foundation.text.BasicTextField(
-      value = input,
-      onValueChange = { input = it },
-      modifier =
-        Modifier.fillMaxWidth()
-          .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp)
-          .testTag("promptInput"),
-      enabled = enabled,
-      maxLines = 6,
-      textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
-      cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.accent),
-      decorationBox = { field ->
-        Box {
-          if (input.isEmpty())
-            Text(
-              if (enabled) placeholder else "Not connected",
-              style = MaterialTheme.typography.bodyMedium,
-              color = colors.faint,
-            )
-          field()
-        }
-      },
-    )
+  val slashSuggestions = remember(input) { matchingSlashCommands(input) }
+
+  Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+    // 1. Quick Action Chips Row
     Row(
-      Modifier.fillMaxWidth().padding(start = 4.dp, end = 6.dp, bottom = 6.dp),
+      Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      // Commands sit at the left under the input, where a thumb reaches, as in pi-pocket.
-      if (onNewSession != null)
+      QuickActionChip(
+        label = "Continue",
+        enabled = enabled,
+        onClick = {
+          if (promptHistory.firstOrNull() != "continue") {
+            promptHistory =
+              (listOf("continue") + promptHistory.filter { it != "continue" }).take(20)
+          }
+          onSend("continue", false)
+        },
+        colors = colors,
+      )
+      if (onStop != null) {
+        QuickActionChip(
+          label = "Interrupt",
+          enabled = true,
+          onClick = onStop,
+          colors = colors,
+          isError = true,
+        )
+      }
+      QuickActionChip(
+        label = "Compact",
+        enabled = enabled,
+        onClick = { confirmingCommand = "/compact" },
+        colors = colors,
+      )
+    }
+
+    // 2. Slash command suggestions overlay (when typing '/')
+    if (slashSuggestions.isNotEmpty() && isFocused) {
+      Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = colors.card,
+        border = BorderStroke(1.dp, colors.line),
+        shadowElevation = 3.dp,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+      ) {
+        Column(
+          Modifier.padding(vertical = 4.dp)
+            .heightIn(max = 200.dp)
+            .verticalScroll(rememberScrollState())
+        ) {
+          slashSuggestions.forEach { item ->
+            Row(
+              Modifier.fillMaxWidth()
+                .clickable {
+                  input = "${item.command} "
+                  onDraftChange?.invoke(input)
+                }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text(
+                item.command,
+                style =
+                  MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = colors.accent,
+              )
+              Spacer(Modifier.widthIn(min = 8.dp))
+              Text(
+                item.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Rounded Input Container
+    Column(
+      Modifier.fillMaxWidth()
+        .background(colors.card, RoundedCornerShape(16.dp))
+        .border(1.dp, if (isFocused) colors.accent else colors.line, RoundedCornerShape(16.dp))
+        .clip(RoundedCornerShape(16.dp))
+    ) {
+      Row(
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        androidx.compose.foundation.text.BasicTextField(
+          value = input,
+          onValueChange = {
+            input = it
+            onDraftChange?.invoke(it)
+          },
+          modifier =
+            Modifier.weight(1f).onFocusChanged { isFocused = it.isFocused }.testTag("promptInput"),
+          enabled = enabled,
+          maxLines = 6,
+          textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
+          cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.accent),
+          decorationBox = { field ->
+            Box {
+              if (input.isEmpty())
+                Text(
+                  if (enabled) placeholder else "Not connected",
+                  style = MaterialTheme.typography.bodyMedium,
+                  color = colors.faint,
+                )
+              field()
+            }
+          },
+        )
+        if (input.isNotEmpty()) {
+          IconButton(
+            onClick = {
+              input = ""
+              onDraftChange?.invoke("")
+            },
+            modifier = Modifier.size(28.dp),
+          ) {
+            Icon(
+              painterResource(com.azusachino.cappuccino.R.drawable.ic_close),
+              contentDescription = "Clear draft",
+              modifier = Modifier.size(16.dp),
+              tint = colors.muted,
+            )
+          }
+        }
+      }
+
+      // Bottom control bar inside the rounded card
+      Row(
+        Modifier.fillMaxWidth().padding(start = 6.dp, end = 8.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        // Commands button (slash command picker + new session)
         Box {
-          IconButton(onClick = { commandsOpen = true }, modifier = Modifier.size(40.dp)) {
+          IconButton(onClick = { commandsOpen = true }, modifier = Modifier.size(36.dp)) {
             Icon(
               painterResource(com.azusachino.cappuccino.R.drawable.ic_grid),
               contentDescription = "Commands",
@@ -1458,64 +1701,174 @@ fun PromptInputBar(
             )
           }
           DropdownMenu(expanded = commandsOpen, onDismissRequest = { commandsOpen = false }) {
-            // A new session replaces the conversation, so only between runs.
-            DropdownMenuItem(
-              text = { Text("New session") },
-              enabled = newSessionEnabled,
-              onClick = {
-                commandsOpen = false
-                onNewSession()
-              },
-            )
-          }
-        }
-      if (model != null)
-        Text(
-          listOfNotNull(shortModel(model), thinkingLevel).joinToString(" · "),
-          // No weight: only the spacer takes the slack, so Stop and Send sit at the end.
-          Modifier.padding(horizontal = 6.dp).widthIn(max = 180.dp),
-          style = MaterialTheme.typography.labelSmall,
-          color = colors.muted,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-      Spacer(Modifier.weight(1f))
-      if (onStop != null)
-        IconButton(onClick = onStop, modifier = Modifier.size(40.dp).testTag("stopAgent")) {
-          Box(Modifier.size(32.dp).border(1.dp, colors.line), contentAlignment = Alignment.Center) {
-            Box(
-              Modifier.size(12.dp).background(MaterialTheme.colorScheme.error).semantics {
-                contentDescription = "Stop"
-              }
-            )
-          }
-        }
-      IconButton(
-        onClick = {
-          if (input.isNotBlank()) {
-            val command = slashCommand(input)
-            if (command != null) confirmingCommand = command
-            else {
-              onSend(input, false)
-              input = ""
+            COMMON_SLASH_COMMANDS.forEach { item ->
+              DropdownMenuItem(
+                text = {
+                  Column {
+                    Text(
+                      item.command,
+                      style =
+                        MaterialTheme.typography.labelMedium.copy(
+                          fontFamily = FontFamily.Monospace
+                        ),
+                      color = colors.accent,
+                    )
+                    Text(
+                      item.description,
+                      style = MaterialTheme.typography.bodySmall,
+                      color = colors.muted,
+                    )
+                  }
+                },
+                onClick = {
+                  commandsOpen = false
+                  input = "${item.command} "
+                },
+              )
             }
           }
-        },
-        enabled = canSend,
-        modifier = Modifier.size(40.dp),
-      ) {
-        Box(
-          Modifier.size(32.dp).background(if (canSend) colors.accent else colors.card2),
-          contentAlignment = Alignment.Center,
-        ) {
-          Icon(
-            painterResource(com.azusachino.cappuccino.R.drawable.ic_arrow_downward),
-            modifier = Modifier.size(18.dp).rotate(180f),
-            contentDescription = "Send",
-            tint = if (canSend) MaterialTheme.colorScheme.onPrimary else colors.faint,
+        }
+
+        // Prompt History button (when prompts have been sent)
+        if (promptHistory.isNotEmpty()) {
+          Box {
+            IconButton(onClick = { historyOpen = true }, modifier = Modifier.size(36.dp)) {
+              Icon(
+                painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
+                contentDescription = "Prompt history",
+                modifier = Modifier.size(18.dp),
+                tint = colors.muted,
+              )
+            }
+            DropdownMenu(expanded = historyOpen, onDismissRequest = { historyOpen = false }) {
+              Text(
+                "Recent Prompts",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.muted,
+              )
+              promptHistory.take(8).forEach { item ->
+                DropdownMenuItem(
+                  text = {
+                    Text(
+                      item,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                      style = MaterialTheme.typography.bodySmall,
+                    )
+                  },
+                  onClick = {
+                    historyOpen = false
+                    input = item
+                    onDraftChange?.invoke(item)
+                  },
+                )
+              }
+            }
+          }
+        }
+
+        if (model != null)
+          Text(
+            listOfNotNull(shortModel(model), thinkingLevel).joinToString(" · "),
+            Modifier.padding(horizontal = 6.dp).widthIn(max = 160.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
           )
+
+        Spacer(Modifier.weight(1f))
+
+        if (onStop != null)
+          IconButton(onClick = onStop, modifier = Modifier.size(36.dp).testTag("stopAgent")) {
+            Box(
+              Modifier.size(28.dp)
+                .background(
+                  MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
+                  RoundedCornerShape(8.dp),
+                )
+                .border(
+                  1.dp,
+                  MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
+                  RoundedCornerShape(8.dp),
+                ),
+              contentAlignment = Alignment.Center,
+            ) {
+              Box(
+                Modifier.size(10.dp)
+                  .background(MaterialTheme.colorScheme.error, RoundedCornerShape(2.dp))
+                  .semantics { contentDescription = "Stop" }
+              )
+            }
+          }
+
+        IconButton(
+          onClick = {
+            if (input.isNotBlank()) {
+              val trimmed = input.trim()
+              if (promptHistory.firstOrNull() != trimmed) {
+                promptHistory = (listOf(trimmed) + promptHistory.filter { it != trimmed }).take(20)
+              }
+              val command = slashCommand(input)
+              if (command != null) {
+                confirmingCommand = command
+              } else {
+                onSend(input, false)
+                input = ""
+                onDraftChange?.invoke("")
+              }
+            }
+          },
+          enabled = canSend,
+          modifier = Modifier.size(36.dp),
+        ) {
+          Box(
+            Modifier.size(30.dp)
+              .background(if (canSend) colors.accent else colors.card2, CircleShape),
+            contentAlignment = Alignment.Center,
+          ) {
+            Icon(
+              painterResource(com.azusachino.cappuccino.R.drawable.ic_arrow_downward),
+              modifier = Modifier.size(16.dp).rotate(180f),
+              contentDescription = "Send",
+              tint = if (canSend) MaterialTheme.colorScheme.onPrimary else colors.faint,
+            )
+          }
         }
       }
+    }
+  }
+}
+
+@Composable
+private fun QuickActionChip(
+  label: String,
+  enabled: Boolean,
+  onClick: () -> Unit,
+  colors: AppColors,
+  isError: Boolean = false,
+) {
+  Surface(
+    onClick = onClick,
+    enabled = enabled,
+    shape = RoundedCornerShape(8.dp),
+    color = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.12f) else colors.card2,
+    border =
+      BorderStroke(
+        1.dp,
+        if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else colors.line,
+      ),
+    modifier = Modifier.height(26.dp),
+  ) {
+    Row(Modifier.padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+      Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        color =
+          if (!enabled) colors.faint
+          else if (isError) MaterialTheme.colorScheme.error else colors.text,
+      )
     }
   }
 }
@@ -1524,39 +1877,120 @@ fun PromptInputBar(
 internal fun shortModel(model: String): String =
   model.removePrefix("claude-").replace(Regex("-(\\d+)-(\\d+)$"), " $1.$2")
 
-/** Under the message box: how full the context is and how much came from the cache. */
+/** Under the message box: how full the context is and active rate limit quotas. */
 @Composable
-internal fun SessionStatusLine(stats: SessionStats) {
-  val tokens = stats.contextTokens ?: return
+internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
   val colors = MaterialTheme.appColors
-  val window = stats.contextWindow
-  val percent = window?.let { (tokens * 100 / it).coerceIn(0, 100).toInt() }
+  val tokens = stats.contextTokens
+  val window = stats.contextWindow ?: defaultContextWindow(stats.model, agent)
+  val percent =
+    when {
+      tokens != null -> (tokens * 100 / window).coerceIn(0, 100).toInt()
+      else ->
+        stats.rateLimits?.windows?.firstOrNull { it.window == "session" }?.usedPercent?.toInt()
+    }
+
+  val modelLabel =
+    stats.model?.let { shortModel(it) }
+      ?: agent?.let {
+        if (it.lowercase() in setOf("agy", "antigravity", "antigravity-cli")) "gemini" else null
+      }
+  val modelParts = listOfNotNull(modelLabel, stats.thinkingLevel, stats.rateLimits?.planTier)
+
+  val rateLimitWindows =
+    stats.rateLimits?.windows?.filterNot {
+      it.window == "session" && percent != null && tokens == null
+    } ?: emptyList()
+
+  if (percent == null && modelParts.isEmpty() && rateLimitWindows.isEmpty()) return
+
   Row(
-    Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+    Modifier.fillMaxWidth()
+      .horizontalScroll(rememberScrollState())
+      .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
-    Text("context", style = MaterialTheme.typography.labelSmall, color = colors.muted)
-    if (percent != null)
-      Box(Modifier.size(width = 48.dp, height = 4.dp).background(colors.card2)) {
+    if (percent != null) {
+      Box(
+        Modifier.size(width = 52.dp, height = 4.dp)
+          .background(colors.card2, RoundedCornerShape(2.dp))
+          .clip(RoundedCornerShape(2.dp))
+      ) {
         Box(
           Modifier.fillMaxHeight()
             .fillMaxWidth(percent / 100f)
-            .background(if (percent >= 80) colors.warn else colors.accent)
+            .background(
+              when {
+                percent >= 85 -> MaterialTheme.colorScheme.error
+                percent >= 70 -> colors.warn
+                else -> colors.accent
+              }
+            )
         )
       }
-    Text(
-      listOfNotNull(
-          percent?.let { "$it%" },
-          formatTokens(tokens) + (window?.let { " / " + formatTokens(it) } ?: ""),
-        )
-        .joinToString(" · "),
-      style = MaterialTheme.typography.labelSmall,
-      color = colors.muted,
-    )
-    stats.cachePercent?.let {
-      Text("cache $it%", style = MaterialTheme.typography.labelSmall, color = colors.muted)
+      Text(
+        "$percent%",
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+        color =
+          when {
+            percent >= 85 -> MaterialTheme.colorScheme.error
+            percent >= 70 -> colors.warn
+            else -> colors.text
+          },
+      )
     }
+
+    if (tokens != null) {
+      Text(
+        "${formatTokens(tokens)} / ${formatTokens(window)}",
+        style = MaterialTheme.typography.labelSmall,
+        color = colors.muted,
+      )
+    }
+
+    if (modelParts.isNotEmpty()) {
+      if (percent != null || tokens != null) {
+        Text("·", style = MaterialTheme.typography.labelSmall, color = colors.faint)
+      }
+      Text(
+        modelParts.joinToString(" · "),
+        style = MaterialTheme.typography.labelSmall,
+        color = colors.muted,
+      )
+    }
+
+    for (win in rateLimitWindows) {
+      Text("·", style = MaterialTheme.typography.labelSmall, color = colors.faint)
+      val prefix = if (win.window == "quota") stats.rateLimits?.provider ?: "quota" else win.window
+      val resetText =
+        win.resetsIn?.let { if (it.startsWith("~") || it.startsWith("↻")) " $it" else " ~$it" }
+          ?: ""
+      val label = "$prefix: ${win.usedPercent}%$resetText"
+      val winColor =
+        when {
+          win.usedPercent >= 85 -> MaterialTheme.colorScheme.error
+          win.usedPercent >= 70 -> colors.warn
+          else -> colors.muted
+        }
+      Text(
+        label,
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+        color = winColor,
+      )
+    }
+  }
+}
+
+internal fun defaultContextWindow(model: String?, agent: String? = null): Long {
+  val m = model?.lowercase()
+  val a = agent?.lowercase()
+  return when {
+    m != null && "gemini" in m -> 1_000_000L
+    m != null && "deepseek" in m -> 64_000L
+    m != null && ("gpt-4" in m || "o1" in m || "o3" in m) -> 128_000L
+    a in setOf("agy", "antigravity", "antigravity-cli") -> 1_000_000L
+    else -> 200_000L
   }
 }
 
@@ -1594,7 +2028,7 @@ fun ConversationTurnRow(
   val segments = remember(shownParts) { transcriptSegments(shownParts) }
   if (segments.isEmpty()) return
   Column(
-    modifier.fillMaxWidth().semantics {
+    modifier.fillMaxWidth().then(textModifier).semantics {
       contentDescription = if (isUser) "You" else assistantLabel
     },
     verticalArrangement = Arrangement.spacedBy(10.dp),

@@ -23,7 +23,8 @@ runtime or generated SDK is used.
 ## Toolchains and pins
 
 - **mise** (`.mise.toml`) pins the non-Xcode tools that Make invokes, such as
-  `xcodegen` and `rumdl`. `make setup` installs them. The Apple SDK and the JDK are
+  `xcodegen`, `rumdl` and xtool. `make setup` installs them. xtool is pinned with
+  `os = ["macos"]`, so the Linux CI job skips it. The Apple SDK and the JDK are
   prerequisites, not mise-managed.
 - **Apple:** macOS 26 or later, Xcode 26 or later with Swift 6.2 or later, and
   swift-format through `xcrun`. The deployment target is iOS 17; glass APIs are
@@ -145,10 +146,30 @@ Developer membership is needed for tests or unsigned Simulator builds.
 
 ### Unsigned iPhone IPA
 
-`make ipa` builds the app for an iPhone and packages it as
-`.build/ipa/Cappuccino.ipa`. The app is unsigned, so SideStore or AltStore
+`make ipa` runs `xtool dev build --configuration release --ipa` in `apps/ios` and
+writes `apps/ios/xtool/Cappuccino.ipa`. The app is unsigned, so SideStore or AltStore
 re-signs it with your own Apple ID when you install it. Nothing is signed or
-uploaded by the build. Install routes are in [install-iphone.md](install-iphone.md).
+uploaded by the build. `make dev` builds, signs and installs on a connected iPhone
+with xtool. It needs a one-time `xtool setup`, your Apple ID and the phone. Install
+routes are in [install-iphone.md](install-iphone.md).
+
+### xtool builds and installs; Xcode tests
+
+xtool builds and installs the iPhone app (`make ipa`, `make dev`). XcodeGen and
+xcodebuild still own `make build-ios`, `make ui-test` and the validate gates. The
+split follows what each tool can do:
+
+- xtool cannot run tests or the simulator test journey
+  ([xtool#177](https://github.com/xtool-org/xtool/issues/177)).
+- `xtool launch` is broken on iOS 17 and later
+  ([xtool#44](https://github.com/xtool-org/xtool/issues/44)), so debugging stays in
+  Xcode.
+- The app is the `Cappuccino` package product, built from target `CappuccinoApp` and
+  sources `apps/ios/App`. xtool and Xcode compile the same sources. `apps/ios/xtool.yml`
+  and `apps/ios/App/Info.plist` define the xtool bundle. The target is not named
+  `Cappuccino` because that name collides with the Xcode app target in xcodebuild's
+  UI-test host lookup.
+- `project.yml` remains the Xcode app target and the UI-test host.
 
 ## Android development
 

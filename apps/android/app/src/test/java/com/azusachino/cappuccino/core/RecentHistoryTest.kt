@@ -44,13 +44,13 @@ class RecentHistoryTest {
   }
 
   @Test
-  fun toolChangesDoNotTriggerMessageFollowingButRepliesAndOutcomesDo() {
+  fun toolChangesAndRepliesTriggerConversationFollowing() {
     val tool = ConversationPart.ToolCall("bash", "test", null)
     val before = listOf(ConversationTurn("reply", "agent", null, "Same reply", listOf(tool)))
     val after =
       listOf(before.single().copy(parts = listOf(tool.copy(output = "failed", isError = true))))
-    assertEquals(conversationFollowContent(before), conversationFollowContent(after))
-    assertTrue(
+    assertNotEquals(conversationFollowContent(before), conversationFollowContent(after))
+    assertFalse(
       conversationFollowContent(listOf(ConversationTurn("tool", "agent", null, null, listOf(tool))))
         .isEmpty()
     )
@@ -79,7 +79,7 @@ class RecentHistoryTest {
   }
 
   @Test
-  fun reasoningWithToolsDoesNotTriggerFollowingWithoutAnAnswer() {
+  fun reasoningWithToolsTriggersFollowingForRunningCommands() {
     val reply = ConversationTurn("reply", "agent", null, "Last answer", emptyList())
     val reasoning =
       ConversationTurn(
@@ -92,11 +92,11 @@ class RecentHistoryTest {
           ConversationPart.ToolCall("bash", "pwd", null),
         ),
       )
-    assertEquals(
+    assertNotEquals(
       conversationFollowContent(listOf(reply)),
       conversationFollowContent(listOf(reply, reasoning)),
     )
-    assertTrue(conversationFollowContent(listOf(reasoning)).isEmpty())
+    assertFalse(conversationFollowContent(listOf(reasoning)).isEmpty())
   }
 
   @Test

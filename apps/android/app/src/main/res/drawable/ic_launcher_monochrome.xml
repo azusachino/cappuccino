@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Title bar dots -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M34,29 A2.5,2.5 0 1,1 33.99,29 Z M42,29 A2.5,2.5 0 1,1 41.99,29 Z M50,29 A2.5,2.5 0 1,1 49.99,29 Z" />
+
+    <!-- Monospace Prompt Chevron `>` -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M38,56 L46,62 L38,68" />
+
+    <!-- Monospace Prompt Cursor `_` -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M52,68 L68,68" />
+
+</vector>

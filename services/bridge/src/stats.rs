@@ -20,8 +20,31 @@ pub struct SessionStats {
     /// Share of the newest call's input that was read from the prompt cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_percent: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limits: Option<RateLimitStats>,
     #[serde(skip)]
     pub provider: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RateLimitWindow {
+    pub window: String,
+    pub used_percent: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_in: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RateLimitStats {
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<RateLimitWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,6 +240,218 @@ pub fn pi_context_window(transcript: &Path, provider: &str, model: &str) -> Opti
         .as_u64()
 }
 
+/// Extracts rate limits and optionally an inferred model from the transcript tail or terminal pane lines.
+pub fn parse_rate_limits(
+    kind: Kind,
+    transcript: &str,
+    pane_text: Option<&str>,
+) -> (Option<RateLimitStats>, Option<String>) {
+    let mut stats: Option<RateLimitStats> = None;
+    let mut model_out: Option<String> = None;
+
+    match kind {
+        Kind::Claude => {
+            // 1. Check transcript for explicit quota limits / 429 error
+            for line in transcript.lines().rev() {
+                if let Ok(entry) = serde_json::from_str::<Value>(line) {
+                    if let Some(quota) = entry.get("quotaLimits") {
+                        if quota.get("status").and_then(Value::as_str) == Some("rejected") {
+                            let r_type = quota
+                                .get("rateLimitType")
+                                .and_then(Value::as_str)
+                                .unwrap_or("five_hour");
+                            let window_label = match r_type {
+                                "five_hour" => "5h",
+                                "seven_day" => "7d",
+                                other => other,
+                            };
+                            let resets_at = quota.get("resetsAt").and_then(Value::as_i64);
+                            stats = Some(RateLimitStats {
+                                provider: "anthropic".to_string(),
+                                plan_tier: None,
+                                windows: vec![RateLimitWindow {
+                                    window: window_label.to_string(),
+                                    used_percent: 100,
+                                    resets_at,
+                                    resets_in: None,
+                                }],
+                                status: Some("exhausted".to_string()),
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 2. Check pane text for live statusline "5h:X% ... 7d:Y% ~ZhZm"
+            if let Some(pane) = pane_text {
+                let mut windows = Vec::new();
+                let mut max_used = 0u32;
+                for line in pane.lines().rev().take(15) {
+                    if line.contains("5h:") || line.contains("7d:") {
+                        if let Some(idx) = line.find("5h:") {
+                            let rest = &line[idx + 3..];
+                            let pct_str: String =
+                                rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                            if let Ok(pct) = pct_str.parse::<u32>() {
+                                max_used = max_used.max(pct);
+                                let resets_in = rest.find('~').and_then(|t_idx| {
+                                    let reset_str: String = rest[t_idx + 1..]
+                                        .chars()
+                                        .take_while(|c| !c.is_whitespace() && *c != '·')
+                                        .collect();
+                                    (!reset_str.is_empty()).then_some(reset_str)
+                                });
+                                windows.push(RateLimitWindow {
+                                    window: "5h".to_string(),
+                                    used_percent: pct,
+                                    resets_at: None,
+                                    resets_in,
+                                });
+                            }
+                        }
+                        if let Some(idx) = line.find("7d:") {
+                            let rest = &line[idx + 3..];
+                            let pct_str: String =
+                                rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                            if let Ok(pct) = pct_str.parse::<u32>() {
+                                max_used = max_used.max(pct);
+                                let resets_in = rest.find('~').and_then(|t_idx| {
+                                    let reset_str: String = rest[t_idx + 1..]
+                                        .chars()
+                                        .take_while(|c| !c.is_whitespace() && *c != '·')
+                                        .collect();
+                                    (!reset_str.is_empty()).then_some(reset_str)
+                                });
+                                windows.push(RateLimitWindow {
+                                    window: "7d".to_string(),
+                                    used_percent: pct,
+                                    resets_at: None,
+                                    resets_in,
+                                });
+                            }
+                        }
+                        if !windows.is_empty() {
+                            let status = if max_used >= 95 {
+                                "exhausted"
+                            } else if max_used >= 70 {
+                                "warning"
+                            } else {
+                                "normal"
+                            };
+                            stats = Some(RateLimitStats {
+                                provider: "anthropic".to_string(),
+                                plan_tier: None,
+                                windows,
+                                status: Some(status.to_string()),
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Kind::Agy => {
+            if let Some(pane) = pane_text {
+                for line in pane.lines().rev().take(15) {
+                    if model_out.is_none()
+                        && (line.contains("Gemini")
+                            || line.contains("Flash")
+                            || line.contains("Pro"))
+                    {
+                        for part in line.split('·') {
+                            let trimmed = part.trim();
+                            if trimmed.starts_with("Gemini") || trimmed.starts_with("Claude") {
+                                model_out = Some(trimmed.to_string());
+                                break;
+                            }
+                        }
+                    }
+                    if line.contains("% used")
+                        || line.contains("Refreshes in")
+                        || line.contains("Quota available")
+                    {
+                        let mut windows = Vec::new();
+                        let mut plan_tier = None;
+                        for part in line.split('·') {
+                            let trimmed = part.trim();
+                            if trimmed == "Pro"
+                                || trimmed == "Ultra"
+                                || trimmed.contains("Google AI")
+                            {
+                                plan_tier = Some(trimmed.to_string());
+                            } else if trimmed.ends_with("% used") {
+                                let num_str = trimmed.trim_end_matches("% used").trim();
+                                if let Ok(pct) = num_str.parse::<u32>() {
+                                    windows.push(RateLimitWindow {
+                                        window: "session".to_string(),
+                                        used_percent: pct,
+                                        resets_at: None,
+                                        resets_in: None,
+                                    });
+                                }
+                            }
+                        }
+                        if !windows.is_empty() || plan_tier.is_some() {
+                            stats = Some(RateLimitStats {
+                                provider: "google".to_string(),
+                                plan_tier,
+                                windows,
+                                status: Some("normal".to_string()),
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Kind::Pi => {
+            if let Some(pane) = pane_text {
+                for line in pane.lines().rev().take(15) {
+                    if let Some(arrow_idx) = line.find('↻') {
+                        let before = line[..arrow_idx].trim_end();
+                        let after = line[arrow_idx + '↻'.len_utf8()..].trim();
+                        let resets_in = after.split_whitespace().next().map(str::to_string);
+                        if let Some(pct_idx) = before.rfind('%') {
+                            let pct_start = before[..pct_idx]
+                                .rfind(|c: char| !c.is_ascii_digit())
+                                .map(|i| i + 1)
+                                .unwrap_or(0);
+                            let pct_str = &before[pct_start..pct_idx];
+                            let name_part = before[..pct_start].trim();
+                            let provider_name =
+                                name_part.split_whitespace().last().unwrap_or("extension");
+                            if let Ok(pct) = pct_str.parse::<u32>() {
+                                let status = if pct >= 95 {
+                                    "exhausted"
+                                } else if pct >= 70 {
+                                    "warning"
+                                } else {
+                                    "normal"
+                                };
+                                stats = Some(RateLimitStats {
+                                    provider: provider_name.to_string(),
+                                    plan_tier: None,
+                                    windows: vec![RateLimitWindow {
+                                        window: "quota".to_string(),
+                                        used_percent: pct,
+                                        resets_at: None,
+                                        resets_in,
+                                    }],
+                                    status: Some(status.to_string()),
+                                });
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (stats, model_out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,5 +554,47 @@ mod tests {
         assert_eq!(pi_context_window(&session, "zai", "glm"), Some(1_000_000));
         assert_eq!(pi_context_window(&session, "zai", "other"), None);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn parse_rate_limits_extracts_claude_statusline_and_quota_error() {
+        let pane = "claude-haiku-5-5 · ~/Projects/test · main* · 5h:2% · 7d:81% ~17h43m · 89% left · v2.1.300";
+        let (stats, _) = parse_rate_limits(Kind::Claude, "", Some(pane));
+        let stats = stats.expect("claude rate limits");
+        assert_eq!(stats.provider, "anthropic");
+        assert_eq!(stats.status.as_deref(), Some("warning"));
+        assert_eq!(stats.windows.len(), 2);
+        assert_eq!(stats.windows[0].window, "5h");
+        assert_eq!(stats.windows[0].used_percent, 2);
+        assert_eq!(stats.windows[1].window, "7d");
+        assert_eq!(stats.windows[1].used_percent, 81);
+        assert_eq!(stats.windows[1].resets_in.as_deref(), Some("17h43m"));
+
+        let rejected = r#"{"quotaLimits":{"status":"rejected","resetsAt":1791813600,"rateLimitType":"five_hour"}}"#;
+        let (stats_err, _) = parse_rate_limits(Kind::Claude, rejected, None);
+        let stats_err = stats_err.expect("rejected quota");
+        assert_eq!(stats_err.status.as_deref(), Some("exhausted"));
+        assert_eq!(stats_err.windows[0].used_percent, 100);
+        assert_eq!(stats_err.windows[0].resets_at, Some(1791813600));
+    }
+
+    #[test]
+    fn parse_rate_limits_extracts_agy_and_pi_extension_status() {
+        let agy_pane =
+            "working · Gemini 3.8 Flash (Medium) · test · main* · 20% used · Pro · v1.3.5";
+        let (agy_stats, model) = parse_rate_limits(Kind::Agy, "", Some(agy_pane));
+        assert_eq!(model.as_deref(), Some("Gemini 3.8 Flash (Medium)"));
+        let agy_stats = agy_stats.expect("agy rate limits");
+        assert_eq!(agy_stats.provider, "google");
+        assert_eq!(agy_stats.plan_tier.as_deref(), Some("Pro"));
+        assert_eq!(agy_stats.windows[0].used_percent, 20);
+
+        let pi_pane = "↑808k ↓142k (openai-codex) gpt-6.1-sol\n bg 2 done · codex 95% ↻ 6d15h";
+        let (pi_stats, _) = parse_rate_limits(Kind::Pi, "", Some(pi_pane));
+        let pi_stats = pi_stats.expect("pi rate limits");
+        assert_eq!(pi_stats.provider, "codex");
+        assert_eq!(pi_stats.status.as_deref(), Some("exhausted"));
+        assert_eq!(pi_stats.windows[0].used_percent, 95);
+        assert_eq!(pi_stats.windows[0].resets_in.as_deref(), Some("6d15h"));
     }
 }

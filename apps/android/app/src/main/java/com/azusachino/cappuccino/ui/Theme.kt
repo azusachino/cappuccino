@@ -167,12 +167,15 @@ fun CappuccinoTheme(
       dynamicDarkColorScheme(context)
     else FallbackDarkColorScheme
   val base =
-    appColorScheme(selectedPalette, isDark, Build.VERSION.SDK_INT, dynamicLight, dynamicDark)
-  androidx.compose.runtime.CompositionLocalProvider(
-    LocalAppColors provides appColors(base, isDark)
-  ) {
+    androidx.compose.runtime.remember(selectedPalette, isDark, dynamicLight, dynamicDark) {
+      appColorScheme(selectedPalette, isDark, Build.VERSION.SDK_INT, dynamicLight, dynamicDark)
+    }
+  val colors = androidx.compose.runtime.remember(base, isDark) { appColors(base, isDark) }
+  val surfaceScheme =
+    androidx.compose.runtime.remember(base, isDark) { flatSurfaceScheme(base, isDark) }
+  androidx.compose.runtime.CompositionLocalProvider(LocalAppColors provides colors) {
     MaterialTheme(
-      colorScheme = flatSurfaceScheme(base, isDark),
+      colorScheme = surfaceScheme,
       typography = AppTypography,
       shapes = AppShapes,
       content = content,

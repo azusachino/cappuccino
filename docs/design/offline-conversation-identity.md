@@ -22,7 +22,7 @@ Require response `session_id` to equal the requested locator. A canonical ID req
 
 Snapshot schema 2 requires the canonical ID. Disk keys are hashes of verified machine UUID plus canonical ID; the captured locator remains metadata, not the archive key. Two canonical conversations from one reused pane stay separate; the same canonical conversation observed in another pane updates the same archive. Schema 1 cannot be guessed/migrated from its locator alone; reject it without deleting its files or remote data.
 
-Retain the existing bounds: 20 entries, 32 MiB retained record bytes, 4 MiB per entry, atomic replacement and bounded message/tool windows. The atomic write can temporarily coexist with the previous retained data. Profiles, drafts/preferences and temporary cache have separate storage ownership.
+Retain the existing bounds: 30 days retention policy, date descending ordering, atomic replacement and manual clean option, alongside existing 32 MiB storage caps and bounded message/tool windows. The atomic write can temporarily coexist with the previous retained data. Profiles, drafts/preferences and temporary cache have separate storage ownership.
 
 Saved views are read-only, show their capture time, use unknown current agent state and contain no actionable approvals. Discovery cannot replace them with live agent state. Canonical identity scopes reader state, but does not itself merge saved/live history or establish synchronization coverage. Older bridges still show live content; no identity means no new snapshot and an honest storage limitation, not a fabricated cache entry.
 

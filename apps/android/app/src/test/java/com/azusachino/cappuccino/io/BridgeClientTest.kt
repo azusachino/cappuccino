@@ -393,7 +393,7 @@ class BridgeClientTest {
       server.enqueue(
         MockResponse.Builder()
           .body(
-            """{"session_id":"s-1","source":"canonical_log","turns":[],"stats":{"model":"glm","thinking_level":"low","context_tokens":1100,"cache_percent":60}}"""
+            """{"session_id":"s-1","source":"canonical_log","turns":[],"stats":{"model":"glm","thinking_level":"low","context_tokens":1100,"cache_percent":60,"rate_limits":{"provider":"anthropic","plan_tier":null,"windows":[{"window":"5h","used_percent":2,"resets_in":null},{"window":"7d","used_percent":81,"resets_in":"17h43m"}],"status":"warning"}}}"""
           )
           .build()
       )
@@ -405,7 +405,23 @@ class BridgeClientTest {
       server.start()
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
       assertEquals(
-        SessionStats("glm", "low", 1100, null, 60),
+        SessionStats(
+          "glm",
+          "low",
+          1100,
+          null,
+          60,
+          RateLimitStats(
+            provider = "anthropic",
+            planTier = null,
+            windows =
+              listOf(
+                RateLimitWindow("5h", 2, null, null),
+                RateLimitWindow("7d", 81, null, "17h43m"),
+              ),
+            status = "warning",
+          ),
+        ),
         client.conversationSnapshot("s-1").stats,
       )
       assertNull(client.conversationSnapshot("s-1").stats)

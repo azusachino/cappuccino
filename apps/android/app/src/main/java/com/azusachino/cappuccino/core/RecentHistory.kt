@@ -1,15 +1,12 @@
 package com.azusachino.cappuccino.core
 
 val ConversationPart.visibleInChat: Boolean
-  get() =
-    this !is ConversationPart.ToolCall &&
-      !(this is ConversationPart.ResponseStatus && status == "failed")
+  get() = !(this is ConversationPart.ResponseStatus && status == "failed")
 
 fun conversationFollowContent(turns: List<ConversationTurn>): List<ConversationTurn> =
   turns
     .mapNotNull { turn ->
-      // Reasoning stays inspectable, but isn't a new chat answer to follow.
-      val visible = turn.parts.filter { it.visibleInChat && it !is ConversationPart.Thinking }
+      val visible = turn.parts.filter { it.visibleInChat }
       if (turn.text.isNullOrBlank() && visible.isEmpty()) null else turn.copy(parts = visible)
     }
     .takeLast(1) // Older-window eviction is not a new answer to follow.

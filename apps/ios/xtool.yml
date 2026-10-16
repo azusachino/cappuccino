@@ -1,0 +1,5 @@
+version: 1
+bundleID: com.azusachino.cappuccino
+product: Cappuccino
+infoPath: App/Info.plist
+skipLSP: true

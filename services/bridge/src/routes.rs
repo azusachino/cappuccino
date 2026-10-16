@@ -402,15 +402,33 @@ pub async fn agent_conversation(
                         ),
                     };
                     let mut session_stats = stats::session_stats(kind, &content);
-                    if let Some(found) = session_stats.as_mut().filter(|_| kind == stats::Kind::Pi)
-                    {
-                        if let (Some(provider), Some(model)) = (&found.provider, &found.model) {
-                            found.context_window =
-                                stats::pi_context_window(resolved.path(), provider, model);
+                    let pane_text = if let Some(pane_id) = resolve_pane(&state, &session_id).await {
+                        herdr::pane_read_recent(&pane_id, 30).await.ok()
+                    } else {
+                        None
+                    };
+                    let (rate_limits, inferred_model) =
+                        stats::parse_rate_limits(kind, &content, pane_text.as_deref());
+
+                    if let Some(found) = session_stats.as_mut() {
+                        if found.model.is_none() {
+                            found.model = inferred_model;
                         }
-                        if found.thinking_level.is_none() {
-                            found.thinking_level = stats::pi_thinking_level(resolved.path());
+                        found.rate_limits = rate_limits;
+                        if kind == stats::Kind::Pi {
+                            if let (Some(provider), Some(model)) = (&found.provider, &found.model) {
+                                found.context_window =
+                                    stats::pi_context_window(resolved.path(), provider, model);
+                            }
+                            if found.thinking_level.is_none() {
+                                found.thinking_level = stats::pi_thinking_level(resolved.path());
+                            }
                         }
+                    } else if rate_limits.is_some() || inferred_model.is_some() {
+                        let mut found = stats::SessionStats::default();
+                        found.model = inferred_model;
+                        found.rate_limits = rate_limits;
+                        session_stats = Some(found);
                     }
                     let payload = conversation::ConversationResponse {
                         session_id,
