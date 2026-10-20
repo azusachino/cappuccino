@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -126,7 +127,10 @@ class CappuccinoShellTest {
       }
     }
 
-    compose.onNodeWithText("opus 5.5 · high").assertIsDisplayed()
+    compose
+      .onNodeWithTag("composerModelLabel")
+      .assertTextEquals("opus 5.5 · high")
+      .assertIsDisplayed()
     assertSendAndStopSitAtTheEnd()
     compose.onNodeWithText("38% · 76K / 200K").assertIsDisplayed()
     compose.onNodeWithText("cache 90%").assertIsDisplayed()

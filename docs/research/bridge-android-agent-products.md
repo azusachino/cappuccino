@@ -210,6 +210,35 @@ lessons: epoch/sequence catch-up, cached-but-unsynchronized replicas, native cod
 rendering bounds, and stable reading position. That study's pinned evidence was
 not freshly rerun here.
 
+## B1 follow-up: live leaf authority
+
+The authorized pi-subagents investigation used
+`zai-coding-cn/glm-5.3-flash` at low thinking against the same Pi reference.
+Parent source inspection confirmed `SessionManager.branch()` and `resetLeaf()`
+only change the in-memory leaf; they do not append a record. Two live states can
+therefore have identical file bytes but different selected conversation branches.
+`ReadonlySessionManager` exposes `getLeafId` and `getBranch` to extensions; that is
+a candidate same-process read surface, not an installed transport endpoint.
+
+B1 is source-feasible only with an explicit authority boundary: native IDs and
+file-tree indexing can improve stability without a new integration, but the
+last-appended entry cannot prove the current live branch. Full B2 active-branch
+acceptance depends on D1 exposing a consistent leaf/history observation from the
+attached process. Until then, label live-branch authority unknown; never describe
+last-append ancestry as proven current. Complete ancestry also cannot be inferred
+from a truncated byte tail.
+
+The scout suggested applying compaction's context cut to the reader. That advice
+is not adopted: the product requires full active-branch conversation history,
+including pre-compaction messages. Model context projection and human history are
+different views. Preserve full proven ancestry, using summaries as explicit
+records rather than silently deleting history. Partial/malformed tails need
+coverage reporting; a valid JSON record lacking a final newline is not itself
+proof of an incomplete record.
+
+This follow-up ran no agent, integration reload or runtime branch journey. B1's
+source investigation is complete; B2 runtime correctness remains unverified.
+
 ## Priority and limits
 
 1. Correct conversation identity/history and recoverable sending.

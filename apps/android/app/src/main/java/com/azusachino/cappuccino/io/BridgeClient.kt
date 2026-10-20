@@ -21,6 +21,8 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.BufferedSource
 
+class BridgeHttpRejectionException(message: String) : IOException(message)
+
 class BridgeWebSocketClosedException(val code: Int, val reason: String) :
   IOException(
     "Bridge stream closed (code=$code${if (reason.isEmpty()) "" else ", reason=$reason"})"
@@ -319,11 +321,13 @@ class BridgeClient(
               try {
                 val text = readBounded(it.body.source(), MAX_HTTP_BODY_BYTES)
                 // The bridge's error envelope says why ("claude is working; stop it first").
-                if (!it.isSuccessful)
-                  throw IOException(
+                if (!it.isSuccessful) {
+                  val message =
                     runCatching { parseJsonObject(text).optionalString("message") }.getOrNull()
                       ?: "Bridge returned HTTP ${it.code}"
-                  )
+                  if (it.code in 400..499) throw BridgeHttpRejectionException(message)
+                  throw IOException(message)
+                }
                 if (continuation.isActive) continuation.resume(text)
               } catch (error: Exception) {
                 if (continuation.isActive) continuation.resumeWithException(error)

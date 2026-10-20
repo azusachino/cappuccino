@@ -42,6 +42,8 @@ fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnecti
       MachineConnection(connection, agents.filter { it.machineId == profile.machineId }, busy)
     else MachineConnection()
 
+data class PromptSendState(val text: String, val outcome: String? = null)
+
 data class ConnectedUiState(
   val profiles: List<MachineProfile> = emptyList(),
   val bridgeDetails: Map<String, BridgeDetails> = emptyMap(),
@@ -71,6 +73,7 @@ data class ConnectedUiState(
   val appPalette: com.azusachino.cappuccino.ui.AppPalette =
     com.azusachino.cappuccino.ui.AppPalette.CATPPUCCIN,
   val drafts: Map<String, String> = emptyMap(),
+  val promptSends: Map<String, PromptSendState> = emptyMap(),
 )
 
 interface ConnectedActions {
@@ -664,21 +667,54 @@ internal constructor(
     if (mutableState.value.offlineSavedAt != null) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
-    setDraft("${agent.machineId}:${agent.sessionId}", "")
+    val key = "${profile.id}:${agent.machineId}:${agent.sessionId}"
+    if (
+      mutableState.value.promptSends[key]?.outcome == null && key in mutableState.value.promptSends
+    )
+      return
+    val draftKey = "${agent.machineId}:${agent.sessionId}"
+    val submittedDraft = mutableState.value.drafts[draftKey].orEmpty()
+    updatePromptSend(key, PromptSendState(text))
     val client = bridgeFor(profile.endpoint)
-    val requestEpoch = epoch
     viewModelScope.launch {
+      var result: PromptSendState
       try {
         client.submitPrompt(agent.sessionId, text, confirmed)
+        result = PromptSendState(text, "Sent to bridge; agent admission is not confirmed.")
       } catch (error: Exception) {
-        if (error is kotlinx.coroutines.CancellationException) throw error
-        if (requestEpoch != epoch || mutableState.value.activeProfileId != profile.id) return@launch
-        mutableState.value =
-          mutableState.value.copy(
-            connection = ConnectionState.Error(error.message ?: "Failed to submit prompt")
+        if (error is kotlinx.coroutines.CancellationException) {
+          result =
+            PromptSendState(
+              text,
+              "Delivery unknown; draft retained. Do not resend unless verified.",
+            )
+        } else {
+          val rejected = error is BridgeHttpRejectionException
+          val outcome =
+            if (rejected) "Rejected by bridge; draft retained."
+            else "Delivery unknown; draft retained. Do not resend unless verified."
+          result = PromptSendState(text, outcome)
+          val currentDraft = mutableState.value.drafts[draftKey].orEmpty()
+          if (currentDraft == submittedDraft) setDraft(draftKey, text)
+          if (
+            mutableState.value.activeProfileId == profile.id &&
+              mutableState.value.selectedAgent?.sessionId == agent.sessionId
           )
+            mutableState.value = mutableState.value.copy(actionError = error.message ?: outcome)
+        }
+      }
+      val current = mutableState.value.promptSends[key]
+      if (current?.outcome == null) updatePromptSend(key, result)
+      if (result.outcome?.startsWith("Sent to bridge") == true) {
+        val currentDraft = mutableState.value.drafts[draftKey].orEmpty()
+        if (currentDraft == submittedDraft) setDraft(draftKey, "")
       }
     }
+  }
+
+  private fun updatePromptSend(key: String, send: PromptSendState) {
+    mutableState.value =
+      mutableState.value.copy(promptSends = mutableState.value.promptSends + (key to send))
   }
 
   override fun controlAgent(action: String) {

@@ -6,7 +6,11 @@ val ConversationPart.visibleInChat: Boolean
 fun conversationFollowContent(turns: List<ConversationTurn>): List<ConversationTurn> =
   turns
     .mapNotNull { turn ->
-      val visible = turn.parts.filter { it.visibleInChat }
+      val visible =
+        turn.parts.filter { part ->
+          part is ConversationPart.Text ||
+            (part is ConversationPart.ResponseStatus && part.visibleInChat)
+        }
       if (turn.text.isNullOrBlank() && visible.isEmpty()) null else turn.copy(parts = visible)
     }
     .takeLast(1) // Older-window eviction is not a new answer to follow.

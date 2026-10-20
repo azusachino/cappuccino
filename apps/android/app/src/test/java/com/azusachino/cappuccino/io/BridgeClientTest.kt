@@ -388,6 +388,28 @@ class BridgeClientTest {
   }
 
   @Test
+  fun promptRejectsOnlyClientErrorsAndLeavesGatewayFailureAmbiguous() = runBlocking {
+    MockWebServer().use { server ->
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      server.enqueue(
+        MockResponse.Builder().code(409).body("""{"code":"confirm_command"}""").build()
+      )
+      val rejection = runCatching { client.submitPrompt("s-1", "/new") }.exceptionOrNull()
+      assertTrue(rejection is BridgeHttpRejectionException)
+      server.enqueue(MockResponse.Builder().code(502).body("""{"code":"herdr_error"}""").build())
+      val gatewayFailure = runCatching {
+        client.submitPrompt("s-1", "possibly written")
+      }
+        .exceptionOrNull()
+      assertTrue(gatewayFailure is java.io.IOException)
+      assertFalse(gatewayFailure is BridgeHttpRejectionException)
+      assertEquals("/api/agents/s-1/prompt", server.takeRequest().url.encodedPath)
+      assertEquals("/api/agents/s-1/prompt", server.takeRequest().url.encodedPath)
+    }
+  }
+
+  @Test
   fun conversationCarriesSessionStatsWhenTheBridgeSendsThem() = runBlocking {
     MockWebServer().use { server ->
       server.enqueue(

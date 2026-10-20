@@ -1,13 +1,17 @@
 package com.azusachino.cappuccino.ui
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -56,6 +60,41 @@ class QuestionFormUiTest {
           ),
         ),
     )
+
+  @Test
+  fun composerRetainsTextWhilePendingDisablesSendAndConfirmsSlashCommand() {
+    val submissions = mutableListOf<Pair<String, Boolean>>()
+    // One composition: pending flips through state so the composer instance (and its draft)
+    // survives.
+    val pending = mutableStateOf(false)
+    compose.setContent {
+      CappuccinoTheme {
+        PromptInputBar(
+          onSend = { text, confirmed -> submissions += text to confirmed },
+          enabled = true,
+          pending = pending.value,
+        )
+      }
+    }
+    compose.onNodeWithTag("promptInput").performTextInput("hello")
+    compose.onNodeWithContentDescription("Send").performClick()
+    assertEquals(listOf("hello" to false), submissions)
+    compose.onNodeWithTag("promptInput").assertTextEquals("hello")
+
+    compose.runOnUiThread { pending.value = true }
+    compose.waitForIdle()
+    compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
+    compose.onNodeWithText("Continue").assertIsNotEnabled()
+    compose.runOnUiThread { pending.value = false }
+    compose.waitForIdle()
+
+    compose.onNodeWithContentDescription("Clear draft").performClick()
+    compose.onNodeWithTag("promptInput").performTextInput("/compact")
+    compose.onNodeWithContentDescription("Send").performClick()
+    compose.onNodeWithText("Run /compact?").assertExists()
+    compose.onNodeWithText("Run /compact").performClick()
+    assertEquals("/compact" to true, submissions.last())
+  }
 
   @Test
   fun everyQuestionIsAnsweredBeforeOneSubmission() {

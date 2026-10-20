@@ -32,8 +32,12 @@ and restored session identity, and prove active-branch authority before claiming
 canonical parity. Typed delivery and approvals continue to belong to #8 and #9;
 reconcile their older terminology and acceptance with current intent first.
 
-This is planning, not implementation or deployment approval. No live task state
-moves here, and existing unverified device/runtime limits remain unchanged.
+The initial document was planning, not implementation or deployment approval.
+The owner subsequently authorized bounded implementation with Pi subagents;
+[the implementation handoff](design/bridge-android-reliability-handoff.md) records
+the verified A1 Android checkpoint, B1 findings and the remaining slices. The
+Android journey passes 50 synthetic tests; existing live-agent and physical-device
+limits remain. A2 session-identity restoration is the next implementation slice.
 
 ## Next steps
 

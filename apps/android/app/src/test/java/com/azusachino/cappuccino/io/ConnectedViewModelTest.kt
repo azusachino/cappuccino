@@ -1009,38 +1009,137 @@ class ConnectedViewModelTest {
     }
 
   @Test
-  fun draftsPersistAcrossAgentNavigationAndClearOnSubmit() =
+  fun successfulSendKeepsDraftUntilTransportReturns() =
     runTest(dispatcher) {
-      val transport =
-        object : BridgeTransport {
-          override suspend fun verify(expectedMachine: UUID?): UUID = machine
-
-          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
-
-          override fun stream(sessionId: String): Flow<StreamEvent> =
-            kotlinx.coroutines.flow.emptyFlow()
-
-          override suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean) =
-            Unit
-        }
+      val response = CompletableDeferred<Unit>()
+      val transport = sendTransport { _, _, _ -> response.await() }
       viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
       viewModel.selectProfile(profile.id)
       viewModel.selectAgent(agent)
-      val key = "${agent.machineId}:${agent.sessionId}"
+      val key = draftKey(agent)
       viewModel.setDraft(key, "my draft text")
-      assertEquals("my draft text", viewModel.state.value.drafts[key])
 
-      // Navigating away from agent does not discard draft
-      viewModel.selectAgent(null)
-      assertEquals("my draft text", viewModel.state.value.drafts[key])
-
-      // Reselecting agent keeps draft
-      viewModel.selectAgent(agent)
-      assertEquals("my draft text", viewModel.state.value.drafts[key])
-
-      // Submitting prompt clears draft
       viewModel.submitPrompt("my draft text")
-      assertNull(viewModel.state.value.drafts[key])
+      assertEquals("my draft text", viewModel.state.value.drafts[key])
+      assertEquals("my draft text", viewModel.state.value.promptSends[sendKey(agent)]?.text)
+      viewModel.setDraft(key, "newer edit")
+      response.complete(Unit)
+      advanceUntilIdle()
+      assertEquals("newer edit", viewModel.state.value.drafts[key])
+      assertTrue(
+        viewModel.state.value.promptSends[sendKey(agent)]!!.outcome!!.contains("not confirmed")
+      )
+    }
+
+  @Test
+  fun pendingSendRejectsRepeatedTapAndRetainsEditedTextOnFailure() =
+    runTest(dispatcher) {
+      val response = CompletableDeferred<Unit>()
+      var attempts = 0
+      val transport = sendTransport { _, _, _ ->
+        attempts++
+        response.await()
+      }
+      viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.selectProfile(profile.id)
+      viewModel.selectAgent(agent)
+      val draftKey = draftKey(agent)
+      viewModel.setDraft(draftKey, "first")
+      viewModel.submitPrompt("first")
+      runCurrent()
+      viewModel.submitPrompt("duplicate")
+      viewModel.setDraft(draftKey, "newer edit")
+      assertEquals(1, attempts)
+      response.completeExceptionally(BridgeHttpRejectionException("bad_request"))
+      advanceUntilIdle()
+      assertEquals("newer edit", viewModel.state.value.drafts[draftKey])
+      assertTrue(
+        viewModel.state.value.promptSends[sendKey(agent)]!!.outcome!!.startsWith("Rejected")
+      )
+    }
+
+  @Test
+  fun ambiguousFailureRestoresUnchangedDraftAndDoesNotRetry() =
+    runTest(dispatcher) {
+      var attempts = 0
+      val transport = sendTransport { _, _, _ ->
+        attempts++
+        throw IOException("response lost")
+      }
+      viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.selectProfile(profile.id)
+      viewModel.selectAgent(agent)
+      val draftKey = draftKey(agent)
+      viewModel.setDraft(draftKey, "prompt")
+      viewModel.submitPrompt("prompt")
+      advanceUntilIdle()
+      assertEquals(1, attempts)
+      assertEquals("prompt", viewModel.state.value.drafts[draftKey])
+      assertTrue(
+        viewModel.state.value.promptSends[sendKey(agent)]!!.outcome!!.startsWith("Delivery unknown")
+      )
+      // No retry is scheduled after an ambiguous response.
+      assertEquals(1, attempts)
+    }
+
+  @Test
+  fun sendSettlesAfterNavigationWithoutLeakingOutcomeToOtherAgent() =
+    runTest(dispatcher) {
+      val response = CompletableDeferred<Unit>()
+      var attempts = 0
+      val transport = sendTransport { _, _, _ -> if (attempts++ == 0) response.await() }
+      val other = agent.copy(sessionId = "other", paneId = "other-pane")
+      viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.selectProfile(profile.id)
+      viewModel.selectAgent(agent)
+      viewModel.submitPrompt("pending")
+      runCurrent()
+      viewModel.selectAgent(other)
+      response.completeExceptionally(IOException("lost response"))
+      advanceUntilIdle()
+      assertNull(viewModel.state.value.promptSends[sendKey(other)])
+      assertEquals("pending", viewModel.state.value.drafts[draftKey(agent)])
+      viewModel.setDraft(draftKey(other), "new")
+      viewModel.submitPrompt("new")
+      advanceUntilIdle()
+      assertTrue(
+        viewModel.state.value.promptSends[sendKey(other)]!!.outcome!!.startsWith("Sent to bridge")
+      )
+    }
+
+  @Test
+  fun sendSettlesAfterBackgroundEpochChange() =
+    runTest(dispatcher) {
+      val response = CompletableDeferred<Unit>()
+      val transport = sendTransport { _, _, _ -> response.await() }
+      viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.selectProfile(profile.id)
+      viewModel.selectAgent(agent)
+      viewModel.submitPrompt("pending")
+      runCurrent()
+      viewModel.setForeground(false)
+      response.completeExceptionally(IOException("lost response"))
+      advanceUntilIdle()
+      assertTrue(
+        viewModel.state.value.promptSends[sendKey(agent)]!!.outcome!!.startsWith("Delivery unknown")
+      )
+    }
+
+  private fun draftKey(agent: AgentRow) = "${agent.machineId}:${agent.sessionId}"
+
+  private fun sendKey(agent: AgentRow) = "${profile.id}:${agent.machineId}:${agent.sessionId}"
+
+  private fun sendTransport(send: suspend (String, String, Boolean) -> Unit) =
+    object : BridgeTransport {
+      override suspend fun verify(expectedMachine: UUID?): UUID = machine
+
+      override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
+
+      override fun stream(sessionId: String): Flow<StreamEvent> =
+        kotlinx.coroutines.flow.emptyFlow()
+
+      override suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean) =
+        send(sessionId, text, confirmed)
     }
 
   private fun offlineViewModel(cache: OfflineConversations) =
