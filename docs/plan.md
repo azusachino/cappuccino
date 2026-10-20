@@ -21,6 +21,20 @@ Asobi. Detailed acceptance belongs in the owning issue or pull request.
 - **#9 approvals and grants:** approvals are answered from the screen today. The
   typed gate, reusable grants and pending-request handling come after delivery.
 
+## Bridge and Android reliability follow-through
+
+The owner's 2026-10-20 assessment is saved in
+[bridge and Android agent-product research](research/bridge-android-agent-products.md).
+The proposed [multi-step reliability plan](design/bridge-android-reliability-plan.md)
+turns those findings into dependency-ordered slices with acceptance tests, owning
+gates and explicit feasibility/approval checkpoints. Start with recoverable sends
+and restored session identity, and prove active-branch authority before claiming
+canonical parity. Typed delivery and approvals continue to belong to #8 and #9;
+reconcile their older terminology and acceptance with current intent first.
+
+This is planning, not implementation or deployment approval. No live task state
+moves here, and existing unverified device/runtime limits remain unchanged.
+
 ## Next steps
 
 1. Verify canonical transcripts for Pi, Claude Code and Agy against a
