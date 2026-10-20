@@ -270,8 +270,35 @@ Do not promise D2 receipts or D3 queue withdrawal from these declarations. A
 bounded adapter admission receipt is different from native Pi acceptance; a
 durable adapter journal cannot remove a crash gap around a non-idempotent send.
 Owner reconciliation of issue #8 and proof of the required native operations
-remain prerequisites for the corresponding write/control slices. No runtime
-spike, integration reload or API mutation was performed for this follow-up.
+remain prerequisites for the corresponding write/control slices. This API review
+itself performed no runtime spike, integration reload or API mutation; the
+subsequently approved disposable attempt and its limits are recorded below.
+
+### Disposable runtime attempt and remaining blocker
+
+The owner approved a new disposable TUI spike, synthetic data and scoped extension
+files, with no owner sessions, global integration install, credentials or provider
+calls, and explicitly kept native Pi admission as issue #8's receipt requirement.
+Luna 6 low attempted it in workstation scratch, not a production integration.
+
+The first isolated launch failed before Pi started because scrubbed PATH omitted
+Node (`exit 127`). A same-protocol retry added only the installed Node directory
+to PATH while retaining `env -i`, isolated HOME/agent/XDG paths, offline mode and
+disabled ambient resources. The version probe returned `1.3.0` with exit 0.
+
+The retry's regular-TUI PTY harness captured no `D1_OBSERVATION` marker within its
+eight-second window. It terminated its own process group (exit `-15`). The worker
+reported no session file or observed identity/leaf/ancestry, and no remaining child
+process. The synthetic extension observed lifecycle/explicit-command hooks in
+principle, but those hooks were not demonstrated at runtime. The evidence does
+not distinguish incomplete startup, a missing callback or capture loss.
+
+D1 therefore remains unproven: no live branch navigation, getter consistency,
+replacement or teardown proof was obtained. A successful version probe is not an
+attachment journey. B2's full live-branch claim and dependent typed delivery stay
+blocked; do not infer admission from dispatch or silently replace the approved
+TUI experiment with an RPC child. Preserve reproducible scratch before another
+attempt; this record is not authorization to load anything into an owner agent.
 
 ## Priority and limits
 

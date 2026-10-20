@@ -1,6 +1,7 @@
 # Bridge and Android reliability: implementation handoff
 
-Date: 2026-10-20. Status: A1 and A2 Android checkpoints verified; overall plan incomplete.
+Date: 2026-10-20. Status: A1/A2 Android and C1a bridge checkpoints verified;
+overall plan incomplete.
 
 ## Owning checkpoint
 
@@ -14,8 +15,10 @@ The owner authorized pi-subagents with `openai-codex/gpt-6-luna` and
 `zai-coding-cn/glm-5.3-flash`, both low thinking. After two unsuccessful shell
 repair passes, the owner explicitly selected parent-led repair. Parent source
 inspection and runtime verification are self-verification, not independent agent
-review. No child is writing this checkout at this checkpoint. A separately approved D1
-runtime spike may own only its task scratch and disposable processes.
+review. No child is writing this checkout at this checkpoint. The approved D1 disposable
+runtime attempt ended without proving live observation; its owned process was
+terminated. The task Android emulator has been stopped while bridge-only work
+continues.
 
 ## Delivered slice
 
@@ -92,6 +95,31 @@ Native references are opaque reported-reference hashes, not canonical IDs or
 proof that a provider reused neither a file nor its contents. A3 remains required
 for mutation ownership at the authority.
 
+## C1a bounded IPC checkpoint
+
+C1a builds on `f25c81694de20dbaeba5a6c4131c4295f01bceb9`. Only bridge
+`herdr.rs` behavior changes: one shared connect/write/read timeout, a bounded
+LF-framed response reader, explicit truncated/oversized/invalid errors, and
+validation of response IDs when present. Conservative safety ceilings are ten
+seconds and 4 MiB payload excluding LF, not measured latency/capacity promises.
+Timeouts are conservatively ambiguous and never trigger automatic retries.
+No HTTP/WS schema or native-client behavior changed.
+
+The first GLM attempt deadlocked its test helper by awaiting accept before
+returning the address. Parent inspected the open command, interrupted that exact
+child, confirmed pause, and resumed the same model/protocol. Parent inspection
+also caught a final-newline cap bypass, stacked deadline budgets, removed ANSI
+regressions and an off-by-one exact-limit test. These were fixed; original ANSI
+coverage is retained, and a deterministic split-buffer limit test was added.
+
+Parent ran `cargo fmt --manifest-path services/bridge/Cargo.toml` and
+`make check-bridge`, both passing. Suites report 90 + 44 + 6 + 9 + 7 passing tests,
+zero failures, plus the unchanged four opt-in ignored resource-soak cases. The
+locked release `test-client` example build passed. No ignored case was added to
+obtain green; the opt-in soak was not executed, and no release is authorized.
+C1 is still partial: C1b unavailable/stale stream state and C2 client recovery are
+not delivered by bounded I/O alone.
+
 ## Earlier failures and disposition
 
 Parent's initial candidate run had 50 tests and three failures: repeated
@@ -117,14 +145,18 @@ acceptance therefore depends on D1 same-process observation. Preserve human
 pre-compaction history; never label last-append ancestry as proven current.
 No runtime leaf journey or integration was executed.
 
-Next: dependency-ready bridge transport hardening from the
-[plan](bridge-android-reliability-plan.md). A3, B2 and C1–F2 are not delivered by
-this checkpoint. The owner separately approved a disposable D1 runtime spike with
-synthetic data and scoped files, no owner session/global integration/credentials,
-and explicitly retained native Pi admission as #8's receipt bar. D1 source-only
-findings and parent corrections are recorded in the research. Do not downgrade
-that bar to adapter dispatch. Typed receipts, stop/queue semantics, approval gates,
-monitoring lifetime and optional Telegram retain their decision/approval gates.
+Next: C1b unavailable/stale stream handling and C2 client recovery from the
+[plan](bridge-android-reliability-plan.md). A3, B2, C1b/C2 and later feature slices
+are not delivered by this checkpoint. The owner approved only a disposable D1
+spike with synthetic data/scoped files, no owner session/global integration or
+credentials, and retained native Pi admission as #8's receipt bar. The isolated
+launch initially lacked Node; the same-protocol corrected version probe returned
+Pi 1.3.0, but the bounded TUI attempt produced no observation marker/session file
+and its own process was terminated. No live getter/branch/teardown proof exists.
+The research records evidence and uncertainty; no owner session was touched.
+B2 live-branch acceptance and D2–E3 stay blocked by their prerequisites. Do not
+downgrade admission to adapter dispatch. Typed receipts, stop/queue semantics,
+approval gates, monitoring lifetime and optional Telegram retain their gates.
 
 At resume, compare owning branch/full commit, inspect current issue acceptance
 and revalidate any changed source. One writer owns a checkout and task device at
