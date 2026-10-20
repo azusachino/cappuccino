@@ -32,7 +32,19 @@ class ConnectedViewModelTest {
   private val machine = UUID.fromString("11111111-1111-4111-8111-111111111111")
   private val profile =
     MachineProfile("p", "Machine", Endpoint.parse("https://bridge.example"), machine)
-  private val agent = AgentRow(machine, "locator", "pane", "Agent", "pi", "idle", false, null)
+  private val nativeRef = "pi:aaaa-native"
+  private val agent =
+    AgentRow(
+      machine,
+      "locator",
+      "pane",
+      "Agent",
+      "pi",
+      "idle",
+      false,
+      null,
+      nativeSessionRef = nativeRef,
+    )
   private val savedId = "pi:${"a".repeat(64)}"
   private val store = MemoryProfiles(profile)
   private val dispatcher = StandardTestDispatcher()
@@ -448,6 +460,7 @@ class ConnectedViewModelTest {
             ConnectedViewModel.SELECTED_PROFILE to profile.id,
             ConnectedViewModel.SELECTED_MACHINE to machine.toString(),
             ConnectedViewModel.SELECTED_LOCATOR to agent.sessionId,
+            ConnectedViewModel.SELECTED_NATIVE_REF to nativeRef,
           )
         )
       val catalogGate = kotlinx.coroutines.CompletableDeferred<Unit>()
@@ -487,6 +500,7 @@ class ConnectedViewModelTest {
             ConnectedViewModel.SELECTED_PROFILE to profile.id,
             ConnectedViewModel.SELECTED_MACHINE to machine.toString(),
             ConnectedViewModel.SELECTED_LOCATOR to agent.sessionId,
+            ConnectedViewModel.SELECTED_NATIVE_REF to nativeRef,
           )
         )
       val transport =
@@ -522,6 +536,7 @@ class ConnectedViewModelTest {
             ConnectedViewModel.SELECTED_PROFILE to "gone",
             ConnectedViewModel.SELECTED_MACHINE to machine.toString(),
             ConnectedViewModel.SELECTED_LOCATOR to agent.sessionId,
+            ConnectedViewModel.SELECTED_NATIVE_REF to nativeRef,
           )
         )
       var verifies = 0
@@ -550,6 +565,7 @@ class ConnectedViewModelTest {
             ConnectedViewModel.SELECTED_PROFILE to profile.id,
             ConnectedViewModel.SELECTED_MACHINE to UUID.randomUUID().toString(),
             ConnectedViewModel.SELECTED_LOCATOR to agent.sessionId,
+            ConnectedViewModel.SELECTED_NATIVE_REF to nativeRef,
           )
         )
       viewModel = ConnectedViewModel(store, { transport }, {}, mismatched)
@@ -564,6 +580,7 @@ class ConnectedViewModelTest {
             ConnectedViewModel.SELECTED_PROFILE to profile.id,
             ConnectedViewModel.SELECTED_MACHINE to machine.toString(),
             ConnectedViewModel.SELECTED_LOCATOR to agent.sessionId,
+            ConnectedViewModel.SELECTED_NATIVE_REF to nativeRef,
           )
         )
       viewModel = ConnectedViewModel(store, { transport }, {}, vanished)
@@ -589,6 +606,7 @@ class ConnectedViewModelTest {
             ConnectedViewModel.SELECTED_PROFILE to profile.id,
             ConnectedViewModel.SELECTED_MACHINE to machine.toString(),
             ConnectedViewModel.SELECTED_LOCATOR to agent.sessionId,
+            ConnectedViewModel.SELECTED_NATIVE_REF to nativeRef,
           )
         )
       val transport =
@@ -629,6 +647,7 @@ class ConnectedViewModelTest {
             ConnectedViewModel.SELECTED_PROFILE to profile.id,
             ConnectedViewModel.SELECTED_MACHINE to machine.toString(),
             ConnectedViewModel.SELECTED_LOCATOR to agent.sessionId,
+            ConnectedViewModel.SELECTED_NATIVE_REF to nativeRef,
           )
         )
       var verifications = 0
@@ -670,12 +689,128 @@ class ConnectedViewModelTest {
       assertTrue(streams >= 2)
     }
 
+  @Test
+  fun oldSavedSelectionWithoutNativeRefRequiresExplicitReselection() =
+    runTest(dispatcher) {
+      val handle =
+        SavedStateHandle(
+          mapOf(
+            ConnectedViewModel.SELECTED_PROFILE to profile.id,
+            ConnectedViewModel.SELECTED_MACHINE to machine.toString(),
+            ConnectedViewModel.SELECTED_LOCATOR to agent.sessionId,
+          )
+        )
+      var verifies = 0
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID {
+            verifies++
+            return machine
+          }
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
+
+          override fun stream(sessionId: String): Flow<StreamEvent> =
+            error("a legacy saved selection must not attach without reselection")
+        }
+      viewModel = ConnectedViewModel(store, { transport }, {}, handle)
+      viewModel.setForeground(true)
+      advanceUntilIdle()
+      assertEquals(0, verifies)
+      assertNull(viewModel.state.value.selectedAgent)
+      assertTrue(viewModel.state.value.connection is ConnectionState.Error)
+      assertNull(handle.get<String>(ConnectedViewModel.SELECTED_PROFILE))
+    }
+
+  @Test
+  fun restoreRejectsReusedLocatorAfterSessionReplacement() =
+    runTest(dispatcher) {
+      val replacement = agent.copy(nativeSessionRef = "pi:bbbb-replacement")
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID = machine
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(replacement)
+
+          override fun stream(sessionId: String): Flow<StreamEvent> =
+            error("a replaced session must not attach by locator reuse")
+        }
+      viewModel = ConnectedViewModel(store, { transport }, {}, savedTarget())
+      viewModel.setForeground(true)
+      advanceUntilIdle()
+      assertNull(viewModel.state.value.selectedAgent)
+      assertTrue(viewModel.state.value.connection is ConnectionState.Error)
+    }
+
+  @Test
+  fun catalogRefreshDropsSelectionAndDraftWhenLocatorIsReused() =
+    runTest(dispatcher) {
+      val replacement = agent.copy(nativeSessionRef = "pi:cccc-replacement")
+      var catalog = listOf(agent)
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID = machine
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = catalog
+
+          override fun stream(sessionId: String): Flow<StreamEvent> =
+            kotlinx.coroutines.flow.emptyFlow()
+        }
+      viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      advanceUntilIdle()
+      assertEquals(agent, viewModel.state.value.selectedAgent)
+      viewModel.setDraft(draftKey(agent), "old draft")
+      assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
+
+      catalog = listOf(replacement)
+      viewModel.refreshProfile(profile.id)
+      advanceUntilIdle()
+      assertNull(viewModel.state.value.selectedAgent)
+      assertEquals(
+        ConnectionState.Error("Selected session was replaced; select it again"),
+        viewModel.state.value.connection,
+      )
+      assertTrue(viewModel.state.value.stream.entries.isEmpty())
+      assertTrue(viewModel.state.value.conversationTurns.isEmpty())
+      assertNull(viewModel.state.value.drafts[draftKey(replacement)])
+    }
+
+  @Test
+  fun lateSendFailureDoesNotLeakIntoReplacementConversation() =
+    runTest(dispatcher) {
+      val response = CompletableDeferred<Unit>()
+      val transport = sendTransport { _, _, _ -> response.await() }
+      val replacement = agent.copy(nativeSessionRef = "pi:replacement")
+      viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.selectProfile(profile.id)
+      viewModel.selectAgent(agent)
+      viewModel.setDraft(draftKey(agent), "original draft")
+      viewModel.submitPrompt("original draft")
+      runCurrent()
+      viewModel.selectAgent(replacement)
+      viewModel.setDraft(draftKey(replacement), "replacement draft")
+      response.completeExceptionally(IOException("old send response lost"))
+      advanceUntilIdle()
+      assertNull(viewModel.state.value.actionError)
+      assertEquals("original draft", viewModel.state.value.drafts[draftKey(agent)])
+      assertEquals("replacement draft", viewModel.state.value.drafts[draftKey(replacement)])
+      assertNull(viewModel.state.value.promptSends[sendKey(replacement)])
+      assertTrue(
+        viewModel.state.value.promptSends[sendKey(agent)]!!.outcome!!.startsWith("Delivery unknown")
+      )
+    }
+
   private fun savedTarget() =
     SavedStateHandle(
       mapOf(
         ConnectedViewModel.SELECTED_PROFILE to profile.id,
         ConnectedViewModel.SELECTED_MACHINE to machine.toString(),
         ConnectedViewModel.SELECTED_LOCATOR to agent.sessionId,
+        ConnectedViewModel.SELECTED_NATIVE_REF to nativeRef,
       )
     )
 
@@ -1125,9 +1260,9 @@ class ConnectedViewModelTest {
       )
     }
 
-  private fun draftKey(agent: AgentRow) = "${agent.machineId}:${agent.sessionId}"
+  private fun draftKey(agent: AgentRow) = agentDraftKey(agent)
 
-  private fun sendKey(agent: AgentRow) = "${profile.id}:${agent.machineId}:${agent.sessionId}"
+  private fun sendKey(agent: AgentRow) = agentSendKey(profile.id, agent)
 
   private fun sendTransport(send: suspend (String, String, Boolean) -> Unit) =
     object : BridgeTransport {

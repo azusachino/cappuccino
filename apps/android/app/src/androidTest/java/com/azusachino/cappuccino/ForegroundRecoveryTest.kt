@@ -38,7 +38,18 @@ class ForegroundRecoveryTest {
         Endpoint.parse("https://resume.example"),
         machine,
       )
-    val agent = AgentRow(machine, "resume-session", "pane-1", "pi", "pi", "idle", false, null)
+    val agent =
+      AgentRow(
+        machine,
+        "resume-session",
+        "pane-1",
+        "pi",
+        "pi",
+        "idle",
+        false,
+        null,
+        nativeSessionRef = "pi:resume-native",
+      )
     store.save(profile)
     val verifications = CountDownLatch(4)
     val catalogCalls = AtomicInteger()

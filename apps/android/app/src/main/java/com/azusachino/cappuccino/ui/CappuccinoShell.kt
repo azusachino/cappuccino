@@ -104,6 +104,8 @@ import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ConnectionState
 import com.azusachino.cappuccino.io.SessionStats
+import com.azusachino.cappuccino.io.agentDraftKey
+import com.azusachino.cappuccino.io.agentSendKey
 import com.azusachino.cappuccino.io.machineConnection
 import java.time.ZoneId
 import kotlinx.coroutines.launch
@@ -219,7 +221,9 @@ fun CappuccinoScreen(
   val namingProfile = state.profiles.firstOrNull { it.id == namingProfileId } ?: selectedProfile
   var namingMachine by rememberSaveable { mutableStateOf(false) }
   var machineNameDraft by rememberSaveable { mutableStateOf("") }
-  val scopedConversation = selected?.let { state.conversationId ?: it.sessionId }
+  val scopedConversation = selected?.let {
+    state.conversationId ?: it.nativeSessionRef ?: it.sessionId
+  }
   val outputIdentity = Triple(state.activeProfileId, selected?.machineId, scopedConversation)
   val conversationKey = "${state.activeProfileId}|${selected?.machineId}|$scopedConversation"
   val outputStates =
@@ -847,12 +851,9 @@ fun CappuccinoScreen(
               ) {
                 Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
               }
-              val agentDraftKey = "${selected.machineId}:${selected.sessionId}"
-              val sendState =
-                state.promptSends[
-                    "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}"]
-              val composerKey =
-                "${state.activeProfileId}|${selected.machineId}|${selected.sessionId}"
+              val draftKey = agentDraftKey(selected)
+              val sendState = state.promptSends[agentSendKey(state.activeProfileId ?: "", selected)]
+              val composerKey = agentSendKey(state.activeProfileId ?: "", selected)
               if (state.offlineSavedAt == null)
                 composerState.SaveableStateProvider(composerKey) {
                   PromptInputBar(
@@ -880,8 +881,8 @@ fun CappuccinoScreen(
                         state.bridgeDetails[state.activeProfileId]
                           ?.capabilities
                           ?.get("prompt_input") != false,
-                    draft = state.drafts[agentDraftKey] ?: "",
-                    onDraftChange = { text -> actions.setDraft(agentDraftKey, text) },
+                    draft = state.drafts[draftKey] ?: "",
+                    onDraftChange = { text -> actions.setDraft(draftKey, text) },
                   )
                   state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                 }

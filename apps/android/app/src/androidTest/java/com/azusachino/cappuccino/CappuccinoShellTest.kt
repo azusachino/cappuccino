@@ -19,6 +19,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -150,6 +151,55 @@ class CappuccinoShellTest {
     compose.onNodeWithText("Start a new session?").assertIsDisplayed()
     compose.onNode(hasText("New session") and hasClickAction()).performClick()
     assertEquals(listOf("interrupt", "new_session"), actions.controls)
+  }
+
+  @Test
+  fun replacementSessionDoesNotInheritComposerDraftOrCommandConfirmation() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile("replacement", "Synthetic", Endpoint.parse("https://bridge.example"), machine)
+    val agent =
+      AgentRow(
+        machine,
+        "same-locator",
+        "pane",
+        "pi",
+        "pi",
+        "idle",
+        false,
+        null,
+        nativeSessionRef = "pi:original",
+      )
+    val state =
+      mutableStateOf(
+        ConnectedUiState(
+          profiles = listOf(profile),
+          activeProfileId = profile.id,
+          selectedAgent = agent,
+          connection = ConnectionState.Connected,
+        )
+      )
+    compose.activity.runOnUiThread {
+      compose.activity.setContent {
+        CappuccinoTheme { CappuccinoScreen(state.value, StateActions(state)) { _, _ -> } }
+      }
+    }
+    compose.onNodeWithTag("promptInput").performTextInput("/compact")
+    compose.onNodeWithContentDescription("Send").performClick()
+    compose.onNodeWithText("Run /compact?").assertIsDisplayed()
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(selectedAgent = agent.copy(nativeSessionRef = "pi:replacement"))
+    }
+    compose.onNodeWithText("Run /compact?").assertDoesNotExist()
+    assertEquals(
+      "",
+      compose
+        .onNodeWithTag("promptInput")
+        .fetchSemanticsNode()
+        .config[SemanticsProperties.EditableText]
+        .text,
+    )
   }
 
   @Test

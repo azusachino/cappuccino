@@ -1,6 +1,6 @@
 # Bridge and Android reliability: implementation handoff
 
-Date: 2026-10-20. Status: A1 Android checkpoint verified; overall plan incomplete.
+Date: 2026-10-20. Status: A1 and A2 Android checkpoints verified; overall plan incomplete.
 
 ## Owning checkpoint
 
@@ -14,7 +14,8 @@ The owner authorized pi-subagents with `openai-codex/gpt-6-luna` and
 `zai-coding-cn/glm-5.3-flash`, both low thinking. After two unsuccessful shell
 repair passes, the owner explicitly selected parent-led repair. Parent source
 inspection and runtime verification are self-verification, not independent agent
-review. No child is still writing at this checkpoint.
+review. No child is writing this checkout at this checkpoint. A separately approved D1
+runtime spike may own only its task scratch and disposable processes.
 
 ## Delivered slice
 
@@ -65,6 +66,32 @@ Reports are ignored build artifacts under
 Run `make md-check` after documentation-only updates; those do not change the
 source/runtime inputs above. Re-run affected runtime checks after source changes.
 
+## A2 native-session restoration checkpoint
+
+A2 builds on committed A1 `69e8219dd8fb4b5c718cd767a72ca21def2584ca`.
+GLM Flash low bound saved selections to the expected native session reference,
+rejected locator reuse with a different reference, and required explicit
+reselection for legacy saved selections lacking native identity. Draft/send keys
+now include the native reference. No bridge/Apple wire fields changed.
+
+Parent integration also scoped composer saveable state and pre-canonical reader
+identity to the native reference, cancelled obsolete selected-stream work on
+catalog replacement, and prevented an old send failure from appearing on the
+replacement's conversation. New tests cover late-send isolation and a replacement
+not inheriting the previous editor or slash-command confirmation. The latter
+initially failed only because an empty editor's placeholder participated in a
+text assertion; the final assertion checks actual `EditableText` instead.
+
+The same parent-run format/check/validate/UI chain listed above passed again on
+the A2 source checkpoint. Connected XML: 51 tests, zero failures/errors/skips,
+timestamp `2026-10-20T11:54:41`. This is synthetic Android verification, not atomic
+server-side fencing. For old bridges emitting no native reference, live catalog
+refresh still cannot distinguish two null references; restored selections fail
+closed, while a manually selected live view retains that compatibility limit.
+Native references are opaque reported-reference hashes, not canonical IDs or
+proof that a provider reused neither a file nor its contents. A3 remains required
+for mutation ownership at the authority.
+
 ## Earlier failures and disposition
 
 Parent's initial candidate run had 50 tests and three failures: repeated
@@ -90,9 +117,13 @@ acceptance therefore depends on D1 same-process observation. Preserve human
 pre-compaction history; never label last-append ancestry as proven current.
 No runtime leaf journey or integration was executed.
 
-Next: A2 restored native-session identity, followed by the other dependency-ready
-[plan slices](bridge-android-reliability-plan.md). A3, B2 and C1–F2 are not delivered
-by this checkpoint. Typed receipts, stop/queue semantics, approval gates,
+Next: dependency-ready bridge transport hardening from the
+[plan](bridge-android-reliability-plan.md). A3, B2 and C1–F2 are not delivered by
+this checkpoint. The owner separately approved a disposable D1 runtime spike with
+synthetic data and scoped files, no owner session/global integration/credentials,
+and explicitly retained native Pi admission as #8's receipt bar. D1 source-only
+findings and parent corrections are recorded in the research. Do not downgrade
+that bar to adapter dispatch. Typed receipts, stop/queue semantics, approval gates,
 monitoring lifetime and optional Telegram retain their decision/approval gates.
 
 At resume, compare owning branch/full commit, inspect current issue acceptance

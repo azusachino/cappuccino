@@ -35,9 +35,10 @@ reconcile their older terminology and acceptance with current intent first.
 The initial document was planning, not implementation or deployment approval.
 The owner subsequently authorized bounded implementation with Pi subagents;
 [the implementation handoff](design/bridge-android-reliability-handoff.md) records
-the verified A1 Android checkpoint, B1 findings and the remaining slices. The
-Android journey passes 50 synthetic tests; existing live-agent and physical-device
-limits remain. A2 session-identity restoration is the next implementation slice.
+the verified A1/A2 Android checkpoints, B1 findings and remaining slices. The
+latest Android journey passes 51 synthetic tests; existing live-agent and
+physical-device limits remain. Bridge transport hardening is next while the
+separately approved disposable D1 spike investigates the same-process read seam.
 
 ## Next steps
 

@@ -44,6 +44,16 @@ fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnecti
 
 data class PromptSendState(val text: String, val outcome: String? = null)
 
+/**
+ * Drafts bind to the native session so a replacement occupant of the same locator never inherits
+ * one.
+ */
+internal fun agentDraftKey(agent: AgentRow): String =
+  "${agent.machineId}:${agent.sessionId}:${agent.nativeSessionRef}"
+
+internal fun agentSendKey(profileId: String, agent: AgentRow): String =
+  "$profileId:${agentDraftKey(agent)}"
+
 data class ConnectedUiState(
   val profiles: List<MachineProfile> = emptyList(),
   val bridgeDetails: Map<String, BridgeDetails> = emptyMap(),
@@ -492,18 +502,41 @@ internal constructor(
           mutableState.value.offlineSavedAt != null
       )
         return
-      val selected =
-        mutableState.value.selectedAgent?.let { old ->
-          agents.firstOrNull { it.machineId == old.machineId && it.sessionId == old.sessionId }
+      val old = mutableState.value.selectedAgent
+      val selected = old?.let { target ->
+        agents.firstOrNull {
+          it.machineId == target.machineId &&
+            it.sessionId == target.sessionId &&
+            // A reused locator with a different native session is a replacement.
+            it.nativeSessionRef == target.nativeSessionRef
         }
+      }
+      val replacedLocators =
+        old != null &&
+          selected == null &&
+          agents.any { it.machineId == old.machineId && it.sessionId == old.sessionId }
+      if (replacedLocators) {
+        cancelOwnedWork()
+        clearSavedSelection()
+      }
       mutableState.value =
         mutableState.value.copy(
           agents = agents,
           selectedAgent = selected,
           connection =
-            if (mutableState.value.selectedAgent == null) ConnectionState.Connected
-            else mutableState.value.connection,
+            when {
+              replacedLocators ->
+                ConnectionState.Error("Selected session was replaced; select it again")
+              old == null -> ConnectionState.Connected
+              else -> mutableState.value.connection
+            },
           busy = false,
+          stream = if (replacedLocators) StreamState() else mutableState.value.stream,
+          conversationTurns =
+            if (replacedLocators) emptyList() else mutableState.value.conversationTurns,
+          conversationSource =
+            if (replacedLocators) null else mutableState.value.conversationSource,
+          sessionStats = if (replacedLocators) null else mutableState.value.sessionStats,
         )
     } catch (error: Exception) {
       if (error is kotlinx.coroutines.CancellationException) throw error
@@ -549,6 +582,7 @@ internal constructor(
       savedStateHandle[SELECTED_PROFILE] = profile?.id
       savedStateHandle[SELECTED_MACHINE] = agent.machineId.toString()
       savedStateHandle[SELECTED_LOCATOR] = agent.sessionId
+      savedStateHandle[SELECTED_NATIVE_REF] = agent.nativeSessionRef
       pendingRestore = true
     }
     if (foreground && agent != null && profile != null) {
@@ -667,12 +701,12 @@ internal constructor(
     if (mutableState.value.offlineSavedAt != null) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
-    val key = "${profile.id}:${agent.machineId}:${agent.sessionId}"
+    val key = agentSendKey(profile.id, agent)
     if (
       mutableState.value.promptSends[key]?.outcome == null && key in mutableState.value.promptSends
     )
       return
-    val draftKey = "${agent.machineId}:${agent.sessionId}"
+    val draftKey = agentDraftKey(agent)
     val submittedDraft = mutableState.value.drafts[draftKey].orEmpty()
     updatePromptSend(key, PromptSendState(text))
     val client = bridgeFor(profile.endpoint)
@@ -698,7 +732,8 @@ internal constructor(
           if (currentDraft == submittedDraft) setDraft(draftKey, text)
           if (
             mutableState.value.activeProfileId == profile.id &&
-              mutableState.value.selectedAgent?.sessionId == agent.sessionId
+              mutableState.value.selectedAgent?.sessionId == agent.sessionId &&
+              mutableState.value.selectedAgent?.nativeSessionRef == agent.nativeSessionRef
           )
             mutableState.value = mutableState.value.copy(actionError = error.message ?: outcome)
         }
@@ -906,9 +941,15 @@ internal constructor(
         runCatching { UUID.fromString(it) }.getOrNull()
       }
     val locator = savedStateHandle.get<String>(SELECTED_LOCATOR)
+    val nativeRef = savedStateHandle.get<String>(SELECTED_NATIVE_REF)
     val profile = mutableState.value.profiles.firstOrNull { it.id == profileId }
     if (profile == null || profile.machineId != machineId || locator.isNullOrBlank()) {
       clearRestoredSelection("Saved agent selection is no longer available")
+      return
+    }
+    // A saved selection without native identity cannot be matched safely; never guess.
+    if (nativeRef.isNullOrBlank()) {
+      clearRestoredSelection("Saved selection must be selected again")
       return
     }
     epoch++
@@ -932,7 +973,9 @@ internal constructor(
               mutableState.value.machines +
                 (profile.id to MachineConnection(ConnectionState.Connected, agents))
           )
-        val match = agents.firstOrNull { it.machineId == machineId && it.sessionId == locator }
+        val match = agents.firstOrNull {
+          it.machineId == machineId && it.sessionId == locator && it.nativeSessionRef == nativeRef
+        }
         if (match == null) {
           mutableState.value = mutableState.value.copy(agents = agents)
           clearRestoredSelection("Saved agent is missing or has changed")
@@ -968,6 +1011,7 @@ internal constructor(
     savedStateHandle[SELECTED_PROFILE] = null
     savedStateHandle[SELECTED_MACHINE] = null
     savedStateHandle[SELECTED_LOCATOR] = null
+    savedStateHandle[SELECTED_NATIVE_REF] = null
     pendingRestore = false
   }
 
@@ -1018,6 +1062,7 @@ internal constructor(
     const val SELECTED_PROFILE = "selected_profile_id"
     const val SELECTED_MACHINE = "selected_machine_id"
     const val SELECTED_LOCATOR = "selected_agent_locator"
+    const val SELECTED_NATIVE_REF = "selected_agent_native_ref"
     const val RESTORE_PENDING = "selection_restore_pending"
   }
 

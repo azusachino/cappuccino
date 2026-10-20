@@ -239,6 +239,40 @@ proof of an incomplete record.
 This follow-up ran no agent, integration reload or runtime branch journey. B1's
 source investigation is complete; B2 runtime correctness remains unverified.
 
+## D1 follow-up: installed extension API boundary
+
+The authorized Luna 6 low source scout returned a feasibility matrix, not a
+runtime proof. Parent inspection corrected two omissions using installed Pi
+1.3.0's `dist/core/extensions/types.d.ts` and `dist/core/session-manager.d.ts`:
+
+- The installed package does ship extension declarations under `dist/core`, not
+  the scout's guessed `dist/extensions` location.
+- `ExtensionContext.abort(): void` and `hasPendingMessages(): boolean` are public.
+  They expose interruption and queue presence, not an acknowledged settled stop,
+  a queue listing, selective withdrawal or a general clear-queue operation.
+- Public `ExtensionAPI.sendUserMessage(...): void` selects steer/follow-up but
+  returns no started/queued/handled disposition. `ReplacedSessionContext` has a
+  promise-returning send method, but that is a special post-replacement context,
+  not permission to replace an existing session to obtain a convenient API.
+- The read-only session manager exposes identity, leaf and branch getters. A
+  synchronous observation inside one extension callback is a candidate consistent
+  read; test its lifecycle/race behavior rather than claim either a documented
+  transactional snapshot or an unavoidable race without evidence.
+
+A private extension-owned local channel is a design option, not an existing RPC
+attachment endpoint. First prove identity/leaf observation in a separately
+approved disposable TUI with synthetic data and scoped integration files. Keep
+owner processes and installed global integrations untouched. The existing no-auth
+phone bridge remains loopback/private-tailnet only; any local capability is a
+separate machine-local channel decision, not silent app-level authentication.
+
+Do not promise D2 receipts or D3 queue withdrawal from these declarations. A
+bounded adapter admission receipt is different from native Pi acceptance; a
+durable adapter journal cannot remove a crash gap around a non-idempotent send.
+Owner reconciliation of issue #8 and proof of the required native operations
+remain prerequisites for the corresponding write/control slices. No runtime
+spike, integration reload or API mutation was performed for this follow-up.
+
 ## Priority and limits
 
 1. Correct conversation identity/history and recoverable sending.
