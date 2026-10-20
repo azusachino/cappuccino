@@ -160,11 +160,16 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
             return;
         }
     };
-    let initial_branch = herdr::agent_get(&session)
-        .await
-        .ok()
-        .and_then(|info| info["agent"]["cwd"].as_str().map(str::to_string))
-        .and_then(|cwd| agents::own_branch(&cwd).branch);
+    let initial_branch = match herdr::agent_get(&session).await {
+        Ok(info) => info["agent"]["cwd"]
+            .as_str()
+            .map(|cwd| agents::own_branch(cwd).branch)
+            .unwrap_or(None),
+        Err(_) => {
+            send_stream_unavailable(&mut socket).await;
+            return;
+        }
+    };
     let mut ring = reconcile::StreamRing::new(initial_branch);
     let mut generation = ring.generation;
     let mut last_status: Option<(String, Option<String>)> = None;
@@ -206,24 +211,30 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
         }
         let text = match herdr::pane_read_recent(&pane_id, 2000).await {
             Ok(text) => text,
-            Err(_) => continue,
+            Err(_) => {
+                send_stream_unavailable(&mut socket).await;
+                return;
+            }
         };
         let mut lines: Vec<String> = text.lines().map(|line| line.to_string()).collect();
         while lines.last().is_some_and(|last| last.is_empty()) {
             lines.pop();
         }
-        let agent = herdr::agent_get(&session).await.ok();
-        if let Some(cwd) = agent
-            .as_ref()
-            .and_then(|info| info["agent"]["cwd"].as_str())
-        {
+        let agent = match herdr::agent_get(&session).await {
+            Ok(agent) => agent,
+            Err(_) => {
+                send_stream_unavailable(&mut socket).await;
+                return;
+            }
+        };
+        if let Some(cwd) = agent["agent"]["cwd"].as_str() {
             let branch = agents::own_branch(cwd).branch;
             ring.set_branch(branch);
         }
-        let current_status_str = agent
-            .as_ref()
-            .and_then(|info| info["agent"]["agent_status"].as_str())
-            .unwrap_or("idle");
+        let Some(current_status_str) = agent["agent"]["agent_status"].as_str() else {
+            send_stream_unavailable(&mut socket).await;
+            return;
+        };
         let working = current_status_str == "working";
 
         // Extract detail line if available (e.g. running command or thinking detail)
@@ -333,6 +344,21 @@ fn claimed(pane_id: &str, prompt_id: &str) -> Option<Response> {
             "this prompt was already answered",
         )
     })
+}
+
+async fn send_stream_unavailable(socket: &mut WebSocket) {
+    let _ = socket
+        .send(Message::Text(
+            json!({
+                "event": "error",
+                "code": "upstream_unavailable",
+                "message": "The agent stream source is temporarily unavailable.",
+            })
+            .to_string()
+            .into(),
+        ))
+        .await;
+    let _ = socket.send(Message::Close(None)).await;
 }
 
 async fn resolve_pane(state: &Arc<BridgeState>, session: &str) -> Option<String> {

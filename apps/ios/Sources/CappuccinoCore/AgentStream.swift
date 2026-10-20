@@ -256,17 +256,34 @@ extension BridgeClient {
     session: String,
     connector: BridgeWebSocketConnecting = URLSessionWebSocketConnector()
   ) -> AsyncThrowingStream<AgentStreamEvent, Error> {
-    AsyncThrowingStream { continuation in
+    AsyncThrowingStream(bufferingPolicy: .bufferingOldest(64)) { continuation in
       let task = Task {
         do {
           let endpoint = try BridgeStream.endpointURL(from: url, session: session)
           let socket = try await connector.connect(url: endpoint)
           defer { socket.closeImmediately() }
-          while true {
-            guard let text = try await socket.receiveText() else {
-              throw BridgeError.unreachable("bridge closed the stream")
+          try await withTaskCancellationHandler {
+            while true {
+              try Task.checkCancellation()
+              guard let text = try await socket.receiveText() else {
+                throw BridgeError.unreachable("bridge closed the stream")
+              }
+              let event = try parseStreamFrame(text)
+              // Error envelopes are terminal for this socket, even if the model retries.
+              if case .error = event { socket.closeImmediately() }
+              switch continuation.yield(event) {
+              case .dropped: throw BridgeError.streamOverflow
+              case .terminated: return
+              case .enqueued: break
+              @unknown default: throw BridgeError.protocolError("Unknown stream buffer result")
+              }
+              if case .error = event {
+                continuation.finish()
+                return
+              }
             }
-            continuation.yield(try parseStreamFrame(text))
+          } onCancel: {
+            socket.closeImmediately()
           }
         } catch {
           continuation.finish(throwing: error)

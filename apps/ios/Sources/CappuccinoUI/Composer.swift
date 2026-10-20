@@ -18,6 +18,7 @@ import SwiftUI
     GlassGroup {
       VStack(alignment: .leading, spacing: 8) {
         TextField("Message \(agentName)…", text: $draft, axis: .vertical)
+          .disabled(!session.isLive)
           .lineLimit(1...6)
           .padding(12)
           .accessibilityIdentifier("promptInput")
@@ -57,7 +58,8 @@ import SwiftUI
           }
           .glassProminentButton()
           .disabled(
-            session.selectedAgent == nil
+            !session.isLive
+              || session.selectedAgent == nil
               || session.capabilities?["prompt_input"] == false
               || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
           )

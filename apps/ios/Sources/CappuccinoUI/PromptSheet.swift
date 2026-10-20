@@ -8,7 +8,7 @@ struct PromptSheet: View {
   let prompt: PromptCard
 
   var body: some View {
-    let answersEnabled = session.capabilities?["prompt_answers"] != false
+    let answersEnabled = session.isLive && session.capabilities?["prompt_answers"] != false
     NavigationStack {
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {

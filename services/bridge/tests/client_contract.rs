@@ -68,6 +68,7 @@ struct MockAgent {
     status: String,
     screen: String,
     requests: Vec<Value>,
+    responses: std::collections::HashMap<String, Value>,
 }
 
 impl Default for MockAgent {
@@ -77,6 +78,7 @@ impl Default for MockAgent {
             status: "idle".to_string(),
             screen: "alpha line\nbeta line\n".to_string(),
             requests: Vec::new(),
+            responses: std::collections::HashMap::new(),
         }
     }
 }
@@ -142,6 +144,14 @@ impl MockHerdr {
 
     fn set_screen(&self, screen: &str) {
         self.agent.lock().unwrap().screen = screen.to_string();
+    }
+
+    fn set_response(&self, method: &str, response: Value) {
+        self.agent
+            .lock()
+            .unwrap()
+            .responses
+            .insert(method.to_string(), response);
     }
 
     /// Keys and text sent to the pane, in order: `["2"]`, `"a bird"`, …
@@ -213,13 +223,17 @@ async fn handle_mock_connection(
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_default();
     let session_value = agent_session.lock().unwrap().clone();
-    let (kind, status, screen) = {
+    let (kind, status, screen, injected) = {
         let mut agent = agent.lock().unwrap();
         agent.requests.push(request.clone());
         (
             agent.kind.clone(),
             agent.status.clone(),
             agent.screen.clone(),
+            agent
+                .responses
+                .get(request["method"].as_str().unwrap_or(""))
+                .cloned(),
         )
     };
     let agent_session_json = match session_value {
@@ -249,7 +263,8 @@ async fn handle_mock_connection(
         "pane.read" => json!({"read": {"text": screen}}),
         _ => json!({}),
     };
-    let response = json!({"id": request["id"], "result": result});
+    let mut response = injected.unwrap_or_else(|| json!({"result": result}));
+    response["id"] = request["id"].clone();
     let mut payload = serde_json::to_vec(&response).unwrap();
     payload.push(b'\n');
     let _ = writer.write_all(&payload).await;
@@ -1137,6 +1152,108 @@ async fn ws_stream_open_generation_then_entries() {
     bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();
+}
+
+async fn next_source_event(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+) -> Option<Value> {
+    use futures_util::StreamExt;
+    use tokio_tungstenite::tungstenite::Message;
+    match tokio::time::timeout(TIMEOUT, socket.next())
+        .await
+        .expect("bounded WS event")
+    {
+        Some(Ok(Message::Text(text))) => Some(serde_json::from_str(text.as_str()).unwrap()),
+        Some(Ok(Message::Close(_))) | None => None,
+        other => panic!("unexpected WS event: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn upstream_failure_after_prompt_reports_error_and_closes_without_idle() {
+    for method in ["pane.read", "agent.get"] {
+        let root = TempRoot::new("wsfault");
+        let herdr = MockHerdr::start(&root);
+        herdr.set_screen("Approve tool call: run_command\n$ synthetic-command\n1. Allow once\n2. Allow always\n3. Reject\n");
+        let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+        let tcp = tokio::net::TcpStream::connect(("127.0.0.1", bridge.port))
+            .await
+            .unwrap();
+        let url = format!("ws://127.0.0.1:{}/api/stream?session=s-probe", bridge.port);
+        let (mut socket, _) = tokio_tungstenite::client_async_with_config(url, tcp, None)
+            .await
+            .unwrap();
+        loop {
+            let event = next_source_event(&mut socket)
+                .await
+                .expect("prompt arrives");
+            if event["event"] == "prompt_request" {
+                break;
+            }
+        }
+        herdr.set_response(
+            method,
+            json!({"error": {"code": "private_source", "message": "PRIVATE_SENTINEL"}}),
+        );
+        let mut saw_error = false;
+        while let Some(event) = next_source_event(&mut socket).await {
+            assert!(!saw_error, "no events after source error: {event}");
+            assert_ne!(
+                event["event"], "prompt_resolved",
+                "an outage is not a resolved prompt"
+            );
+            if event["event"] == "agent_status" {
+                assert_ne!(event["state"], "idle");
+            }
+            if event["event"] == "error" {
+                assert_eq!(event["code"], "upstream_unavailable");
+                assert!(!event.to_string().contains("PRIVATE_SENTINEL"));
+                saw_error = true;
+            }
+        }
+        assert!(saw_error, "source failure must be visible for {method}");
+        drop(socket);
+        bridge.stop().expect("bridge stop");
+        herdr.stop().await;
+        root.remove();
+    }
+}
+
+#[tokio::test]
+async fn unavailable_or_malformed_initial_status_never_becomes_idle() {
+    for response in [
+        json!({"error": {"code": "unavailable", "message": "PRIVATE_SENTINEL"}}),
+        json!({"result": {"agent": {}}}),
+        json!({"result": {"agent": {"agent_status": 42}}}),
+    ] {
+        let root = TempRoot::new("wsstate");
+        let herdr = MockHerdr::start(&root);
+        herdr.set_response("agent.get", response);
+        let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+        let tcp = tokio::net::TcpStream::connect(("127.0.0.1", bridge.port))
+            .await
+            .unwrap();
+        let url = format!("ws://127.0.0.1:{}/api/stream?session=s-probe", bridge.port);
+        let (mut socket, _) = tokio_tungstenite::client_async_with_config(url, tcp, None)
+            .await
+            .unwrap();
+        let mut saw_error = false;
+        while let Some(event) = next_source_event(&mut socket).await {
+            assert!(!saw_error, "no events after source error: {event}");
+            assert_ne!(event["event"], "agent_status");
+            assert_ne!(event["event"], "entries");
+            if event["event"] == "error" {
+                assert_eq!(event["code"], "upstream_unavailable");
+                assert!(!event.to_string().contains("PRIVATE_SENTINEL"));
+                saw_error = true;
+            }
+        }
+        assert!(saw_error);
+        drop(socket);
+        bridge.stop().expect("bridge stop");
+        herdr.stop().await;
+        root.remove();
+    }
 }
 
 /// Branch change must surface as stream_reset with an increased generation.

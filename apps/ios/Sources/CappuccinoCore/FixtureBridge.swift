@@ -69,7 +69,8 @@ extension FixtureBridge: AgentSessionServing {
     AsyncThrowingStream { continuation in
       continuation.yield(.open(sessionID: Self.sessionID, generation: 0))
       continuation.yield(.agentStatus(sessionID: Self.sessionID, state: "idle", detail: nil))
-      continuation.finish()
+      // This preview models an attached, idle agent, not an ended stream. Cancellation of
+      // the consuming session ends the stream; no socket or producer task is retained here.
     }
   }
 

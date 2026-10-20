@@ -4,6 +4,8 @@ import androidx.lifecycle.SavedStateHandle
 import com.azusachino.cappuccino.core.AgentRow
 import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.Endpoint
+import com.azusachino.cappuccino.core.PromptCard
+import com.azusachino.cappuccino.core.PromptOption
 import com.azusachino.cappuccino.core.StreamEntry
 import com.azusachino.cappuccino.core.StreamEvent
 import java.io.IOException
@@ -153,6 +155,22 @@ class ConnectedViewModelTest {
             attempts++
             try {
               emit(StreamEvent.Open(session, 1))
+              emit(StreamEvent.AgentStatus(session, "working", "Old detail"))
+              emit(
+                StreamEvent.PromptRequest(
+                  session,
+                  PromptCard(
+                    "p-1",
+                    "approval",
+                    "Approve?",
+                    null,
+                    null,
+                    null,
+                    listOf(PromptOption("a", "Yes", null)),
+                    0,
+                  ),
+                )
+              )
               emit(StreamEvent.Error("not_found", "gone"))
               kotlinx.coroutines.awaitCancellation()
             } finally {
@@ -168,7 +186,252 @@ class ConnectedViewModelTest {
       assertEquals(1, attempts)
       assertTrue(viewModel.state.value.connection is ConnectionState.Error)
       assertEquals("not_found: gone", viewModel.state.value.stream.error)
+      assertNull(viewModel.state.value.stream.pendingPrompt)
+      assertNull(viewModel.state.value.stream.agentStatusDetail)
+      assertFalse(viewModel.state.value.streamLive)
       assertTrue(cancelled)
+    }
+
+  @Test
+  fun upstreamUnavailableRetriesWithinBudgetClearsStalePromptAndRequiresFreshStatus() =
+    runTest(dispatcher) {
+      var attempts = 0
+      val delays = mutableListOf<Long>()
+      viewModel =
+        createViewModel(
+          pause = { delays += it },
+          streamFactory = { session ->
+            flow {
+              attempts++
+              emit(StreamEvent.Open(session, attempts.toLong()))
+              if (attempts == 1) {
+                emit(
+                  StreamEvent.PromptRequest(
+                    session,
+                    PromptCard(
+                      "p-1",
+                      "approval",
+                      "Approve?",
+                      null,
+                      null,
+                      null,
+                      listOf(PromptOption("a", "Yes", null)),
+                      0,
+                    ),
+                  )
+                )
+                emit(
+                  StreamEvent.Error(
+                    "upstream_unavailable",
+                    "The agent stream source is temporarily unavailable.",
+                  )
+                )
+              } else {
+                emit(StreamEvent.AgentStatus(session, "idle", null))
+              }
+              kotlinx.coroutines.awaitCancellation()
+            }
+          },
+        )
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      runCurrent()
+      advanceUntilIdle()
+      // One bounded retry; the stale approval card does not survive source loss.
+      assertEquals(2, attempts)
+      assertEquals(listOf(1_000L), delays)
+      assertNull(viewModel.state.value.stream.pendingPrompt)
+      assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
+      // The reopened stream is live only after its fresh authoritative agent_status.
+      assertTrue(viewModel.state.value.streamLive)
+      assertTrue(viewModel.state.value.stream.pendingPrompt == null)
+    }
+
+  @Test
+  fun replacedIdentityOnReconnectFailsClosedWithoutAttaching() =
+    runTest(dispatcher) {
+      val replacement = agent.copy(nativeSessionRef = "pi:replaced")
+      var catalogAgent = agent
+      var streamAttempts = 0
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID = machine
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(catalogAgent)
+
+          override fun stream(sessionId: String): Flow<StreamEvent> = flow {
+            streamAttempts++
+            emit(StreamEvent.Open(sessionId, 1))
+            emit(StreamEvent.AgentStatus(sessionId, "working", null))
+            catalogAgent = replacement
+            throw IOException("source lost before locator reuse")
+          }
+        }
+      viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      advanceUntilIdle()
+      // The first binding was valid. Its replacement must never receive the reconnect.
+      assertEquals(1, streamAttempts)
+      assertNull(viewModel.state.value.selectedAgent)
+      assertEquals(
+        ConnectionState.Error("Selected session is missing or has changed; select it again"),
+        viewModel.state.value.connection,
+      )
+      assertTrue(viewModel.state.value.stream.pendingPrompt == null)
+    }
+
+  @Test
+  fun missingNativeIdentityAllowsManualViewButNeverAutomaticRecovery() =
+    runTest(dispatcher) {
+      val legacy = agent.copy(nativeSessionRef = null)
+      var streamAttempts = 0
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID = machine
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(legacy)
+
+          override fun stream(sessionId: String): Flow<StreamEvent> = flow {
+            streamAttempts++
+            emit(StreamEvent.Open(sessionId, 1))
+            emit(StreamEvent.AgentStatus(sessionId, "idle", null))
+            emit(
+              StreamEvent.Entries(listOf(StreamEntry("legacy", 1, "text", "Legacy output", null)))
+            )
+            throw IOException("source lost")
+          }
+        }
+      viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(legacy)
+      advanceUntilIdle()
+      // Explicit legacy reading remains compatible; null refs cannot prove a safe reconnect.
+      assertEquals(1, streamAttempts)
+      assertEquals("Legacy output", viewModel.state.value.stream.entries.single().text)
+      assertFalse(viewModel.state.value.streamLive)
+      assertEquals(legacy, viewModel.state.value.selectedAgent)
+      assertEquals(
+        ConnectionState.Error("Selected session has no verified native identity; select it again"),
+        viewModel.state.value.connection,
+      )
+      viewModel.submitPrompt("must not transmit")
+      advanceUntilIdle()
+      assertTrue(viewModel.state.value.promptSends.isEmpty())
+    }
+
+  @Test
+  fun legacyForegroundRecoveryRequiresExplicitReselection() =
+    runTest(dispatcher) {
+      val legacy = agent.copy(nativeSessionRef = null)
+      var attempts = 0
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID = machine
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(legacy)
+
+          override fun stream(sessionId: String): Flow<StreamEvent> = flow {
+            attempts++
+            emit(StreamEvent.Open(sessionId, 1))
+            emit(StreamEvent.AgentStatus(sessionId, "idle", null))
+            kotlinx.coroutines.awaitCancellation()
+          }
+        }
+      viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.setForeground(true)
+      advanceUntilIdle()
+      viewModel.selectAgent(legacy)
+      runCurrent()
+      assertEquals(1, attempts)
+      assertTrue(viewModel.state.value.streamLive)
+      viewModel.setForeground(false)
+      viewModel.setForeground(true)
+      advanceUntilIdle()
+      assertEquals(1, attempts)
+      assertFalse(viewModel.state.value.streamLive)
+      assertTrue(viewModel.state.value.connection is ConnectionState.Error)
+      viewModel.selectAgent(legacy)
+      runCurrent()
+      assertEquals(2, attempts)
+      assertTrue(viewModel.state.value.streamLive)
+    }
+
+  @Test
+  fun protocolAndTlsLossClearStaleActionsWithoutRetry() =
+    runTest(dispatcher) {
+      for (failure in
+        listOf(
+          com.azusachino.cappuccino.core.ProtocolException("Malformed stream"),
+          javax.net.ssl.SSLException("TLS failure"),
+        )) {
+        var attempts = 0
+        viewModel =
+          createViewModel({ error("Terminal failure must not retry") }) { session ->
+            flow {
+              attempts++
+              emit(StreamEvent.Open(session, 1))
+              emit(StreamEvent.AgentStatus(session, "working", "Old detail"))
+              emit(
+                StreamEvent.PromptRequest(
+                  session,
+                  PromptCard(
+                    "p-1",
+                    "approval",
+                    "Approve?",
+                    null,
+                    null,
+                    null,
+                    listOf(PromptOption("a", "Yes", null)),
+                    0,
+                  ),
+                )
+              )
+              throw failure
+            }
+          }
+        viewModel.setForeground(true)
+        advanceUntilIdle()
+        viewModel.selectAgent(agent)
+        advanceUntilIdle()
+        assertEquals(1, attempts)
+        assertTrue(viewModel.state.value.connection is ConnectionState.Error)
+        assertFalse(viewModel.state.value.streamLive)
+        assertNull(viewModel.state.value.stream.pendingPrompt)
+        assertNull(viewModel.state.value.stream.agentStatusDetail)
+        viewModel.submitPrompt("stale callback")
+        assertTrue(viewModel.state.value.promptSends.isEmpty())
+        viewModel.setForeground(false)
+      }
+    }
+
+  @Test
+  fun actionsStayDisabledUntilAFreshAgentStatusBaseline() =
+    runTest(dispatcher) {
+      val events = MutableSharedFlow<StreamEvent>()
+      viewModel = createViewModel({}, streamFactory = { events })
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      advanceUntilIdle()
+      events.emit(StreamEvent.Open(agent.sessionId, 1))
+      runCurrent()
+      // stream_open is transport: the machine shows Connected but actions must not enable.
+      assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
+      assertFalse(viewModel.state.value.streamLive)
+      viewModel.submitPrompt("before baseline")
+      advanceUntilIdle()
+      assertTrue(viewModel.state.value.promptSends.isEmpty())
+      events.emit(StreamEvent.AgentStatus(agent.sessionId, "idle", null))
+      runCurrent()
+      assertTrue(viewModel.state.value.streamLive)
     }
 
   @Test
@@ -240,6 +503,10 @@ class ConnectedViewModelTest {
             override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
 
             override fun stream(sessionId: String): Flow<StreamEvent> = flow {
+              // Truthful connection: transport open, then the fresh agent_status baseline that
+              // enables actions; stream_open alone is not live state.
+              emit(StreamEvent.Open(sessionId, 1))
+              emit(StreamEvent.AgentStatus(sessionId, "idle", null))
               kotlinx.coroutines.awaitCancellation()
             }
 
@@ -674,8 +941,9 @@ class ConnectedViewModelTest {
       assertEquals(0, verifications)
       viewModel.setForeground(true)
       advanceUntilIdle()
+      // Restore verifies once; each stream attach re-verifies machine and catalog before opening.
       assertEquals(2, verifications)
-      assertEquals(1, catalogs)
+      assertEquals(2, catalogs)
       assertEquals(agent, viewModel.state.value.selectedAgent)
       viewModel.setForeground(false)
       val second = ConnectedViewModel(store, { transport }, {}, handle)
@@ -684,7 +952,7 @@ class ConnectedViewModelTest {
       second.setForeground(true)
       advanceUntilIdle()
       assertEquals(4, verifications)
-      assertEquals(2, catalogs)
+      assertEquals(4, catalogs)
       assertEquals(agent, second.state.value.selectedAgent)
       assertTrue(streams >= 2)
     }
@@ -786,8 +1054,10 @@ class ConnectedViewModelTest {
       val transport = sendTransport { _, _, _ -> response.await() }
       val replacement = agent.copy(nativeSessionRef = "pi:replacement")
       viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.setForeground(true)
       viewModel.selectProfile(profile.id)
       viewModel.selectAgent(agent)
+      runCurrent()
       viewModel.setDraft(draftKey(agent), "original draft")
       viewModel.submitPrompt("original draft")
       runCurrent()
@@ -848,6 +1118,48 @@ class ConnectedViewModelTest {
       advanceUntilIdle()
       assertEquals("Owner name", viewModel.state.value.profiles.single().label)
       assertEquals(profile.machineId, store.read().single().machineId)
+    }
+
+  @Test
+  fun canonicalRefreshBurstCoalescesWithoutHidingSourceLossOrFinalUpdate() =
+    runTest(dispatcher) {
+      val events = MutableSharedFlow<StreamEvent>()
+      val firstRead = CompletableDeferred<Unit>()
+      val retry = CompletableDeferred<Unit>()
+      var reads = 0
+      viewModel =
+        createViewModel(
+          pause = { retry.await() },
+          conversationFactory = {
+            reads++
+            if (reads == 1) firstRead.await()
+            listOf(
+              ConversationTurn("settled-$reads", "assistant", null, "Settled $reads", emptyList())
+            )
+          },
+          streamFactory = { events },
+        )
+      viewModel.setForeground(true)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      runCurrent()
+      assertEquals(1, reads)
+      events.emit(StreamEvent.Open(agent.sessionId, 1))
+      events.emit(StreamEvent.AgentStatus(agent.sessionId, "working", null))
+      repeat(20) { viewModel.loadConversation() }
+      runCurrent()
+      assertEquals(1, reads)
+      events.emit(StreamEvent.Error("upstream_unavailable", "Source unavailable"))
+      runCurrent()
+      assertEquals(ConnectionState.Recovering, viewModel.state.value.connection)
+      assertFalse(viewModel.state.value.streamLive)
+      firstRead.complete(Unit)
+      advanceUntilIdle()
+      assertEquals(2, reads)
+      assertEquals("Settled 2", viewModel.state.value.conversationTurns.single().text)
+      assertEquals(ConnectionState.Recovering, viewModel.state.value.connection)
+      assertFalse(viewModel.state.value.streamLive)
+      assertTrue(viewModel.state.value.stream.error!!.contains("upstream_unavailable"))
     }
 
   @Test
@@ -1149,8 +1461,10 @@ class ConnectedViewModelTest {
       val response = CompletableDeferred<Unit>()
       val transport = sendTransport { _, _, _ -> response.await() }
       viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.setForeground(true)
       viewModel.selectProfile(profile.id)
       viewModel.selectAgent(agent)
+      runCurrent() // Establish the fresh status baseline before exercising sending.
       val key = draftKey(agent)
       viewModel.setDraft(key, "my draft text")
 
@@ -1176,8 +1490,10 @@ class ConnectedViewModelTest {
         response.await()
       }
       viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.setForeground(true)
       viewModel.selectProfile(profile.id)
       viewModel.selectAgent(agent)
+      runCurrent()
       val draftKey = draftKey(agent)
       viewModel.setDraft(draftKey, "first")
       viewModel.submitPrompt("first")
@@ -1202,8 +1518,10 @@ class ConnectedViewModelTest {
         throw IOException("response lost")
       }
       viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.setForeground(true)
       viewModel.selectProfile(profile.id)
       viewModel.selectAgent(agent)
+      runCurrent()
       val draftKey = draftKey(agent)
       viewModel.setDraft(draftKey, "prompt")
       viewModel.submitPrompt("prompt")
@@ -1222,11 +1540,14 @@ class ConnectedViewModelTest {
     runTest(dispatcher) {
       val response = CompletableDeferred<Unit>()
       var attempts = 0
-      val transport = sendTransport { _, _, _ -> if (attempts++ == 0) response.await() }
       val other = agent.copy(sessionId = "other", paneId = "other-pane")
+      val transport =
+        sendTransport(listOf(agent, other)) { _, _, _ -> if (attempts++ == 0) response.await() }
       viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.setForeground(true)
       viewModel.selectProfile(profile.id)
       viewModel.selectAgent(agent)
+      runCurrent()
       viewModel.submitPrompt("pending")
       runCurrent()
       viewModel.selectAgent(other)
@@ -1248,8 +1569,10 @@ class ConnectedViewModelTest {
       val response = CompletableDeferred<Unit>()
       val transport = sendTransport { _, _, _ -> response.await() }
       viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.setForeground(true)
       viewModel.selectProfile(profile.id)
       viewModel.selectAgent(agent)
+      runCurrent()
       viewModel.submitPrompt("pending")
       runCurrent()
       viewModel.setForeground(false)
@@ -1264,14 +1587,22 @@ class ConnectedViewModelTest {
 
   private fun sendKey(agent: AgentRow) = agentSendKey(profile.id, agent)
 
-  private fun sendTransport(send: suspend (String, String, Boolean) -> Unit) =
+  private fun sendTransport(
+    catalog: List<AgentRow> = listOf(agent),
+    send: suspend (String, String, Boolean) -> Unit,
+  ) =
     object : BridgeTransport {
       override suspend fun verify(expectedMachine: UUID?): UUID = machine
 
-      override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
+      override suspend fun agents(machine: UUID): List<AgentRow> = catalog
 
-      override fun stream(sessionId: String): Flow<StreamEvent> =
-        kotlinx.coroutines.flow.emptyFlow()
+      override fun stream(sessionId: String): Flow<StreamEvent> = flow {
+        // Truthful synthetic connection: transport open plus the fresh agent_status that makes
+        // actions live; Open alone is transport, not live state.
+        emit(StreamEvent.Open(sessionId, 1))
+        emit(StreamEvent.AgentStatus(sessionId, "idle", null))
+        kotlinx.coroutines.awaitCancellation()
+      }
 
       override suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean) =
         send(sessionId, text, confirmed)

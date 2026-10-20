@@ -18,6 +18,9 @@ import kotlinx.coroutines.withContext
 
 private class BridgeStreamError(message: String) : Exception(message)
 
+/** Bridge reported a recoverable upstream loss; retried within the existing stream budget. */
+private class BridgeUpstreamUnavailableError(message: String) : Exception(message)
+
 sealed interface ConnectionState {
   data object Disconnected : ConnectionState
 
@@ -64,6 +67,11 @@ data class ConnectedUiState(
   val agents: List<AgentRow> = emptyList(),
   val selectedAgent: AgentRow? = null,
   val stream: StreamState = StreamState(),
+  /**
+   * True only after a fresh authoritative agent_status on the current stream connection;
+   * stream_open is transport, not live state, so actions stay disabled until then (C2).
+   */
+  val streamLive: Boolean = false,
   val conversationTurns: List<ConversationTurn> = emptyList(),
   val omittedConversationTurns: Int = 0,
   val omittedToolOperations: Int = 0,
@@ -387,6 +395,7 @@ internal constructor(
         activeProfileId = id,
         selectedAgent = null,
         stream = StreamState(),
+        streamLive = false,
         connection = mutableState.value.machineConnection(profile).connection,
         agents = mutableState.value.machineConnection(profile).agents,
         conversationTurns = emptyList(),
@@ -416,6 +425,7 @@ internal constructor(
           selectedAgent = null,
           agents = emptyList(),
           stream = StreamState(),
+          streamLive = false,
           conversationTurns = emptyList(),
           conversationSource = null,
           sessionStats = null,
@@ -560,6 +570,7 @@ internal constructor(
         mutableState.value.copy(
           selectedAgent = null,
           stream = StreamState(),
+          streamLive = false,
           conversationTurns = emptyList(),
           conversationSource = null,
           sessionStats = null,
@@ -572,6 +583,7 @@ internal constructor(
       mutableState.value.copy(
         selectedAgent = agent,
         stream = StreamState(),
+        streamLive = false,
         conversationTurns = emptyList(),
         conversationSource = null,
         sessionStats = null,
@@ -587,7 +599,7 @@ internal constructor(
     }
     if (foreground && agent != null && profile != null) {
       loadConversation()
-      openStream(profile, agent)
+      openStream(profile, agent, allowLegacyInitial = true)
     }
   }
 
@@ -699,6 +711,7 @@ internal constructor(
 
   override fun submitPrompt(text: String, confirmed: Boolean) {
     if (mutableState.value.offlineSavedAt != null) return
+    if (!actionsLive()) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
     val key = agentSendKey(profile.id, agent)
@@ -754,6 +767,7 @@ internal constructor(
 
   override fun controlAgent(action: String) {
     val profile = activeProfile() ?: return
+    if (!actionsLive()) return
     // Each request gets a fresh client; the capability comes from the machine's verified details.
     if (mutableState.value.bridgeDetails[profile.id]?.capabilities?.get("agent_control") != true)
       return
@@ -789,6 +803,7 @@ internal constructor(
     send: suspend (BridgeTransport, AgentRow) -> Unit,
   ) {
     if (mutableState.value.offlineSavedAt != null) return
+    if (!actionsLive()) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
     val client = bridgeFor(profile.endpoint)
@@ -813,7 +828,17 @@ internal constructor(
       cancelOwnedWork()
       stopMachineJobs()
       mutableState.value =
-        mutableState.value.copy(connection = ConnectionState.Disconnected, busy = false)
+        mutableState.value.copy(
+          connection = ConnectionState.Disconnected,
+          streamLive = false,
+          stream =
+            mutableState.value.stream.copy(
+              pendingPrompt = null,
+              agentStatus = null,
+              agentStatusDetail = null,
+            ),
+          busy = false,
+        )
     } else {
       if (pendingRestore) {
         restoreSelection()
@@ -871,17 +896,84 @@ internal constructor(
     }
   }
 
-  private fun openStream(profile: MachineProfile, agent: AgentRow) {
+  private fun actionsLive() =
+    mutableState.value.connection == ConnectionState.Connected && mutableState.value.streamLive
+
+  private fun openStream(
+    profile: MachineProfile,
+    agent: AgentRow,
+    allowLegacyInitial: Boolean = false,
+  ) {
     cancelStream()
     val token = epoch
     val client = bridgeFor(profile.endpoint)
     streamJob = viewModelScope.launch {
       val retryBudget = StreamRetryBudget()
+      var hasAttached = false
       while (foreground && token == epoch) {
+        // Invalidate before any suspending handshake, not only after it succeeds.
+        mutableState.value =
+          mutableState.value.copy(
+            streamLive = false,
+            stream =
+              mutableState.value.stream.copy(
+                pendingPrompt = null,
+                agentStatus = null,
+                agentStatusDetail = null,
+              ),
+          )
         try {
           client.verify(profile.machineId)
           if (token != epoch) return@launch
           recordMachineName(profile, client.machineName, client.bridgeDetails)
+          // Native identity must still match before attaching. Preserve explicitly selected
+          // legacy views, but never treat two missing refs as proof for automatic recovery.
+          val agents = client.agents(profile.machineId)
+          if (!foreground || token != epoch) return@launch
+          val bound = agents.firstOrNull {
+            it.machineId == agent.machineId &&
+              it.sessionId == agent.sessionId &&
+              (agent.paneId == null || it.paneId == agent.paneId) &&
+              ((agent.nativeSessionRef != null && it.nativeSessionRef == agent.nativeSessionRef) ||
+                (allowLegacyInitial &&
+                  !hasAttached &&
+                  agent.nativeSessionRef == null &&
+                  it.nativeSessionRef == null))
+          }
+          if (bound == null) {
+            if (agent.nativeSessionRef == null) {
+              // A legacy row without native identity cannot be bound; never invent one. Keep the
+              // selection visible but fail closed until the owner reselects.
+              mutableState.value =
+                mutableState.value.copy(
+                  agents = agents,
+                  busy = false,
+                  streamLive = false,
+                  connection =
+                    ConnectionState.Error(
+                      "Selected session has no verified native identity; select it again"
+                    ),
+                )
+            } else {
+              epoch++
+              mutableState.value =
+                mutableState.value.copy(
+                  agents = agents,
+                  selectedAgent = null,
+                  stream = StreamState(),
+                  streamLive = false,
+                  busy = false,
+                  connection =
+                    ConnectionState.Error(
+                      "Selected session is missing or has changed; select it again"
+                    ),
+                )
+              clearSavedSelection()
+            }
+            return@launch
+          }
+          hasAttached = true
+          var opened = false
           client.stream(agent.sessionId).collect { event ->
             val selected = mutableState.value.selectedAgent
             if (
@@ -890,15 +982,31 @@ internal constructor(
                 selected.sessionId != agent.sessionId
             )
               return@collect
+            if (event is StreamEvent.Open) opened = true
+            if (event is StreamEvent.AgentStatus && !opened)
+              throw ProtocolException("Agent status arrived before stream_open")
             val current = mutableState.value
             val reduced = reduce(current.stream, event, agent.sessionId)
             val streamError = (event as? StreamEvent.Error)?.let { "${it.code}: ${it.message}" }
+            val freshBaseline =
+              event is StreamEvent.AgentStatus && event.sessionId == agent.sessionId
             mutableState.value =
               current.copy(
                 stream = reduced,
-                connection = streamError?.let(ConnectionState::Error) ?: ConnectionState.Connected,
+                streamLive = if (freshBaseline) true else current.streamLive,
+                connection =
+                  when {
+                    streamError != null -> ConnectionState.Error(streamError)
+                    // Only a fresh agent_status marks the stream live; other events are transport.
+                    freshBaseline -> ConnectionState.Connected
+                    else -> current.connection
+                  },
               )
-            if (streamError != null) throw BridgeStreamError(streamError)
+            if (streamError != null) {
+              if (event.code == UPSTREAM_UNAVAILABLE_CODE)
+                throw BridgeUpstreamUnavailableError(streamError)
+              throw BridgeStreamError(streamError)
+            }
             if (
               event is StreamEvent.Open ||
                 event is StreamEvent.Entries ||
@@ -912,6 +1020,18 @@ internal constructor(
           if (error is kotlinx.coroutines.CancellationException) throw error
           if (!foreground || token != epoch || mutableState.value.activeProfileId != profile.id)
             return@launch
+          // Every loss, including terminal failures and retry exhaustion, invalidates actions
+          // and pending cards. Keep history available without presenting it as live state.
+          mutableState.value =
+            mutableState.value.copy(
+              streamLive = false,
+              stream =
+                mutableState.value.stream.copy(
+                  pendingPrompt = null,
+                  agentStatus = null,
+                  agentStatusDetail = null,
+                ),
+            )
           if (error is ProtocolException || error is SSLException || error is BridgeStreamError) {
             mutableState.value =
               mutableState.value.copy(
@@ -958,6 +1078,7 @@ internal constructor(
       mutableState.value.copy(
         activeProfileId = profileId,
         connection = ConnectionState.Recovering,
+        streamLive = false,
         busy = true,
       )
     operation = viewModelScope.launch {
@@ -1020,6 +1141,7 @@ internal constructor(
       mutableState.value.copy(
         selectedAgent = null,
         stream = StreamState(),
+        streamLive = false,
         busy = false,
         connection = ConnectionState.Error(message),
       )

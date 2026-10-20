@@ -76,6 +76,10 @@ public final class URLSessionWebSocketConnection: BridgeWebSocket, @unchecked Se
           // is impossible from here, so treat as a clean end.
           continuation.resume(returning: nil)
         case .failure(let error):
+          if isBridgeTLSFailure(error) {
+            continuation.resume(throwing: error)
+            return
+          }
           continuation.resume(
             throwing: BridgeError.unreachable(
               "stream receive failed: \(error.localizedDescription)"))

@@ -214,6 +214,7 @@ fun CappuccinoScreen(
   val agentControl =
     state.offlineSavedAt == null &&
       state.connection == ConnectionState.Connected &&
+      state.streamLive &&
       state.bridgeDetails[state.activeProfileId]?.capabilities?.get("agent_control") == true
   val detailsProfile =
     if (detailsProfileId == null) selectedProfile
@@ -820,8 +821,11 @@ fun CappuccinoScreen(
               }
               state.stream.pendingPrompt?.let { card ->
                 val answersEnabled =
-                  state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_answers") !=
-                    false
+                  state.connection == ConnectionState.Connected &&
+                    state.streamLive &&
+                    state.bridgeDetails[state.activeProfileId]
+                      ?.capabilities
+                      ?.get("prompt_answers") != false
                 Box(
                   Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("pendingPrompt")
                 ) {
@@ -878,6 +882,7 @@ fun CappuccinoScreen(
                     placeholder = "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
                     enabled =
                       state.connection == ConnectionState.Connected &&
+                        state.streamLive &&
                         state.bridgeDetails[state.activeProfileId]
                           ?.capabilities
                           ?.get("prompt_input") != false,

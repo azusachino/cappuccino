@@ -40,7 +40,18 @@ class ConnectedControllerTest {
     store.save(profile)
     val streamAttempts = CountDownLatch(5)
     val catalogLoaded = CountDownLatch(1)
-    val agent = AgentRow(machine, "retry-session", "pane-1", "pi", "pi", "idle", false, null)
+    val agent =
+      AgentRow(
+        machine,
+        "retry-session",
+        "pane-1",
+        "pi",
+        "pi",
+        "idle",
+        false,
+        null,
+        nativeSessionRef = "pi:synthetic-retry",
+      )
     val viewModel =
       ConnectedViewModel(
         store = store,

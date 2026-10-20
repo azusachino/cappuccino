@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 
 @testable import CappuccinoCore
@@ -41,6 +42,52 @@ final class StubURLProtocol: URLProtocol {
 }
 
 @Suite(.serialized) struct BridgeClientTests {
+  @Test func recoveryBindingUsesFreshMachineAndNativeCatalogIdentity() async throws {
+    let machine = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+    let base = URL(string: "http://127.0.0.1:7392")!
+    let agent = AgentRow(
+      machineID: machine.uuidString, sessionID: "same-locator", label: "pi",
+      branch: nil, working: false, paneID: "pane-1", nativeSessionRef: "pi:original")
+    let cases: [(String?, String, Bool)] = [
+      ("pi:original", "pane-1", true), ("pi:replaced", "pane-1", false),
+      (nil, "pane-1", false), ("pi:original", "reused-pane", false),
+    ]
+    for (native, pane, accepted) in cases {
+      let reads = Mutex<[String]>([])
+      let reference = native.map { "\"\($0)\"" } ?? "null"
+      let payload =
+        #"{"event":"agents","machine_id":"11111111-1111-4111-8111-111111111111","agents":[{"machine_id":"11111111-1111-4111-8111-111111111111","session_id":"same-locator","pane_id":"\#(pane)","native_session_ref":\#(reference),"agent":"pi"}]}"#
+      StubURLProtocol.handler = { request in
+        let path = request.url!.path
+        reads.withLock { $0.append(path) }
+        if path == "/api/session" {
+          return (
+            200,
+            Data(
+              #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"cappuccino-bridge"}"#
+                .utf8)
+          )
+        }
+        #expect(path == "/api/agents")
+        return (200, Data(payload.utf8))
+      }
+      #expect(
+        try await stubbedClient().verifyBinding(base: base, machineID: machine, agent: agent)
+          == accepted)
+      #expect(reads.withLock { $0 } == ["/api/session", "/api/agents"])
+    }
+    StubURLProtocol.handler = { _ in
+      Issue.record("Missing native identity must not trigger a guessed binding")
+      return (500, Data())
+    }
+    let legacy = AgentRow(
+      machineID: machine.uuidString, sessionID: "same-locator", label: "pi", branch: nil,
+      working: false)
+    #expect(
+      try await stubbedClient().verifyBinding(base: base, machineID: machine, agent: legacy)
+        == false)
+  }
+
   private func stubbedClient() -> BridgeClient {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [StubURLProtocol.self]

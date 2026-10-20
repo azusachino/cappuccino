@@ -28,6 +28,14 @@ class BridgeWebSocketClosedException(val code: Int, val reason: String) :
     "Bridge stream closed (code=$code${if (reason.isEmpty()) "" else ", reason=$reason"})"
   )
 
+/**
+ * The bounded local stream buffer overflowed because the consumer fell behind. The stream is lossy
+ * once this happens, so it terminates instead of silently dropping an event; the client recovers by
+ * reopening within its normal transport retry budget.
+ */
+class BridgeStreamOverflowException :
+  IOException("Bridge stream events arrived faster than the app consumed them; reopening")
+
 data class ConversationSnapshot(
   val turns: List<ConversationTurn>,
   val source: String,
@@ -246,6 +254,8 @@ class BridgeClient(
     }
 
   override fun stream(sessionId: String): Flow<StreamEvent> = callbackFlow {
+    // callbackFlow's default buffer (64) is the only local buffering; there is no unbounded
+    // queue. An overflow closes the stream with a typed error rather than dropping an event.
     val request = Request.Builder().url(endpoint.stream(sessionId).toString()).build()
     val socket =
       client.newWebSocket(
@@ -254,7 +264,12 @@ class BridgeClient(
           override fun onMessage(webSocket: WebSocket, text: String) {
             try {
               validateWebSocketMessage(text)
-              trySend(parseStreamEvent(parseJsonObject(text)))
+              val sent = trySend(parseStreamEvent(parseJsonObject(text)))
+              if (sent.isFailure) {
+                // A dropped event is silent corruption; fail the stream into recovery instead.
+                close(BridgeStreamOverflowException())
+                webSocket.cancel()
+              }
             } catch (error: Exception) {
               close(error)
               webSocket.cancel()

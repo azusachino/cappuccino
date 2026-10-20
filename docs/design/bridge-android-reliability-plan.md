@@ -203,6 +203,13 @@ missing-agent and recovery tests. Shared gates if wire events change.
 
 **Depends on:** C1 for upstream recovery cases. **Size:** medium. **Evidence:** R5.
 
+Implementation is partial: bounded overflow, source-loss invalidation, finite
+retries, native recovery binding and fresh-status guards have native component
+verification. Canonical refresh is still asynchronous rather than an action
+prerequisite. Finish and verify that ordering before calling C2 complete; see the
+[implementation handoff](bridge-android-reliability-handoff.md#c1bc2-recovery-checkpoint)
+for exact evidence and remaining acceptance.
+
 Likely paths: Android `io/BridgeClient.kt`, `io/ConnectedViewModel.kt`, transport
 and recovery tests.
 

@@ -250,6 +250,69 @@ class BridgeClientTest {
   }
 
   @Test
+  fun slowConsumerOverflowClosesTheStreamInsteadOfDroppingEvents() = runBlocking {
+    MockWebServer().use { server ->
+      val firstEvent = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val releaseConsumer = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val peerClosed = kotlinx.coroutines.CompletableDeferred<Unit>()
+      server.enqueue(
+        MockResponse.Builder()
+          .webSocketUpgrade(
+            object : WebSocketListener() {
+              override fun onFailure(
+                webSocket: WebSocket,
+                t: Throwable,
+                response: okhttp3.Response?,
+              ) {
+                peerClosed.complete(Unit)
+              }
+
+              override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                peerClosed.complete(Unit)
+              }
+
+              override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                // The collector blocks on its first event while this fills the bounded buffer.
+                repeat(200) {
+                  webSocket.send(
+                    """{"event":"agent_status","session_id":"session","state":"working","detail":null}"""
+                  )
+                }
+              }
+            }
+          )
+          .build()
+      )
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      val collector = async {
+        runCatching {
+          client.stream("session").collect {
+            firstEvent.complete(Unit)
+            releaseConsumer.await()
+          }
+        }
+          .exceptionOrNull()
+      }
+      try {
+        kotlinx.coroutines.withTimeout(5_000) {
+          firstEvent.await()
+          peerClosed.await()
+        }
+        releaseConsumer.complete(Unit)
+        val failure = kotlinx.coroutines.withTimeout(5_000) { collector.await() }
+        assertTrue(
+          "expected a typed overflow failure, got $failure",
+          failure is BridgeStreamOverflowException,
+        )
+      } finally {
+        releaseConsumer.complete(Unit)
+        collector.cancelAndJoin()
+      }
+    }
+  }
+
+  @Test
   fun nonSuccessHttpStatusIsReported() = runBlocking {
     MockWebServer().use { server ->
       server.enqueue(MockResponse.Builder().code(503).body("unavailable").build())

@@ -116,6 +116,8 @@ class ConversationPreviewScreenshotTest {
         selectedAgent = agent,
         conversationTurns = previewTurns(),
         connection = ConnectionState.Connected,
+        streamLive = true,
+        stream = StreamState(agent.sessionId, 1, agentStatus = "idle"),
       )
     )
   }

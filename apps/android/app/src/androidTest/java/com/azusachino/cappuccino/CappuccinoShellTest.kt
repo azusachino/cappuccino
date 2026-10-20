@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasClickAction
@@ -98,6 +99,8 @@ class CappuccinoShellTest {
           agents = listOf(agent),
           selectedAgent = agent,
           connection = ConnectionState.Connected,
+          streamLive = true,
+          stream = StreamState(agent.sessionId, 1, agentStatus = "working"),
           bridgeDetails =
             mapOf(
               profile.id to
@@ -142,7 +145,11 @@ class CappuccinoShellTest {
     assertEquals(listOf("interrupt"), actions.controls)
 
     compose.activity.runOnUiThread {
-      state.value = state.value.copy(selectedAgent = agent.copy(status = "idle"))
+      state.value =
+        state.value.copy(
+          selectedAgent = agent.copy(status = "idle"),
+          stream = state.value.stream.copy(agentStatus = "idle"),
+        )
     }
     compose.waitForIdle()
     compose.onNodeWithContentDescription("Stop").assertDoesNotExist()
@@ -177,6 +184,8 @@ class CappuccinoShellTest {
           activeProfileId = profile.id,
           selectedAgent = agent,
           connection = ConnectionState.Connected,
+          streamLive = true,
+          stream = StreamState(agent.sessionId, 1, agentStatus = "idle"),
         )
       )
     compose.activity.runOnUiThread {
@@ -540,7 +549,7 @@ class CappuccinoShellTest {
   }
 
   @Test
-  fun pendingQuestionSitsBetweenTranscriptAndComposer() {
+  fun pendingQuestionLayoutAndRecoveryInvalidateStaleActions() {
     val machine = UUID.randomUUID()
     val profile =
       MachineProfile("question", "Synthetic", Endpoint.parse("https://bridge.example"), machine)
@@ -559,10 +568,12 @@ class CappuccinoShellTest {
               ConversationTurn("t$it", "assistant", null, "Synthetic turn $it", emptyList())
             },
           connection = ConnectionState.Connected,
+          streamLive = true,
           stream =
             StreamState(
               "question-session",
               1,
+              agentStatus = "blocked",
               pendingPrompt =
                 PromptCard(
                   "p-question-1",
@@ -578,11 +589,12 @@ class CappuccinoShellTest {
             ),
         )
       )
+    val actions = StateActions(state)
     compose.activity.runOnUiThread {
       compose.activity.setContent {
         CappuccinoTheme {
           val s by state
-          CappuccinoScreen(s, StateActions(state)) { _, _ -> }
+          CappuccinoScreen(s, actions) { _, _ -> }
         }
       }
     }
@@ -604,6 +616,44 @@ class CappuccinoShellTest {
       transcript.top < card.top,
     )
     capture("PendingQuestion")
+
+    compose.onNodeWithTag("promptInput").performTextInput("Review first")
+    compose.onNodeWithContentDescription("Send").assertIsEnabled()
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          connection = ConnectionState.Recovering,
+          streamLive = false,
+          stream = state.value.stream.copy(pendingPrompt = null, agentStatus = null),
+        )
+    }
+    compose.onNodeWithTag("pendingPrompt").assertDoesNotExist()
+    compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
+    compose.onNodeWithTag("promptInput").assertTextEquals("Review first")
+    assertTrue(actions.prompts.isEmpty())
+
+    // Reopening transport alone must not re-enable actions or replay the retained draft.
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          connection = ConnectionState.Connected,
+          stream = StreamState("question-session", 2),
+        )
+    }
+    compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
+    assertTrue(actions.prompts.isEmpty())
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          streamLive = true,
+          stream = state.value.stream.copy(agentStatus = "idle"),
+        )
+    }
+    compose.onNodeWithContentDescription("Send").assertIsEnabled()
+    compose.onNodeWithTag("pendingPrompt").assertDoesNotExist()
+    assertTrue(actions.prompts.isEmpty())
+    compose.onNodeWithContentDescription("Send").performClick()
+    assertEquals(listOf("Review first"), actions.prompts)
   }
 
   private fun assertSendAndStopSitAtTheEnd() {
@@ -664,6 +714,7 @@ class CappuccinoShellTest {
 
   private class StateActions(private val state: MutableState<ConnectedUiState>) : ConnectedActions {
     val controls = mutableListOf<String>()
+    val prompts = mutableListOf<String>()
 
     override fun controlAgent(action: String) {
       controls += action
@@ -700,7 +751,9 @@ class CappuccinoShellTest {
       state.value = state.value.copy(themeMode = mode)
     }
 
-    override fun submitPrompt(text: String, confirmed: Boolean) = Unit
+    override fun submitPrompt(text: String, confirmed: Boolean) {
+      prompts += text
+    }
 
     override fun answerPrompt(
       promptId: String,
