@@ -166,10 +166,13 @@ split follows what each tool can do:
   Xcode.
 - The app is the `Cappuccino` package product, built from target `CappuccinoApp` and
   sources `apps/ios/App`. xtool and Xcode compile the same sources. `apps/ios/xtool.yml`
-  and `apps/ios/App/Info.plist` define the xtool bundle. The target is not named
-  `Cappuccino` because that name collides with the Xcode app target in xcodebuild's
-  UI-test host lookup.
-- `project.yml` remains the Xcode app target and the UI-test host.
+  and `apps/ios/App/Info.plist` define the xtool bundle. Keep its entry target
+  `CappuccinoApp` distinct from the Xcode app target.
+- `project.yml` names the Xcode application target `CappuccinoPhone` so UI-test
+  host lookup does not confuse it with the `Cappuccino` package product. The
+  Xcode product name and scheme remain `Cappuccino`, with the same bundle ID and
+  `Cappuccino.app` artifact. This does not rename the package/xtool product.
+  Edit `project.yml` rather than the generated Xcode project.
 
 ## Android development
 
