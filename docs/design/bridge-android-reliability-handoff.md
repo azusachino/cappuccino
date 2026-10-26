@@ -396,5 +396,28 @@ port 5580 was shut
 down with its scoped `adb emu kill` command after acceptance. Apple remains
 unchanged and pending. These are Android/bridge checkpoints, not full A3 closure.
 
-Next: finish Android tests and acceptance, then Apple adapters and full/native UI
-verification. No agent reviewer is implied.
+Android checkpoint: `99edbd5` (`fix: bind Android actions to the rendered native
+session`), with 218 unit and 53 UI tests passing. No agent reviewer was used.
+
+## Owner-directed Android-only continuation
+
+The owner explicitly paused all iOS updates and chose saving the unfinished iOS
+candidate as a verified local patch. Its four core files were restored exactly
+to the committed baseline; no iOS implementation is accepted or left active in
+the checkout. Apple fixtures, UI task-selection capture, conformers and tests had
+not been updated, and no Apple gate ran for that incomplete candidate.
+
+The untracked workstation-root artifact is
+`.tmp/cappuccino-reliability/ios-a3-paused/changes.patch`, with adjacent `README.md`.
+SHA-256:
+`f61699eebf84eeea09b4bd2c8e2ba2b1ade4f9b77b52376503eea10464715a9c`.
+Reverse apply-check passed before parking and forward apply-check passed after
+restoration at `99edbd5`; the owning checkout was clean. This is local scratch,
+not published implementation or a substitute for these owning records. Resuming
+iOS requires renewed owner authorization and rechecking owning Git/hash first.
+
+Current active scope is Android-only. Bridge and Android checkpoints are verified;
+full cross-platform A3 and issue #45 remain open. Do not infer native Pi admission,
+atomic PTY fencing, active-branch authority, real approval or physical-phone parity
+from synthetic evidence. No push, PR, deployment or owner-runtime action occurred.
+Both task-owned native devices are stopped.
