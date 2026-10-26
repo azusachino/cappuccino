@@ -1,7 +1,7 @@
 # Bridge and Android reliability: implementation handoff
 
-Date: 2026-10-20. Status: A1/A2, C1 and native stream-recovery checkpoints
-verified; C2 history-before-actions and the overall plan remain incomplete.
+Created: 2026-10-20. Updated: 2026-10-26. Status: A1/A2 Android, C1 and C2
+native recovery checkpoints verified; the overall plan remains incomplete.
 
 ## Owning checkpoint
 
@@ -240,13 +240,79 @@ journeys/gates. Source/native evidence is synthetic, not physical-phone tailnet,
 real approval or live Pi admission proof. The live-bridge UI skip remains an
 explicit verification limit.
 
-**Remaining C2 criterion:** actions currently require fresh live status after
-binding revalidation, but canonical refresh runs asynchronously. They are not yet
-held until that refresh settles. Do not label the full C2 history-before-actions
-requirement complete from the passing recovery tests. The next implementation
-slice must bind refresh completion to the current attachment (not a late previous
-request), handle unavailable history explicitly, and test the ordering. Existing
-coalescing needs evidence, not an unnecessary replacement. B2 branch authority,
+**C2 gap at the `7f95208` checkpoint:** fresh status gated actions, but canonical
+refresh was asynchronous. The following checkpoint resolves that ordering gap;
+passing status-recovery tests alone did not establish history-before-actions.
+Existing coalescing needed evidence, not an unnecessary replacement. B2 branch authority,
 A3 mutation fencing, physical-phone/live parity and native admission remain
 unproven as described above. No new frame type, native admission proof,
 publication or deployment is claimed.
+
+## C2 canonical-history gate checkpoint
+
+Base: `7f952082b95f53b8fc0549e5887731e571ebf9a8`. The owner explicitly chose
+**block writes until canonical history refresh succeeds after reconnect**, not an
+automatically degraded raw-output mode. A fresh native binding/status alone must
+not unlock recovery. Initial explicit manual legacy attachment retains its
+existing compatibility limits; automatic legacy recovery still fails closed.
+
+The verified follow-up serializes recovery: verify binding, cancel obsolete
+coalesced history work, fetch/validate/apply canonical history, then open the
+stream and wait for fresh status. History must carry the expected machine, a
+valid provider-specific canonical ID and any already-known conversation ID.
+Unavailable, missing or changed identity keeps actions blocked; a read-only
+explicit retry can attempt recovery again and never replays input/answers/control.
+Cancelled old requests check their own task/job cancellation before publishing,
+so a transport ignoring cancellation cannot overwrite the recovered view or
+unlock it. Apple now exposes the read-only retry in its error UI.
+
+New model regressions cover blocked history, late cancelled reads, source/identity
+failure and successful explicit retry without replay. Native fixture metadata is
+explicitly canonical for tests that assert recovery. Focused checks passed:
+113 Swift and 209 Android unit tests. Shared validation passed, including builds
+and lint. Selected disconnected views now show Unknown instead of a cached
+Idle/Working/Done label.
+
+The first Android native run had 51 tests and one failure: the foreground fixture
+still lacked canonical identity. The repaired fixture retains its verification,
+catalog and resubscription assertions, and now additionally holds recovery
+history behind a signal, proves actions and reattachment stay blocked, releases
+history, then asserts fresh live readiness without replay. Android validation
+and all 51 native tests then passed; its task AVD was shut down.
+
+The Apple UI gate failed before executing tests: Xcode reported the host path as
+`Debug-iphonesimulator/Cappuccino` (missing `.app`), while the actual `.app` exists
+with the correct identifier/executable. Diagnostic collection also reported
+missing `simctl`, although explicit scoped tool lookup succeeds. The unchanged
+owning UI gate reproduced the same failure with fresh task-scoped derived data
+(`.build/xcode-history-readiness`), ruling out a fix by simply replacing the
+project's derived-data directory. The local package/development record documents
+an earlier Xcode app/package target-name collision. No generated project edit,
+global developer selection/service restart, easier gate or test bypass was used.
+The owner approved a project-local test-host repair, keeping the xtool product
+contract and all owner/global toolchain settings unchanged. Parent inspected
+build settings: the UI host is looked up by `TEST_TARGET_NAME=Cappuccino`, which
+also names a package product. Renaming only the Xcode app target to
+`CappuccinoPhone`, retaining `PRODUCT_NAME=Cappuccino`, scheme `Cappuccino`, bundle
+identifier and the untouched package/xtool product, resolved host lookup. The
+unchanged full `make validate` and default Apple UI gate passed after this
+project-local disambiguation. The public development record documents the naming
+contract; no global fix is claimed for the secondary diagnostic-tool lookup.
+
+Final evidence on the checkpoint source:
+
+- Bridge: unchanged from the verified 158-test C1b gate; four pre-existing opt-in
+  soak cases remain ignored.
+- Shared `make validate`: 113 Swift core tests; unsigned simulator app build;
+  209 Android unit tests; Android lint, app APK and instrumentation APK builds.
+- Android `ui-test-android`: 51 passed, zero failures/errors/skips; XML timestamp
+  `2026-10-26T04:03:11`. Includes the strict foreground/history barrier journey.
+- Apple `ui-test`: four passed, zero failures; one pre-existing live-bridge opt-in
+  test skipped. This is synthetic fixture acceptance, not live agent parity.
+- Both task devices shut down cleanly. No owner sessions/devices, global Xcode
+  selection, installs/reloads to long-running agents, pushes or PRs were used.
+
+Run `make md-check` and `git diff --check` after final documentation updates.
+C1/C2 are ready for owner checkpoint review; A3/B2 and later native-authority and
+admission-dependent work remain open/blocked. Do not interpret these gates as
+proof of live Pi admission, atomic mutation fencing or active-branch history.

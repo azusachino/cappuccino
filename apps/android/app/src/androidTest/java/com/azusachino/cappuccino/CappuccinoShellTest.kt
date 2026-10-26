@@ -628,6 +628,7 @@ class CappuccinoShellTest {
         )
     }
     compose.onNodeWithTag("pendingPrompt").assertDoesNotExist()
+    compose.onNodeWithText("Unknown", substring = true).assertIsDisplayed()
     compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
     compose.onNodeWithTag("promptInput").assertTextEquals("Review first")
     assertTrue(actions.prompts.isEmpty())

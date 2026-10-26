@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -603,6 +604,22 @@ internal constructor(
     }
   }
 
+  private fun applyConversationSnapshot(snapshot: ConversationSnapshot) =
+    com.azusachino.cappuccino.core
+      .boundedConversation(if (snapshot.source == "canonical_log") snapshot.turns else emptyList())
+      .also { recent ->
+        mutableState.value =
+          mutableState.value.copy(
+            conversationTurns = recent.turns,
+            omittedConversationTurns = recent.omittedMessages,
+            omittedToolOperations = recent.omittedTools,
+            conversationSource = snapshot.source,
+            sessionStats = snapshot.stats,
+            conversationId = snapshot.conversationId,
+            offlineSavedAt = null,
+          )
+      }
+
   override fun loadConversation() {
     if (mutableState.value.offlineSavedAt != null) return
     val profile = activeProfile() ?: return
@@ -626,7 +643,8 @@ internal constructor(
             throw ProtocolException("Conversation machine identity changed")
           val current = mutableState.value
           if (
-            token != epoch ||
+            !isActive ||
+              token != epoch ||
               !foreground ||
               current.activeProfileId != profile.id ||
               current.selectedAgent?.machineId != agent.machineId ||
@@ -641,20 +659,7 @@ internal constructor(
                 !snapshot.conversationId.startsWith("${agent.agent}:"))
           )
             throw ProtocolException("Canonical conversation provider mismatch")
-          val recent =
-            com.azusachino.cappuccino.core.boundedConversation(
-              if (snapshot.source == "canonical_log") snapshot.turns else emptyList()
-            )
-          mutableState.value =
-            current.copy(
-              conversationTurns = recent.turns,
-              omittedConversationTurns = recent.omittedMessages,
-              omittedToolOperations = recent.omittedTools,
-              conversationSource = snapshot.source,
-              sessionStats = snapshot.stats,
-              conversationId = snapshot.conversationId,
-              offlineSavedAt = null,
-            )
+          val recent = applyConversationSnapshot(snapshot)
           if (
             snapshot.source == "canonical_log" &&
               offlineHistory != null &&
@@ -687,7 +692,8 @@ internal constructor(
           // Keep earlier turns; on a newly opened view allow verified stream scrollback
           // rather than leaving a restored reader waiting for unavailable history.
           if (
-            token == epoch &&
+            isActive &&
+              token == epoch &&
               foreground &&
               mutableState.value.activeProfileId == profile.id &&
               mutableState.value.selectedAgent?.sessionId == agent.sessionId
@@ -698,7 +704,7 @@ internal constructor(
               )
           }
         }
-      } while (conversationRequested && token == epoch && foreground)
+      } while (isActive && conversationRequested && token == epoch && foreground)
     }
   }
 
@@ -971,6 +977,28 @@ internal constructor(
               clearSavedSelection()
             }
             return@launch
+          }
+          if (hasAttached || !allowLegacyInitial) {
+            // Serialize recovery history before opening a new stream. A cancelled previous
+            // refresh cannot publish later: loadConversation checks its own job's liveness.
+            conversationJob?.cancel()
+            conversationJob = null
+            conversationRequested = false
+            val expectedConversation = mutableState.value.conversationId
+            val snapshot = client.conversationSnapshot(agent.sessionId)
+            if (!isActive || token != epoch || !foreground) return@launch
+            if (snapshot.source != "canonical_log")
+              throw java.io.IOException("Canonical history unavailable; retry to enable actions")
+            val identity = snapshot.conversationId
+            if (
+              snapshot.machineId != profile.machineId ||
+                identity == null ||
+                !isCanonicalConversationId(identity) ||
+                !identity.startsWith("${agent.agent}:") ||
+                (expectedConversation != null && identity != expectedConversation)
+            )
+              throw ProtocolException("Recovery history identity changed or is unavailable")
+            applyConversationSnapshot(snapshot)
           }
           hasAttached = true
           var opened = false

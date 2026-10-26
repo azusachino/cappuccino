@@ -203,12 +203,12 @@ missing-agent and recovery tests. Shared gates if wire events change.
 
 **Depends on:** C1 for upstream recovery cases. **Size:** medium. **Evidence:** R5.
 
-Implementation is partial: bounded overflow, source-loss invalidation, finite
-retries, native recovery binding and fresh-status guards have native component
-verification. Canonical refresh is still asynchronous rather than an action
-prerequisite. Finish and verify that ordering before calling C2 complete; see the
-[implementation handoff](bridge-android-reliability-handoff.md#c1bc2-recovery-checkpoint)
-for exact evidence and remaining acceptance.
+Implementation checkpoint verified: bounded overflow, source-loss invalidation,
+finite retries, native recovery binding, canonical history before reattachment
+and fresh-status action guards. The owner chose to block recovery writes when
+canonical history is unavailable; no automatic degraded mode is enabled. See the
+[implementation handoff](bridge-android-reliability-handoff.md#c2-canonical-history-gate-checkpoint)
+for native gate evidence and the remaining overall-plan limits.
 
 Likely paths: Android `io/BridgeClient.kt`, `io/ConnectedViewModel.kt`, transport
 and recovery tests.

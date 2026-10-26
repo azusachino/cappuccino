@@ -606,6 +606,9 @@ class ConnectedViewModelTest {
 
           override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
 
+          override suspend fun conversationSnapshot(sessionId: String) =
+            ConversationSnapshot(emptyList(), "canonical_log", savedId, machine)
+
           override fun stream(sessionId: String): Flow<StreamEvent> = flow {
             streams++
             kotlinx.coroutines.awaitCancellation()
@@ -932,6 +935,9 @@ class ConnectedViewModelTest {
             return listOf(agent)
           }
 
+          override suspend fun conversationSnapshot(sessionId: String) =
+            ConversationSnapshot(emptyList(), "canonical_log", savedId, machine)
+
           override fun stream(sessionId: String): Flow<StreamEvent> = flow {
             streams++
             kotlinx.coroutines.awaitCancellation()
@@ -1118,6 +1124,157 @@ class ConnectedViewModelTest {
       advanceUntilIdle()
       assertEquals("Owner name", viewModel.state.value.profiles.single().label)
       assertEquals(profile.machineId, store.read().single().machineId)
+    }
+
+  @Test
+  fun recoveryWaitsForCanonicalHistoryAndDiscardsCancelledPreviousRefresh() =
+    runTest(dispatcher) {
+      val events = MutableSharedFlow<StreamEvent>()
+      val obsolete = CompletableDeferred<Unit>()
+      val recovered = CompletableDeferred<Unit>()
+      var reads = 0
+      var attachments = 0
+      viewModel =
+        createViewModel(
+          pause = {},
+          conversationFactory = {
+            val read = ++reads
+            if (read == 1) withContext(NonCancellable) { obsolete.await() }
+            if (read == 2) recovered.await()
+            listOf(
+              ConversationTurn(
+                "history-$read",
+                "assistant",
+                null,
+                if (read == 1) "Obsolete" else "Recovered",
+                emptyList(),
+              )
+            )
+          },
+          streamFactory = {
+            attachments++
+            events
+          },
+        )
+      try {
+        viewModel.setForeground(true)
+        advanceUntilIdle()
+        viewModel.selectAgent(agent)
+        runCurrent()
+        events.emit(StreamEvent.Open(agent.sessionId, 1))
+        events.emit(StreamEvent.AgentStatus(agent.sessionId, "idle", null))
+        events.emit(StreamEvent.Error("upstream_unavailable", "Source lost"))
+        runCurrent()
+        assertEquals(2, reads)
+        assertEquals(1, attachments)
+        assertFalse(viewModel.state.value.streamLive)
+        viewModel.submitPrompt("before history")
+        assertTrue(viewModel.state.value.promptSends.isEmpty())
+        obsolete.complete(Unit)
+        runCurrent()
+        assertTrue(viewModel.state.value.conversationTurns.isEmpty())
+        assertEquals(1, attachments)
+        assertFalse(viewModel.state.value.streamLive)
+        recovered.complete(Unit)
+        runCurrent()
+        assertEquals(2, attachments)
+        assertEquals("Recovered", viewModel.state.value.conversationTurns.single().text)
+        assertFalse(viewModel.state.value.streamLive)
+        events.emit(StreamEvent.Open(agent.sessionId, 2))
+        events.emit(StreamEvent.AgentStatus(agent.sessionId, "idle", null))
+        runCurrent()
+        assertTrue(viewModel.state.value.streamLive)
+        assertEquals("Recovered", viewModel.state.value.conversationTurns.single().text)
+        viewModel.submitPrompt("once ready")
+        runCurrent()
+        assertEquals(1, viewModel.state.value.promptSends.size)
+      } finally {
+        obsolete.complete(Unit)
+        recovered.complete(Unit)
+      }
+    }
+
+  @Test
+  fun explicitRetryCanRecoverHistoryWithoutReplayingInput() =
+    runTest(dispatcher) {
+      val events = MutableSharedFlow<StreamEvent>()
+      var available = true
+      var attachments = 0
+      viewModel =
+        createViewModel(
+          pause = {},
+          conversationFactory = {
+            if (!available) throw IOException("History offline")
+            emptyList()
+          },
+          streamFactory = {
+            attachments++
+            events
+          },
+        )
+      viewModel.setForeground(true)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      runCurrent()
+      events.emit(StreamEvent.Open(agent.sessionId, 1))
+      events.emit(StreamEvent.AgentStatus(agent.sessionId, "idle", null))
+      available = false
+      events.emit(StreamEvent.Error("upstream_unavailable", "Source lost"))
+      advanceUntilIdle()
+      assertEquals(1, attachments)
+      assertFalse(viewModel.state.value.streamLive)
+      assertTrue(viewModel.state.value.connection is ConnectionState.Error)
+      viewModel.submitPrompt("never replay")
+      available = true
+      viewModel.retry()
+      runCurrent()
+      assertEquals(2, attachments)
+      assertFalse(viewModel.state.value.streamLive)
+      events.emit(StreamEvent.Open(agent.sessionId, 2))
+      events.emit(StreamEvent.AgentStatus(agent.sessionId, "idle", null))
+      runCurrent()
+      assertTrue(viewModel.state.value.streamLive)
+      assertTrue(viewModel.state.value.promptSends.isEmpty())
+    }
+
+  @Test
+  fun unavailableOrUnverifiedCanonicalHistoryNeverUnlocksRecovery() =
+    runTest(dispatcher) {
+      val cases: List<Triple<String, String?, UUID?>> =
+        listOf(
+          Triple("terminal_scrollback", savedId, machine),
+          Triple("canonical_log", null, machine),
+          Triple("canonical_log", savedId, UUID.randomUUID()),
+        )
+      for ((source, identity, reportedMachine) in cases) {
+        val events = MutableSharedFlow<StreamEvent>()
+        var attachments = 0
+        viewModel =
+          createViewModel(
+            pause = {},
+            conversationSource = source,
+            conversationIdentity = identity,
+            conversationMachine = reportedMachine,
+            streamFactory = {
+              attachments++
+              events
+            },
+          )
+        viewModel.setForeground(true)
+        advanceUntilIdle()
+        viewModel.selectAgent(agent)
+        runCurrent()
+        events.emit(StreamEvent.Open(agent.sessionId, 1))
+        events.emit(StreamEvent.AgentStatus(agent.sessionId, "idle", null))
+        events.emit(StreamEvent.Error("upstream_unavailable", "Source lost"))
+        advanceUntilIdle()
+        assertEquals(1, attachments)
+        assertFalse(viewModel.state.value.streamLive)
+        assertTrue(viewModel.state.value.connection is ConnectionState.Error)
+        viewModel.submitPrompt("must remain blocked")
+        assertTrue(viewModel.state.value.promptSends.isEmpty())
+        viewModel.setForeground(false)
+      }
     }
 
   @Test
@@ -1624,7 +1781,7 @@ class ConnectedViewModelTest {
     conversationSource: String = "canonical_log",
     reportedMachineName: String? = null,
     offlineHistory: OfflineConversations? = null,
-    conversationIdentity: String? = null,
+    conversationIdentity: String? = savedId,
     conversationMachine: UUID? = machine,
     streamFactory: (String) -> Flow<StreamEvent>,
   ): ConnectedViewModel =

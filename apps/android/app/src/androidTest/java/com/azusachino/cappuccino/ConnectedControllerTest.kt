@@ -64,6 +64,14 @@ class ConnectedControllerTest {
               return listOf(agent)
             }
 
+            override suspend fun conversationSnapshot(sessionId: String) =
+              com.azusachino.cappuccino.io.ConversationSnapshot(
+                emptyList(),
+                "canonical_log",
+                "pi:" + "a".repeat(64),
+                machine,
+              )
+
             override fun stream(sessionId: String): Flow<StreamEvent> = flow {
               streamAttempts.countDown()
               throw IOException("synthetic disconnect")

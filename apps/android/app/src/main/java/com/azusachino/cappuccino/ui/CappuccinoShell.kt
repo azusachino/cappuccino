@@ -208,7 +208,8 @@ fun CappuccinoScreen(
   val selected = state.selectedAgent
   val selectedProfile = state.profiles.firstOrNull { it.id == state.activeProfileId }
   val selectedStatus =
-    if (state.stream.pendingPrompt != null) "blocked"
+    if (!state.streamLive) "unknown"
+    else if (state.stream.pendingPrompt != null) "blocked"
     else (state.stream.agentStatus ?: selected?.status)?.lowercase()
   val selectedIdle = selectedStatus !in setOf("working", "blocked")
   val agentControl =
@@ -456,8 +457,7 @@ fun CappuccinoScreen(
             if (selected != null) {
               val status =
                 agentStatusStyle(
-                  if (state.stream.pendingPrompt != null) "blocked"
-                  else state.stream.agentStatus ?: selected.status,
+                  selectedStatus ?: "unknown",
                   MaterialTheme.colorScheme.background.luminance() < 0.5f,
                 )
               Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -750,9 +750,7 @@ fun CappuccinoScreen(
                         // The live line lives in the bottom marker so follow targets stay put.
                         item(key = "conversation-bottom") {
                           Column {
-                            val liveStatus =
-                              if (state.stream.pendingPrompt != null) "blocked"
-                              else (state.stream.agentStatus ?: selected.status).lowercase()
+                            val liveStatus = selectedStatus
                             if (
                               state.offlineSavedAt == null &&
                                 liveStatus in setOf("working", "blocked")

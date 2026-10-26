@@ -15,7 +15,7 @@ private final class FakeBridge: AgentSessionServing, @unchecked Sendable {
   var holdOpen = false
   var continuation: AsyncThrowingStream<AgentStreamEvent, Error>.Continuation?
   var streamFailure: Error?
-  var snapshotFactory: (@Sendable () async -> ConversationSnapshot)?
+  var snapshotFactory: (@Sendable () async throws -> ConversationSnapshot)?
   var attempts = 0
   var bindingChecks = 0
   var binding = true
@@ -28,7 +28,7 @@ private final class FakeBridge: AgentSessionServing, @unchecked Sendable {
   func conversationSnapshot(base: URL, session: String, agent: String?) async throws
     -> ConversationSnapshot
   {
-    if let snapshotFactory { return await snapshotFactory() }
+    if let snapshotFactory { return try await snapshotFactory() }
     return snapshot
   }
 
@@ -98,6 +98,44 @@ private actor SnapshotGate {
   }
 }
 
+private actor RecoveryHistoryGate {
+  let machineID: UUID
+  let blocking: Bool
+  private(set) var reads = 0
+  private var pending: [Int: CheckedContinuation<Void, Never>] = [:]
+  private var released: Set<Int> = []
+  private var available = true
+
+  init(machineID: UUID, blocking: Bool) {
+    self.machineID = machineID
+    self.blocking = blocking
+  }
+
+  func read() async throws -> ConversationSnapshot {
+    reads += 1
+    let index = reads
+    if blocking && index <= 2 && !released.contains(index) {
+      await withCheckedContinuation { pending[index] = $0 }
+    }
+    guard available else { throw BridgeError.unreachable("History offline") }
+    return ConversationSnapshot(
+      turns: [
+        ConversationTurn(
+          id: "history-\(index)", role: "assistant", timestamp: nil,
+          text: blocking && index == 1 ? "Obsolete" : "Recovered", parts: [])
+      ],
+      source: "canonical_log", conversationID: "pi:" + String(repeating: "a", count: 64),
+      machineID: machineID, stats: nil)
+  }
+
+  func release(_ index: Int) {
+    released.insert(index)
+    pending.removeValue(forKey: index)?.resume()
+  }
+
+  func setAvailable(_ value: Bool) { available = value }
+}
+
 private final class ClientCounter: @unchecked Sendable {
   var count = 0
 }
@@ -149,6 +187,9 @@ private struct InstantDiscovery: BridgeMachineServing {
         .agentStatus(sessionID: "s-1", state: "idle", detail: nil),
       ]
     bridge.holdOpen = holdOpen ?? (events == nil)
+    bridge.snapshot = ConversationSnapshot(
+      turns: [], source: "canonical_log",
+      conversationID: "pi:" + String(repeating: "a", count: 64), machineID: machineID, stats: nil)
     let counter = ClientCounter()
     let model = SessionModel(machines: machines) {
       counter.count += 1
@@ -267,6 +308,110 @@ private struct InstantDiscovery: BridgeMachineServing {
     #expect(fx.model.stream.pendingPrompt == nil)
     #expect(!fx.model.isLive)
     #expect(fx.model.stream.entries.map(\.text) == ["hi"])
+  }
+
+  @Test func canonicalHistoryMustSettleAndCancelledOldRefreshCannotUnlockRecovery() async throws {
+    let fx = try await fixture(events: [.open(sessionID: "s-1", generation: 1)], holdOpen: true)
+    let gate = RecoveryHistoryGate(machineID: fx.machineID, blocking: true)
+    defer {
+      fx.model.clearSelection()
+      Task {
+        await gate.release(1)
+        await gate.release(2)
+      }
+    }
+    fx.bridge.snapshotFactory = { try await gate.read() }
+    fx.model.retryPause = { _ in }
+    fx.model.select(profileID: fx.profileID, agent: fx.agent)
+    for _ in 0..<100 {
+      if fx.bridge.attempts == 1 { break }
+      await Task.yield()
+    }
+    fx.bridge.continuation?.yield(.agentStatus(sessionID: "s-1", state: "idle", detail: nil))
+    for _ in 0..<100 {
+      let reads = await gate.reads
+      if fx.model.isLive && reads == 1 { break }
+      await Task.yield()
+    }
+    #expect(fx.model.isLive)
+    fx.bridge.continuation?.yield(.error(code: "upstream_unavailable", message: "Source lost"))
+    for _ in 0..<100 {
+      if await gate.reads == 2 { break }
+      await Task.yield()
+    }
+    #expect(await gate.reads == 2)
+    #expect(fx.bridge.attempts == 1)
+    #expect(!fx.model.isLive)
+    #expect(await fx.model.sendPrompt("before history") == false)
+    await gate.release(1)
+    for _ in 0..<10 { await Task.yield() }
+    #expect(fx.model.turns.isEmpty)
+    #expect(fx.bridge.attempts == 1)
+    await gate.release(2)
+    for _ in 0..<100 {
+      if fx.bridge.attempts == 2 { break }
+      await Task.yield()
+    }
+    #expect(fx.model.turns.last?.text == "Recovered")
+    #expect(fx.bridge.attempts == 2)
+    #expect(!fx.model.isLive)
+    fx.bridge.continuation?.yield(.agentStatus(sessionID: "s-1", state: "idle", detail: nil))
+    for _ in 0..<100 {
+      if fx.model.isLive { break }
+      await Task.yield()
+    }
+    #expect(fx.model.isLive)
+    #expect(fx.model.turns.last?.text == "Recovered")
+    #expect(fx.bridge.sent.isEmpty)
+  }
+
+  @Test func unverifiedOrUnavailableHistoryBlocksRecovery() async throws {
+    for mode in 0..<4 {
+      let fx = try await fixture()
+      defer { fx.model.clearSelection() }
+      fx.model.retryPause = { _ in }
+      await selectLive(fx)
+      await fx.model.awaitConversationForTesting()
+      fx.bridge.snapshot = ConversationSnapshot(
+        turns: [],
+        source: mode == 0 ? "terminal_scrollback" : "canonical_log",
+        conversationID: mode == 1
+          ? nil : "pi:" + String(repeating: mode == 3 ? "b" : "a", count: 64),
+        machineID: mode == 2 ? UUID() : fx.machineID, stats: nil)
+      fx.bridge.continuation?.yield(.error(code: "upstream_unavailable", message: "Source lost"))
+      await fx.model.awaitStreamForTesting()
+      #expect(fx.bridge.attempts == 1)
+      #expect(!fx.model.isLive)
+      #expect(fx.model.streamError != nil)
+      #expect(await fx.model.sendPrompt("must stay blocked") == false)
+      #expect(fx.bridge.sent.isEmpty)
+    }
+  }
+
+  @Test func explicitRetryRecoversCanonicalHistoryWithoutReplayingInput() async throws {
+    let fx = try await fixture()
+    defer { fx.model.clearSelection() }
+    let gate = RecoveryHistoryGate(machineID: fx.machineID, blocking: false)
+    fx.bridge.snapshotFactory = { try await gate.read() }
+    fx.model.retryPause = { _ in }
+    await selectLive(fx)
+    await fx.model.awaitConversationForTesting()
+    await gate.setAvailable(false)
+    fx.bridge.continuation?.yield(.error(code: "upstream_unavailable", message: "Source lost"))
+    await fx.model.awaitStreamForTesting()
+    #expect(fx.bridge.attempts == 1)
+    #expect(!fx.model.isLive)
+    #expect(await fx.model.sendPrompt("must not replay") == false)
+    await gate.setAvailable(true)
+    fx.model.retryStream()
+    for _ in 0..<100 {
+      if fx.bridge.attempts == 2 && fx.model.isLive { break }
+      await Task.yield()
+    }
+    #expect(fx.bridge.attempts == 2)
+    #expect(fx.model.isLive)
+    #expect(fx.model.streamError == nil)
+    #expect(fx.bridge.sent.isEmpty)
   }
 
   @Test func refreshBurstCoalescesAndSettlesWithoutHidingSourceLoss() async throws {

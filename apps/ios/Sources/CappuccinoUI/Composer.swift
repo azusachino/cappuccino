@@ -123,7 +123,8 @@ import SwiftUI
   }
 
   private var currentStatus: String {
-    liveStatus(
+    guard session.isLive else { return "unknown" }
+    return liveStatus(
       pendingPrompt: session.stream.pendingPrompt != nil,
       streamStatus: session.stream.agentStatus,
       listedStatus: session.selectedAgent?.status ?? "idle")

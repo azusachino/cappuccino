@@ -158,17 +158,31 @@ public final class SessionModel {
     guard conversationTask == nil else { return }
     let token = epoch
     conversationTask = Task { [weak self] in
-      while let model = self, model.conversationRequested, model.epoch == token {
+      while !Task.isCancelled, let model = self, model.conversationRequested, model.epoch == token {
         model.conversationRequested = false
         await model.loadConversation(token: token)
       }
-      if let model = self, model.epoch == token { model.conversationTask = nil }
+      if !Task.isCancelled, let model = self, model.epoch == token { model.conversationTask = nil }
     }
   }
 
   /// Waits for the current stream to end. Tests use this to observe the reducer deterministically.
   func awaitStreamForTesting() async {
     await streamTask?.value
+  }
+
+  func awaitConversationForTesting() async {
+    await conversationTask?.value
+  }
+
+  private func applyConversation(_ snapshot: ConversationSnapshot) {
+    let recent = boundedConversation(snapshot.source == "canonical_log" ? snapshot.turns : [])
+    turns = recent.turns
+    omittedTurns = recent.omittedMessages
+    omittedTools = recent.omittedTools
+    conversationSource = snapshot.source
+    conversationID = snapshot.conversationID
+    stats = snapshot.stats
   }
 
   private func loadConversation(token: Int) async {
@@ -179,21 +193,22 @@ public final class SessionModel {
       if let machine = snapshot.machineID, machine != profile.machineID {
         throw BridgeError.protocolError("Conversation machine identity changed")
       }
-      guard token == epoch else { return }
+      guard token == epoch, !Task.isCancelled else { return }
       // Terminal snapshots arrive through the stream; only canonical history is shown here.
-      let recent = boundedConversation(
-        snapshot.source == "canonical_log" ? snapshot.turns : [])
-      turns = recent.turns
-      omittedTurns = recent.omittedMessages
-      omittedTools = recent.omittedTools
-      conversationSource = snapshot.source
-      conversationID = snapshot.conversationID
-      stats = snapshot.stats
+      applyConversation(snapshot)
     } catch {
       // Keep the turns already shown. A failed first load falls back to scrollback.
       guard token == epoch, !Task.isCancelled else { return }
       if conversationSource == nil { conversationSource = "terminal_scrollback" }
     }
+  }
+
+  /// A read-only recovery attempt; it never replays a prompt, answer or control operation.
+  public func retryStream() {
+    guard foreground, selectedAgent != nil else { return }
+    invalidateLiveStream()
+    streamError = "Reconnecting to the agent"
+    startStream(token: epoch, recovering: true)
   }
 
   private func startStream(token: Int, recovering: Bool = false) {
@@ -222,6 +237,26 @@ public final class SessionModel {
               "Agent session identity is unavailable or replaced; reselect it")
           }
           guard token == epoch, !Task.isCancelled else { return }
+          // Recovery is serialized: obsolete coalesced reads cannot unlock or overwrite this
+          // attachment, even when their transport ignores cancellation.
+          conversationTask?.cancel()
+          conversationTask = nil
+          conversationRequested = false
+          let expectedConversation = conversationID
+          let snapshot = try await client.conversationSnapshot(
+            base: profile.endpoint, session: agent.sessionID, agent: agent.provider)
+          guard token == epoch, !Task.isCancelled else { return }
+          guard snapshot.source == "canonical_log" else {
+            throw BridgeError.unreachable("Canonical history unavailable; retry to enable actions")
+          }
+          guard snapshot.machineID == profile.machineID,
+            let identity = snapshot.conversationID, let provider = agent.provider,
+            CanonicalConversationID.isCanonical(identity, agent: provider),
+            expectedConversation == nil || identity == expectedConversation
+          else {
+            throw BridgeError.protocolError("Recovery history identity changed or is unavailable")
+          }
+          applyConversation(snapshot)
         }
         attached = true
         var opened = false
