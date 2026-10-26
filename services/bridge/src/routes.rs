@@ -2,7 +2,9 @@
 //! `pane.read` and emits wire-v0-shaped events with the slice-A
 //! reconciliation semantics.
 
-use crate::{agents, conversation, herdr, prompt, questions, reconcile, stats, transcript};
+use crate::{
+    agents, conversation, herdr, mutation, prompt, questions, reconcile, stats, transcript,
+};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Json, Path as AxumPath, Query, State};
 use axum::http::{header, StatusCode};
@@ -71,6 +73,7 @@ pub async fn session(State(state): State<Arc<BridgeState>>) -> Response {
                 "prompt_input": true,
                 "prompt_answers": true,
                 "agent_control": true,
+                "mutation_binding": true,
                 "completion_signals": true,
                 "telegram_notifications": false,
                 "telegram_notifications_configured": false,
@@ -536,8 +539,26 @@ pub struct ControlRequest {
 pub async fn control_agent(
     State(state): State<Arc<BridgeState>>,
     AxumPath(session_id): AxumPath<String>,
-    Json(request): Json<ControlRequest>,
+    body: Result<Json<serde_json::Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
+    let Ok(Json(body)) = body else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "Invalid mutation body",
+        );
+    };
+    let binding = match mutation::Binding::from_body(&body) {
+        Ok(binding) => binding,
+        Err(response) => return response,
+    };
+    let Ok(request) = serde_json::from_value::<ControlRequest>(body) else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "Invalid control body",
+        );
+    };
     if !matches!(request.action.as_str(), "interrupt" | "new_session") {
         return error_response(
             StatusCode::BAD_REQUEST,
@@ -545,47 +566,41 @@ pub async fn control_agent(
             "unknown control action",
         );
     }
-    let rows = match herdr::agent_list().await {
-        Ok(result) => agents::map_agents(&result, &state.machine_id).unwrap_or_default(),
-        Err(err) => {
-            return error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string())
-        }
+    // This observation is a preflight, not an atomic check-and-write at Herdr.
+    let row = match binding.check(&state.machine_id, &session_id, false).await {
+        Ok(row) => row,
+        Err(response) => return response,
     };
-    let Some(row) = rows
-        .into_iter()
-        .find(|row| row.session_id == session_id || row.pane_id == session_id)
-    else {
-        return error_response(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            &format!("no agent with session_id {session_id}"),
-        );
-    };
-    // Typed into a running turn or an open question, the command would become its input.
-    if request.action == "new_session"
-        && (row.working || matches!(row.status.as_str(), "working" | "blocked"))
-    {
-        return error_response(
-            StatusCode::CONFLICT,
-            "agent_busy",
-            &format!(
-                "{} is {}; stop it before starting a new session",
-                row.agent, row.status
-            ),
-        );
-    }
     let sent = match request.action.as_str() {
-        "interrupt" => herdr::pane_send_keys(&row.pane_id, &["esc"]).await,
-        _ => match new_session_command(&row.agent) {
-            Some(command) => herdr::agent_prompt(&row.pane_id, command).await,
-            None => {
+        "interrupt" => herdr::pane_send_keys(&binding.pane_id, &["esc"]).await,
+        _ => {
+            match row["agent_status"].as_str() {
+                Some("idle") => {}
+                Some("working" | "blocked") => {
+                    return error_response(
+                        StatusCode::CONFLICT,
+                        "agent_busy",
+                        "Stop the agent before starting a new session",
+                    )
+                }
+                _ => {
+                    return error_response(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "upstream_unavailable",
+                        "Agent idle state is unavailable",
+                    )
+                }
+            }
+            let Some(command) = new_session_command(row["agent"].as_str().unwrap_or_default())
+            else {
                 return error_response(
                     StatusCode::BAD_REQUEST,
                     "unsupported",
-                    &format!("no new-session command known for {}", row.agent),
-                )
-            }
-        },
+                    "No new-session command known for this agent",
+                );
+            };
+            herdr::agent_prompt(&binding.pane_id, command).await
+        }
     };
     match sent {
         Ok(_) => (
@@ -595,7 +610,7 @@ pub async fn control_agent(
                 .to_string(),
         )
             .into_response(),
-        Err(err) => error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string()),
+        Err(_) => mutation::unknown(),
     }
 }
 
@@ -603,18 +618,30 @@ pub async fn control_agent(
 pub async fn submit_agent_prompt(
     State(state): State<Arc<BridgeState>>,
     AxumPath(session_id): AxumPath<String>,
-    Json(submission): Json<prompt::PromptSubmission>,
+    body: Result<Json<serde_json::Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
-    let pane_id = match resolve_pane(&state, &session_id).await {
-        Some(pane_id) => pane_id,
-        None => {
-            return error_response(
-                StatusCode::NOT_FOUND,
-                "not_found",
-                &format!("no agent with session_id {session_id}"),
-            );
-        }
+    let Ok(Json(body)) = body else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "Invalid mutation body",
+        );
     };
+    let binding = match mutation::Binding::from_body(&body) {
+        Ok(binding) => binding,
+        Err(response) => return response,
+    };
+    let Ok(submission) = serde_json::from_value::<prompt::PromptSubmission>(body) else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "Invalid prompt body",
+        );
+    };
+    if let Err(response) = binding.check(&state.machine_id, &session_id, false).await {
+        return response;
+    }
+    let pane_id = binding.pane_id.clone();
 
     match submission {
         prompt::PromptSubmission::Prompt { text, confirmed } => {
@@ -634,18 +661,17 @@ pub async fn submit_agent_prompt(
                     &format!("{command} is an agent command; confirm it to run it"),
                 );
             }
-            match herdr::agent_prompt(&session_id, &text).await {
+            if let Err(response) = binding.check(&state.machine_id, &session_id, false).await {
+                return response;
+            }
+            match herdr::agent_prompt(&pane_id, &text).await {
                 Ok(_) => (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "application/json")],
                     json!({"event": "prompt_sent", "session_id": session_id}).to_string(),
                 )
                     .into_response(),
-                Err(err) => error_response(
-                    StatusCode::BAD_GATEWAY,
-                    "herdr_error",
-                    &format!("cannot deliver prompt: {err}"),
-                ),
+                Err(_) => mutation::unknown(),
             }
         }
         prompt::PromptSubmission::AnswerPrompt {
@@ -698,16 +724,15 @@ pub async fn submit_agent_prompt(
                 } else {
                     "esc"
                 };
+                if let Err(response) = binding.check(&state.machine_id, &session_id, false).await {
+                    return response;
+                }
                 if let Some(stale) = claimed(&pane_id, &prompt_id) {
                     return stale;
                 }
-                if let Err(err) = herdr::pane_send_keys(&pane_id, &[key]).await {
+                if herdr::pane_send_keys(&pane_id, &[key]).await.is_err() {
                     prompt::forget(&pane_id);
-                    return error_response(
-                        StatusCode::BAD_GATEWAY,
-                        "herdr_error",
-                        &format!("cannot cancel: {err}"),
-                    );
+                    return mutation::unknown();
                 }
                 return (
                     StatusCode::OK,
@@ -752,6 +777,9 @@ pub async fn submit_agent_prompt(
             } else {
                 &[&key_digit, "enter"]
             };
+            if let Err(response) = binding.check(&state.machine_id, &session_id, false).await {
+                return response;
+            }
             if let Some(stale) = claimed(&pane_id, &prompt_id) {
                 return stale;
             }
@@ -768,13 +796,9 @@ pub async fn submit_agent_prompt(
                     .to_string(),
                 )
                     .into_response(),
-                Err(err) => {
+                Err(_) => {
                     prompt::forget(&pane_id);
-                    error_response(
-                        StatusCode::BAD_GATEWAY,
-                        "herdr_error",
-                        &format!("cannot send keys: {err}"),
-                    )
+                    mutation::unknown()
                 }
             }
         }
@@ -797,10 +821,18 @@ pub async fn submit_agent_prompt(
                     return error_response(StatusCode::BAD_REQUEST, "bad_answer", &message)
                 }
             };
-            if let Some(stale) = claimed(&pane_id, &prompt_id) {
-                return stale;
-            }
-            for step in steps {
+            for (index, step) in steps.into_iter().enumerate() {
+                if let Err(response) = binding
+                    .check(&state.machine_id, &session_id, index > 0)
+                    .await
+                {
+                    return response;
+                }
+                if index == 0 {
+                    if let Some(stale) = claimed(&pane_id, &prompt_id) {
+                        return stale;
+                    }
+                }
                 let sent = match &step {
                     questions::Step::Keys(keys) => {
                         let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
@@ -808,13 +840,9 @@ pub async fn submit_agent_prompt(
                     }
                     questions::Step::Text(text) => herdr::pane_send_text(&pane_id, text).await,
                 };
-                if let Err(err) = sent {
+                if sent.is_err() {
                     prompt::forget(&pane_id);
-                    return error_response(
-                        StatusCode::BAD_GATEWAY,
-                        "herdr_error",
-                        &format!("cannot send answer: {err}"),
-                    );
+                    return mutation::unknown();
                 }
                 // The form redraws between keys; faster input lands on the previous step.
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -861,5 +889,6 @@ mod tests {
         assert_eq!(value["capabilities"]["prompt_input"], true);
         assert_eq!(value["capabilities"]["prompt_answers"], true);
         assert_eq!(value["capabilities"]["agent_control"], true);
+        assert_eq!(value["capabilities"]["mutation_binding"], true);
     }
 }

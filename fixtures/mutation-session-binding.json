@@ -1,0 +1,31 @@
+{
+  "valid": {
+    "expected_session": {
+      "machine_id": "ABCDEFAB-1111-4111-8111-111111111111",
+      "pane_id": "w1:a",
+      "native_session_ref": "native-ref:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "invalid": [
+    {"body": {}, "status": 428, "code": "session_binding_required"},
+    {"body": {"expected_session": null}, "status": 428, "code": "session_binding_required"},
+    {"body": {"expected_session": false}, "status": 400, "code": "bad_session_binding"},
+    {"body": {"expected_session": {}}, "status": 400, "code": "bad_session_binding"},
+    {
+      "body": {"expected_session": {"machine_id": "not-a-uuid", "pane_id": "w1:a", "native_session_ref": "opaque"}},
+      "status": 400, "code": "bad_session_binding"
+    },
+    {
+      "body": {"expected_session": {"machine_id": "abcdefab-1111-4111-8111-111111111111", "pane_id": "", "native_session_ref": "opaque"}},
+      "status": 400, "code": "bad_session_binding"
+    },
+    {
+      "body": {"expected_session": {"machine_id": "abcdefab-1111-4111-8111-111111111111", "pane_id": "w1:a", "native_session_ref": 1}},
+      "status": 400, "code": "bad_session_binding"
+    }
+  ],
+  "errors": [
+    {"event": "error", "code": "stale_session", "message": "Selected session changed; reselect it"},
+    {"event": "error", "code": "mutation_outcome_unknown", "message": "Input may have been applied; inspect current state before another action"}
+  ]
+}

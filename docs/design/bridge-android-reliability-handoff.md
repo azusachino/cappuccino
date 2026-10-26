@@ -316,3 +316,51 @@ Run `make md-check` and `git diff --check` after final documentation updates.
 C1/C2 are ready for owner checkpoint review; A3/B2 and later native-authority and
 admission-dependent work remain open/blocked. Do not interpret these gates as
 proof of live Pi admission, atomic mutation fencing or active-branch history.
+
+## A3 contract-first continuation
+
+The owner requested continuing A3 in steps after the C1/C2 checkpoint. Owning Git
+was rechecked clean on `feat/bridge-android-reliability` at
+`5cf12114edf26c89187297e7f9a1b70f8af030e3` before edits. The bridge
+implementation now enforces binding guards and passes its owning gate;
+Android/Apple adapters remain pending.
+The [accepted A3 contract](mutation-session-binding.md) records the
+expected-session object, new capability, strict old/new-client behavior, typed
+stale and partial-outcome errors, test matrix and unavoidable PTY race.
+
+Inspection found prompt submission resolving a pane but then writing through
+the original alias, and multi-step answers lacking intervening native checks.
+The captured Herdr schema does not offer atomic expected-native-session writes.
+A3 must use one identity algorithm and fresh pre-dispatch checks, without calling
+this atomic fencing or changing native-admission acceptance.
+
+Read-only issue searches found no matching binding issue. Existing #10 requires
+broader approval/grant work; it must not be closed by A3. The owner accepted the
+exact A3 wire and strict compatibility contract, recorded
+in [issue #45](https://github.com/azusachino/cappuccino/issues/45) before production
+implementation. The no-push/no-PR/deploy and no-owner-runtime restrictions remain.
+The bridge candidate shares the existing reference hash, validates required
+binding, checks fresh catalog metadata before each write, targets the verified
+pane, and stops partial multi-step input with an unknown outcome. Shared fixtures
+and real-bridge/mock-Herdr cases cover all mutation variants, legacy/malformed/
+stale input, unavailable metadata, nonce preservation, partial replacement and the
+remaining post-final-check race. This is bridge-only evidence, not native-client
+acceptance or a native fencing/admission guarantee.
+
+The initial focused `cargo test mutation::tests` passed three tests. The first
+full `make check-bridge` stopped at a new test's invalid `StatusCode as u64` cast;
+it was corrected to `u64::from(status.as_u16())`. The identical full gate is being
+rerun before proceeding. That rerun passed 94 unit tests and 49/51 contract
+tests; two new race fixtures failed before bridge startup because their long
+temporary Unix-socket paths exceeded macOS `SUN_LEN`. Their labels were shortened
+to `a3-nonce` and `a3-pty`. The next full `make check-bridge` passed: 94 unit,
+51 contract, six lifecycle, nine active resource and seven schema tests (167
+passing), plus release test-client build. Four pre-existing opt-in soak ignores
+remain. The forced post-final-check replacement test observes the replacement
+receiving input, explicitly preserving that known limitation.
+No prior assertion was removed, ignored or weakened; missing-target mutation
+expectation intentionally changes from 404 to the
+accepted 409 `stale_session` contract. Native gates have not run for A3.
+
+Next: implement Android, then Apple adapters, and run full/native UI verification.
+No agent reviewer is implied.

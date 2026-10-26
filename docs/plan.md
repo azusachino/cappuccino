@@ -35,11 +35,15 @@ reconcile their older terminology and acceptance with current intent first.
 The initial document was planning, not implementation or deployment approval.
 The owner subsequently authorized bounded implementation with Pi subagents;
 [the implementation handoff](design/bridge-android-reliability-handoff.md) records
-the verified A1/A2 Android and C1a bounded bridge-I/O checkpoints, B1 findings and
-remaining slices. The latest Android journey passes 51 synthetic tests; existing
-live-agent and physical-device limits remain. C1b/C2 stream recovery is next.
-The separately approved disposable D1 attempt did not establish runtime branch
-observation; typed-delivery prerequisites remain blocked.
+the verified A1/A2 Android, C1 bounded/source-unavailable bridge and C2 native
+recovery/history-before-actions checkpoints. Android's 51 synthetic UI tests and
+Apple's four fixture UI tests pass; live-agent and physical-device limits remain.
+The owner requested continuing with A3. Its
+[mutation session-binding contract](design/mutation-session-binding.md) has owner
+wire acceptance and [issue #45](https://github.com/azusachino/cappuccino/issues/45);
+bridge-first implementation and verification are in progress. The separately approved disposable
+D1 attempt did not establish runtime branch observation; typed-delivery
+prerequisites remain blocked.
 
 ## Next steps
 

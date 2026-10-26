@@ -38,7 +38,24 @@ same base URL for both transports.
 | `POST /api/agents/{sessionId}/control` | HTTP | `interrupt` (Escape) or `new_session` (`/new`, refused while the agent is busy) |
 | `/api/stream?session=…` | WebSocket | read-only pane-line append/reset events with visible gaps |
 
-`GET /api/session` adds optional `bridge_version` (the Cargo package version) and a boolean `capabilities` object: `agent_discovery`, `live_output`, `conversation_history`, `prompt_input`, `prompt_answers`, `agent_control` and `completion_signals`. `telegram_notifications` is reported `false`. These advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Missing fields mean not reported; `false` explicitly means unsupported. Protocol remains 1 and existing identity validation is unchanged. Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog.
+`GET /api/session` adds optional `bridge_version` (the Cargo package version) and a boolean `capabilities` object: `agent_discovery`, `live_output`, `conversation_history`, `prompt_input`, `prompt_answers`, `agent_control`, `mutation_binding` and `completion_signals`. `telegram_notifications` is reported `false`. These advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Missing fields mean not reported; `false` explicitly means unsupported. Protocol remains 1 and existing identity validation is unchanged. Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog.
+
+Both mutation endpoints require `expected_session` with the selected `machine_id`
+(UUID), `pane_id` and opaque `native_session_ref`, including every answer/cancel
+variant. `mutation_binding: true` advertises this pre-dispatch contract. Clients
+must treat missing/false support as read-only, without an unbound fallback.
+Older unbound requests receive 428 `session_binding_required`; malformed binding
+gets 400 `bad_session_binding`, and a changed/missing binding gets 409
+`stale_session` before input. Unavailable metadata fails closed with 503
+`upstream_unavailable`. A multi-step answer rechecks before each write; lost
+binding after an earlier step returns 502 `mutation_outcome_unknown` and stops
+later steps. Never replay uncertain input. See the accepted
+[A3 contract](../../docs/design/mutation-session-binding.md) and
+[issue #45](https://github.com/azusachino/cappuccino/issues/45).
+
+These checks use fresh Herdr metadata and the verified pane, but are **not atomic
+fencing**: replacement after the final observation can still receive input.
+Native admission and process-incarnation guarantees remain unproven.
 
 The bridge exposes `/api/agents/{sessionId}/conversation`, `POST /api/agents/{sessionId}/prompt` for prompt text and validated prompt-card answers, and `POST /api/agents/{sessionId}/control` for `interrupt` and `new_session`; this is not native Pi queue selection or a correlated delivery receipt. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
 

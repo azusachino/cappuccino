@@ -97,7 +97,7 @@ pub fn map_agents(result: &Value, machine_id: &str) -> Result<Vec<AgentRow>, Str
         .collect())
 }
 
-fn native_session_reference(reference: &Value, kind: &str) -> Option<String> {
+pub(crate) fn native_session_reference(reference: &Value, kind: &str) -> Option<String> {
     use sha2::{Digest, Sha256};
     let agent = reference["agent"].as_str()?;
     let ref_kind = reference["kind"].as_str()?;
