@@ -420,4 +420,54 @@ Current active scope is Android-only. Bridge and Android checkpoints are verifie
 full cross-platform A3 and issue #45 remain open. Do not infer native Pi admission,
 atomic PTY fencing, active-branch authority, real approval or physical-phone parity
 from synthetic evidence. No push, PR, deployment or owner-runtime action occurred.
-Both task-owned native devices are stopped.
+Both task-owned native devices were stopped at that checkpoint.
+
+## Android actual-bridge continuation
+
+The owner approved an Android-to-actual-bridge integration journey after the
+`8df8921` clean checkpoint. iOS remains explicitly paused. This is tier-1 test
+infrastructure work, not another wire contract, release or deployment.
+
+`make ui-test-android` now uses
+`services/bridge/tests/android_journey.py` to launch the locked Rust bridge with
+an isolated temporary HOME, synthetic Pi-format history and a private fake Herdr
+Unix socket. Fixture control and bridge HTTP bind loopback only; host probes
+ignore proxies/redirects and the runner adds/removes only its two owned adb
+reverse mappings on the explicitly selected emulator. No provider/Pi process or
+owner store is used. The existing full UI suite is retained, not filtered.
+
+`ActualBridgeJourneyTest` uses real Android `BridgeClient` HTTP/WebSocket and
+`ConnectedViewModel`: stale prompt/control/answer must yield zero terminal RPCs;
+a frozen old rendered screen must not borrow B's binding; a positive B send
+proves writes work; then a pending write loses its acknowledgement, canonical
+history becomes unavailable, and read-only recovery must never replay the input.
+The peer journal is a synthetic terminal-RPC oracle, not native Pi admission.
+
+Host fixture self-test and `make md-check`/`git diff --check` passed. Initial
+self-checks incorrectly expected `available: false` and then an explicit null ID;
+the actual labeled scrollback contract omits the optional canonical ID. The
+correct check requires scrollback with no canonical identity. Android
+`make validate-android` passed after replacing a deprecated Compose test-rule
+import with the project's v2 API; warnings remain errors. The complete 54-test UI
+suite initially passed the existing 53 tests but exposed the rejected draft
+correctly retained by A1: text input appended to it in the new frozen-screen
+scenario. Changed that scenario to explicit text replacement, preserving the
+exact retained-text and zero-write assertions.
+
+Final unchanged-source acceptance passed:
+
+- `mise exec -- make validate-android`: 218 unit tests, lint, debug and test APKs.
+- `ANDROID_SERIAL=emulator-5580 mise exec -- make ui-test-android`: all 54 UI tests,
+  zero failures/errors/skips, including the actual-bridge journey (7.808 seconds;
+  XML timestamp `2026-10-26T12:55:33`). Screenshot export also passed.
+- Host fixture self-test, `make md-check`, and `git diff --check` passed. Rust
+  source, Cargo manifest and lockfile are unchanged from `3b2ccd3`; its 167-test
+  bridge gate evidence remains applicable, while the actual bridge binary was
+  freshly built/run by both the self-test and Android runner.
+
+After completion, scoped `adb reverse --list` was empty, the runner had reaped its
+bridge and removed temporary state, and the task-owned emulator was shut down.
+These results prove the synthetic Android/actual-bridge contract, not native Pi
+admission, atomic PTY fencing, real approval, live branch or tailnet-phone parity.
+iOS stays paused; issue #45/full cross-platform A3 remain open. No push, PR,
+deployment, global integration or owner-session action was performed.

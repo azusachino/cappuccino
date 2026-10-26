@@ -213,6 +213,24 @@ with consumed, validated bodies. It establishes a baseline and asserts no
 performance threshold. Its hermetic tests spawn the real bridge against a mock
 Herdr socket.
 
+`ANDROID_SERIAL=<task-owned emulator> make ui-test-android` also runs the actual
+Rust bridge against a private synthetic Herdr peer. Its stdlib Python runner
+(`services/bridge/tests/android_journey.py`) builds the locked bridge, uses a
+private temporary HOME/session store and loopback fixture control, and reverses
+only its two owned ports on the explicitly selected emulator. No Pi/provider
+process, credential, owner session or global integration is involved. Python 3,
+Cargo and `adb` must be available; no Python package installation is needed.
+
+The complete UI suite includes `ActualBridgeJourneyTest`: replacement before
+prompt/control/answer, a frozen old UI callback against a live replacement, and
+canonical-history recovery after a pending write loses its acknowledgement. The
+peer journal proves terminal-RPC counts, not native Pi admission. Missing fixture
+runner arguments fail the journey rather than silently skip it; use the Make
+target, not a bare connected-test command. The runner removes its reverse
+mappings, stops its owned bridge/listeners and removes its temporary store at
+exit. Host-only fixture verification is
+`python3 services/bridge/tests/android_journey.py --self-test` from the repo root.
+
 The resource soak (`make resource-bridge-client`) is opt-in. It asserts that file
 descriptors, child processes, temp files and memory recover after each scenario
 class. Short samples never prove an absolute zero leak.

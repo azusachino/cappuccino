@@ -100,7 +100,7 @@ ui-test: generate ## Run iPhone shell smoke on an explicitly selected simulator
 
 ui-test-android: ## Run Android shell smoke on one task-owned emulator and export screenshots
 	@test -n "$(ANDROID_SERIAL)" || { echo 'Set ANDROID_SERIAL=<task-owned emulator serial>' >&2; exit 2; }
-	$(ANDROID) :app:connectedDebugAndroidTest
+	python3 services/bridge/tests/android_journey.py --serial "$(ANDROID_SERIAL)"
 	mkdir -p .build/android/screens
 	@set -e; for screen in Machines AddMachineIme Settings; do \
 	  image=$$(find "$(ANDROID_TEST_OUTPUT)" -type f -name "$$screen.png"); \
