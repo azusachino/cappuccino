@@ -362,5 +362,39 @@ No prior assertion was removed, ignored or weakened; missing-target mutation
 expectation intentionally changes from 404 to the
 accepted 409 `stale_session` contract. Native gates have not run for A3.
 
-Next: implement Android, then Apple adapters, and run full/native UI verification.
-No agent reviewer is implied.
+Bridge checkpoint: `3b2ccd3` (`fix: require native binding before bridge mutations`).
+
+Android candidates now require an immutable selected binding on all transport
+writes, reverify capability/machine before POST, serialize binding through JSON
+builders, and disable OkHttp POST retry/redirect behavior. Model/UI gates require
+both live readiness and advertised binding support. Typed stale/partial-unknown
+responses invalidate source/action state while preserving original-native draft
+and outcome keys; late errors are epoch-fenced. New focused transport/binding
+tests passed (20 transport plus two binding tests). Added direct-call capability,
+shared typed-error, escaped-field and injected-client no-POST-retry regressions,
+plus all-action source invalidation and late typed-error isolation tests. The
+full Android format/unit/lint gate passed after fixing a compiler unnecessary
+safe-call warning, a MockWebServer 5 immutable-ByteString helper assumption, and
+unstable chained `runCatching` formatting; no checks were suppressed.
+
+Click-time UI checks now compare the rendered profile/native binding with the
+current model, preventing a stale callback from borrowing a replacement's valid
+binding. Positive UI fixtures explicitly advertise the new capability/native
+reference; added frozen-old-render and read-only legacy/incomplete-binding
+journeys. Foreground recovery also asserts actual mutation readiness after the
+history barrier, rather than transport readiness alone. The first native build
+needed a missing `assertNull` import. Its UI run then passed 51/53; the new frozen
+render's fake controller lacked draft storage, and the IME preview still used
+legacy binding advertisements. Corrected those fixtures without changing draft,
+IME-inset, action-isolation or positive-readiness assertions.
+
+Final Android `mise exec -- make validate-android` and
+`ANDROID_SERIAL=emulator-5580 mise exec -- make ui-test-android` passed on unchanged
+source: 218 unit and 53 UI tests, zero failures/errors/skips, lint and both APKs.
+Native UI XML timestamp: `2026-10-26T10:23:12`. The task-owned API35 emulator on
+port 5580 was shut
+down with its scoped `adb emu kill` command after acceptance. Apple remains
+unchanged and pending. These are Android/bridge checkpoints, not full A3 closure.
+
+Next: finish Android tests and acceptance, then Apple adapters and full/native UI
+verification. No agent reviewer is implied.

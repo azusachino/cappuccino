@@ -35,15 +35,19 @@ import com.azusachino.cappuccino.core.PromptOption
 import com.azusachino.cappuccino.core.PromptQuestion
 import com.azusachino.cappuccino.core.StreamEntry
 import com.azusachino.cappuccino.core.StreamState
+import com.azusachino.cappuccino.io.BridgeDetails
 import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectionState
 import com.azusachino.cappuccino.io.MachineProfile
+import com.azusachino.cappuccino.io.agentDraftKey
+import com.azusachino.cappuccino.io.canMutate
 import com.azusachino.cappuccino.ui.CappuccinoScreen
 import com.azusachino.cappuccino.ui.CappuccinoTheme
 import java.time.ZoneId
 import java.util.UUID
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -90,7 +94,17 @@ class CappuccinoShellTest {
         machine,
       )
     val agent =
-      AgentRow(machine, "synthetic-session", "pane-1", "claude", "claude", "working", false, "main")
+      AgentRow(
+        machine,
+        "synthetic-session",
+        "pane-1",
+        "claude",
+        "claude",
+        "working",
+        false,
+        "main",
+        nativeSessionRef = "synthetic-native",
+      )
     val state =
       mutableStateOf(
         ConnectedUiState(
@@ -108,7 +122,11 @@ class CappuccinoShellTest {
                   machine,
                   "0.1.0",
                   1,
-                  mapOf("prompt_input" to true, "agent_control" to true),
+                  mapOf(
+                    "prompt_input" to true,
+                    "agent_control" to true,
+                    "mutation_binding" to true,
+                  ),
                 )
             ),
           sessionStats =
@@ -186,6 +204,7 @@ class CappuccinoShellTest {
           connection = ConnectionState.Connected,
           streamLive = true,
           stream = StreamState(agent.sessionId, 1, agentStatus = "idle"),
+          bridgeDetails = boundDetails(profile),
         )
       )
     compose.activity.runOnUiThread {
@@ -554,7 +573,17 @@ class CappuccinoShellTest {
     val profile =
       MachineProfile("question", "Synthetic", Endpoint.parse("https://bridge.example"), machine)
     val agent =
-      AgentRow(machine, "question-session", "pane", "claude", "claude", "blocked", false, "main")
+      AgentRow(
+        machine,
+        "question-session",
+        "pane",
+        "claude",
+        "claude",
+        "blocked",
+        false,
+        "main",
+        nativeSessionRef = "synthetic-question-native",
+      )
     val options = listOf("Red", "Blue", "Green").map { PromptOption(it.lowercase(), it, null) }
     val question = PromptQuestion("Color", "Which color should the theme use?", false, options)
     val state =
@@ -563,6 +592,7 @@ class CappuccinoShellTest {
           profiles = listOf(profile),
           activeProfileId = profile.id,
           selectedAgent = agent,
+          bridgeDetails = boundDetails(profile),
           conversationTurns =
             (1..20).map {
               ConversationTurn("t$it", "assistant", null, "Synthetic turn $it", emptyList())
@@ -657,6 +687,119 @@ class CappuccinoShellTest {
     assertEquals(listOf("Review first"), actions.prompts)
   }
 
+  private fun boundDetails(profile: MachineProfile, advertised: Boolean? = true) =
+    mapOf(
+      profile.id to
+        BridgeDetails(
+          profile.machineId,
+          "fixture",
+          1,
+          mapOf("prompt_input" to true, "prompt_answers" to true, "agent_control" to true) +
+            (advertised?.let { mapOf("mutation_binding" to it) } ?: emptyMap()),
+        )
+    )
+
+  @Test
+  fun staleRenderedComposerCannotBorrowReplacementBinding() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile("stale-render", "Synthetic", Endpoint.parse("https://bridge.example"), machine)
+    val agent =
+      AgentRow(
+        machine,
+        "same-locator",
+        "pane",
+        "pi",
+        "pi",
+        "idle",
+        false,
+        null,
+        nativeSessionRef = "native-A",
+      )
+    val rendered =
+      ConnectedUiState(
+        profiles = listOf(profile),
+        activeProfileId = profile.id,
+        selectedAgent = agent,
+        connection = ConnectionState.Connected,
+        streamLive = true,
+        stream = StreamState(agent.sessionId, 1, agentStatus = "idle"),
+        bridgeDetails = boundDetails(profile),
+      )
+    val current = mutableStateOf(rendered)
+    val actions = StateActions(current)
+    compose.activity.runOnUiThread {
+      compose.activity.setContent {
+        // Deliberately freeze the rendered snapshot, simulating a callback before recomposition.
+        CappuccinoTheme { CappuccinoScreen(rendered, actions) { _, _ -> } }
+      }
+    }
+    compose.onNodeWithTag("promptInput").performTextInput("Old draft")
+    compose.runOnIdle {
+      current.value = current.value.copy(selectedAgent = agent.copy(nativeSessionRef = "native-B"))
+    }
+    compose.onNodeWithContentDescription("Send").performClick()
+    compose.onNodeWithContentDescription("Commands").performClick()
+    compose.onNodeWithText("New session").performClick()
+    compose.onNodeWithText("Start a new session?").assertIsDisplayed()
+    compose.onNode(hasText("New session") and hasClickAction()).performClick()
+    assertTrue(actions.prompts.isEmpty())
+    assertTrue(actions.controls.isEmpty())
+    assertEquals("Old draft", current.value.drafts[agentDraftKey(agent)])
+    assertNull(current.value.drafts[agentDraftKey(agent.copy(nativeSessionRef = "native-B"))])
+  }
+
+  @Test
+  fun legacyOrIncompleteBindingKeepsLiveComposerReadOnly() {
+    val machine = UUID.randomUUID()
+    val profile =
+      MachineProfile("binding", "Synthetic", Endpoint.parse("https://bridge.example"), machine)
+    val agent =
+      AgentRow(
+        machine,
+        "fixture",
+        "pane",
+        "pi",
+        "pi",
+        "idle",
+        false,
+        null,
+        nativeSessionRef = "native-A",
+      )
+    val ready =
+      ConnectedUiState(
+        profiles = listOf(profile),
+        activeProfileId = profile.id,
+        selectedAgent = agent,
+        connection = ConnectionState.Connected,
+        streamLive = true,
+        stream = StreamState(agent.sessionId, 1, agentStatus = "idle"),
+        bridgeDetails = boundDetails(profile),
+        drafts = mapOf(agentDraftKey(agent) to "Retained draft"),
+      )
+    val state = mutableStateOf(ready)
+    val actions = StateActions(state)
+    compose.activity.runOnUiThread {
+      compose.activity.setContent {
+        CappuccinoTheme { CappuccinoScreen(state.value, actions) { _, _ -> } }
+      }
+    }
+    compose.onNodeWithContentDescription("Send").assertIsEnabled()
+    for (readonly in
+      listOf(
+        ready.copy(bridgeDetails = boundDetails(profile, null)),
+        ready.copy(bridgeDetails = boundDetails(profile, false)),
+        ready.copy(selectedAgent = agent.copy(nativeSessionRef = null)),
+      )) {
+      compose.runOnIdle { state.value = readonly }
+      compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
+      compose
+        .onNodeWithText("Session-bound actions unavailable.", substring = true)
+        .assertIsDisplayed()
+      assertTrue(actions.prompts.isEmpty())
+    }
+  }
+
   private fun assertSendAndStopSitAtTheEnd() {
     // The model chip must not take the slack: Stop and Send hug the composer's end edge.
     val composer = compose.onNodeWithTag("promptInput").fetchSemanticsNode().boundsInRoot
@@ -714,6 +857,16 @@ class CappuccinoShellTest {
       .use { it.readText() }
 
   private class StateActions(private val state: MutableState<ConnectedUiState>) : ConnectedActions {
+    override fun acceptsMutation(profileId: String?, agent: AgentRow): Boolean {
+      val current = state.value.selectedAgent ?: return false
+      return state.value.canMutate &&
+        state.value.activeProfileId == profileId &&
+        current.machineId == agent.machineId &&
+        current.sessionId == agent.sessionId &&
+        current.paneId == agent.paneId &&
+        current.nativeSessionRef == agent.nativeSessionRef
+    }
+
     val controls = mutableListOf<String>()
     val prompts = mutableListOf<String>()
 
@@ -750,6 +903,14 @@ class CappuccinoShellTest {
 
     override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
       state.value = state.value.copy(themeMode = mode)
+    }
+
+    override fun setDraft(key: String, text: String) {
+      state.value =
+        state.value.copy(
+          drafts =
+            if (text.isEmpty()) state.value.drafts - key else state.value.drafts + (key to text)
+        )
     }
 
     override fun submitPrompt(text: String, confirmed: Boolean) {

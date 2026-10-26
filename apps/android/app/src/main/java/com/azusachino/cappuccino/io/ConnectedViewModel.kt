@@ -48,6 +48,14 @@ fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnecti
 
 data class PromptSendState(val text: String, val outcome: String? = null)
 
+/** Live observation and an advertised binding contract are both required for writes. */
+val ConnectedUiState.canMutate: Boolean
+  get() =
+    connection == ConnectionState.Connected &&
+      streamLive &&
+      bridgeDetails[activeProfileId]?.capabilities?.get("mutation_binding") == true &&
+      selectedAgent?.let { MutationBinding.from(it) } != null
+
 /**
  * Drafts bind to the native session so a replacement occupant of the same locator never inherits
  * one.
@@ -96,6 +104,9 @@ data class ConnectedUiState(
 )
 
 interface ConnectedActions {
+  /** Recheck the rendered native selection at click time; unsupported controllers fail closed. */
+  fun acceptsMutation(profileId: String?, agent: AgentRow): Boolean = false
+
   fun addMachine(label: String, url: String)
 
   fun renameProfile(id: String, label: String)
@@ -715,11 +726,23 @@ internal constructor(
     mutableState.value = mutableState.value.copy(drafts = updated)
   }
 
+  override fun acceptsMutation(profileId: String?, agent: AgentRow): Boolean {
+    val current = mutableState.value.selectedAgent ?: return false
+    return actionsLive() &&
+      mutableState.value.activeProfileId == profileId &&
+      current.machineId == agent.machineId &&
+      current.sessionId == agent.sessionId &&
+      current.paneId == agent.paneId &&
+      current.nativeSessionRef == agent.nativeSessionRef
+  }
+
   override fun submitPrompt(text: String, confirmed: Boolean) {
     if (mutableState.value.offlineSavedAt != null) return
     if (!actionsLive()) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
+    val binding = MutationBinding.from(agent) ?: return
+    val requestEpoch = epoch
     val key = agentSendKey(profile.id, agent)
     if (
       mutableState.value.promptSends[key]?.outcome == null && key in mutableState.value.promptSends
@@ -732,7 +755,7 @@ internal constructor(
     viewModelScope.launch {
       var result: PromptSendState
       try {
-        client.submitPrompt(agent.sessionId, text, confirmed)
+        client.submitPrompt(agent.sessionId, text, confirmed, binding)
         result = PromptSendState(text, "Sent to bridge; agent admission is not confirmed.")
       } catch (error: Exception) {
         if (error is kotlinx.coroutines.CancellationException) {
@@ -750,11 +773,14 @@ internal constructor(
           val currentDraft = mutableState.value.drafts[draftKey].orEmpty()
           if (currentDraft == submittedDraft) setDraft(draftKey, text)
           if (
-            mutableState.value.activeProfileId == profile.id &&
+            requestEpoch == epoch &&
+              mutableState.value.activeProfileId == profile.id &&
               mutableState.value.selectedAgent?.sessionId == agent.sessionId &&
               mutableState.value.selectedAgent?.nativeSessionRef == agent.nativeSessionRef
-          )
+          ) {
             mutableState.value = mutableState.value.copy(actionError = error.message ?: outcome)
+            invalidateMutationSource(error)
+          }
         }
       }
       val current = mutableState.value.promptSends[key]
@@ -777,8 +803,8 @@ internal constructor(
     // Each request gets a fresh client; the capability comes from the machine's verified details.
     if (mutableState.value.bridgeDetails[profile.id]?.capabilities?.get("agent_control") != true)
       return
-    runAgentAction("Failed to control the agent") { client, agent ->
-      client.controlAgent(agent.sessionId, action)
+    runAgentAction("Failed to control the agent") { client, agent, binding ->
+      client.controlAgent(agent.sessionId, action, binding)
     }
   }
 
@@ -788,16 +814,16 @@ internal constructor(
     optionId: String?,
     action: String?,
   ) =
-    runAgentAction("Failed to answer prompt") { client, agent ->
-      client.answerPrompt(agent.sessionId, promptId, optionIndex, optionId, action)
+    runAgentAction("Failed to answer prompt") { client, agent, binding ->
+      client.answerPrompt(agent.sessionId, promptId, optionIndex, optionId, action, binding)
     }
 
   override fun answerQuestions(
     promptId: String,
     answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
   ) =
-    runAgentAction("Failed to answer the question") { client, agent ->
-      client.answerQuestions(agent.sessionId, promptId, answers)
+    runAgentAction("Failed to answer the question") { client, agent, binding ->
+      client.answerQuestions(agent.sessionId, promptId, answers, binding)
     }
 
   /**
@@ -806,24 +832,48 @@ internal constructor(
    */
   private fun runAgentAction(
     failure: String,
-    send: suspend (BridgeTransport, AgentRow) -> Unit,
+    send: suspend (BridgeTransport, AgentRow, MutationBinding) -> Unit,
   ) {
     if (mutableState.value.offlineSavedAt != null) return
     if (!actionsLive()) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
+    val binding = MutationBinding.from(agent) ?: return
     val client = bridgeFor(profile.endpoint)
     val requestEpoch = epoch
     mutableState.value = mutableState.value.copy(actionError = null)
     viewModelScope.launch {
       try {
-        send(client, agent)
+        send(client, agent, binding)
       } catch (error: Exception) {
         if (error is kotlinx.coroutines.CancellationException) throw error
         if (requestEpoch != epoch || mutableState.value.activeProfileId != profile.id) return@launch
         mutableState.value = mutableState.value.copy(actionError = error.message ?: failure)
+        invalidateMutationSource(error)
       }
     }
+  }
+
+  private fun invalidateMutationSource(error: Exception) {
+    if (
+      error !is BridgeStaleSessionException &&
+        error !is BridgeMutationOutcomeUnknownException &&
+        error !is BridgeMutationUnsupportedException
+    )
+      return
+    cancelOwnedWork()
+    mutableState.value =
+      mutableState.value.copy(
+        streamLive = false,
+        busy = false,
+        connection = ConnectionState.Error(error.message ?: "Reselect the session before writing"),
+        stream =
+          mutableState.value.stream.copy(
+            pendingPrompt = null,
+            agentStatus = null,
+            agentStatusDetail = null,
+          ),
+      )
   }
 
   fun setForeground(value: Boolean) {
@@ -902,8 +952,7 @@ internal constructor(
     }
   }
 
-  private fun actionsLive() =
-    mutableState.value.connection == ConnectionState.Connected && mutableState.value.streamLive
+  private fun actionsLive() = mutableState.value.canMutate
 
   private fun openStream(
     profile: MachineProfile,

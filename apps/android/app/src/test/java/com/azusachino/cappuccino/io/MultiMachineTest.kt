@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.azusachino.cappuccino.core.AgentRow
 import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.Endpoint
+import com.azusachino.cappuccino.core.MutationBinding
 import com.azusachino.cappuccino.core.StreamEvent
 import com.azusachino.cappuccino.ui.ThemeMode
 import java.io.IOException
@@ -82,7 +83,12 @@ class MultiMachineTest {
               return emptyList()
             }
 
-            override suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean) {
+            override suspend fun submitPrompt(
+              sessionId: String,
+              text: String,
+              confirmed: Boolean,
+              binding: MutationBinding,
+            ) {
               error("No prompts permitted in this fixture")
             }
 
@@ -92,6 +98,7 @@ class MultiMachineTest {
               optionIndex: Int?,
               optionId: String?,
               action: String?,
+              binding: MutationBinding,
             ) {
               error("No approvals permitted in this fixture")
             }

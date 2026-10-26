@@ -106,6 +106,7 @@ import com.azusachino.cappuccino.io.ConnectionState
 import com.azusachino.cappuccino.io.SessionStats
 import com.azusachino.cappuccino.io.agentDraftKey
 import com.azusachino.cappuccino.io.agentSendKey
+import com.azusachino.cappuccino.io.canMutate
 import com.azusachino.cappuccino.io.machineConnection
 import java.time.ZoneId
 import kotlinx.coroutines.launch
@@ -206,6 +207,9 @@ fun CappuccinoScreen(
   var pendingAdd by rememberSaveable { mutableStateOf(false) }
   var previousProfileIds by rememberSaveable { mutableStateOf("") }
   val selected = state.selectedAgent
+  fun mutate(send: (ConnectedActions) -> Unit) {
+    if (selected != null && actions.acceptsMutation(state.activeProfileId, selected)) send(actions)
+  }
   val selectedProfile = state.profiles.firstOrNull { it.id == state.activeProfileId }
   val selectedStatus =
     if (!state.streamLive) "unknown"
@@ -215,7 +219,7 @@ fun CappuccinoScreen(
   val agentControl =
     state.offlineSavedAt == null &&
       state.connection == ConnectionState.Connected &&
-      state.streamLive &&
+      state.canMutate &&
       state.bridgeDetails[state.activeProfileId]?.capabilities?.get("agent_control") == true
   val detailsProfile =
     if (detailsProfileId == null) selectedProfile
@@ -820,7 +824,7 @@ fun CappuccinoScreen(
               state.stream.pendingPrompt?.let { card ->
                 val answersEnabled =
                   state.connection == ConnectionState.Connected &&
-                    state.streamLive &&
+                    state.canMutate &&
                     state.bridgeDetails[state.activeProfileId]
                       ?.capabilities
                       ?.get("prompt_answers") != false
@@ -831,21 +835,33 @@ fun CappuccinoScreen(
                     QuestionFormCard(
                       prompt = card,
                       enabled = answersEnabled,
-                      onSubmit = { answers -> actions.answerQuestions(card.promptId, answers) },
-                      onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
+                      onSubmit = { answers ->
+                        mutate { it.answerQuestions(card.promptId, answers) }
+                      },
+                      onCancel = {
+                        mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                      },
                     )
                   else
                     PromptCardView(
                       prompt = card,
                       enabled = answersEnabled,
                       onSelectOption = { idx, optId ->
-                        actions.answerPrompt(card.promptId, idx, optId, "select_option")
+                        mutate { it.answerPrompt(card.promptId, idx, optId, "select_option") }
                       },
-                      onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
+                      onCancel = {
+                        mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                      },
                     )
                 }
               }
 
+              if (state.streamLive && !state.canMutate) {
+                Text(
+                  "Session-bound actions unavailable. Update the bridge or reselect a session with native identity.",
+                  Modifier.padding(horizontal = 16.dp),
+                )
+              }
               // Existing live prompt route; saved readers remain read-only.
               if (
                 state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") ==
@@ -859,12 +875,12 @@ fun CappuccinoScreen(
               if (state.offlineSavedAt == null)
                 composerState.SaveableStateProvider(composerKey) {
                   PromptInputBar(
-                    onSend = { text, confirmed -> actions.submitPrompt(text, confirmed) },
+                    onSend = { text, confirmed -> mutate { it.submitPrompt(text, confirmed) } },
                     pending = sendState != null && sendState.outcome == null,
                     outcome = sendState?.outcome,
                     onStop =
                       if (agentControl && selectedStatus == "working") {
-                        { actions.controlAgent("interrupt") }
+                        { mutate { it.controlAgent("interrupt") } }
                       } else null,
                     onNewSession =
                       if (
@@ -872,7 +888,7 @@ fun CappuccinoScreen(
                           selected.agent in
                             setOf("pi", "claude", "agy", "antigravity", "antigravity-cli")
                       ) {
-                        { actions.controlAgent("new_session") }
+                        { mutate { it.controlAgent("new_session") } }
                       } else null,
                     newSessionEnabled = selectedStatus == "idle",
                     model = state.sessionStats?.model,
@@ -880,7 +896,7 @@ fun CappuccinoScreen(
                     placeholder = "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
                     enabled =
                       state.connection == ConnectionState.Connected &&
-                        state.streamLive &&
+                        state.canMutate &&
                         state.bridgeDetails[state.activeProfileId]
                           ?.capabilities
                           ?.get("prompt_input") != false,

@@ -11,6 +11,7 @@ import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ConnectionState
 import com.azusachino.cappuccino.io.MachineProfile
 import com.azusachino.cappuccino.io.ProfileStore
+import com.azusachino.cappuccino.io.canMutate
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -69,6 +70,14 @@ class ForegroundRecoveryTest {
         store,
         { _ ->
           object : BridgeTransport {
+            override val bridgeDetails =
+              com.azusachino.cappuccino.io.BridgeDetails(
+                machine,
+                "fixture",
+                1,
+                mapOf("mutation_binding" to true),
+              )
+
             override suspend fun verify(expectedMachine: UUID?): UUID {
               verifications.countDown()
               return machine
@@ -129,6 +138,7 @@ class ForegroundRecoveryTest {
       assertEquals("history must settle before reattaching", 1, streamCalls.get())
       InstrumentationRegistry.getInstrumentation().runOnMainSync {
         assertFalse(viewModel.state.value.streamLive)
+        assertFalse(viewModel.state.value.canMutate)
         viewModel.submitPrompt("must not send while history is pending")
         assertTrue(viewModel.state.value.promptSends.isEmpty())
       }
@@ -139,6 +149,7 @@ class ForegroundRecoveryTest {
       InstrumentationRegistry.getInstrumentation().runOnMainSync {
         assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
         assertTrue(viewModel.state.value.streamLive)
+        assertTrue(viewModel.state.value.canMutate)
         assertTrue(viewModel.state.value.promptSends.isEmpty())
         assertFalse(viewModel.state.value.busy)
       }

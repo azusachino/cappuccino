@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.azusachino.cappuccino.core.AgentRow
 import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.Endpoint
+import com.azusachino.cappuccino.core.MutationBinding
 import com.azusachino.cappuccino.core.PromptCard
 import com.azusachino.cappuccino.core.PromptOption
 import com.azusachino.cappuccino.core.StreamEntry
@@ -496,7 +497,13 @@ class ConnectedViewModelTest {
             override var bridgeDetails: BridgeDetails? = null
 
             override suspend fun verify(expectedMachine: UUID?): UUID {
-              bridgeDetails = BridgeDetails(machine, "1", 1, mapOf("agent_control" to advertised))
+              bridgeDetails =
+                BridgeDetails(
+                  machine,
+                  "1",
+                  1,
+                  mapOf("agent_control" to advertised, "mutation_binding" to true),
+                )
               return machine
             }
 
@@ -510,7 +517,11 @@ class ConnectedViewModelTest {
               kotlinx.coroutines.awaitCancellation()
             }
 
-            override suspend fun controlAgent(sessionId: String, action: String) {
+            override suspend fun controlAgent(
+              sessionId: String,
+              action: String,
+              binding: MutationBinding,
+            ) {
               sent += "$sessionId:$action"
             }
 
@@ -518,6 +529,7 @@ class ConnectedViewModelTest {
               sessionId: String,
               promptId: String,
               answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
+              binding: MutationBinding,
             ) {
               throw java.io.IOException(
                 "the question is no longer at its start; answer it in the terminal"
@@ -1740,12 +1752,169 @@ class ConnectedViewModelTest {
       )
     }
 
+  private fun mutationActions(): List<(ConnectedViewModel) -> Unit> =
+    listOf(
+      { it.submitPrompt("original draft") },
+      { it.controlAgent("interrupt") },
+      { it.answerPrompt("p-1", 0, "reject", "select_option") },
+      {
+        it.answerQuestions(
+          "p-1",
+          listOf(com.azusachino.cappuccino.core.QuestionAnswer(listOf(0), null)),
+        )
+      },
+    )
+
+  @Test
+  fun missingCapabilityOrNativeBindingKeepsAllDirectCallbacksReadOnly() =
+    runTest(dispatcher) {
+      for ((capability, selected) in
+        listOf(
+          null to agent,
+          false to agent,
+          true to agent.copy(nativeSessionRef = null),
+          true to agent.copy(paneId = null),
+        )) {
+        var attempts = 0
+        val transport =
+          sendTransport(catalog = listOf(selected), bindingCapability = capability) { _, _, _ ->
+            attempts++
+          }
+        viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+        try {
+          viewModel.setForeground(true)
+          viewModel.selectProfile(profile.id)
+          advanceUntilIdle()
+          viewModel.selectAgent(selected)
+          advanceUntilIdle()
+          assertTrue(viewModel.state.value.streamLive)
+          assertFalse(viewModel.state.value.canMutate)
+          assertFalse(viewModel.acceptsMutation(profile.id, selected))
+          val before = viewModel.state.value
+          mutationActions().forEach { it(viewModel) }
+          advanceUntilIdle()
+          assertEquals(0, attempts)
+          assertEquals(before, viewModel.state.value)
+        } finally {
+          viewModel.setForeground(false)
+        }
+      }
+    }
+
+  @Test
+  fun staleAndPartialUnknownInvalidateAllActionKindsWithoutReplay() =
+    runTest(dispatcher) {
+      val pending =
+        PromptCard(
+          "p-1",
+          "tool_approval",
+          "Synthetic",
+          null,
+          null,
+          null,
+          listOf(PromptOption("reject", "Reject", null)),
+          0,
+        )
+      for (failure in
+        listOf(
+          BridgeStaleSessionException("Reselect session"),
+          BridgeMutationOutcomeUnknownException("Inspect current state"),
+        )) {
+        for (action in mutationActions()) {
+          val bindings = mutableListOf<MutationBinding>()
+          var attempts = 0
+          val transport =
+            sendTransport(bindings = bindings, pending = pending) { _, _, _ ->
+              attempts++
+              throw failure
+            }
+          viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+          try {
+            viewModel.setForeground(true)
+            viewModel.selectProfile(profile.id)
+            advanceUntilIdle()
+            viewModel.selectAgent(agent)
+            advanceUntilIdle()
+            assertTrue(viewModel.state.value.canMutate)
+            assertNotNull(viewModel.state.value.stream.pendingPrompt)
+            viewModel.setDraft(draftKey(agent), "original draft")
+            action(viewModel)
+            advanceUntilIdle()
+            assertEquals(1, attempts)
+            assertEquals(machine, bindings.single().machineId)
+            assertEquals(agent.paneId, bindings.single().paneId)
+            assertEquals(nativeRef, bindings.single().nativeSessionRef)
+            assertFalse(viewModel.state.value.canMutate)
+            assertFalse(viewModel.state.value.streamLive)
+            assertNull(viewModel.state.value.stream.pendingPrompt)
+            assertNull(viewModel.state.value.stream.agentStatus)
+            assertTrue(viewModel.state.value.connection is ConnectionState.Error)
+            assertEquals("original draft", viewModel.state.value.drafts[draftKey(agent)])
+            mutationActions().forEach { it(viewModel) }
+            advanceUntilIdle()
+            assertEquals("no writes or automatic replay after source invalidation", 1, attempts)
+          } finally {
+            viewModel.setForeground(false)
+          }
+        }
+      }
+    }
+
+  @Test
+  fun lateTypedMutationErrorCannotInvalidateAnotherNativeSelection() =
+    runTest(dispatcher) {
+      val other =
+        agent.copy(sessionId = "other", paneId = "other-pane", nativeSessionRef = "other-native")
+      for (failure in
+        listOf(
+          BridgeStaleSessionException("old stale"),
+          BridgeMutationOutcomeUnknownException("old unknown"),
+        )) {
+        for (action in mutationActions()) {
+          val response = CompletableDeferred<Unit>()
+          val bindings = mutableListOf<MutationBinding>()
+          val transport =
+            sendTransport(catalog = listOf(agent, other), bindings = bindings) { _, _, _ ->
+              response.await()
+            }
+          viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+          try {
+            viewModel.setForeground(true)
+            viewModel.selectProfile(profile.id)
+            advanceUntilIdle()
+            viewModel.selectAgent(agent)
+            advanceUntilIdle()
+            action(viewModel)
+            runCurrent()
+            viewModel.selectAgent(other)
+            advanceUntilIdle()
+            assertTrue(viewModel.state.value.canMutate)
+            response.completeExceptionally(failure)
+            advanceUntilIdle()
+            assertEquals(other, viewModel.state.value.selectedAgent)
+            assertTrue(viewModel.state.value.canMutate)
+            assertFalse(viewModel.acceptsMutation(profile.id, agent))
+            assertTrue(viewModel.acceptsMutation(profile.id, other))
+            assertFalse(viewModel.acceptsMutation("wrong-profile", other))
+            assertNull(viewModel.state.value.actionError)
+            assertEquals(nativeRef, bindings.single().nativeSessionRef)
+            assertNull(viewModel.state.value.promptSends[sendKey(other)])
+          } finally {
+            viewModel.setForeground(false)
+          }
+        }
+      }
+    }
+
   private fun draftKey(agent: AgentRow) = agentDraftKey(agent)
 
   private fun sendKey(agent: AgentRow) = agentSendKey(profile.id, agent)
 
   private fun sendTransport(
     catalog: List<AgentRow> = listOf(agent),
+    bindingCapability: Boolean? = true,
+    bindings: MutableList<MutationBinding>? = null,
+    pending: PromptCard? = null,
     send: suspend (String, String, Boolean) -> Unit,
   ) =
     object : BridgeTransport {
@@ -1758,11 +1927,57 @@ class ConnectedViewModelTest {
         // actions live; Open alone is transport, not live state.
         emit(StreamEvent.Open(sessionId, 1))
         emit(StreamEvent.AgentStatus(sessionId, "idle", null))
+        pending?.let { emit(StreamEvent.PromptRequest(sessionId, it)) }
         kotlinx.coroutines.awaitCancellation()
       }
 
-      override suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean) =
-        send(sessionId, text, confirmed)
+      override val bridgeDetails =
+        BridgeDetails(
+          machine,
+          "1",
+          1,
+          mapOf("agent_control" to true) +
+            (bindingCapability?.let { mapOf("mutation_binding" to it) } ?: emptyMap()),
+        )
+
+      private suspend fun dispatch(
+        session: String,
+        text: String,
+        confirmed: Boolean,
+        binding: MutationBinding,
+      ) {
+        bindings?.add(binding)
+        send(session, text, confirmed)
+      }
+
+      override suspend fun submitPrompt(
+        sessionId: String,
+        text: String,
+        confirmed: Boolean,
+        binding: MutationBinding,
+      ) = dispatch(sessionId, text, confirmed, binding)
+
+      override suspend fun controlAgent(
+        sessionId: String,
+        action: String,
+        binding: MutationBinding,
+      ) = dispatch(sessionId, "control:$action", false, binding)
+
+      override suspend fun answerPrompt(
+        sessionId: String,
+        promptId: String,
+        optionIndex: Int?,
+        optionId: String?,
+        action: String?,
+        binding: MutationBinding,
+      ) = dispatch(sessionId, "answer:$promptId", false, binding)
+
+      override suspend fun answerQuestions(
+        sessionId: String,
+        promptId: String,
+        answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
+        binding: MutationBinding,
+      ) = dispatch(sessionId, "question:$promptId", false, binding)
     }
 
   private fun offlineViewModel(cache: OfflineConversations) =
@@ -1809,7 +2024,15 @@ class ConnectedViewModelTest {
               conversationMachine,
             )
 
-          override suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean) {}
+          override val bridgeDetails =
+            BridgeDetails(machine, "1", 1, mapOf("mutation_binding" to true))
+
+          override suspend fun submitPrompt(
+            sessionId: String,
+            text: String,
+            confirmed: Boolean,
+            binding: MutationBinding,
+          ) {}
 
           override suspend fun answerPrompt(
             sessionId: String,
@@ -1817,6 +2040,7 @@ class ConnectedViewModelTest {
             optionIndex: Int?,
             optionId: String?,
             action: String?,
+            binding: MutationBinding,
           ) {}
         }
       },

@@ -1,7 +1,9 @@
 package com.azusachino.cappuccino.io
 
+import com.azusachino.cappuccino.core.AgentRow
 import com.azusachino.cappuccino.core.Endpoint
 import com.azusachino.cappuccino.core.MAX_HTTP_BODY_BYTES
+import com.azusachino.cappuccino.core.MutationBinding
 import com.azusachino.cappuccino.core.ProtocolException
 import com.azusachino.cappuccino.core.StreamEvent
 import java.util.UUID
@@ -13,6 +15,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonObject
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.WebSocket
@@ -22,6 +25,49 @@ import org.junit.Test
 
 class BridgeClientTest {
   private val machine = UUID.fromString("11111111-1111-4111-8111-111111111111")
+  private val binding =
+    requireNotNull(
+      MutationBinding.from(
+        AgentRow(
+          machine,
+          "s-1",
+          "pane-1",
+          "fixture",
+          "pi",
+          "idle",
+          false,
+          null,
+          nativeSessionRef = "native-ref:${"a".repeat(64)}",
+        )
+      )
+    )
+
+  private fun enqueueMutation(server: MockWebServer, response: MockResponse) {
+    server.enqueue(advertisement())
+    server.enqueue(response)
+  }
+
+  private fun advertisement(flags: String = "\"mutation_binding\":true") =
+    MockResponse.Builder()
+      .body(
+        """{"event":"paired","machine_id":"$machine","protocol":1,"plugin":"cappuccino-bridge","capabilities":{$flags}}"""
+      )
+      .build()
+
+  private fun takeBoundPost(server: MockWebServer): mockwebserver3.RecordedRequest {
+    val handshake = server.takeRequest()
+    assertEquals("GET", handshake.method)
+    assertEquals("/api/session", handshake.url.encodedPath)
+    val request = server.takeRequest()
+    assertEquals("POST", request.method)
+    val json = kotlinx.serialization.json.Json.parseToJsonElement(request.body!!.utf8()).jsonObject
+    val expected =
+      kotlinx.serialization.json.Json.parseToJsonElement(
+        """{"machine_id":"$machine","pane_id":"${binding.paneId}","native_session_ref":"${binding.nativeSessionRef}"}"""
+      )
+    assertEquals(expected, json["expected_session"])
+    return request
+  }
 
   @Test
   fun transparentlyNegotiatesAndDecodesGzipWithoutChangingIdentity() = runBlocking {
@@ -422,26 +468,27 @@ class BridgeClientTest {
   @Test
   fun submitsPromptAndAnswersPrompt() = runBlocking {
     MockWebServer().use { server ->
-      server.enqueue(MockResponse.Builder().body("""{"status":"delivered"}""").build())
-      server.enqueue(MockResponse.Builder().body("""{"status":"delivered"}""").build())
+      enqueueMutation(server, MockResponse.Builder().body("""{"status":"delivered"}""").build())
       server.start()
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
 
-      client.submitPrompt("s-1", "hello world")
-      val req1 = server.takeRequest()
+      client.submitPrompt("s-1", "hello world", binding = binding)
+      val req1 = takeBoundPost(server)
       assertEquals("/api/agents/s-1/prompt", req1.url.encodedPath)
       assertEquals("POST", req1.method)
-      assertTrue(req1.body?.utf8()?.contains(""""text":"hello world"""") == true)
-      assertTrue(req1.body?.utf8()?.contains("confirmed") == false)
+      val body1 = req1.body?.utf8().orEmpty()
+      assertTrue(body1.contains(""""text":"hello world""""))
+      assertFalse(body1.contains("confirmed"))
 
-      server.enqueue(MockResponse.Builder().body("""{"status":"delivered"}""").build())
-      client.submitPrompt("s-1", "/model\topus", confirmed = true)
-      val command = server.takeRequest().body?.utf8() ?: ""
+      enqueueMutation(server, MockResponse.Builder().body("""{"status":"delivered"}""").build())
+      client.submitPrompt("s-1", "/model\topus", confirmed = true, binding = binding)
+      val command = takeBoundPost(server).body?.utf8() ?: ""
       assertTrue(command, command.contains(""""text":"/model\topus""""))
       assertTrue(command, command.contains(""""confirmed":true"""))
 
-      client.answerPrompt("s-1", "p-1", 0, "opt-1", "select_option")
-      val req2 = server.takeRequest()
+      enqueueMutation(server, MockResponse.Builder().body("""{"status":"delivered"}""").build())
+      client.answerPrompt("s-1", "p-1", 0, "opt-1", "select_option", binding)
+      val req2 = takeBoundPost(server)
       assertEquals("/api/agents/s-1/prompt", req2.url.encodedPath)
       assertEquals("POST", req2.method)
       val body2 = req2.body?.utf8() ?: ""
@@ -455,20 +502,27 @@ class BridgeClientTest {
     MockWebServer().use { server ->
       server.start()
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
-      server.enqueue(
-        MockResponse.Builder().code(409).body("""{"code":"confirm_command"}""").build()
+      enqueueMutation(
+        server,
+        MockResponse.Builder().code(409).body("""{"code":"confirm_command"}""").build(),
       )
-      val rejection = runCatching { client.submitPrompt("s-1", "/new") }.exceptionOrNull()
+      val rejection = runCatching {
+        client.submitPrompt("s-1", "/new", binding = binding)
+      }
+        .exceptionOrNull()
       assertTrue(rejection is BridgeHttpRejectionException)
-      server.enqueue(MockResponse.Builder().code(502).body("""{"code":"herdr_error"}""").build())
+      enqueueMutation(
+        server,
+        MockResponse.Builder().code(502).body("""{"code":"herdr_error"}""").build(),
+      )
       val gatewayFailure = runCatching {
-        client.submitPrompt("s-1", "possibly written")
+        client.submitPrompt("s-1", "possibly written", binding = binding)
       }
         .exceptionOrNull()
       assertTrue(gatewayFailure is java.io.IOException)
       assertFalse(gatewayFailure is BridgeHttpRejectionException)
-      assertEquals("/api/agents/s-1/prompt", server.takeRequest().url.encodedPath)
-      assertEquals("/api/agents/s-1/prompt", server.takeRequest().url.encodedPath)
+      assertEquals("/api/agents/s-1/prompt", takeBoundPost(server).url.encodedPath)
+      assertEquals("/api/agents/s-1/prompt", takeBoundPost(server).url.encodedPath)
     }
   }
 
@@ -516,12 +570,16 @@ class BridgeClientTest {
   @Test
   fun answersEveryQuestionInOneStructuredSubmission() = runBlocking {
     MockWebServer().use { server ->
-      server.enqueue(MockResponse.Builder().body("""{"event":"question_answered"}""").build())
-      server.enqueue(
+      enqueueMutation(
+        server,
+        MockResponse.Builder().body("""{"event":"question_answered"}""").build(),
+      )
+      enqueueMutation(
+        server,
         MockResponse.Builder()
           .code(409)
           .body("""{"event":"error","code":"stale_prompt","message":"answer it in the terminal"}""")
-          .build()
+          .build(),
       )
       server.start()
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
@@ -530,49 +588,143 @@ class BridgeClientTest {
           com.azusachino.cappuccino.core.QuestionAnswer(listOf(1), null),
           com.azusachino.cappuccino.core.QuestionAnswer(listOf(0, 2), "a \"bird\""),
         )
-      client.answerQuestions("s-1", "q-toolu_1", answers)
-      val request = server.takeRequest()
+      client.answerQuestions("s-1", "q-toolu_1", answers, binding)
+      val request = takeBoundPost(server)
       assertEquals("/api/agents/s-1/prompt", request.url.encodedPath)
       assertEquals(
-        """{"type":"answer_question","prompt_id":"q-toolu_1","answers":[{"selected":[1]},{"selected":[0,2],"other":"a \"bird\""}]}""",
+        """{"expected_session":{"machine_id":"$machine","pane_id":"${binding.paneId}","native_session_ref":"${binding.nativeSessionRef}"},"type":"answer_question","prompt_id":"q-toolu_1","answers":[{"selected":[1]},{"selected":[0,2],"other":"a \"bird\""}]}""",
         request.body?.utf8(),
       )
       // The bridge's reason reaches the owner, not just the status.
-      val refused = runCatching { client.answerQuestions("s-1", "q-toolu_1", answers) }
+      val refused = runCatching { client.answerQuestions("s-1", "q-toolu_1", answers, binding) }
       assertEquals("answer it in the terminal", refused.exceptionOrNull()?.message)
+    }
+  }
+
+  @Test
+  fun unsupportedBindingCapabilityBlocksEveryDirectMutationBeforePost() = runBlocking {
+    MockWebServer().use { server ->
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      val actions: List<suspend () -> Unit> =
+        listOf(
+          { client.submitPrompt("s-1", "synthetic", binding = binding) },
+          { client.controlAgent("s-1", "interrupt", binding) },
+          { client.answerPrompt("s-1", "p-1", null, null, "cancel", binding) },
+          { client.answerQuestions("s-1", "p-1", emptyList(), binding) },
+        )
+      for (flags in listOf("", "\"mutation_binding\":false")) {
+        for (action in actions) {
+          server.enqueue(advertisement(flags))
+          assertTrue(
+            runCatching { action() }.exceptionOrNull() is BridgeMutationUnsupportedException
+          )
+          assertEquals("GET", server.takeRequest().method)
+        }
+      }
+      assertEquals(8, server.requestCount)
+    }
+  }
+
+  @Test
+  fun sharedTypedErrorsRetainRejectionVersusUncertainty() = runBlocking {
+    val fixture =
+      kotlinx.serialization.json.Json.parseToJsonElement(
+          java.io.File("../../../fixtures/mutation-session-binding.json").readText()
+        )
+        .jsonObject
+    val errors = fixture.getValue("errors") as kotlinx.serialization.json.JsonArray
+    MockWebServer().use { server ->
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      for ((index, error) in errors.withIndex()) {
+        enqueueMutation(
+          server,
+          MockResponse.Builder().code(if (index == 0) 409 else 502).body(error.toString()).build(),
+        )
+        val outcome = runCatching { client.submitPrompt("s-1", "synthetic", binding = binding) }
+        val failure = outcome.exceptionOrNull()
+        if (index == 0) assertTrue(failure is BridgeStaleSessionException)
+        else {
+          assertTrue(failure is BridgeMutationOutcomeUnknownException)
+          assertFalse(failure is BridgeHttpRejectionException)
+        }
+        takeBoundPost(server)
+      }
+      assertEquals(4, server.requestCount)
+    }
+  }
+
+  @Test
+  fun ambiguousPostIsNotRetriedEvenWithRetryEnabledOnInjectedClient() = runBlocking {
+    MockWebServer().use { server ->
+      enqueueMutation(
+        server,
+        MockResponse.Builder().onResponseStart(mockwebserver3.SocketEffect.CloseSocket()).build(),
+      )
+      server.enqueue(MockResponse.Builder().body("""{"event":"prompt_sent"}""").build())
+      server.start()
+      val client =
+        BridgeClient(
+          Endpoint.parse(server.url("/").toString(), allowLocalHttp = true),
+          BridgeClient.defaultClient().newBuilder().retryOnConnectionFailure(true).build(),
+        )
+      val outcome = runCatching { client.submitPrompt("s-1", "synthetic", binding = binding) }
+      val failure = outcome.exceptionOrNull()
+      assertTrue(failure is java.io.IOException)
+      assertFalse(failure is BridgeHttpRejectionException)
+      takeBoundPost(server)
+      assertEquals("exactly one POST, no transport replay", 2, server.requestCount)
+    }
+  }
+
+  @Test
+  fun answerFieldsAreEscapedWithoutChangingTheBinding() = runBlocking {
+    MockWebServer().use { server ->
+      enqueueMutation(
+        server,
+        MockResponse.Builder().body("""{"event":"prompt_answered"}""").build(),
+      )
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      client.answerPrompt("s-1", "p\"1", 0, "option\"1", "select_option", binding)
+      val json =
+        kotlinx.serialization.json.Json.parseToJsonElement(takeBoundPost(server).body!!.utf8())
+          .jsonObject
+      assertEquals(kotlinx.serialization.json.JsonPrimitive("p\"1"), json["prompt_id"])
+      assertEquals(kotlinx.serialization.json.JsonPrimitive("option\"1"), json["option_id"])
     }
   }
 
   @Test
   fun controlsAgentOnlyWhenTheBridgeAdvertisesIt() = runBlocking {
     MockWebServer().use { server ->
-      val session =
-        """{"event":"paired","machine_id":"%s","protocol":1,"plugin":"cappuccino-bridge","capabilities":{%s}}"""
-      val machine = UUID.randomUUID()
-      server.enqueue(
-        MockResponse.Builder().body(session.format(machine, """"agent_control":false""")).build()
-      )
-      server.enqueue(
-        MockResponse.Builder().body(session.format(machine, """"agent_control":true""")).build()
-      )
-      server.enqueue(MockResponse.Builder().body("""{"event":"control_sent"}""").build())
       server.start()
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
-
-      client.verify()
-      try {
-        client.controlAgent("s-1", "interrupt")
-        fail("a bridge that declines controls must not receive them")
-      } catch (_: ProtocolException) {}
-      server.takeRequest()
-
-      client.verify()
-      server.takeRequest()
-      client.controlAgent("s-1", "interrupt")
-      val req = server.takeRequest()
+      for (flags in
+        listOf(
+          "\"agent_control\":false,\"mutation_binding\":true",
+          "\"agent_control\":true",
+          "\"agent_control\":true,\"mutation_binding\":false",
+        )) {
+        server.enqueue(advertisement(flags))
+        val outcome = runCatching { client.controlAgent("s-1", "interrupt", binding) }
+        val error = outcome.exceptionOrNull()
+        assertTrue(
+          "a bridge that declines bound controls must not receive them",
+          error is BridgeMutationUnsupportedException,
+        )
+        assertEquals("GET", server.takeRequest().method)
+      }
+      assertEquals("read-only compatibility sends no POST", 3, server.requestCount)
+      server.enqueue(advertisement("\"agent_control\":true,\"mutation_binding\":true"))
+      server.enqueue(MockResponse.Builder().body("""{"event":"control_sent"}""").build())
+      client.controlAgent("s-1", "interrupt", binding)
+      val req = takeBoundPost(server)
       assertEquals("/api/agents/s-1/control", req.url.encodedPath)
-      assertEquals("POST", req.method)
-      assertEquals("""{"action":"interrupt"}""", req.body?.utf8())
+      val json = kotlinx.serialization.json.Json.parseToJsonElement(req.body!!.utf8()).jsonObject
+      assertEquals(kotlinx.serialization.json.JsonPrimitive("interrupt"), json["action"])
+      assertEquals(2, json.size)
     }
   }
 }
