@@ -539,7 +539,10 @@ fun CappuccinoScreen(
             },
             navigationIcon = {
               if (selected == null && destination == Destination.APPEARANCE) {
-                IconButton(onClick = { destination = Destination.SETTINGS }) {
+                IconButton(
+                  onClick = { destination = Destination.SETTINGS },
+                  modifier = Modifier.pressScale(),
+                ) {
                   Icon(
                     painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
                     contentDescription = "Back to settings",
@@ -554,7 +557,8 @@ fun CappuccinoScreen(
                     } else {
                       actions.selectAgent(null)
                     }
-                  }
+                  },
+                  modifier = Modifier.pressScale(),
                 ) {
                   Icon(
                     painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
@@ -568,7 +572,7 @@ fun CappuccinoScreen(
             // 2026-10-27, superseding the no-colors-override note in android-material3.md).
             actions = {
               if (destination == Destination.MACHINES && selected == null) {
-                IconButton(onClick = { adding = true }) {
+                IconButton(onClick = { adding = true }, modifier = Modifier.pressScale()) {
                   Icon(
                     painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
                     contentDescription = "Add machine",
