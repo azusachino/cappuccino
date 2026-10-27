@@ -46,8 +46,8 @@ object GlassDefaults {
   val LightSurfaceElevated: Color = Color(0xEEFDFEFF)
 
   // Haze backdrop tints: lower alpha than the surfaces above so the blur shows through
-  val DarkBackdropTint: Color = Color(0x991D2330)
-  val LightBackdropTint: Color = Color(0x99F2F5F9)
+  val DarkBackdropTint: Color = Color(0xB31D2330)
+  val LightBackdropTint: Color = Color(0xB3F2F5F9)
 
   // Specular rim gradient brushes
   val DarkRimGradient: Brush =

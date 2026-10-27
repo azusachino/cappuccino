@@ -1153,18 +1153,11 @@ fun CappuccinoScreen(
       },
       title = { Text("Add machine") },
       text = {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-          Text(
-            "Runs the cappuccino-bridge Herdr plugin, exposed over your tailnet.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.appColors.muted,
-          )
-          Spacer(Modifier.height(4.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
           OutlinedTextField(
             value = label,
             onValueChange = { label = it },
             label = { Text("Label") },
-            supportingText = { Text("Optional; defaults to the machine's own name") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors =
@@ -1180,16 +1173,6 @@ fun CappuccinoScreen(
             onValueChange = { endpoint = it },
             label = { Text("Bridge address") },
             placeholder = { Text("https://machine.tailnet.ts.net") },
-            supportingText = {
-              Text(
-                when {
-                  state.addError != null -> state.addError
-                  endpoint.isBlank() || endpoint.startsWith("https://") ->
-                    "From the machine: the URL the bridge prints on start"
-                  else -> "The address should use https:// (tailscale serve)"
-                }
-              )
-            },
             keyboardOptions =
               androidx.compose.foundation.text.KeyboardOptions(
                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
@@ -1206,6 +1189,7 @@ fun CappuccinoScreen(
                 unfocusedBorderColor = MaterialTheme.colorScheme.outline,
               ),
           )
+          state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
           if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }
       },

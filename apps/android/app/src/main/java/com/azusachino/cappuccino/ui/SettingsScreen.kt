@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -24,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.azusachino.cappuccino.BuildConfig
 
 internal data class SettingsConnection(val id: String, val label: String, val status: String)
@@ -81,6 +83,7 @@ internal fun SettingsScreen(
             .exceptionOrNull()
             ?.let { "Couldn't open the guide. Visit github.com/azusachino/cappuccino." }
       }
+      SettingsDivider()
       SettingRow("Herdr", value = "herdr.dev") {
         helpError =
           runCatching { uriHandler.openUri("https://herdr.dev") }
@@ -90,38 +93,53 @@ internal fun SettingsScreen(
     }
     SettingsCard("About") {
       SettingRow("Version", value = BuildConfig.VERSION_NAME, onClick = null)
+      SettingsDivider()
       SettingRow("Source", value = "GitHub") {
         helpError =
           runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino") }
             .exceptionOrNull()
             ?.let { "Couldn't open github.com/azusachino/cappuccino." }
       }
+      SettingsDivider()
       SettingRow("License", value = "GPL-3.0", onClick = null)
     }
     helpError?.let { SettingNote(it, warning = true) }
-    SettingNote(
-      "Cappuccino only reads and relays agents that run on your machines — it never starts, stops or replaces them."
-    )
   }
 }
 
-/** One settings group: a liquid glass card holding its rows under a heading label. */
+/** 0.5dp hairline between rows inside a group card. */
+@Composable
+private fun SettingsDivider() {
+  HorizontalDivider(
+    Modifier.padding(horizontal = 16.dp),
+    thickness = 0.5.dp,
+    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+  )
+}
+
+/** Uppercase section header, latte-style: quiet, letterspaced, above the card. */
+@Composable
+private fun SettingsSectionHeader(title: String) {
+  Text(
+    title.uppercase(),
+    Modifier.padding(start = 28.dp, end = 24.dp, top = 20.dp, bottom = 8.dp).semantics {
+      heading()
+    },
+    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.5.sp),
+    color = MaterialTheme.colorScheme.primary,
+  )
+}
+
+/** One settings group: an elevated liquid glass card holding its rows. */
 @Composable
 private fun SettingsCard(title: String, content: @Composable () -> Unit) {
+  SettingsSectionHeader(title)
   Column(
     Modifier.fillMaxWidth()
-      .padding(horizontal = 12.dp)
-      .glassSurface(shape = RoundedCornerShape(GlassDefaults.CardCornerRadius))
-      .padding(vertical = 8.dp)
+      .padding(horizontal = 16.dp)
+      .glassSurface(shape = RoundedCornerShape(16.dp), isElevated = true)
+      .padding(vertical = 4.dp)
   ) {
-    Text(
-      title,
-      Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp).semantics {
-        heading()
-      },
-      style = MaterialTheme.typography.labelMedium,
-      color = MaterialTheme.appColors.accent,
-    )
     content()
   }
 }
