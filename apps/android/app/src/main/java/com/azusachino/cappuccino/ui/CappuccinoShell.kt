@@ -921,17 +921,11 @@ fun CappuccinoScreen(
             )
           }
           destination == Destination.APPEARANCE -> {
-            AppAppearanceSettings(
-              state.themeMode,
-              state.appPalette,
-              actions::setThemeMode,
-              actions::setAppPalette,
-            )
+            AppAppearanceSettings(state.themeMode, actions::setThemeMode)
           }
           destination == Destination.SETTINGS -> {
             SettingsScreen(
               themeMode = state.themeMode,
-              appPalette = state.appPalette,
               onOpenAppearance = { destination = Destination.APPEARANCE },
               onSelectTheme = actions::setThemeMode,
               onReloadMachines = actions::refreshAll,

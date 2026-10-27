@@ -1,12 +1,8 @@
 package com.azusachino.cappuccino.ui
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -15,7 +11,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.platform.LocalContext
 
 enum class ThemeMode {
   SYSTEM,
@@ -129,50 +124,22 @@ fun resolveIsDark(themeMode: ThemeMode, systemDark: Boolean): Boolean =
     ThemeMode.DARK -> true
   }
 
-fun selectColorScheme(
-  apiLevel: Int,
-  dark: Boolean,
-  dynamicLight: ColorScheme,
-  dynamicDark: ColorScheme,
-  fallbackLight: ColorScheme,
-  fallbackDark: ColorScheme,
-  useDynamic: Boolean = false,
-): ColorScheme =
-  when {
-    useDynamic && apiLevel >= Build.VERSION_CODES.S && dark -> dynamicDark
-    useDynamic && apiLevel >= Build.VERSION_CODES.S -> dynamicLight
-    dark -> fallbackDark
-    else -> fallbackLight
-  }
-
 @Composable
 fun CappuccinoTheme(
   themeMode: ThemeMode = ThemeMode.SYSTEM,
-  useDynamicColor: Boolean = false,
   onResolvedDarkChanged: ((Boolean) -> Unit)? = null,
-  palette: AppPalette = AppPalette.CATPPUCCIN,
   content: @Composable () -> Unit,
 ) {
-  val context = LocalContext.current
   val isDark = resolveIsDark(themeMode, isSystemInDarkTheme())
   val themeSink by rememberUpdatedState(onResolvedDarkChanged)
   LaunchedEffect(isDark) { themeSink?.invoke(isDark) }
-  val selectedPalette = if (useDynamicColor) AppPalette.DYNAMIC else palette
-  val dynamicLight =
-    if (selectedPalette == AppPalette.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-      dynamicLightColorScheme(context)
-    else FallbackLightColorScheme
-  val dynamicDark =
-    if (selectedPalette == AppPalette.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-      dynamicDarkColorScheme(context)
-    else FallbackDarkColorScheme
-  val base =
-    androidx.compose.runtime.remember(selectedPalette, isDark, dynamicLight, dynamicDark) {
-      appColorScheme(selectedPalette, isDark, Build.VERSION.SDK_INT, dynamicLight, dynamicDark)
+  val selected =
+    androidx.compose.runtime.remember(isDark) {
+      if (isDark) FallbackDarkColorScheme else FallbackLightColorScheme
     }
-  val colors = androidx.compose.runtime.remember(base, isDark) { appColors(base, isDark) }
+  val colors = androidx.compose.runtime.remember(selected, isDark) { appColors(selected, isDark) }
   val surfaceScheme =
-    androidx.compose.runtime.remember(base, isDark) { flatSurfaceScheme(base, isDark) }
+    androidx.compose.runtime.remember(selected, isDark) { flatSurfaceScheme(selected, isDark) }
   androidx.compose.runtime.CompositionLocalProvider(LocalAppColors provides colors) {
     MaterialTheme(
       colorScheme = surfaceScheme,

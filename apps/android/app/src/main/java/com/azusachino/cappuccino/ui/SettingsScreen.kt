@@ -35,7 +35,6 @@ internal fun SettingsScreen(
   onReloadMachines: () -> Unit,
   connections: List<SettingsConnection>,
   onConnectionDetails: (String) -> Unit,
-  appPalette: AppPalette = AppPalette.CATPPUCCIN,
   onOpenAppearance: (() -> Unit)? = null,
 ) {
   val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
@@ -45,8 +44,7 @@ internal fun SettingsScreen(
     SettingsHeading("Appearance")
     SettingRow(
       "Theme",
-      value =
-        "${appPalette.label} · ${themeMode.name.lowercase().replaceFirstChar { it.uppercase() }}",
+      value = themeMode.name.lowercase().replaceFirstChar { it.uppercase() },
     ) {
       if (onOpenAppearance != null) onOpenAppearance() else choosingTheme = true
     }

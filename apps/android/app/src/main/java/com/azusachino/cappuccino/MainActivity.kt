@@ -192,7 +192,6 @@ class MainActivity : ComponentActivity() {
       val state by vm.state.collectAsStateWithLifecycle()
       CappuccinoTheme(
         themeMode = state.themeMode,
-        palette = state.appPalette,
         onResolvedDarkChanged = ::applySystemBarAppearance,
       ) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
