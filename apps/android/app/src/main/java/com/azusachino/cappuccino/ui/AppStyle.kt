@@ -119,11 +119,11 @@ fun appColors(scheme: ColorScheme, dark: Boolean): AppColors {
     faint = fg.over(bg, if (dark) 0.38f else 0.58f),
     codeBackground = if (dark) Color.Black.over(bg, 0.22f) else fg.over(bg, 0.05f),
     accent = scheme.primary,
-    // Status hues stay semantic on the coffee surfaces: green, amber, blue, rose.
+    // Status hues stay semantic: green, amber, Chino blue, rose.
     ok = if (dark) Color(0xFFA3D9B0) else Color(0xFF33774A),
-    warn = if (dark) Color(0xFFD9A868) else Color(0xFF8F5D26),
+    warn = if (dark) Color(0xFFE3C48E) else Color(0xFF8F5D26),
     err = scheme.error,
-    working = if (dark) Color(0xFF8FB2E0) else Color(0xFF3A66AE),
+    working = if (dark) Color(0xFF9CC4EE) else Color(0xFF35639F),
   )
 }
 

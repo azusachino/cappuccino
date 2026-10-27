@@ -37,17 +37,17 @@ object GlassDefaults {
   val CardCornerRadius: Dp = 14.dp
   val PillCornerRadius: Dp = 24.dp
 
-  // Translucent dark mode surfaces: smoked espresso glass
-  val DarkSurface: Color = Color(0xCC241C15)
-  val DarkSurfaceElevated: Color = Color(0xD9322921)
+  // Translucent dark mode surfaces: navy-charcoal glass, from the uniform
+  val DarkSurface: Color = Color(0xCC1D2330)
+  val DarkSurfaceElevated: Color = Color(0xD9262F40)
 
-  // Translucent light mode surfaces: milk-foam glass, warm enough to read on cream
-  val LightSurface: Color = Color(0xE6FBF4EA)
-  val LightSurfaceElevated: Color = Color(0xEEFFFDF8)
+  // Translucent light mode surfaces: airy white over the cool canvas
+  val LightSurface: Color = Color(0xE6FFFFFF)
+  val LightSurfaceElevated: Color = Color(0xEEFDFEFF)
 
   // Haze backdrop tints: lower alpha than the surfaces above so the blur shows through
-  val DarkBackdropTint: Color = Color(0x99241C15)
-  val LightBackdropTint: Color = Color(0x99F2E4CF)
+  val DarkBackdropTint: Color = Color(0x991D2330)
+  val LightBackdropTint: Color = Color(0x99F2F5F9)
 
   // Specular rim gradient brushes
   val DarkRimGradient: Brush =
@@ -62,7 +62,7 @@ object GlassDefaults {
     Brush.verticalGradient(
       listOf(
         Color.White.copy(alpha = 0.85f),
-        Color(0xFF8C5A32).copy(alpha = 0.10f),
+        Color(0xFF35639F).copy(alpha = 0.10f),
       )
     )
 
