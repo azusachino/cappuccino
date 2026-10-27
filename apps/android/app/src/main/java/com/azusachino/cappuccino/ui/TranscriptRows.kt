@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -80,7 +81,8 @@ internal fun UserPromptRow(
   Row(
     modifier
       .fillMaxWidth()
-      .background(colors.card)
+      .padding(start = 4.dp, end = 32.dp, bottom = 2.dp)
+      .background(colors.card, RoundedCornerShape(14.dp))
       .padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 10.dp),
     horizontalArrangement = Arrangement.spacedBy(10.dp),
   ) {

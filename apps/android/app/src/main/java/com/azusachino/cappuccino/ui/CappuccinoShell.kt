@@ -523,19 +523,9 @@ fun CappuccinoScreen(
                     } else {
                       StatusSquare(status.background)
                       Text(
-                        listOfNotNull(
-                            status.label,
-                            selectedProfile?.label,
-                            selected.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf {
-                              it.isNotBlank()
-                            },
-                            selected.branch?.takeIf { it.isNotBlank() },
-                          )
-                          .joinToString(" · "),
+                        status.label,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.appColors.muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                       )
                     }
                   }
@@ -1650,45 +1640,10 @@ fun PromptInputBar(
         style = MaterialTheme.typography.labelSmall,
         color = colors.muted,
       )
-    // 1. Quick Action Chips Row
-    Row(
-      Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp),
-      horizontalArrangement = Arrangement.spacedBy(6.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      QuickActionChip(
-        label = "Continue",
-        enabled = enabled && !pending,
-        onClick = {
-          if (promptHistory.firstOrNull() != "continue") {
-            promptHistory =
-              (listOf("continue") + promptHistory.filter { it != "continue" }).take(20)
-          }
-          onSend("continue", false)
-        },
-        colors = colors,
-      )
-      if (onStop != null) {
-        QuickActionChip(
-          label = "Interrupt",
-          enabled = true,
-          onClick = onStop,
-          colors = colors,
-          isError = true,
-        )
-      }
-      QuickActionChip(
-        label = "Compact",
-        enabled = enabled && !pending,
-        onClick = { confirmingCommand = "/compact" },
-        colors = colors,
-      )
-    }
-
-    // 2. Slash command suggestions overlay (when typing '/')
+    // 1. Slash command suggestions overlay (when typing '/')
     if (slashSuggestions.isNotEmpty() && isFocused) {
       Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(16.dp),
         color = colors.card,
         border = BorderStroke(1.dp, colors.line),
         shadowElevation = 3.dp,
@@ -1729,24 +1684,22 @@ fun PromptInputBar(
       }
     }
 
-    // 3. Rounded Input Container
-    val inputShape = RoundedCornerShape(16.dp)
+    // 2. The input pill: one quiet glass surface; content first, chrome underneath.
+    val pillShape = RoundedCornerShape(24.dp)
     Column(
       Modifier.fillMaxWidth()
         .glassSurface(
-          shape = inputShape,
-          // Keep the accent cue while editing: the rim gradient stays, focus adds a tint edge.
+          shape = pillShape,
           rimStroke = if (isFocused) 0.dp else GlassDefaults.RimStrokeWidth,
         )
         .then(
-          if (isFocused) {
-            Modifier.border(1.dp, colors.accent.copy(alpha = 0.6f), inputShape)
-          } else Modifier
+          if (isFocused) Modifier.border(1.dp, colors.accent.copy(alpha = 0.5f), pillShape)
+          else Modifier
         )
-        .clip(inputShape)
+        .clip(pillShape)
     ) {
       Row(
-        Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 4.dp),
+        Modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp, top = 12.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
         androidx.compose.foundation.text.BasicTextField(
@@ -1791,12 +1744,11 @@ fun PromptInputBar(
         }
       }
 
-      // Bottom control bar inside the rounded card
       Row(
-        Modifier.fillMaxWidth().padding(start = 6.dp, end = 8.dp, bottom = 6.dp),
+        Modifier.fillMaxWidth().padding(start = 10.dp, end = 12.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        // Commands button (slash command picker + new session)
+        // Commands (slash picker, one-tap continue/compact, new session)
         Box {
           IconButton(onClick = { commandsOpen = true }, modifier = Modifier.size(36.dp)) {
             Icon(
@@ -1807,6 +1759,22 @@ fun PromptInputBar(
             )
           }
           DropdownMenu(expanded = commandsOpen, onDismissRequest = { commandsOpen = false }) {
+            if (enabled && !pending) {
+              DropdownMenuItem(
+                text = { Text("Continue") },
+                onClick = {
+                  commandsOpen = false
+                  onSend("continue", false)
+                },
+              )
+              DropdownMenuItem(
+                text = { Text("Compact context") },
+                onClick = {
+                  commandsOpen = false
+                  confirmingCommand = "/compact"
+                },
+              )
+            }
             if (onNewSession != null) {
               DropdownMenuItem(
                 text = { Text("New session") },
@@ -1845,7 +1813,7 @@ fun PromptInputBar(
           }
         }
 
-        // Prompt History button (when prompts have been sent)
+        // Prompt history
         if (promptHistory.isNotEmpty()) {
           Box {
             IconButton(onClick = { historyOpen = true }, modifier = Modifier.size(36.dp)) {
@@ -1858,7 +1826,7 @@ fun PromptInputBar(
             }
             DropdownMenu(expanded = historyOpen, onDismissRequest = { historyOpen = false }) {
               Text(
-                "Recent Prompts",
+                "Recent prompts",
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.muted,
@@ -1899,90 +1867,53 @@ fun PromptInputBar(
         if (onStop != null)
           IconButton(onClick = onStop, modifier = Modifier.size(36.dp).testTag("stopAgent")) {
             Box(
-              Modifier.size(28.dp)
-                .background(
-                  MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
-                  RoundedCornerShape(8.dp),
-                )
-                .border(
-                  1.dp,
-                  MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
-                  RoundedCornerShape(8.dp),
-                ),
-              contentAlignment = Alignment.Center,
-            ) {
-              Box(
-                Modifier.size(10.dp)
-                  .background(MaterialTheme.colorScheme.error, RoundedCornerShape(2.dp))
-                  .semantics { contentDescription = "Stop" }
-              )
-            }
+              Modifier.size(18.dp)
+                .background(MaterialTheme.colorScheme.error, RoundedCornerShape(4.dp))
+                .semantics { contentDescription = "Stop" }
+            )
           }
 
-        IconButton(
-          onClick = {
-            if (input.isNotBlank()) {
-              val trimmed = input.trim()
-              if (promptHistory.firstOrNull() != trimmed) {
-                promptHistory = (listOf(trimmed) + promptHistory.filter { it != trimmed }).take(20)
-              }
-              val command = slashCommand(input)
-              if (command != null) {
-                confirmingCommand = command
-              } else {
-                onSend(input, false)
-              }
+        val send: () -> Unit = {
+          if (input.isNotBlank()) {
+            val trimmed = input.trim()
+            if (promptHistory.firstOrNull() != trimmed) {
+              promptHistory = (listOf(trimmed) + promptHistory.filter { it != trimmed }).take(20)
             }
-          },
-          enabled = canSend,
-          modifier = Modifier.size(36.dp),
-        ) {
+            val command = slashCommand(input)
+            if (command != null) {
+              confirmingCommand = command
+            } else {
+              onSend(input, false)
+            }
+          }
+        }
+        if (pending) {
           Box(
-            Modifier.size(30.dp)
-              .background(if (canSend) colors.accent else colors.card2, CircleShape),
+            Modifier.size(40.dp).background(colors.card2, CircleShape).testTag("pendingIndicator"),
+            contentAlignment = Alignment.Center,
+          ) {
+            Box(Modifier.size(14.dp).background(colors.muted, RoundedCornerShape(3.dp)))
+          }
+        } else {
+          Box(
+            Modifier.size(40.dp)
+              .background(
+                if (canSend) MaterialTheme.colorScheme.primary else colors.card2,
+                CircleShape,
+              )
+              .clickable(enabled = canSend) { send() }
+              .testTag("sendPrompt"),
             contentAlignment = Alignment.Center,
           ) {
             Icon(
               painterResource(com.azusachino.cappuccino.R.drawable.ic_arrow_downward),
-              modifier = Modifier.size(16.dp).rotate(180f),
+              modifier = Modifier.size(18.dp).rotate(180f),
               contentDescription = "Send",
               tint = if (canSend) MaterialTheme.colorScheme.onPrimary else colors.faint,
             )
           }
         }
       }
-    }
-  }
-}
-
-@Composable
-private fun QuickActionChip(
-  label: String,
-  enabled: Boolean,
-  onClick: () -> Unit,
-  colors: AppColors,
-  isError: Boolean = false,
-) {
-  Surface(
-    onClick = onClick,
-    enabled = enabled,
-    shape = RoundedCornerShape(8.dp),
-    color = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.12f) else colors.card2,
-    border =
-      BorderStroke(
-        1.dp,
-        if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else colors.line,
-      ),
-    modifier = Modifier.height(26.dp),
-  ) {
-    Row(Modifier.padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-      Text(
-        label,
-        style = MaterialTheme.typography.labelSmall,
-        color =
-          if (!enabled) colors.faint
-          else if (isError) MaterialTheme.colorScheme.error else colors.text,
-      )
     }
   }
 }
