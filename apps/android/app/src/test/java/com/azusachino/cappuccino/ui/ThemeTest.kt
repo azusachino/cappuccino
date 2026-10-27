@@ -11,8 +11,8 @@ class ThemeTest {
 
   @Test
   fun catppuccinCanvasesAndNormalTextHaveReadableContrast() {
-    assertEquals(Color(0xFFEFF1F5), FallbackLightColorScheme.background)
-    assertEquals(Color(0xFF1E1E2E), FallbackDarkColorScheme.background)
+    assertEquals(Color(0xFFF3F4FA), FallbackLightColorScheme.background)
+    assertEquals(Color(0xFF1B1E2B), FallbackDarkColorScheme.background)
     for (scheme in listOf(FallbackLightColorScheme, FallbackDarkColorScheme)) {
       for ((foreground, background) in
         listOf(
@@ -44,12 +44,12 @@ class ThemeTest {
   }
 
   @Test
-  fun statusBadgesUseDistinctCatppuccinColorsAndReadableLabels() {
+  fun statusBadgesUseDistinctPaletteColorsAndReadableLabels() {
     for (dark in listOf(false, true)) {
       val badges = listOf("working", "idle", "done", "blocked").map { agentStatusStyle(it, dark) }
       assertEquals(4, badges.map { it.background }.distinct().size)
       assertEquals(listOf("Working", "Idle", "Done", "Blocked"), badges.map { it.label })
-      assertEquals(Color(if (dark) 0xFF89B4FA else 0xFF1E66F5), badges.first().background)
+      assertEquals(Color(if (dark) 0xFF7FA0D6 else 0xFF3563B0), badges.first().background)
       for (badge in badges + agentStatusStyle("unreported", dark)) {
         val a = badge.foreground.luminance()
         val b = badge.background.luminance()

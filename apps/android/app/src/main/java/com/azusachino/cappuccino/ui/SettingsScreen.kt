@@ -10,13 +10,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Surface
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,21 +35,32 @@ internal fun SettingsScreen(
   onReloadMachines: () -> Unit,
   connections: List<SettingsConnection>,
   onConnectionDetails: (String) -> Unit,
-  onOpenAppearance: (() -> Unit)? = null,
 ) {
   val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }
-  var choosingTheme by rememberSaveable { mutableStateOf(false) }
   Column(
     Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 12.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp),
   ) {
     SettingsCard("Appearance") {
-      SettingRow(
+      Text(
         "Theme",
-        value = themeMode.name.lowercase().replaceFirstChar { it.uppercase() },
+        Modifier.padding(start = 16.dp, top = 4.dp),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.appColors.text,
+      )
+      SingleChoiceSegmentedButtonRow(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
       ) {
-        if (onOpenAppearance != null) onOpenAppearance() else choosingTheme = true
+        ThemeMode.entries.forEachIndexed { index, value ->
+          SegmentedButton(
+            selected = themeMode == value,
+            onClick = { onSelectTheme(value) },
+            shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
+          ) {
+            Text(value.name.lowercase().replaceFirstChar { it.uppercase() })
+          }
+        }
       }
     }
     SettingsCard("Notifications") { NotificationSettings() }
@@ -76,37 +85,6 @@ internal fun SettingsScreen(
     }
     helpError?.let { SettingNote(it, warning = true) }
     SettingNote("Agent sessions stay on your machines; this app only reads and relays them.")
-  }
-  if (choosingTheme) {
-    AlertDialog(
-      onDismissRequest = { choosingTheme = false },
-      title = { Text("Theme") },
-      text = {
-        Column {
-          ThemeMode.entries.forEach { mode ->
-            Surface(
-              color = androidx.compose.ui.graphics.Color.Transparent,
-              onClick = {
-                onSelectTheme(mode)
-                choosingTheme = false
-              },
-            ) {
-              ListItem(
-                colors =
-                  androidx.compose.material3.ListItemDefaults.colors(
-                    containerColor = androidx.compose.ui.graphics.Color.Transparent
-                  ),
-                headlineContent = {
-                  Text(mode.name.lowercase().replaceFirstChar { it.uppercase() })
-                },
-                leadingContent = { RadioButton(selected = themeMode == mode, onClick = null) },
-              )
-            }
-          }
-        }
-      },
-      confirmButton = { TextButton(onClick = { choosingTheme = false }) { Text("Cancel") } },
-    )
   }
 }
 

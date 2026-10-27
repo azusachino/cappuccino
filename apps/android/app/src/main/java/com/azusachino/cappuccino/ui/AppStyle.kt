@@ -119,11 +119,11 @@ fun appColors(scheme: ColorScheme, dark: Boolean): AppColors {
     faint = fg.over(bg, if (dark) 0.38f else 0.58f),
     codeBackground = if (dark) Color.Black.over(bg, 0.22f) else fg.over(bg, 0.05f),
     accent = scheme.primary,
-    // Catppuccin Mocha / Latte hues: palettes disagree on which role is green, status must not.
-    ok = if (dark) Color(0xFFA6E3A1) else Color(0xFF40A02B),
-    warn = if (dark) Color(0xFFF9E2AF) else Color(0xFFDF8E1D),
+    // Status hues from the artwork palette: green/amber/blue/rose stay distinct by role.
+    ok = if (dark) Color(0xFFA3D9B0) else Color(0xFF3E8E55),
+    warn = if (dark) Color(0xFFE8C48A) else Color(0xFFB07A2E),
     err = scheme.error,
-    working = if (dark) Color(0xFF89B4FA) else Color(0xFF1E66F5),
+    working = if (dark) Color(0xFF7FA0D6) else Color(0xFF3563B0),
   )
 }
 

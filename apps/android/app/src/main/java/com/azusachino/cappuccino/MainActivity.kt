@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
   // surface. enableEdgeToEdge() in onCreate stays the one edge-to-edge enabler; this sync
   // corrects only the icon appearance on top of it.
   internal fun applySystemBarAppearance(isDark: Boolean) {
-    val bgColor = if (isDark) 0xFF1E1E2E.toInt() else 0xFFEFF1F5.toInt()
+    val bgColor = if (isDark) 0xFF1B1E2B.toInt() else 0xFFF3F4FA.toInt()
     window.decorView.setBackgroundColor(bgColor)
     window.setBackgroundDrawable(bgColor.toDrawable())
     enableEdgeToEdge(

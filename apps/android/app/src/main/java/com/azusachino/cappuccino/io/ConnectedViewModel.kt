@@ -123,6 +123,9 @@ interface ConnectedActions {
 
   fun selectAgent(agent: AgentRow?)
 
+  /** Dismisses an open saved conversation and returns to its list; no connection is touched. */
+  fun closeSavedConversation() = Unit
+
   fun removeProfile(id: String)
 
   fun retry()
@@ -1193,6 +1196,25 @@ internal constructor(
         }
       }
     }
+  }
+
+  override fun closeSavedConversation() {
+    cancelOwnedWork()
+    clearSavedSelection()
+    mutableState.value =
+      mutableState.value.copy(
+        selectedAgent = null,
+        stream = StreamState(),
+        streamLive = false,
+        conversationTurns = emptyList(),
+        omittedConversationTurns = 0,
+        omittedToolOperations = 0,
+        conversationSource = null,
+        sessionStats = null,
+        conversationId = null,
+        offlineSavedAt = null,
+        busy = false,
+      )
   }
 
   private fun clearSavedSelection() {

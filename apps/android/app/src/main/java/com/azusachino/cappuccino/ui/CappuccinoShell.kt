@@ -128,10 +128,6 @@ private enum class Destination(val title: Int, val icon: Int) {
     com.azusachino.cappuccino.R.string.history,
     com.azusachino.cappuccino.R.drawable.ic_history,
   ),
-  APPEARANCE(
-    com.azusachino.cappuccino.R.string.appearance,
-    com.azusachino.cappuccino.R.drawable.ic_settings,
-  ),
   SETTINGS(
     com.azusachino.cappuccino.R.string.settings,
     com.azusachino.cappuccino.R.drawable.ic_settings,
@@ -201,6 +197,7 @@ fun CappuccinoScreen(
   var machineMenuId by remember { mutableStateOf<String?>(null) }
   var showingConnection by rememberSaveable { mutableStateOf(false) }
   var showingHistory by rememberSaveable { mutableStateOf(false) }
+  var confirmingClearAll by rememberSaveable { mutableStateOf(false) }
   var historyMachineId by rememberSaveable { mutableStateOf<java.util.UUID?>(null) }
   var showingTechnical by rememberSaveable { mutableStateOf(false) }
   var detailsProfileId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -362,18 +359,12 @@ fun CappuccinoScreen(
     }
   }
   LaunchedEffect(showingConnection) { if (showingConnection) followingOutput = false }
-  BackHandler(enabled = selected == null && destination == Destination.APPEARANCE) {
-    destination = Destination.SETTINGS
-  }
   BackHandler(enabled = selected == null && destination == Destination.HISTORY) {
     destination = Destination.MACHINES
   }
   BackHandler(enabled = selected != null && !showingConnection && !showingHistory) {
-    if (
-      state.offlineSavedAt != null && selectedProfile != null && destination == Destination.MACHINES
-    ) {
-      actions.selectProfile(selectedProfile.id)
-      actions.selectAgent(selected)
+    if (state.offlineSavedAt != null) {
+      actions.closeSavedConversation()
     } else {
       actions.selectAgent(null)
     }
@@ -454,6 +445,25 @@ fun CappuccinoScreen(
         }
       },
       dismissButton = { TextButton(onClick = { namingMachine = false }) { Text("Cancel") } },
+    )
+  }
+
+  if (confirmingClearAll) {
+    AlertDialog(
+      onDismissRequest = { confirmingClearAll = false },
+      title = { Text("Clear all saved conversations?") },
+      text = { Text("Saved conversations stay only on this device and cannot be recovered.") },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            confirmingClearAll = false
+            actions.clearSavedConversations(null)
+          }
+        ) {
+          Text("Clear", color = MaterialTheme.colorScheme.error)
+        }
+      },
+      dismissButton = { TextButton(onClick = { confirmingClearAll = false }) { Text("Cancel") } },
     )
   }
 
@@ -538,32 +548,18 @@ fun CappuccinoScreen(
               }
             },
             navigationIcon = {
-              if (selected == null && destination == Destination.APPEARANCE) {
-                IconButton(
-                  onClick = { destination = Destination.SETTINGS },
-                  modifier = Modifier.pressScale(),
-                ) {
-                  Icon(
-                    painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
-                    contentDescription = "Back to settings",
-                  )
-                }
-              } else if (selected != null) {
+              if (selected != null) {
                 IconButton(
                   onClick = {
-                    if (state.offlineSavedAt != null && selectedProfile != null) {
-                      actions.selectProfile(selectedProfile.id)
-                      actions.selectAgent(selected)
-                    } else {
-                      actions.selectAgent(null)
-                    }
+                    if (state.offlineSavedAt != null) actions.closeSavedConversation()
+                    else actions.selectAgent(null)
                   },
                   modifier = Modifier.pressScale(),
                 ) {
                   Icon(
                     painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
                     contentDescription =
-                      if (state.offlineSavedAt != null) "Back to live session" else "Back",
+                      if (state.offlineSavedAt != null) "Back to history" else "Back",
                   )
                 }
               }
@@ -571,6 +567,21 @@ fun CappuccinoScreen(
             // Liquid glass chrome: transcript blurs behind the bar (owner decision
             // 2026-10-27, superseding the no-colors-override note in android-material3.md).
             actions = {
+              if (
+                destination == Destination.HISTORY &&
+                  selected == null &&
+                  state.savedConversations.isNotEmpty()
+              ) {
+                IconButton(
+                  onClick = { confirmingClearAll = true },
+                  modifier = Modifier.pressScale().testTag("clearAllHistory"),
+                ) {
+                  Icon(
+                    painterResource(com.azusachino.cappuccino.R.drawable.ic_trash),
+                    contentDescription = "Clear all saved conversations",
+                  )
+                }
+              }
               if (destination == Destination.MACHINES && selected == null) {
                 IconButton(onClick = { adding = true }, modifier = Modifier.pressScale()) {
                   Icon(
@@ -619,9 +630,7 @@ fun CappuccinoScreen(
               listOf(Destination.MACHINES, Destination.HISTORY, Destination.SETTINGS).forEach { item
                 ->
                 NavigationBarItem(
-                  selected =
-                    destination == item ||
-                      (item == Destination.SETTINGS && destination == Destination.APPEARANCE),
+                  selected = destination == item,
                   onClick = {
                     actions.selectAgent(null)
                     destination = item
@@ -948,16 +957,11 @@ fun CappuccinoScreen(
                 savedHistoryAction?.invoke(machineId, convoId)
               },
               onDeleteSaved = actions::deleteSavedConversation,
-              onClearAll = actions::clearSavedConversations,
             )
-          }
-          destination == Destination.APPEARANCE -> {
-            AppAppearanceSettings(state.themeMode, actions::setThemeMode)
           }
           destination == Destination.SETTINGS -> {
             SettingsScreen(
               themeMode = state.themeMode,
-              onOpenAppearance = { destination = Destination.APPEARANCE },
               onSelectTheme = actions::setThemeMode,
               onReloadMachines = actions::refreshAll,
               connections =

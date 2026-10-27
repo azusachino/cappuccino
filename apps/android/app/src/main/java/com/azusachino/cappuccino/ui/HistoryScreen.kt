@@ -48,12 +48,10 @@ internal fun HistoryScreen(
   timeZone: ZoneId,
   onOpenSaved: (UUID, String) -> Unit,
   onDeleteSaved: (UUID, String) -> Unit,
-  onClearAll: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val colors = MaterialTheme.appColors
   var pendingDelete by rememberSaveable { mutableStateOf<String?>(null) }
-  var confirmingClearAll by rememberSaveable { mutableStateOf(false) }
 
   if (conversations.isEmpty()) {
     Box(
@@ -99,23 +97,12 @@ internal fun HistoryScreen(
       verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
       item(key = "history_header") {
-        Row(
-          modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-          Text(
-            "Retained locally for 30 days · ${conversations.size} saved",
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.muted,
-          )
-          TextButton(
-            onClick = { confirmingClearAll = true },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-          ) {
-            Text("Clear all", style = MaterialTheme.typography.labelMedium, color = colors.muted)
-          }
-        }
+        Text(
+          "Retained locally for 30 days · ${conversations.size} saved",
+          Modifier.fillMaxWidth().padding(bottom = 4.dp),
+          style = MaterialTheme.typography.labelMedium,
+          color = colors.muted,
+        )
       }
 
       items(conversations, key = { "${it.agent.machineId}:${it.conversationId}" }) { saved ->
@@ -244,29 +231,6 @@ internal fun HistoryScreen(
         }
       },
       dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
-    )
-  }
-
-  if (confirmingClearAll) {
-    AlertDialog(
-      onDismissRequest = { confirmingClearAll = false },
-      title = { Text("Clear all saved history?") },
-      text = {
-        Text(
-          "All ${conversations.size} saved conversation snapshots will be deleted. This action cannot be undone."
-        )
-      },
-      confirmButton = {
-        TextButton(
-          onClick = {
-            onClearAll()
-            confirmingClearAll = false
-          }
-        ) {
-          Text("Clear all", color = MaterialTheme.colorScheme.error)
-        }
-      },
-      dismissButton = { TextButton(onClick = { confirmingClearAll = false }) { Text("Cancel") } },
     )
   }
 }

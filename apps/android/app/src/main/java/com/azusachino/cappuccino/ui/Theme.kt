@@ -9,7 +9,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 
 enum class ThemeMode {
@@ -18,83 +17,85 @@ enum class ThemeMode {
   DARK,
 }
 
-// Catppuccin palette 1.8.0: https://github.com/catppuccin/palette
-// Material container roles use accent tints; small text uses the stronger text tone.
+// The app palette is derived from the launcher artwork: dark navy backdrop
+// (#1B1E2B), periwinkle hair (#A9B2E8), eye blue (#3563B0) and cheek rose
+// (#F2B7C4). Surface roles use navy tints in dark mode and lavender-tinted
+// whites in light mode.
 val FallbackLightColorScheme =
   lightColorScheme(
-    primary = Color(0xFF8839EF),
-    onPrimary = Color(0xFFEFF1F5),
-    primaryContainer = Color(0xFF8839EF).copy(alpha = 0.12f).compositeOver(Color(0xFFEFF1F5)),
-    onPrimaryContainer = Color(0xFF4C4F69),
-    secondary = Color(0xFF7287FD),
-    onSecondary = Color(0xFF11111B),
-    secondaryContainer = Color(0xFFE6E9EF),
-    onSecondaryContainer = Color(0xFF4C4F69),
-    tertiary = Color(0xFF40A02B),
-    onTertiary = Color(0xFF11111B),
-    tertiaryContainer = Color(0xFFEFF1F5),
-    onTertiaryContainer = Color(0xFF4C4F69),
-    background = Color(0xFFEFF1F5),
-    onBackground = Color(0xFF4C4F69),
-    surface = Color(0xFFEFF1F5),
-    onSurface = Color(0xFF4C4F69),
-    surfaceVariant = Color(0xFFDCE0E8),
-    onSurfaceVariant = Color(0xFF4C4F69),
-    surfaceContainerLowest = Color(0xFFEFF1F5),
-    surfaceContainerLow = Color(0xFFE6E9EF),
-    surfaceContainer = Color(0xFFE6E9EF),
-    surfaceContainerHigh = Color(0xFFDCE0E8),
-    surfaceContainerHighest = Color(0xFFCCD0DA),
-    surfaceDim = Color(0xFFCCD0DA),
-    surfaceBright = Color(0xFFEFF1F5),
-    outline = Color(0xFF6C6F85),
-    outlineVariant = Color(0xFFBCC0CC),
-    error = Color(0xFFD20F39),
-    onError = Color.White,
-    errorContainer = Color(0xFFD20F39).copy(alpha = 0.1f).compositeOver(Color(0xFFEFF1F5)),
-    onErrorContainer = Color(0xFF4C4F69),
-    surfaceTint = Color(0xFF8839EF),
-    inverseSurface = Color(0xFF313244),
-    inverseOnSurface = Color(0xFFCDD6F4),
-    inversePrimary = Color(0xFFCBA6F7),
+    primary = Color(0xFF4A5AA8),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFDDE1F8),
+    onPrimaryContainer = Color(0xFF262F63),
+    secondary = Color(0xFF5674B4),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFDCE6F8),
+    onSecondaryContainer = Color(0xFF273A5C),
+    tertiary = Color(0xFFB05A70),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFFBDEE5),
+    onTertiaryContainer = Color(0xFF4E2230),
+    background = Color(0xFFF3F4FA),
+    onBackground = Color(0xFF262A3A),
+    surface = Color(0xFFF3F4FA),
+    onSurface = Color(0xFF262A3A),
+    surfaceVariant = Color(0xFFE1E3F0),
+    onSurfaceVariant = Color(0xFF565C74),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF0F1F8),
+    surfaceContainer = Color(0xFFE9EBF5),
+    surfaceContainerHigh = Color(0xFFE1E3F0),
+    surfaceContainerHighest = Color(0xFFD5D9EA),
+    surfaceDim = Color(0xFFD5D9EA),
+    surfaceBright = Color(0xFFF3F4FA),
+    outline = Color(0xFF6B7290),
+    outlineVariant = Color(0xFFC9CDE0),
+    error = Color(0xFFB3424E),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFBDEE5),
+    onErrorContainer = Color(0xFF4E2230),
+    surfaceTint = Color(0xFF4A5AA8),
+    inverseSurface = Color(0xFF262A3A),
+    inverseOnSurface = Color(0xFFF3F4FA),
+    inversePrimary = Color(0xFFA9B2E8),
   )
 val FallbackDarkColorScheme =
   darkColorScheme(
-    primary = Color(0xFFCBA6F7),
-    onPrimary = Color(0xFF11111B),
-    primaryContainer = Color(0xFFCBA6F7).copy(alpha = 0.15f).compositeOver(Color(0xFF1E1E2E)),
-    onPrimaryContainer = Color(0xFFCDD6F4),
-    secondary = Color(0xFFB4BEFE),
-    onSecondary = Color(0xFF11111B),
-    secondaryContainer = Color(0xFF313244),
-    onSecondaryContainer = Color(0xFFCDD6F4),
-    tertiary = Color(0xFFA6E3A1),
-    onTertiary = Color(0xFF11111B),
-    tertiaryContainer = Color(0xFF313244),
-    onTertiaryContainer = Color(0xFFCDD6F4),
-    background = Color(0xFF1E1E2E),
-    onBackground = Color(0xFFCDD6F4),
-    surface = Color(0xFF1E1E2E),
-    onSurface = Color(0xFFCDD6F4),
-    surfaceVariant = Color(0xFF45475A),
-    onSurfaceVariant = Color(0xFFBAC2DE),
-    surfaceContainerLowest = Color(0xFF11111B),
-    surfaceContainerLow = Color(0xFF181825),
-    surfaceContainer = Color(0xFF313244),
-    surfaceContainerHigh = Color(0xFF313244),
-    surfaceContainerHighest = Color(0xFF45475A),
-    surfaceDim = Color(0xFF181825),
-    surfaceBright = Color(0xFF45475A),
-    outline = Color(0xFF9399B2),
-    outlineVariant = Color(0xFF585B70),
-    error = Color(0xFFF38BA8),
-    onError = Color(0xFF11111B),
-    errorContainer = Color(0xFFF38BA8).copy(alpha = 0.15f).compositeOver(Color(0xFF1E1E2E)),
-    onErrorContainer = Color(0xFFCDD6F4),
-    surfaceTint = Color(0xFFCBA6F7),
-    inverseSurface = Color(0xFFEFF1F5),
-    inverseOnSurface = Color(0xFF4C4F69),
-    inversePrimary = Color(0xFF8839EF),
+    primary = Color(0xFFA9B2E8),
+    onPrimary = Color(0xFF1B2030),
+    primaryContainer = Color(0xFF39406B),
+    onPrimaryContainer = Color(0xFFDDE1F8),
+    secondary = Color(0xFF7FA0D6),
+    onSecondary = Color(0xFF10131F),
+    secondaryContainer = Color(0xFF2C3A56),
+    onSecondaryContainer = Color(0xFFD6E2F6),
+    tertiary = Color(0xFFF2B7C4),
+    onTertiary = Color(0xFF2E141B),
+    tertiaryContainer = Color(0xFF4A2E38),
+    onTertiaryContainer = Color(0xFFFBDEE5),
+    background = Color(0xFF1B1E2B),
+    onBackground = Color(0xFFE8EAF4),
+    surface = Color(0xFF1B1E2B),
+    onSurface = Color(0xFFE8EAF4),
+    surfaceVariant = Color(0xFF2A2F42),
+    onSurfaceVariant = Color(0xFFB9BFDA),
+    surfaceContainerLowest = Color(0xFF161926),
+    surfaceContainerLow = Color(0xFF1E2230),
+    surfaceContainer = Color(0xFF262B3D),
+    surfaceContainerHigh = Color(0xFF2A2F42),
+    surfaceContainerHighest = Color(0xFF323852),
+    surfaceDim = Color(0xFF161926),
+    surfaceBright = Color(0xFF323852),
+    outline = Color(0xFF8C93B0),
+    outlineVariant = Color(0xFF3A4059),
+    error = Color(0xFFF09CA8),
+    onError = Color(0xFF2E1015),
+    errorContainer = Color(0xFF4E2530),
+    onErrorContainer = Color(0xFFFBDEE5),
+    surfaceTint = Color(0xFFA9B2E8),
+    inverseSurface = Color(0xFFE8EAF4),
+    inverseOnSurface = Color(0xFF1B1E2B),
+    inversePrimary = Color(0xFF4A5AA8),
   )
 
 internal data class AgentStatusStyle(
@@ -106,11 +107,11 @@ internal data class AgentStatusStyle(
 internal fun agentStatusStyle(status: String, dark: Boolean): AgentStatusStyle {
   val (background, label) =
     when (status.lowercase()) {
-      "working" -> (if (dark) Color(0xFF89B4FA) else Color(0xFF1E66F5)) to "Working"
-      "idle" -> (if (dark) Color(0xFFFAB387) else Color(0xFFFE640B)) to "Idle"
-      "done" -> (if (dark) Color(0xFFA6E3A1) else Color(0xFF40A02B)) to "Done"
-      "blocked" -> (if (dark) Color(0xFFF38BA8) else Color(0xFFD20F39)) to "Blocked"
-      else -> (if (dark) Color(0xFF313244) else Color(0xFFDCE0E8)) to "Unknown"
+      "working" -> (if (dark) Color(0xFF7FA0D6) else Color(0xFF3563B0)) to "Working"
+      "idle" -> (if (dark) Color(0xFFE8C48A) else Color(0xFFB07A2E)) to "Idle"
+      "done" -> (if (dark) Color(0xFFA3D9B0) else Color(0xFF3E8E55)) to "Done"
+      "blocked" -> (if (dark) Color(0xFFF09CA8) else Color(0xFFB3424E)) to "Blocked"
+      else -> (if (dark) Color(0xFF323852) else Color(0xFFD5D9EA)) to "Unknown"
     }
   val foreground =
     if ((1.05f / (background.luminance() + 0.05f)) >= 4.5f) Color.White else Color(0xFF11111B)
