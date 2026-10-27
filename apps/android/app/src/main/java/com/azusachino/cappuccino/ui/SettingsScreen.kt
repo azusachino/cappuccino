@@ -84,7 +84,9 @@ internal fun SettingsScreen(
       }
     }
     helpError?.let { SettingNote(it, warning = true) }
-    SettingNote("Agent sessions stay on your machines; this app only reads and relays them.")
+    SettingNote(
+      "Cappuccino only reads and relays agents that run on your machines — it never starts, stops or replaces them."
+    )
   }
 }
 

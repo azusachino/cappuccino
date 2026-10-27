@@ -83,7 +83,7 @@ internal fun HistoryScreen(
           color = colors.text,
         )
         Text(
-          "Conversations are preserved automatically when agents run or when starting a fresh session (/new). They are kept locally for 30 days.",
+          "Nothing brewing yet. Conversations are preserved automatically while agents run or start a fresh session (/new), and kept locally for 30 days.",
           style = MaterialTheme.typography.bodyMedium,
           color = colors.muted,
           textAlign = TextAlign.Center,
