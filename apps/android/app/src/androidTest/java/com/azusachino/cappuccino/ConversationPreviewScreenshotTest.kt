@@ -1,7 +1,6 @@
 package com.azusachino.cappuccino
 
 import android.graphics.Bitmap
-import android.os.Build
 import android.view.WindowInsets
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
@@ -230,12 +229,9 @@ class ConversationPreviewScreenshotTest {
   fun captureConversationComposerImeDark() {
     setContent(previewState(), ThemeMode.DARK)
     compose.onNodeWithTag("promptInput").performClick()
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      compose.waitUntil(timeoutMillis = 5000) {
-        compose.activity.window.decorView.rootWindowInsets
-          .getInsets(WindowInsets.Type.ime())
-          .bottom > 0
-      }
+    compose.waitUntil(timeoutMillis = 5000) {
+      compose.activity.window.decorView.rootWindowInsets.getInsets(WindowInsets.Type.ime()).bottom >
+        0
     }
     compose.waitForIdle()
     // Focused text field alone is not proof: assert the actual IME insets before capturing.
