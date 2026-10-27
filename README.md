@@ -4,12 +4,34 @@
   <img src="docs/assets/icon.png" width="128" alt="Cappuccino icon" />
 </p>
 
+<h1 align="center">Cappuccino</h1>
+
+<p align="center">
+  <a href="#license"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0 license" /></a>
+  <img src="https://img.shields.io/badge/platform-Android%20%7C%20iOS-black" alt="Android and iOS" />
+  <img src="https://img.shields.io/badge/Herdr-0.9.0%2B-4C4F69" alt="Herdr 0.9.0 or later" />
+  <img src="https://img.shields.io/badge/agents-Pi%20%7C%20Claude%20Code%20%7C%20Agy-8839EF" alt="Supported agents" />
+</p>
+
 Cappuccino is a native iPhone and Android app for the coding agents already
 running in [Herdr](https://github.com/herdrdev/herdr) panes on your own machines. It lists
 those agents, shows their conversations, and lets you send a prompt, stop a
 run, start a new session, or answer an approval. It does not start, stop or
 replace the agents. A small Rust bridge, installed as a Herdr plugin, serves
 the apps over your private tailnet.
+
+## Contents
+
+- [Why](#why)
+- [What you can do](#what-you-can-do)
+- [How it works](#how-it-works)
+- [Design and trade-offs](#design-and-trade-offs)
+- [Getting started](#getting-started)
+- [Limitations](#limitations)
+- [Documentation](#documentation)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Why
 
@@ -124,7 +146,7 @@ session only type into the existing pane, so neither starts nor ends a process.
 - iPhone app: macOS 26 or later with Xcode 26 or later (Swift 6.2), and
   [mise](https://mise.jdx.dev). The app targets iOS 17 and later.
 - Android app: JDK 21 and an Android SDK with platform API 37 and build-tools
-  36.0.0. The app runs on Android 8.0 (API 26) and later.
+  36.0.0. The app runs on Android 13 (API 33) and later.
 
 ### 1. Prepare each agent's Herdr integration
 
@@ -258,6 +280,14 @@ For the tested behavior and its limits, see [verification](docs/verification.md)
   derived code.
 - [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md): style, gates
   and ownership rules.
+
+## Contributing
+
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md)
+for setup, style and the validation gates, and [docs/development.md](docs/development.md)
+for toolchain pins and CI. Keep scope within the product intent in
+[docs/intent.md](docs/intent.md): Cappuccino reads and relays agents that you
+already own; it does not start, stop or replace them.
 
 ## Development
 
