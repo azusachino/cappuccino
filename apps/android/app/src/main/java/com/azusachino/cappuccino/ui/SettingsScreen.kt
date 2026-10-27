@@ -43,10 +43,7 @@ internal fun SettingsScreen(
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }
   var choosingTheme by rememberSaveable { mutableStateOf(false) }
   Column(
-    Modifier
-      .fillMaxWidth()
-      .verticalScroll(rememberScrollState())
-      .padding(vertical = 12.dp),
+    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 12.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp),
   ) {
     SettingsCard("Appearance") {

@@ -1,5 +1,9 @@
 # Cappuccino
 
+<p align="center">
+  <img src="docs/assets/icon.png" width="128" alt="Cappuccino icon" />
+</p>
+
 Cappuccino is a native iPhone and Android app for the coding agents already
 running in [Herdr](https://github.com/herdrdev/herdr) panes on your own machines. It lists
 those agents, shows their conversations, and lets you send a prompt, stop a
