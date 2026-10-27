@@ -1000,6 +1000,8 @@ fun CappuccinoScreen(
                     modifier = Modifier.weight(1f),
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     style = MaterialTheme.typography.bodySmall,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
                   )
                   if (state.activeProfileId != null) {
                     FilledTonalButton(
@@ -1145,8 +1147,11 @@ fun CappuccinoScreen(
                         if (machine.connection is ConnectionState.Error)
                           Text(
                             machine.connection.message,
-                            Modifier.padding(16.dp),
-                            color = MaterialTheme.colorScheme.error,
+                            Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                           )
                       } else {
                         val agents = machine.agents.filter { it.machineId == profile.machineId }
