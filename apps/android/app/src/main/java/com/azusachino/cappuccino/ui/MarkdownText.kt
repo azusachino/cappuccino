@@ -241,7 +241,8 @@ internal fun markdownInlineText(
         }
       is StrongEmphasis -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { children() }
       is Emphasis -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { children() }
-      is SoftLineBreak -> append(' ')
+      // Agent prose uses single newlines as visual breaks; honor them like chat apps do.
+      is SoftLineBreak -> append('\n')
       is HardLineBreak -> append('\n')
       is HtmlInline -> append(current.literal)
       // Links/images are passive text: no automatic navigation, HTML or remote image fetches.

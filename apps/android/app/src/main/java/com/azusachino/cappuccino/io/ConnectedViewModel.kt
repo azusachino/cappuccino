@@ -193,18 +193,16 @@ internal constructor(
     val history = offlineHistory ?: return
     offlineIndexJob?.cancel()
     offlineIndexJob = viewModelScope.launch {
-      val machines = mutableState.value.profiles.map { it.machineId }.toSet()
       try {
         val (saved, bytes) =
           withContext(offlineDispatcher) {
-            history.list(machines).map {
+            history.list().map {
               SavedConversationInfo(it.agent, it.savedAt, it.history.turns.size, it.conversationId)
             } to history.bytes()
           }
-        val currentMachines = mutableState.value.profiles.map { it.machineId }.toSet()
         mutableState.value =
           mutableState.value.copy(
-            savedConversations = saved.filter { it.agent.machineId in currentMachines },
+            savedConversations = saved,
             offlineBytes = bytes,
             offlineProblem = null,
           )
@@ -365,6 +363,7 @@ internal constructor(
             machineId,
           )
         store.save(profile)
+        reloadSavedHistory()
         mutableState.value =
           mutableState.value.copy(
             profiles = store.read(),
@@ -919,11 +918,8 @@ internal constructor(
         machines = current.machines - id,
         bridgeDetails = current.bridgeDetails - id,
         activeProfileId = current.activeProfileId.takeUnless { it == id },
-        savedConversations =
-          current.savedConversations.filter { row ->
-            row.agent.machineId in store.read().map { it.machineId }
-          },
       )
+    reloadSavedHistory()
   }
 
   override fun retry() {

@@ -132,20 +132,7 @@ internal fun HistoryScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
           ) {
-            Surface(
-              shape = RoundedCornerShape(8.dp),
-              color = colors.card,
-              modifier = Modifier.size(36.dp),
-            ) {
-              Box(contentAlignment = Alignment.Center) {
-                Icon(
-                  painter = painterResource(agentIconResource(saved.agent.agent)),
-                  contentDescription = saved.agent.agent,
-                  modifier = Modifier.size(20.dp),
-                  tint = colors.accent,
-                )
-              }
-            }
+            AgentAvatar(saved.agent.agent, 36.dp)
 
             Column(modifier = Modifier.weight(1f)) {
               Row(

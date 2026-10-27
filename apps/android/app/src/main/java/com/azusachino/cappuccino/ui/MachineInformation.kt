@@ -22,7 +22,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import com.azusachino.cappuccino.BuildConfig
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectionState
 import com.azusachino.cappuccino.io.MachineProfile
@@ -87,27 +86,16 @@ internal fun MachineInformation(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
       if (connection is ConnectionState.Error) {
-        Text(
+        ErrorBanner(
           if (machineInformationStatus(profile, state) == "Protocol conflict")
             "The app and bridge use incompatible protocols. Update to compatible builds."
-          else "The connection or an action needs attention. See Technical details.",
-          Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-          color = MaterialTheme.colorScheme.error,
+          else connection.message,
+          modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
       }
       machineInformationWarnings(profile, state).forEach { warning ->
-        Text(
-          warning,
-          Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-          color = MaterialTheme.colorScheme.error,
-        )
+        ErrorBanner(warning, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
       }
-      ListItem(
-        headlineContent = { Text("App version") },
-        trailingContent = {
-          Text(BuildConfig.VERSION_NAME, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        },
-      )
       ListItem(
         headlineContent = { Text("Bridge version") },
         trailingContent = {

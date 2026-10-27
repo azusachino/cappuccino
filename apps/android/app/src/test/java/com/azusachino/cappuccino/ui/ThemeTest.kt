@@ -65,11 +65,10 @@ class ThemeTest {
 
   @Test
   fun agentIconsAreDistinctAndUnknownAgentsHaveANeutralFallback() {
-    assertTrue(agentIconResource("pi") != agentIconResource("agy"))
-    assertTrue(agentIconResource("claude") != agentIconResource("pi"))
-    assertTrue(agentIconResource("claude") != agentIconResource("agy"))
-    assertEquals(agentIconResource("agy"), agentIconResource("antigravity-cli"))
-    assertEquals(com.azusachino.cappuccino.R.drawable.ic_machine, agentIconResource("unknown"))
+    val brands =
+      listOf("pi", "claude", "agy", "unknown").map { agentBrandColors(it, dark = false).first }
+    assertEquals(4, brands.distinct().size)
+    assertEquals(agentBrandColors("agy", false), agentBrandColors("antigravity-cli", false))
   }
 
   @Test

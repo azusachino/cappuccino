@@ -495,12 +495,7 @@ fun CappuccinoScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                   ) {
-                    Icon(
-                      painterResource(agentIconResource(selected.agent)),
-                      contentDescription = null,
-                      modifier = Modifier.size(16.dp),
-                      tint = MaterialTheme.appColors.accent,
-                    )
+                    AgentAvatar(selected.agent, 24.dp)
                     Text(
                       selected.label,
                       style = MaterialTheme.typography.titleSmall,
@@ -1398,13 +1393,7 @@ private fun AgentItemCard(
             .joinToString(" · ")
         )
       },
-      leadingContent = {
-        Icon(
-          painterResource(agentIconResource(agent.agent)),
-          contentDescription = null,
-          tint = MaterialTheme.colorScheme.primary,
-        )
-      },
+      leadingContent = { AgentAvatar(agent.agent, 40.dp) },
       trailingContent = { StatusBadge(agent.status) },
     )
   }
