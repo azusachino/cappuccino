@@ -74,14 +74,29 @@ internal fun SettingsScreen(
         }
       }
     }
-    SettingsCard("About") {
-      SettingRow("Version", value = BuildConfig.VERSION_NAME, onClick = null)
+    SettingsCard("Help") {
       SettingRow("Setup guide", value = "GitHub") {
         helpError =
           runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
             .exceptionOrNull()
             ?.let { "Couldn't open the guide. Visit github.com/azusachino/cappuccino." }
       }
+      SettingRow("Herdr", value = "herdr.dev") {
+        helpError =
+          runCatching { uriHandler.openUri("https://herdr.dev") }
+            .exceptionOrNull()
+            ?.let { "Couldn't open herdr.dev." }
+      }
+    }
+    SettingsCard("About") {
+      SettingRow("Version", value = BuildConfig.VERSION_NAME, onClick = null)
+      SettingRow("Source", value = "GitHub") {
+        helpError =
+          runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino") }
+            .exceptionOrNull()
+            ?.let { "Couldn't open github.com/azusachino/cappuccino." }
+      }
+      SettingRow("License", value = "GPL-3.0", onClick = null)
     }
     helpError?.let { SettingNote(it, warning = true) }
     SettingNote(

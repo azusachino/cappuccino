@@ -717,12 +717,7 @@ fun CappuccinoScreen(
                   Modifier.padding(16.dp),
                   color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-              is ConnectionState.Error ->
-                Text(
-                  connection.message,
-                  Modifier.padding(16.dp),
-                  color = MaterialTheme.colorScheme.error,
-                )
+              is ConnectionState.Error -> ErrorBanner(connection.message)
               else -> Unit
             }
 
@@ -844,13 +839,7 @@ fun CappuccinoScreen(
 
               // A waiting prompt sits by the composer, after the output that asked it, so the
               // transcript keeps the top of the screen and the answer is within thumb reach.
-              state.actionError?.let {
-                Text(
-                  it,
-                  Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                  color = MaterialTheme.colorScheme.error,
-                )
-              }
+              state.actionError?.let { ErrorBanner(it) }
               state.stream.pendingPrompt?.let { card ->
                 val answersEnabled =
                   state.connection == ConnectionState.Connected &&
@@ -912,15 +901,6 @@ fun CappuccinoScreen(
                       if (agentControl && selectedStatus == "working") {
                         { mutate { it.controlAgent("interrupt") } }
                       } else null,
-                    onNewSession =
-                      if (
-                        agentControl &&
-                          selected.agent in
-                            setOf("pi", "claude", "agy", "antigravity", "antigravity-cli")
-                      ) {
-                        { mutate { it.controlAgent("new_session") } }
-                      } else null,
-                    newSessionEnabled = selectedStatus == "idle",
                     model = state.sessionStats?.model,
                     thinkingLevel = state.sessionStats?.thinkingLevel,
                     placeholder = "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
@@ -1173,11 +1153,18 @@ fun CappuccinoScreen(
       },
       title = { Text("Add machine") },
       text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          Text(
+            "Runs the cappuccino-bridge Herdr plugin, exposed over your tailnet.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.appColors.muted,
+          )
+          Spacer(Modifier.height(4.dp))
           OutlinedTextField(
             value = label,
             onValueChange = { label = it },
-            label = { Text("Label (optional)") },
+            label = { Text("Label") },
+            supportingText = { Text("Optional; defaults to the machine's own name") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors =
@@ -1192,7 +1179,22 @@ fun CappuccinoScreen(
             value = endpoint,
             onValueChange = { endpoint = it },
             label = { Text("Bridge address") },
-            placeholder = { Text("https://machine.example") },
+            placeholder = { Text("https://machine.tailnet.ts.net") },
+            supportingText = {
+              Text(
+                when {
+                  state.addError != null -> state.addError
+                  endpoint.isBlank() || endpoint.startsWith("https://") ->
+                    "From the machine: the URL the bridge prints on start"
+                  else -> "The address should use https:// (tailscale serve)"
+                }
+              )
+            },
+            keyboardOptions =
+              androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                autoCorrectEnabled = false,
+              ),
             singleLine = true,
             isError = state.addError != null,
             modifier = Modifier.fillMaxWidth(),
@@ -1204,7 +1206,6 @@ fun CappuccinoScreen(
                 unfocusedBorderColor = MaterialTheme.colorScheme.outline,
               ),
           )
-          state.addError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
           if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }
       },
@@ -1215,7 +1216,7 @@ fun CappuccinoScreen(
             pendingAdd = true
             requestConnect(label, endpoint)
           },
-          enabled = !state.busy,
+          enabled = !state.busy && endpoint.isNotBlank(),
         ) {
           Text("Connect")
         }
@@ -1555,8 +1556,6 @@ fun PromptInputBar(
   modifier: Modifier = Modifier,
   placeholder: String = "Message agent…",
   onStop: (() -> Unit)? = null,
-  onNewSession: (() -> Unit)? = null,
-  newSessionEnabled: Boolean = false,
   model: String? = null,
   thinkingLevel: String? = null,
   draft: String = "",
@@ -1567,7 +1566,6 @@ fun PromptInputBar(
   var input by rememberSaveable(draft) { mutableStateOf(draft) }
   LaunchedEffect(draft) { if (input != draft) input = draft }
   var commandsOpen by remember { mutableStateOf(false) }
-  var confirmingNewSession by rememberSaveable { mutableStateOf(false) }
   var historyOpen by remember { mutableStateOf(false) }
   var isFocused by remember { mutableStateOf(false) }
   var promptHistory by rememberSaveable { mutableStateOf(listOf<String>()) }
@@ -1608,25 +1606,6 @@ fun PromptInputBar(
         dismissButton = { TextButton(onClick = { confirmingCommand = null }) { Text("Cancel") } },
       )
     }
-  }
-  if (confirmingNewSession && onNewSession != null) {
-    AlertDialog(
-      onDismissRequest = { confirmingNewSession = false },
-      title = { Text("Start a new session?") },
-      text = { Text("Start a fresh conversation in the same running agent. Your draft is kept.") },
-      confirmButton = {
-        TextButton(
-          enabled = enabled && !pending && newSessionEnabled,
-          onClick = {
-            confirmingNewSession = false
-            onNewSession()
-          },
-        ) {
-          Text("New session")
-        }
-      },
-      dismissButton = { TextButton(onClick = { confirmingNewSession = false }) { Text("Cancel") } },
-    )
   }
   val colors = MaterialTheme.appColors
   val canSend = enabled && !pending && input.isNotBlank()
@@ -1772,16 +1751,6 @@ fun PromptInputBar(
                 onClick = {
                   commandsOpen = false
                   confirmingCommand = "/compact"
-                },
-              )
-            }
-            if (onNewSession != null) {
-              DropdownMenuItem(
-                text = { Text("New session") },
-                enabled = enabled && !pending && newSessionEnabled,
-                onClick = {
-                  commandsOpen = false
-                  confirmingNewSession = true
                 },
               )
             }
