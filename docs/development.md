@@ -111,18 +111,21 @@ only that device afterwards, after its evidence is preserved.
 | `make build-android` | Debug app and instrumentation APKs |
 | `make validate-apple` | `check-apple` and `build-ios` |
 | `make validate-android` | ktfmt, unit tests, lint and both debug APKs |
-| `make validate` | Both platform validations; needs both toolchains |
+| `make validate` | Default Android validation, bridge gate and Markdown check; no Xcode required |
 | `make ui-test DESTINATION=…` | iPhone shell journey on the named simulator |
 | `make ui-test-android` | Android shell journey on `ANDROID_SERIAL`; exports three screenshots |
 | `make check-bridge` | Bridge gate: `cargo fmt --check`, all hermetic tests, release example build |
 | `make bench-bridge-client` | Benchmark against a running bridge (`BASE_URL`, `SESSION`, `STREAM_CYCLES`) |
 | `make resource-bridge-client` | Leak and lifecycle soak, about six minutes; run before a version release |
 
-Use the platform-focused targets while iterating, and run `make validate` before
-acceptance. `make validate` covers both toolchains. Shared or build changes need
-both platform gates. Run the owning gates before committing: `make check` for changes that touch
-both platforms, `make check-bridge` for bridge changes and `make md-check` for
-Markdown. Run `make validate` before a pull request.
+Use the platform-focused targets while iterating. The owner-selected default
+acceptance and pre-PR gate is `make validate`: Android, bridge and Markdown only.
+iOS implementation is deferred; Xcode is not required by this default gate.
+`make validate-apple` remains the explicit Apple source/test/build gate and must
+accompany resumed Apple work and its simulator journey. Existing Apple CI remains
+enabled. Run the owning gates before committing; `make check-bridge` covers bridge
+changes and `make md-check` covers Markdown. The default gate does not establish
+Apple acceptance or claim the deferred iOS mutation-binding work is complete.
 
 Formatting, compilation and core tests are prerequisites, not proof of safe remote
 control. Both platform UI journeys are explicit commands. Nothing in the gates

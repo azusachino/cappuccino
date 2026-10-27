@@ -471,3 +471,24 @@ These results prove the synthetic Android/actual-bridge contract, not native Pi
 admission, atomic PTY fencing, real approval, live branch or tailnet-phone parity.
 iOS stays paused; issue #45/full cross-platform A3 remain open. No push, PR,
 deployment, global integration or owner-session action was performed.
+
+## Owner-authorized default validation scope
+
+For PR review, the owner explicitly requested removing Xcode from the default
+`make validate` target while leaving iOS implementation for later. The previous
+aggregate could not run here because full Xcode is absent; the selected developer
+directory is CommandLineTools. This is an explicit owner change to the active
+validation contract, not a claim that the unavailable Apple gate passed.
+
+The default now runs Android source/tests/lint/APK builds, the full bridge gate
+and Markdown checks. `validate-apple` and the Apple CI job remain available and
+unchanged; resumed Apple work still requires its explicit validation and simulator
+journey. No assertions, diagnostics, critical tests or Apple implementation were
+removed. Owning instructions and development/contribution/plan references now
+state the same scope. The revised `mise exec -- make validate` passed: Android
+unit/lint/debug and instrumentation APK checks, 167 bridge tests (four existing
+opt-in soak ignores), release test-client build and 32 Markdown files. Diff
+hygiene also passed. The existing 54-test Android UI evidence remains applicable:
+this scope change modifies no app, bridge runtime or journey source. Local Apple
+checks were not rerun, as explicitly requested. Publication is a draft PR for
+review; iOS A3 and full cross-platform acceptance stay deferred.

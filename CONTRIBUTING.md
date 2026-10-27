@@ -4,12 +4,13 @@ Cappuccino is a personal native client, not a replacement agent runtime. Read [i
 
 ## Setup and checks
 
-Apple uses macOS 26+/Xcode 26+ (Swift 6.2+); Android uses JDK 21/API 37 SDK. With both toolchains available, run:
+The default `make validate` checks Android, the bridge and Markdown without Xcode; Apple work is currently deferred. Android uses JDK 21/API 37 SDK. Apple checks remain explicit with `validate-apple` and need macOS 26+/Xcode 26+ (Swift 6.2+). For full cross-platform work with both toolchains available, run:
 
 ```sh
 make setup
 make fmt
 make validate
+make validate-apple
 make ui-test DESTINATION="platform=iOS Simulator,id=<task-owned simulator-id>"
 ANDROID_SERIAL=<task-owned emulator serial> make ui-test-android
 ```

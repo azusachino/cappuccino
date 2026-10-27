@@ -109,7 +109,7 @@ ui-test-android: ## Run Android shell smoke on one task-owned emulator and expor
 	  cp "$$image" ".build/android/screens/$$screen.png"; \
 	done
 
-validate: validate-apple validate-android ## Build/check all apps; UI journeys remain explicit
+validate: validate-android check-bridge md-check ## Default Android/bridge/docs gate; Apple validation is explicit
 
 validate-apple: check-apple build-ios ## Apple source/test/build acceptance
 

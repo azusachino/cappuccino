@@ -81,11 +81,14 @@ Commands run from the repository root, using the scoped toolchains in
 | Docs | `make md-check` |
 | Bridge | `make check-bridge` |
 | Android | `mise exec -- make check-android` during iteration; `mise exec -- make validate-android` and `ANDROID_SERIAL=<task-owned emulator> mise exec -- make ui-test-android` at acceptance |
-| Shared | Bridge gate plus `make validate` and both native UI journeys; select a task-owned iOS simulator with `make ui-test DESTINATION="platform=iOS Simulator,id=<id>"` |
+| Shared (full cross-platform acceptance) | `make validate`, explicit `make validate-apple` and both native UI journeys; select a task-owned iOS simulator with `make ui-test DESTINATION="platform=iOS Simulator,id=<id>"` |
 | Runtime | Explicitly task-owned disposable Herdr/Pi processes and synthetic content; installation/reload or physical-device use needs the separately scoped approval |
 
-Preserve both native platform gates for shared/build changes. `make validate` is
-required before a PR; docs-only CI normally checks Markdown, but that is not a
+The owner changed the default gate to Android/bridge/Markdown while Apple work is
+deferred. `make validate` no longer invokes Xcode and is required before a PR;
+full cross-platform completion still needs explicit Apple validation and its UI
+journey when that work resumes. This does not claim deferred Apple acceptance;
+docs-only CI normally checks Markdown, but that is not a
 waiver of the documented local PR gate. A failed or unavailable required gate
 blocks that acceptance/publication action; do not substitute CI or a narrower
 check. No agent reviewer is dispatched without owner authorization.
