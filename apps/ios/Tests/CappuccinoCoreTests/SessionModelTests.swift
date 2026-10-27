@@ -12,18 +12,36 @@ private final class FakeBridge: AgentSessionServing, @unchecked Sendable {
   var failure: Error?
   var latency: UInt64 = 0
   var sent: [String] = []
+  var holdOpen = false
+  var continuation: AsyncThrowingStream<AgentStreamEvent, Error>.Continuation?
+  var streamFailure: Error?
+  var snapshotFactory: (@Sendable () async throws -> ConversationSnapshot)?
+  var attempts = 0
+  var bindingChecks = 0
+  var binding = true
+
+  func verifyBinding(base: URL, machineID: UUID, agent: AgentRow) async throws -> Bool {
+    bindingChecks += 1
+    return binding
+  }
 
   func conversationSnapshot(base: URL, session: String, agent: String?) async throws
     -> ConversationSnapshot
   {
-    snapshot
+    if let snapshotFactory { return try await snapshotFactory() }
+    return snapshot
   }
 
   func events(base: URL, session: String) -> AsyncThrowingStream<AgentStreamEvent, Error> {
-    let events = self.events
+    attempts += 1
     return AsyncThrowingStream { continuation in
+      self.continuation = continuation
       for event in events { continuation.yield(event) }
-      continuation.finish()
+      if let streamFailure {
+        continuation.finish(throwing: streamFailure)
+      } else if !holdOpen {
+        continuation.finish()
+      }
     }
   }
 
@@ -57,6 +75,67 @@ private final class FakeBridge: AgentSessionServing, @unchecked Sendable {
   }
 }
 
+private actor SnapshotGate {
+  private(set) var reads = 0
+  private var first: CheckedContinuation<Void, Never>?
+
+  func read() async -> ConversationSnapshot {
+    reads += 1
+    let index = reads
+    if index == 1 { await withCheckedContinuation { first = $0 } }
+    return ConversationSnapshot(
+      turns: [
+        ConversationTurn(
+          id: "settled-\(index)", role: "assistant", timestamp: nil, text: "Settled \(index)",
+          parts: [])
+      ],
+      source: "canonical_log", conversationID: nil, machineID: nil, stats: nil)
+  }
+
+  func release() {
+    first?.resume()
+    first = nil
+  }
+}
+
+private actor RecoveryHistoryGate {
+  let machineID: UUID
+  let blocking: Bool
+  private(set) var reads = 0
+  private var pending: [Int: CheckedContinuation<Void, Never>] = [:]
+  private var released: Set<Int> = []
+  private var available = true
+
+  init(machineID: UUID, blocking: Bool) {
+    self.machineID = machineID
+    self.blocking = blocking
+  }
+
+  func read() async throws -> ConversationSnapshot {
+    reads += 1
+    let index = reads
+    if blocking && index <= 2 && !released.contains(index) {
+      await withCheckedContinuation { pending[index] = $0 }
+    }
+    guard available else { throw BridgeError.unreachable("History offline") }
+    return ConversationSnapshot(
+      turns: [
+        ConversationTurn(
+          id: "history-\(index)", role: "assistant", timestamp: nil,
+          text: blocking && index == 1 ? "Obsolete" : "Recovered", parts: [])
+      ],
+      source: "canonical_log", conversationID: "pi:" + String(repeating: "a", count: 64),
+      machineID: machineID, stats: nil)
+  }
+
+  func release(_ index: Int) {
+    released.insert(index)
+    pending.removeValue(forKey: index)?.resume()
+  }
+
+  func setAvailable(_ value: Bool) { available = value }
+}
+
 private final class ClientCounter: @unchecked Sendable {
   var count = 0
 }
@@ -87,7 +166,8 @@ private struct InstantDiscovery: BridgeMachineServing {
   }
 
   private func fixture(
-    capabilities: [String: Bool] = ["agent_control": true], events: [AgentStreamEvent] = []
+    capabilities: [String: Bool] = ["agent_control": true], events: [AgentStreamEvent]? = nil,
+    nativeRef: String? = "pi:synthetic", holdOpen: Bool? = nil
   ) async throws -> Fixture {
     let suite = "cappuccino-session-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
@@ -101,7 +181,15 @@ private struct InstantDiscovery: BridgeMachineServing {
     machines.setForeground(true)
     await machines.refresh(profile.id)?.value
     let bridge = FakeBridge()
-    bridge.events = events
+    bridge.events =
+      events ?? [
+        .open(sessionID: "s-1", generation: 1),
+        .agentStatus(sessionID: "s-1", state: "idle", detail: nil),
+      ]
+    bridge.holdOpen = holdOpen ?? (events == nil)
+    bridge.snapshot = ConversationSnapshot(
+      turns: [], source: "canonical_log",
+      conversationID: "pi:" + String(repeating: "a", count: 64), machineID: machineID, stats: nil)
     let counter = ClientCounter()
     let model = SessionModel(machines: machines) {
       counter.count += 1
@@ -109,19 +197,28 @@ private struct InstantDiscovery: BridgeMachineServing {
     }
     let agent = AgentRow(
       machineID: machineID.uuidString, sessionID: "s-1", label: "pi", branch: nil, working: false,
-      provider: "pi")
+      provider: "pi", paneID: "pane-1", nativeSessionRef: nativeRef)
     return Fixture(
       model: model, bridge: bridge, counter: counter, profileID: profile.id, machineID: machineID,
       agent: agent)
   }
 
+  private func selectLive(_ fx: Fixture) async {
+    fx.model.select(profileID: fx.profileID, agent: fx.agent)
+    for _ in 0..<100 {
+      if fx.model.isLive { return }
+      await Task.yield()
+    }
+    #expect(fx.model.isLive, "Controlled stream must deliver its fresh baseline")
+  }
+
   @Test func controlsRequireAdvertisedCapabilityAndUseAFreshClientEach() async throws {
     let fx = try await fixture()
-    fx.model.select(profileID: fx.profileID, agent: fx.agent)
+    defer { fx.model.clearSelection() }
+    await selectLive(fx)
     let before = fx.counter.count
     await fx.model.control("interrupt")
     await fx.model.control("new_session")
-    await fx.model.awaitStreamForTesting()
     #expect(fx.bridge.sent == ["control:interrupt", "control:new_session"])
     #expect(fx.counter.count >= before + 2)
     #expect(fx.model.actionError == nil)
@@ -129,7 +226,8 @@ private struct InstantDiscovery: BridgeMachineServing {
 
   @Test func controlIsNotOfferedWhenTheBridgeDeclinesIt() async throws {
     let fx = try await fixture(capabilities: ["agent_control": false])
-    fx.model.select(profileID: fx.profileID, agent: fx.agent)
+    defer { fx.model.clearSelection() }
+    await selectLive(fx)
     #expect(!fx.model.canControl)
     await fx.model.control("interrupt")
     #expect(fx.bridge.sent.isEmpty)
@@ -137,20 +235,23 @@ private struct InstantDiscovery: BridgeMachineServing {
 
   @Test func answersAreRefusedOnlyWhenTheBridgeSaysNo() async throws {
     let refused = try await fixture(capabilities: ["prompt_answers": false])
-    refused.model.select(profileID: refused.profileID, agent: refused.agent)
+    defer { refused.model.clearSelection() }
+    await selectLive(refused)
     await refused.model.answerPrompt("p-1", optionIndex: 0)
     #expect(refused.bridge.sent.isEmpty)
     #expect(refused.model.actionError == "Prompt answers unsupported by this bridge")
 
     let unknown = try await fixture(capabilities: [:])
-    unknown.model.select(profileID: unknown.profileID, agent: unknown.agent)
+    defer { unknown.model.clearSelection() }
+    await selectLive(unknown)
     await unknown.model.answerPrompt("p-1", optionIndex: 0)
     #expect(unknown.bridge.sent == ["answer:p-1"])
   }
 
   @Test func bridgeRefusalReasonIsReportedWithoutTouchingTheConnection() async throws {
     let fx = try await fixture()
-    fx.model.select(profileID: fx.profileID, agent: fx.agent)
+    defer { fx.model.clearSelection() }
+    await selectLive(fx)
     fx.bridge.failure = BridgeError.protocolError("answer it in the terminal")
     await fx.model.answerQuestions("q-toolu_1", [QuestionAnswer(selected: [0], other: nil)])
     #expect(fx.model.actionError == "answer it in the terminal")
@@ -159,7 +260,8 @@ private struct InstantDiscovery: BridgeMachineServing {
 
   @Test func staleActionResultIsDroppedAfterSwitchingAgents() async throws {
     let fx = try await fixture()
-    fx.model.select(profileID: fx.profileID, agent: fx.agent)
+    defer { fx.model.clearSelection() }
+    await selectLive(fx)
     fx.bridge.latency = 50_000_000
     fx.bridge.failure = BridgeError.protocolError("late refusal")
     let action = Task {
@@ -185,16 +287,319 @@ private struct InstantDiscovery: BridgeMachineServing {
     let card = PromptCard(
       promptID: "p-1", type: "tool_approval", title: "Approve", message: nil, toolName: "bash",
       command: "make test", options: [], selectedIndex: 0, questions: [])
-    let fx = try await fixture(events: [
-      .open(sessionID: "s-1", generation: 1),
-      .entries([StreamEntry(id: "a", seq: 1, kind: "output", text: "hi", branch: nil)]),
-      .promptRequest(sessionID: "s-1", prompt: card),
-    ])
-    fx.model.select(profileID: fx.profileID, agent: fx.agent)
-    await fx.model.awaitStreamForTesting()
+    let fx = try await fixture(
+      events: [
+        .open(sessionID: "s-1", generation: 1),
+        .agentStatus(sessionID: "s-1", state: "idle", detail: nil),
+        .entries([StreamEntry(id: "a", seq: 1, kind: "output", text: "hi", branch: nil)]),
+        .promptRequest(sessionID: "s-1", prompt: card),
+      ], holdOpen: true)
+    defer { fx.model.clearSelection() }
+    await selectLive(fx)
+    for _ in 0..<100 {
+      if fx.model.stream.pendingPrompt == card { break }
+      await Task.yield()
+    }
     #expect(fx.model.stream.pendingPrompt == card)
     #expect(fx.model.stream.entries.map(\.text) == ["hi"])
     #expect(fx.model.streamError == nil)
+    fx.bridge.continuation?.yield(.error(code: "not_found", message: "Gone"))
+    await fx.model.awaitStreamForTesting()
+    #expect(fx.model.stream.pendingPrompt == nil)
+    #expect(!fx.model.isLive)
+    #expect(fx.model.stream.entries.map(\.text) == ["hi"])
+  }
+
+  @Test func canonicalHistoryMustSettleAndCancelledOldRefreshCannotUnlockRecovery() async throws {
+    let fx = try await fixture(events: [.open(sessionID: "s-1", generation: 1)], holdOpen: true)
+    let gate = RecoveryHistoryGate(machineID: fx.machineID, blocking: true)
+    defer {
+      fx.model.clearSelection()
+      Task {
+        await gate.release(1)
+        await gate.release(2)
+      }
+    }
+    fx.bridge.snapshotFactory = { try await gate.read() }
+    fx.model.retryPause = { _ in }
+    fx.model.select(profileID: fx.profileID, agent: fx.agent)
+    for _ in 0..<100 {
+      if fx.bridge.attempts == 1 { break }
+      await Task.yield()
+    }
+    fx.bridge.continuation?.yield(.agentStatus(sessionID: "s-1", state: "idle", detail: nil))
+    for _ in 0..<100 {
+      let reads = await gate.reads
+      if fx.model.isLive && reads == 1 { break }
+      await Task.yield()
+    }
+    #expect(fx.model.isLive)
+    fx.bridge.continuation?.yield(.error(code: "upstream_unavailable", message: "Source lost"))
+    for _ in 0..<100 {
+      if await gate.reads == 2 { break }
+      await Task.yield()
+    }
+    #expect(await gate.reads == 2)
+    #expect(fx.bridge.attempts == 1)
+    #expect(!fx.model.isLive)
+    #expect(await fx.model.sendPrompt("before history") == false)
+    await gate.release(1)
+    for _ in 0..<10 { await Task.yield() }
+    #expect(fx.model.turns.isEmpty)
+    #expect(fx.bridge.attempts == 1)
+    await gate.release(2)
+    for _ in 0..<100 {
+      if fx.bridge.attempts == 2 { break }
+      await Task.yield()
+    }
+    #expect(fx.model.turns.last?.text == "Recovered")
+    #expect(fx.bridge.attempts == 2)
+    #expect(!fx.model.isLive)
+    fx.bridge.continuation?.yield(.agentStatus(sessionID: "s-1", state: "idle", detail: nil))
+    for _ in 0..<100 {
+      if fx.model.isLive { break }
+      await Task.yield()
+    }
+    #expect(fx.model.isLive)
+    #expect(fx.model.turns.last?.text == "Recovered")
+    #expect(fx.bridge.sent.isEmpty)
+  }
+
+  @Test func unverifiedOrUnavailableHistoryBlocksRecovery() async throws {
+    for mode in 0..<4 {
+      let fx = try await fixture()
+      defer { fx.model.clearSelection() }
+      fx.model.retryPause = { _ in }
+      await selectLive(fx)
+      await fx.model.awaitConversationForTesting()
+      fx.bridge.snapshot = ConversationSnapshot(
+        turns: [],
+        source: mode == 0 ? "terminal_scrollback" : "canonical_log",
+        conversationID: mode == 1
+          ? nil : "pi:" + String(repeating: mode == 3 ? "b" : "a", count: 64),
+        machineID: mode == 2 ? UUID() : fx.machineID, stats: nil)
+      fx.bridge.continuation?.yield(.error(code: "upstream_unavailable", message: "Source lost"))
+      await fx.model.awaitStreamForTesting()
+      #expect(fx.bridge.attempts == 1)
+      #expect(!fx.model.isLive)
+      #expect(fx.model.streamError != nil)
+      #expect(await fx.model.sendPrompt("must stay blocked") == false)
+      #expect(fx.bridge.sent.isEmpty)
+    }
+  }
+
+  @Test func explicitRetryRecoversCanonicalHistoryWithoutReplayingInput() async throws {
+    let fx = try await fixture()
+    defer { fx.model.clearSelection() }
+    let gate = RecoveryHistoryGate(machineID: fx.machineID, blocking: false)
+    fx.bridge.snapshotFactory = { try await gate.read() }
+    fx.model.retryPause = { _ in }
+    await selectLive(fx)
+    await fx.model.awaitConversationForTesting()
+    await gate.setAvailable(false)
+    fx.bridge.continuation?.yield(.error(code: "upstream_unavailable", message: "Source lost"))
+    await fx.model.awaitStreamForTesting()
+    #expect(fx.bridge.attempts == 1)
+    #expect(!fx.model.isLive)
+    #expect(await fx.model.sendPrompt("must not replay") == false)
+    await gate.setAvailable(true)
+    fx.model.retryStream()
+    for _ in 0..<100 {
+      if fx.bridge.attempts == 2 && fx.model.isLive { break }
+      await Task.yield()
+    }
+    #expect(fx.bridge.attempts == 2)
+    #expect(fx.model.isLive)
+    #expect(fx.model.streamError == nil)
+    #expect(fx.bridge.sent.isEmpty)
+  }
+
+  @Test func refreshBurstCoalescesAndSettlesWithoutHidingSourceLoss() async throws {
+    let fx = try await fixture()
+    defer { fx.model.clearSelection() }
+    let gate = SnapshotGate()
+    fx.bridge.snapshotFactory = { await gate.read() }
+    fx.model.retryPause = { _ in throw CancellationError() }
+    await selectLive(fx)
+    for _ in 0..<100 {
+      if await gate.reads == 1 { break }
+      await Task.yield()
+    }
+    #expect(await gate.reads == 1)
+    for _ in 0..<20 { fx.model.requestConversation() }
+    #expect(await gate.reads == 1)
+    fx.bridge.continuation?.yield(
+      .error(code: "upstream_unavailable", message: "Source unavailable"))
+    await fx.model.awaitStreamForTesting()
+    #expect(!fx.model.isLive)
+    #expect(fx.model.streamError != nil)
+    await gate.release()
+    for _ in 0..<100 {
+      if fx.model.turns.last?.text == "Settled 2" { break }
+      await Task.yield()
+    }
+    #expect(await gate.reads == 2)
+    #expect(fx.model.turns.last?.text == "Settled 2")
+    #expect(!fx.model.isLive)
+    #expect(fx.model.streamError != nil)
+  }
+
+  @Test func foregroundRecoveryRevalidatesNativeBindingAndLegacyNeedsReselection() async throws {
+    for legacy in [false, true] {
+      let fx = try await fixture(nativeRef: legacy ? nil : "pi:original")
+      defer { fx.model.clearSelection() }
+      await selectLive(fx)
+      fx.bridge.continuation?.yield(.promptRequest(sessionID: "s-1", prompt: approval))
+      for _ in 0..<100 {
+        if fx.model.stream.pendingPrompt != nil { break }
+        await Task.yield()
+      }
+      #expect(fx.model.stream.pendingPrompt == approval)
+      fx.model.setForeground(false)
+      #expect(!fx.model.isLive)
+      #expect(fx.model.stream.pendingPrompt == nil)
+      #expect(await fx.model.sendPrompt("background callback") == false)
+      fx.model.setForeground(true)
+      if legacy {
+        await fx.model.awaitStreamForTesting()
+        #expect(fx.bridge.attempts == 1)
+        #expect(fx.bridge.bindingChecks == 0)
+        #expect(!fx.model.isLive)
+        await selectLive(fx)
+      } else {
+        for _ in 0..<100 {
+          if fx.bridge.attempts == 2 && fx.model.isLive { break }
+          await Task.yield()
+        }
+        #expect(fx.bridge.bindingChecks == 1)
+      }
+      #expect(fx.bridge.attempts == 2)
+      #expect(fx.model.isLive)
+      #expect(fx.model.stream.pendingPrompt == nil)
+      #expect(fx.bridge.sent.isEmpty)
+    }
+  }
+
+  private var approval: PromptCard {
+    PromptCard(
+      promptID: "p-stale", type: "tool_approval", title: "Approve", message: nil,
+      toolName: "bash", command: "synthetic-command", options: [], selectedIndex: 0, questions: [])
+  }
+
+  private var liveEvents: [AgentStreamEvent] {
+    [
+      .open(sessionID: "s-1", generation: 1),
+      .agentStatus(sessionID: "s-1", state: "working", detail: "Old detail"),
+      .promptRequest(sessionID: "s-1", prompt: approval),
+    ]
+  }
+
+  @Test func sourceOverflowAndEOFLossUseFiniteBudgetAndInvalidateActions() async throws {
+    for mode in 0..<3 {
+      let fx = try await fixture(events: liveEvents)
+      defer { fx.model.clearSelection() }
+      fx.model.retryPause = { _ in }
+      if mode == 0 {
+        fx.bridge.events.append(.error(code: "upstream_unavailable", message: "Source unavailable"))
+      }
+      if mode == 1 { fx.bridge.streamFailure = BridgeError.streamOverflow }
+      fx.model.select(profileID: fx.profileID, agent: fx.agent)
+      await fx.model.awaitStreamForTesting()
+      #expect(fx.bridge.attempts == 5)
+      #expect(fx.bridge.bindingChecks == 4)
+      #expect(!fx.model.isLive)
+      #expect(fx.model.stream.pendingPrompt == nil)
+      #expect(fx.model.stream.agentStatusDetail == nil)
+      #expect(fx.model.streamError != nil)
+      #expect(await fx.model.sendPrompt("stale") == false)
+      #expect(fx.bridge.sent.isEmpty)
+    }
+  }
+
+  @Test func legacyAndReplacedIdentityNeverReceiveAutomaticReattach() async throws {
+    for legacy in [true, false] {
+      let fx = try await fixture(events: liveEvents, nativeRef: legacy ? nil : "pi:original")
+      defer { fx.model.clearSelection() }
+      fx.model.retryPause = { _ in }
+      fx.bridge.binding = false
+      fx.model.select(profileID: fx.profileID, agent: fx.agent)
+      await fx.model.awaitStreamForTesting()
+      #expect(fx.bridge.attempts == 1)
+      #expect(fx.bridge.bindingChecks == (legacy ? 0 : 1))
+      #expect(!fx.model.isLive)
+      #expect(fx.model.stream.pendingPrompt == nil)
+      #expect(
+        fx.model.streamError == "Agent session identity is unavailable or replaced; reselect it")
+    }
+  }
+
+  @Test func terminalFailuresInvalidateWithoutRetry() async throws {
+    let failures: [any Error] = [
+      BridgeError.protocolError("Malformed"), BridgeError.unauthorized,
+      URLError(.serverCertificateUntrusted),
+    ]
+    for failure in failures {
+      let fx = try await fixture(events: liveEvents)
+      defer { fx.model.clearSelection() }
+      fx.bridge.streamFailure = failure
+      fx.model.retryPause = { _ in Issue.record("Terminal failures must not retry") }
+      fx.model.select(profileID: fx.profileID, agent: fx.agent)
+      await fx.model.awaitStreamForTesting()
+      #expect(fx.bridge.attempts == 1)
+      #expect(!fx.model.isLive)
+      #expect(fx.model.stream.pendingPrompt == nil)
+      #expect(fx.model.stream.agentStatusDetail == nil)
+      #expect(fx.model.streamError != nil)
+      await fx.model.answerPrompt("p-stale")
+      #expect(fx.bridge.sent.isEmpty)
+    }
+  }
+
+  @Test func freshBaselineRequiredAndRecoveryNeverReplaysWrites() async throws {
+    let fx = try await fixture(events: [.open(sessionID: "s-1", generation: 1)], holdOpen: true)
+    defer { fx.model.clearSelection() }
+    fx.model.retryPause = { _ in }
+    fx.model.select(profileID: fx.profileID, agent: fx.agent)
+    for _ in 0..<100 {
+      if fx.bridge.attempts == 1 { break }
+      await Task.yield()
+    }
+    #expect(!fx.model.isLive)
+    #expect(await fx.model.sendPrompt("before baseline") == false)
+    await fx.model.control("interrupt")
+    await fx.model.answerPrompt("stale")
+    #expect(fx.bridge.sent.isEmpty)
+    fx.bridge.continuation?.yield(.agentStatus(sessionID: "s-1", state: "idle", detail: nil))
+    for _ in 0..<100 {
+      if fx.model.isLive { break }
+      await Task.yield()
+    }
+    #expect(fx.model.isLive)
+    #expect(await fx.model.sendPrompt("only once"))
+    fx.bridge.continuation?.yield(.promptRequest(sessionID: "s-1", prompt: approval))
+    for _ in 0..<100 {
+      if fx.model.stream.pendingPrompt != nil { break }
+      await Task.yield()
+    }
+    #expect(fx.model.stream.pendingPrompt == approval)
+    fx.bridge.continuation?.yield(.error(code: "upstream_unavailable", message: "Lost source"))
+    for _ in 0..<100 {
+      if fx.bridge.attempts == 2 { break }
+      await Task.yield()
+    }
+    #expect(fx.bridge.attempts == 2)
+    #expect(fx.bridge.bindingChecks == 1)
+    #expect(!fx.model.isLive)
+    #expect(fx.model.stream.pendingPrompt == nil)
+    #expect(fx.bridge.sent == ["prompt:only once"])
+    fx.bridge.continuation?.yield(.agentStatus(sessionID: "s-1", state: "idle", detail: nil))
+    for _ in 0..<100 {
+      if fx.model.isLive { break }
+      await Task.yield()
+    }
+    #expect(fx.model.isLive)
+    #expect(fx.model.streamError == nil)
+    #expect(fx.bridge.sent == ["prompt:only once"])
   }
 
   @Test func protocolViolationEndsTheStreamWithItsReason() async throws {

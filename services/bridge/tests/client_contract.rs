@@ -68,6 +68,9 @@ struct MockAgent {
     status: String,
     screen: String,
     requests: Vec<Value>,
+    responses: std::collections::HashMap<String, Value>,
+    replace_after_list: Option<(usize, String)>,
+    replace_after_write: Option<String>,
 }
 
 impl Default for MockAgent {
@@ -77,6 +80,9 @@ impl Default for MockAgent {
             status: "idle".to_string(),
             screen: "alpha line\nbeta line\n".to_string(),
             requests: Vec::new(),
+            responses: std::collections::HashMap::new(),
+            replace_after_list: None,
+            replace_after_write: None,
         }
     }
 }
@@ -133,6 +139,12 @@ impl MockHerdr {
         }
     }
 
+    fn start_bound(root: &TempRoot) -> Self {
+        let mock = Self::start(root);
+        mock.set_agent_session(Some("/synthetic/native-A.jsonl"));
+        mock
+    }
+
     /// The agent the mock reports in `agent.list`, and every request it received.
     fn set_agent(&self, kind: &str, status: &str) {
         let mut agent = self.agent.lock().unwrap();
@@ -140,8 +152,25 @@ impl MockHerdr {
         agent.status = status.to_string();
     }
 
+    fn replace_after_list(&self, checks: usize, reference: &str) {
+        assert!(checks > 0);
+        self.agent.lock().unwrap().replace_after_list = Some((checks, reference.to_string()));
+    }
+
+    fn replace_after_write(&self, reference: &str) {
+        self.agent.lock().unwrap().replace_after_write = Some(reference.to_string());
+    }
+
     fn set_screen(&self, screen: &str) {
         self.agent.lock().unwrap().screen = screen.to_string();
+    }
+
+    fn set_response(&self, method: &str, response: Value) {
+        self.agent
+            .lock()
+            .unwrap()
+            .responses
+            .insert(method.to_string(), response);
     }
 
     /// Keys and text sent to the pane, in order: `["2"]`, `"a bird"`, …
@@ -213,17 +242,43 @@ async fn handle_mock_connection(
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_default();
     let session_value = agent_session.lock().unwrap().clone();
-    let (kind, status, screen) = {
+    let (kind, status, screen, injected, replacement) = {
         let mut agent = agent.lock().unwrap();
-        agent.requests.push(request.clone());
+        let mut recorded = request.clone();
+        recorded["observed_native_session"] = json!(session_value.clone());
+        agent.requests.push(recorded);
+        let method = request["method"].as_str().unwrap_or("");
+        let replacement = if method == "agent.list" {
+            if let Some((remaining, _)) = agent.replace_after_list.as_mut() {
+                *remaining -= 1;
+                if *remaining == 0 {
+                    agent.replace_after_list.take().map(|(_, value)| value)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else if matches!(method, "agent.prompt" | "pane.send_keys" | "pane.send_text") {
+            agent.replace_after_write.take()
+        } else {
+            None
+        };
         (
             agent.kind.clone(),
             agent.status.clone(),
             agent.screen.clone(),
+            agent.responses.get(method).cloned(),
+            replacement,
         )
     };
+    // Snapshot and replacement are deterministic: list can return its old snapshot
+    // after the mock occupant changed, reproducing the uncloseable PTY window.
+    if let Some(reference) = replacement {
+        *agent_session.lock().unwrap() = Some(reference);
+    }
     let agent_session_json = match session_value {
-        Some(value) => json!({"kind": "path", "value": value}),
+        Some(value) => json!({"agent": kind, "kind": "path", "value": value}),
         None => json!(null),
     };
     let result = match request["method"].as_str().unwrap_or("") {
@@ -234,14 +289,15 @@ async fn handle_mock_connection(
                 "agent": kind,
                 "agent_status": status,
                 "cwd": cwd_text,
+                "agent_session": agent_session_json,
             }]
         }),
         "agent.get" => json!({
             "agent": {
                 "name": "s-probe",
                 "pane_id": "w1:a",
-                "agent": "pi",
-                "agent_status": "idle",
+                "agent": kind,
+                "agent_status": status,
                 "cwd": cwd_text,
                 "agent_session": agent_session_json,
             }
@@ -249,7 +305,8 @@ async fn handle_mock_connection(
         "pane.read" => json!({"read": {"text": screen}}),
         _ => json!({}),
     };
-    let response = json!({"id": request["id"], "result": result});
+    let mut response = injected.unwrap_or_else(|| json!({"result": result}));
+    response["id"] = request["id"].clone();
     let mut payload = serde_json::to_vec(&response).unwrap();
     payload.push(b'\n');
     let _ = writer.write_all(&payload).await;
@@ -385,6 +442,33 @@ fn probe_options(base_url: &str) -> ProbeOptions {
     let mut options = ProbeOptions::new(base_url);
     options.timeout = TIMEOUT;
     options
+}
+
+// Positive mutation journeys explicitly select the mock's current binding. New A3
+// stale/legacy tests use raw probe::post_json with a captured body, never this helper.
+async fn selected_binding(options: &ProbeOptions) -> Value {
+    let session = probe::get(options, "/api/session")
+        .await
+        .expect("session metadata");
+    let agents = probe::get(options, "/api/agents")
+        .await
+        .expect("agent metadata");
+    let row = &agents.body["agents"][0];
+    assert!(
+        row["native_session_ref"].is_string(),
+        "bound fixture required: {row}"
+    );
+    json!({"machine_id": session.body["machine_id"], "pane_id": row["pane_id"], "native_session_ref": row["native_session_ref"]})
+}
+
+async fn bound_post(
+    options: &ProbeOptions,
+    path: &str,
+    body: &Value,
+) -> Result<probe::HttpExchange, String> {
+    let mut body = body.clone();
+    body["expected_session"] = selected_binding(options).await;
+    probe::post_json(options, path, &body).await
 }
 
 async fn ws_probe(options: &ProbeOptions, session: &str, followup: Duration) -> StreamProbe {
@@ -640,7 +724,7 @@ async fn agent_conversation_returns_structured_turns() {
 #[tokio::test]
 async fn submit_agent_prompt_delivers_input() {
     let root = TempRoot::new("prompt-test");
-    let herdr = MockHerdr::start(&root);
+    let herdr = MockHerdr::start_bound(&root);
     let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
 
     // 1. Submit free-form prompt
@@ -648,7 +732,7 @@ async fn submit_agent_prompt_delivers_input() {
         "type": "prompt",
         "text": "run make check"
     });
-    let exchange = probe::post_json(
+    let exchange = bound_post(
         &probe_options(&bridge.base_url()),
         "/api/agents/s-probe/prompt",
         &body,
@@ -664,7 +748,7 @@ async fn submit_agent_prompt_delivers_input() {
         "type": "prompt",
         "text": "   "
     });
-    let err_exchange = probe::post_json(
+    let err_exchange = bound_post(
         &probe_options(&bridge.base_url()),
         "/api/agents/s-probe/prompt",
         &empty_body,
@@ -679,7 +763,7 @@ async fn submit_agent_prompt_delivers_input() {
     let send = |body: Value| {
         let options = options.clone();
         async move {
-            probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+            bound_post(&options, "/api/agents/s-probe/prompt", &body)
                 .await
                 .expect("prompt request")
         }
@@ -705,16 +789,267 @@ async fn submit_agent_prompt_delivers_input() {
     root.remove();
 }
 
+fn mutation_variants() -> Vec<(&'static str, Value)> {
+    vec![
+        (
+            "prompt",
+            json!({"type": "prompt", "text": "synthetic input"}),
+        ),
+        (
+            "prompt",
+            json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "cancel"}),
+        ),
+        (
+            "prompt",
+            json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "select_option", "option_index": 0}),
+        ),
+        (
+            "prompt",
+            json!({"type": "answer_question", "prompt_id": "p-old", "answers": [{"selected": [0]}]}),
+        ),
+        ("control", json!({"action": "interrupt"})),
+        ("control", json!({"action": "new_session"})),
+    ]
+}
+
+#[tokio::test]
+async fn all_mutation_variants_reject_unbound_malformed_and_stale_requests_without_input() {
+    let root = TempRoot::new("binding-boundary");
+    let herdr = MockHerdr::start_bound(&root);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+    let options = probe_options(&bridge.base_url());
+    let binding = selected_binding(&options).await;
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../fixtures/mutation-session-binding.json"
+    ))
+    .unwrap();
+    let paired = probe::get(&options, "/api/session").await.unwrap();
+    assert_eq!(paired.body["capabilities"]["mutation_binding"], true);
+    for (endpoint, body) in mutation_variants() {
+        let path = format!("/api/agents/s-probe/{endpoint}");
+        for case in fixture["invalid"].as_array().unwrap() {
+            let mut invalid = body.clone();
+            invalid
+                .as_object_mut()
+                .unwrap()
+                .extend(case["body"].as_object().unwrap().clone());
+            let result = probe::post_json(&options, &path, &invalid).await.unwrap();
+            assert_eq!(
+                u64::from(result.status.as_u16()),
+                case["status"].as_u64().unwrap(),
+                "{endpoint}: {}",
+                result.body
+            );
+            assert_eq!(result.body["code"], case["code"]);
+        }
+        for (field, value) in [
+            ("pane_id", json!("w9:replacement")),
+            ("native_session_ref", json!("different-native")),
+            (
+                "machine_id",
+                json!(
+                    if binding["machine_id"] == "11111111-1111-4111-8111-111111111111" {
+                        "22222222-2222-4222-8222-222222222222"
+                    } else {
+                        "11111111-1111-4111-8111-111111111111"
+                    }
+                ),
+            ),
+        ] {
+            let mut stale = body.clone();
+            stale["expected_session"] = binding.clone();
+            stale["expected_session"][field] = value;
+            let result = probe::post_json(&options, &path, &stale).await.unwrap();
+            assert_eq!(result.status, 409, "{endpoint}: {}", result.body);
+            assert_eq!(result.body["code"], "stale_session");
+        }
+    }
+    assert!(herdr.input().is_empty());
+    assert!(herdr.requests("agent.prompt").is_empty());
+    // UUID case does not alter identity; a normal input is dispatched to the verified pane.
+    let mut body =
+        json!({"type": "prompt", "text": "synthetic input", "expected_session": binding});
+    body["expected_session"]["machine_id"] = json!(body["expected_session"]["machine_id"]
+        .as_str()
+        .unwrap()
+        .to_uppercase());
+    assert_eq!(
+        probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+            .await
+            .unwrap()
+            .status,
+        200
+    );
+    assert_eq!(
+        herdr.requests("agent.prompt")[0]["params"]["target"],
+        "w1:a"
+    );
+    bridge.stop().unwrap();
+    herdr.stop().await;
+    root.remove();
+}
+
+#[tokio::test]
+async fn unavailable_malformed_missing_and_ambiguous_catalogs_fail_closed() {
+    let root = TempRoot::new("binding-catalog");
+    let herdr = MockHerdr::start_bound(&root);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+    let options = probe_options(&bridge.base_url());
+    let body = json!({"type": "prompt", "text": "synthetic input", "expected_session": selected_binding(&options).await});
+    let row = json!({"name": "s-probe", "pane_id": "w1:a", "agent": "pi", "agent_status": "idle"});
+    let mut malformed = row.clone();
+    malformed["agent_session"] = json!({"private-source": "must not leak"});
+    let mut shadow = row.clone();
+    shadow["name"] = json!("w1:a");
+    shadow["pane_id"] = json!("w2:b");
+    for (response, status, code) in [
+        (
+            json!({"error": {"message": "private-source"}}),
+            503,
+            "upstream_unavailable",
+        ),
+        (
+            json!({"result": {"agents": "private-source"}}),
+            503,
+            "upstream_unavailable",
+        ),
+        (
+            json!({"result": {"agents": [malformed]}}),
+            503,
+            "upstream_unavailable",
+        ),
+        (json!({"result": {"agents": []}}), 409, "stale_session"),
+        (
+            json!({"result": {"agents": [row.clone()]}}),
+            409,
+            "stale_session",
+        ),
+        (
+            json!({"result": {"agents": [row, shadow]}}),
+            409,
+            "stale_session",
+        ),
+    ] {
+        herdr.set_response("agent.list", response);
+        let result = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+            .await
+            .unwrap();
+        assert_eq!(result.status, status, "{}", result.body);
+        assert_eq!(result.body["code"], code);
+        assert!(!result.body.to_string().contains("private-source"));
+    }
+    assert!(herdr.input().is_empty());
+    assert!(herdr.requests("agent.prompt").is_empty());
+    bridge.stop().unwrap();
+    herdr.stop().await;
+    root.remove();
+}
+
+#[tokio::test]
+async fn replacement_before_final_check_rejects_without_spending_the_prompt_nonce() {
+    let root = TempRoot::new("a3-nonce");
+    let herdr = MockHerdr::start_bound(&root);
+    herdr.set_screen(PETS_SCREEN);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+    let options = probe_options(&bridge.base_url());
+    let mut body = json!({"type": "answer_prompt", "action": "cancel", "prompt_id": "p-old", "expected_session": selected_binding(&options).await});
+    let stale = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+        .await
+        .unwrap();
+    body["prompt_id"] = json!(on_screen_id(&stale.body));
+    herdr.replace_after_list(1, "/synthetic/native-B.jsonl");
+    let refused = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+        .await
+        .unwrap();
+    assert_eq!(refused.status, 409);
+    assert_eq!(refused.body["code"], "stale_session");
+    assert!(herdr.input().is_empty());
+    // Restore the fixture's original reported binding solely to inspect nonce spending.
+    // This is not proof that a reported reference is an incarnation token.
+    herdr.set_agent_session(Some("/synthetic/native-A.jsonl"));
+    let answer = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+        .await
+        .unwrap();
+    assert_eq!(answer.status, 200, "{}", answer.body);
+    assert_eq!(herdr.input(), vec![json!(["esc"])]);
+    bridge.stop().unwrap();
+    herdr.stop().await;
+    root.remove();
+}
+
+#[tokio::test]
+async fn multi_step_answer_stops_on_replacement_with_partial_outcome_unknown() {
+    let root = TempRoot::new("binding-partial");
+    let herdr = MockHerdr::start_bound(&root);
+    herdr.set_screen(PETS_SCREEN);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+    let options = probe_options(&bridge.base_url());
+    let mut body = json!({"type": "answer_question", "prompt_id": "p-old", "answers": [{"selected": [0], "other": "synthetic"}], "expected_session": selected_binding(&options).await});
+    let stale = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+        .await
+        .unwrap();
+    body["prompt_id"] = json!(on_screen_id(&stale.body));
+    herdr.replace_after_write("/synthetic/native-B.jsonl");
+    let partial = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+        .await
+        .unwrap();
+    assert_eq!(partial.status, 502, "{}", partial.body);
+    assert_eq!(partial.body["code"], "mutation_outcome_unknown");
+    assert_eq!(herdr.input(), vec![json!(["1"])]);
+    assert_eq!(
+        herdr.requests("pane.send_keys")[0]["observed_native_session"],
+        "/synthetic/native-A.jsonl"
+    );
+    assert!(herdr.requests("pane.send_text").is_empty());
+    assert_eq!(
+        probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+            .await
+            .unwrap()
+            .body["code"],
+        "stale_session"
+    );
+    assert_eq!(herdr.input().len(), 1, "no further steps or replay");
+    bridge.stop().unwrap();
+    herdr.stop().await;
+    root.remove();
+}
+
+#[tokio::test]
+async fn post_final_check_replacement_remains_explicitly_unfenced() {
+    let root = TempRoot::new("a3-pty");
+    let herdr = MockHerdr::start_bound(&root);
+    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+    let options = probe_options(&bridge.base_url());
+    let body = json!({"type": "prompt", "text": "synthetic input", "expected_session": selected_binding(&options).await});
+    herdr.replace_after_list(2, "/synthetic/native-B.jsonl");
+    let result = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+        .await
+        .unwrap();
+    assert_eq!(
+        result.status, 200,
+        "PTY acknowledgement, NOT native admission/fencing"
+    );
+    let writes = herdr.requests("agent.prompt");
+    assert_eq!(writes.len(), 1);
+    assert_eq!(
+        writes[0]["observed_native_session"], "/synthetic/native-B.jsonl",
+        "known limitation: Herdr applies the write after the last snapshot, without a precondition"
+    );
+    bridge.stop().unwrap();
+    herdr.stop().await;
+    root.remove();
+}
+
 #[tokio::test]
 async fn control_route_sends_each_agents_own_keys_and_refuses_busy_new_sessions() {
     let root = TempRoot::new("control-test");
-    let herdr = MockHerdr::start(&root);
+    let herdr = MockHerdr::start_bound(&root);
     let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
     let options = probe_options(&bridge.base_url());
     let control = |session: &'static str, action: &'static str| {
         let options = options.clone();
         async move {
-            probe::post_json(
+            bound_post(
                 &options,
                 &format!("/api/agents/{session}/control"),
                 &json!({"action": action}),
@@ -727,7 +1062,8 @@ async fn control_route_sends_each_agents_own_keys_and_refuses_busy_new_sessions(
     let unknown = control("s-probe", "reboot").await;
     assert_eq!(unknown.status, 400, "payload: {}", unknown.body);
     let missing = control("s-missing", "interrupt").await;
-    assert_eq!(missing.status, 404, "payload: {}", missing.body);
+    assert_eq!(missing.status, 409, "payload: {}", missing.body);
+    assert_eq!(missing.body["code"], "stale_session");
 
     // Stop presses Esc in the agent's pane, whatever it is doing.
     herdr.set_agent("claude", "working");
@@ -804,13 +1140,13 @@ fn on_screen_id(body: &Value) -> String {
 #[tokio::test]
 async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
     let root = TempRoot::new("question-test");
-    let herdr = MockHerdr::start(&root);
+    let herdr = MockHerdr::start_bound(&root);
     let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
     let options = probe_options(&bridge.base_url());
     let post = |body: Value| {
         let options = options.clone();
         async move {
-            probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+            bound_post(&options, "/api/agents/s-probe/prompt", &body)
                 .await
                 .expect("prompt request")
         }
@@ -1057,7 +1393,7 @@ async fn ws_unknown_session_fails_closed_not_found() {
 #[tokio::test]
 async fn an_answered_prompt_is_resolved_not_announced_again() {
     let root = TempRoot::new("wsanswer");
-    let herdr = MockHerdr::start(&root);
+    let herdr = MockHerdr::start_bound(&root);
     let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
     let options = probe_options(&bridge.base_url());
     herdr.set_screen(
@@ -1071,13 +1407,13 @@ async fn an_answered_prompt_is_resolved_not_announced_again() {
     tokio::time::sleep(Duration::from_millis(1200)).await;
     let probe = json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "cancel"});
     let id = on_screen_id(
-        &probe::post_json(&options, "/api/agents/s-probe/prompt", &probe)
+        &bound_post(&options, "/api/agents/s-probe/prompt", &probe)
             .await
             .expect("probe")
             .body,
     );
     let reject = json!({"type": "answer_prompt", "prompt_id": id, "action": "select_option", "option_id": "reject"});
-    let answered = probe::post_json(&options, "/api/agents/s-probe/prompt", &reject)
+    let answered = bound_post(&options, "/api/agents/s-probe/prompt", &reject)
         .await
         .expect("answer");
     assert_eq!(answered.status, 200, "payload: {}", answered.body);
@@ -1137,6 +1473,108 @@ async fn ws_stream_open_generation_then_entries() {
     bridge.stop().expect("bridge stop");
     herdr.stop().await;
     root.remove();
+}
+
+async fn next_source_event(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+) -> Option<Value> {
+    use futures_util::StreamExt;
+    use tokio_tungstenite::tungstenite::Message;
+    match tokio::time::timeout(TIMEOUT, socket.next())
+        .await
+        .expect("bounded WS event")
+    {
+        Some(Ok(Message::Text(text))) => Some(serde_json::from_str(text.as_str()).unwrap()),
+        Some(Ok(Message::Close(_))) | None => None,
+        other => panic!("unexpected WS event: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn upstream_failure_after_prompt_reports_error_and_closes_without_idle() {
+    for method in ["pane.read", "agent.get"] {
+        let root = TempRoot::new("wsfault");
+        let herdr = MockHerdr::start(&root);
+        herdr.set_screen("Approve tool call: run_command\n$ synthetic-command\n1. Allow once\n2. Allow always\n3. Reject\n");
+        let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+        let tcp = tokio::net::TcpStream::connect(("127.0.0.1", bridge.port))
+            .await
+            .unwrap();
+        let url = format!("ws://127.0.0.1:{}/api/stream?session=s-probe", bridge.port);
+        let (mut socket, _) = tokio_tungstenite::client_async_with_config(url, tcp, None)
+            .await
+            .unwrap();
+        loop {
+            let event = next_source_event(&mut socket)
+                .await
+                .expect("prompt arrives");
+            if event["event"] == "prompt_request" {
+                break;
+            }
+        }
+        herdr.set_response(
+            method,
+            json!({"error": {"code": "private_source", "message": "PRIVATE_SENTINEL"}}),
+        );
+        let mut saw_error = false;
+        while let Some(event) = next_source_event(&mut socket).await {
+            assert!(!saw_error, "no events after source error: {event}");
+            assert_ne!(
+                event["event"], "prompt_resolved",
+                "an outage is not a resolved prompt"
+            );
+            if event["event"] == "agent_status" {
+                assert_ne!(event["state"], "idle");
+            }
+            if event["event"] == "error" {
+                assert_eq!(event["code"], "upstream_unavailable");
+                assert!(!event.to_string().contains("PRIVATE_SENTINEL"));
+                saw_error = true;
+            }
+        }
+        assert!(saw_error, "source failure must be visible for {method}");
+        drop(socket);
+        bridge.stop().expect("bridge stop");
+        herdr.stop().await;
+        root.remove();
+    }
+}
+
+#[tokio::test]
+async fn unavailable_or_malformed_initial_status_never_becomes_idle() {
+    for response in [
+        json!({"error": {"code": "unavailable", "message": "PRIVATE_SENTINEL"}}),
+        json!({"result": {"agent": {}}}),
+        json!({"result": {"agent": {"agent_status": 42}}}),
+    ] {
+        let root = TempRoot::new("wsstate");
+        let herdr = MockHerdr::start(&root);
+        herdr.set_response("agent.get", response);
+        let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
+        let tcp = tokio::net::TcpStream::connect(("127.0.0.1", bridge.port))
+            .await
+            .unwrap();
+        let url = format!("ws://127.0.0.1:{}/api/stream?session=s-probe", bridge.port);
+        let (mut socket, _) = tokio_tungstenite::client_async_with_config(url, tcp, None)
+            .await
+            .unwrap();
+        let mut saw_error = false;
+        while let Some(event) = next_source_event(&mut socket).await {
+            assert!(!saw_error, "no events after source error: {event}");
+            assert_ne!(event["event"], "agent_status");
+            assert_ne!(event["event"], "entries");
+            if event["event"] == "error" {
+                assert_eq!(event["code"], "upstream_unavailable");
+                assert!(!event.to_string().contains("PRIVATE_SENTINEL"));
+                saw_error = true;
+            }
+        }
+        assert!(saw_error);
+        drop(socket);
+        bridge.stop().expect("bridge stop");
+        herdr.stop().await;
+        root.remove();
+    }
 }
 
 /// Branch change must surface as stream_reset with an increased generation.

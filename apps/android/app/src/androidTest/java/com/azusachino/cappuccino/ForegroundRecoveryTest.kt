@@ -11,10 +11,13 @@ import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ConnectionState
 import com.azusachino.cappuccino.io.MachineProfile
 import com.azusachino.cappuccino.io.ProfileStore
+import com.azusachino.cappuccino.io.canMutate
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -38,7 +41,18 @@ class ForegroundRecoveryTest {
         Endpoint.parse("https://resume.example"),
         machine,
       )
-    val agent = AgentRow(machine, "resume-session", "pane-1", "pi", "pi", "idle", false, null)
+    val agent =
+      AgentRow(
+        machine,
+        "resume-session",
+        "pane-1",
+        "pi",
+        "pi",
+        "idle",
+        false,
+        null,
+        nativeSessionRef = "pi:resume-native",
+      )
     store.save(profile)
     val verifications = CountDownLatch(4)
     val catalogCalls = AtomicInteger()
@@ -48,11 +62,22 @@ class ForegroundRecoveryTest {
     val initialStream = CountDownLatch(1)
     val resumedStream = CountDownLatch(1)
     val streamCancelled = CountDownLatch(1)
+    val recovering = AtomicBoolean(false)
+    val recoveryHistoryRequested = CountDownLatch(1)
+    val historyReady = CompletableDeferred<Unit>()
     val viewModel =
       ConnectedViewModel(
         store,
         { _ ->
           object : BridgeTransport {
+            override val bridgeDetails =
+              com.azusachino.cappuccino.io.BridgeDetails(
+                machine,
+                "fixture",
+                1,
+                mapOf("mutation_binding" to true),
+              )
+
             override suspend fun verify(expectedMachine: UUID?): UUID {
               verifications.countDown()
               return machine
@@ -64,9 +89,26 @@ class ForegroundRecoveryTest {
               return listOf(agent)
             }
 
+            override suspend fun conversationSnapshot(
+              sessionId: String
+            ): com.azusachino.cappuccino.io.ConversationSnapshot {
+              if (recovering.get()) {
+                recoveryHistoryRequested.countDown()
+                historyReady.await()
+              }
+              return com.azusachino.cappuccino.io.ConversationSnapshot(
+                emptyList(),
+                "canonical_log",
+                "pi:" + "a".repeat(64),
+                machine,
+              )
+            }
+
             override fun stream(sessionId: String): Flow<StreamEvent> = flow {
-              if (streamCalls.incrementAndGet() == 1) initialStream.countDown()
-              else resumedStream.countDown()
+              val attempt = streamCalls.incrementAndGet()
+              emit(StreamEvent.Open(sessionId, attempt.toLong()))
+              emit(StreamEvent.AgentStatus(sessionId, "idle", null))
+              if (attempt == 1) initialStream.countDown() else resumedStream.countDown()
               try {
                 awaitCancellation()
               } finally {
@@ -88,15 +130,31 @@ class ForegroundRecoveryTest {
       assertTrue("initial stream did not start", await(initialStream))
       InstrumentationRegistry.getInstrumentation().runOnMainSync { viewModel.setForeground(false) }
       assertTrue("background did not cancel stream", await(streamCancelled))
+      val catalogsBeforeResume = catalogCalls.get()
+      recovering.set(true)
       InstrumentationRegistry.getInstrumentation().runOnMainSync { viewModel.setForeground(true) }
+      assertTrue("foreground did not request canonical history", await(recoveryHistoryRequested))
+      assertTrue("foreground did not revalidate catalog", catalogCalls.get() > catalogsBeforeResume)
+      assertEquals("history must settle before reattaching", 1, streamCalls.get())
+      InstrumentationRegistry.getInstrumentation().runOnMainSync {
+        assertFalse(viewModel.state.value.streamLive)
+        assertFalse(viewModel.state.value.canMutate)
+        viewModel.submitPrompt("must not send while history is pending")
+        assertTrue(viewModel.state.value.promptSends.isEmpty())
+      }
+      historyReady.complete(Unit)
       assertTrue("foreground did not refresh catalog", await(resumedCatalog))
       assertTrue("foreground did not open a new stream", await(resumedStream))
       assertTrue("foreground did not revalidate profile", await(verifications))
       InstrumentationRegistry.getInstrumentation().runOnMainSync {
         assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
+        assertTrue(viewModel.state.value.streamLive)
+        assertTrue(viewModel.state.value.canMutate)
+        assertTrue(viewModel.state.value.promptSends.isEmpty())
         assertFalse(viewModel.state.value.busy)
       }
     } finally {
+      historyReady.complete(Unit)
       InstrumentationRegistry.getInstrumentation().runOnMainSync { viewModel.setForeground(false) }
       store.remove(profile.id)
     }

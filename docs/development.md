@@ -111,18 +111,21 @@ only that device afterwards, after its evidence is preserved.
 | `make build-android` | Debug app and instrumentation APKs |
 | `make validate-apple` | `check-apple` and `build-ios` |
 | `make validate-android` | ktfmt, unit tests, lint and both debug APKs |
-| `make validate` | Both platform validations; needs both toolchains |
+| `make validate` | Default Android validation, bridge gate and Markdown check; no Xcode required |
 | `make ui-test DESTINATION=…` | iPhone shell journey on the named simulator |
 | `make ui-test-android` | Android shell journey on `ANDROID_SERIAL`; exports three screenshots |
 | `make check-bridge` | Bridge gate: `cargo fmt --check`, all hermetic tests, release example build |
 | `make bench-bridge-client` | Benchmark against a running bridge (`BASE_URL`, `SESSION`, `STREAM_CYCLES`) |
 | `make resource-bridge-client` | Leak and lifecycle soak, about six minutes; run before a version release |
 
-Use the platform-focused targets while iterating, and run `make validate` before
-acceptance. `make validate` covers both toolchains. Shared or build changes need
-both platform gates. Run the owning gates before committing: `make check` for changes that touch
-both platforms, `make check-bridge` for bridge changes and `make md-check` for
-Markdown. Run `make validate` before a pull request.
+Use the platform-focused targets while iterating. The owner-selected default
+acceptance and pre-PR gate is `make validate`: Android, bridge and Markdown only.
+iOS implementation is deferred; Xcode is not required by this default gate.
+`make validate-apple` remains the explicit Apple source/test/build gate and must
+accompany resumed Apple work and its simulator journey. Existing Apple CI remains
+enabled. Run the owning gates before committing; `make check-bridge` covers bridge
+changes and `make md-check` covers Markdown. The default gate does not establish
+Apple acceptance or claim the deferred iOS mutation-binding work is complete.
 
 Formatting, compilation and core tests are prerequisites, not proof of safe remote
 control. Both platform UI journeys are explicit commands. Nothing in the gates
@@ -166,10 +169,13 @@ split follows what each tool can do:
   Xcode.
 - The app is the `Cappuccino` package product, built from target `CappuccinoApp` and
   sources `apps/ios/App`. xtool and Xcode compile the same sources. `apps/ios/xtool.yml`
-  and `apps/ios/App/Info.plist` define the xtool bundle. The target is not named
-  `Cappuccino` because that name collides with the Xcode app target in xcodebuild's
-  UI-test host lookup.
-- `project.yml` remains the Xcode app target and the UI-test host.
+  and `apps/ios/App/Info.plist` define the xtool bundle. Keep its entry target
+  `CappuccinoApp` distinct from the Xcode app target.
+- `project.yml` names the Xcode application target `CappuccinoPhone` so UI-test
+  host lookup does not confuse it with the `Cappuccino` package product. The
+  Xcode product name and scheme remain `Cappuccino`, with the same bundle ID and
+  `Cappuccino.app` artifact. This does not rename the package/xtool product.
+  Edit `project.yml` rather than the generated Xcode project.
 
 ## Android development
 
@@ -209,6 +215,24 @@ WebSocket stream. Its `bench` mode reports timings, RSS and CPU for a running br
 with consumed, validated bodies. It establishes a baseline and asserts no
 performance threshold. Its hermetic tests spawn the real bridge against a mock
 Herdr socket.
+
+`ANDROID_SERIAL=<task-owned emulator> make ui-test-android` also runs the actual
+Rust bridge against a private synthetic Herdr peer. Its stdlib Python runner
+(`services/bridge/tests/android_journey.py`) builds the locked bridge, uses a
+private temporary HOME/session store and loopback fixture control, and reverses
+only its two owned ports on the explicitly selected emulator. No Pi/provider
+process, credential, owner session or global integration is involved. Python 3,
+Cargo and `adb` must be available; no Python package installation is needed.
+
+The complete UI suite includes `ActualBridgeJourneyTest`: replacement before
+prompt/control/answer, a frozen old UI callback against a live replacement, and
+canonical-history recovery after a pending write loses its acknowledgement. The
+peer journal proves terminal-RPC counts, not native Pi admission. Missing fixture
+runner arguments fail the journey rather than silently skip it; use the Make
+target, not a bare connected-test command. The runner removes its reverse
+mappings, stops its owned bridge/listeners and removes its temporary store at
+exit. Host-only fixture verification is
+`python3 services/bridge/tests/android_journey.py --self-test` from the repo root.
 
 The resource soak (`make resource-bridge-client`) is opt-in. It asserts that file
 descriptors, child processes, temp files and memory recover after each scenario

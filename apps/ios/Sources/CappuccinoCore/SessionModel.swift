@@ -7,6 +7,7 @@ public protocol AgentSessionServing: Sendable {
   func conversationSnapshot(base: URL, session: String, agent: String?) async throws
     -> ConversationSnapshot
   func events(base: URL, session: String) -> AsyncThrowingStream<AgentStreamEvent, Error>
+  func verifyBinding(base: URL, machineID: UUID, agent: AgentRow) async throws -> Bool
   func controlAgent(base: URL, session: String, action: String, capabilities: [String: Bool]?)
     async throws
   func submitPrompt(base: URL, session: String, text: String, confirmed: Bool) async throws
@@ -18,7 +19,25 @@ public protocol AgentSessionServing: Sendable {
     async throws
 }
 
+extension AgentSessionServing {
+  /// Clients without authoritative discovery cannot establish a recovery binding.
+  public func verifyBinding(base: URL, machineID: UUID, agent: AgentRow) async throws -> Bool {
+    false
+  }
+}
+
 extension BridgeClient: AgentSessionServing {
+  public func verifyBinding(base: URL, machineID: UUID, agent: AgentRow) async throws -> Bool {
+    guard agent.nativeSessionRef != nil, UUID(uuidString: agent.machineID) == machineID else {
+      return false
+    }
+    _ = try await verifyMachine(baseURL: base, expectedID: machineID)
+    return try await listAgents(baseURL: base, expectedMachineID: machineID).contains {
+      UUID(uuidString: $0.machineID) == machineID && $0.sessionID == agent.sessionID
+        && $0.paneID == agent.paneID && $0.nativeSessionRef == agent.nativeSessionRef
+    }
+  }
+
   public func events(base: URL, session: String) -> AsyncThrowingStream<AgentStreamEvent, Error> {
     agentEvents(base: base, session: session)
   }
@@ -45,9 +64,13 @@ public final class SessionModel {
   @ObservationIgnored private let machines: MachineConnections
   @ObservationIgnored private let makeClient: @Sendable () -> any AgentSessionServing
   @ObservationIgnored private var epoch = 0
+  @ObservationIgnored private var foreground = true
   @ObservationIgnored private var streamTask: Task<Void, Never>?
   @ObservationIgnored private var conversationTask: Task<Void, Never>?
   @ObservationIgnored private var conversationRequested = false
+  @ObservationIgnored var retryPause: @Sendable (Int) async throws -> Void = {
+    try await Task.sleep(nanoseconds: UInt64($0) * 1_000_000)
+  }
 
   public init(
     machines: MachineConnections,
@@ -69,7 +92,8 @@ public final class SessionModel {
   }
 
   /// Stop and New session are offered only when the bridge advertises agent control.
-  public var canControl: Bool { capabilities?["agent_control"] == true }
+  public var isLive: Bool { stream.generation != nil && stream.agentStatus != nil }
+  public var canControl: Bool { isLive && capabilities?["agent_control"] == true }
 
   /// Leaves the agent: its stream and conversation stop, its results are dropped, and the
   /// transcript is cleared. Switching agents bumps the same epoch.
@@ -93,6 +117,27 @@ public final class SessionModel {
     actionError = nil
   }
 
+  /// Pausing discovery is not enough: discard live affordances and fence old work too.
+  /// Foreground recovery must revalidate the original native binding before reattaching.
+  public func setForeground(_ value: Bool) {
+    guard value != foreground else { return }
+    foreground = value
+    if value {
+      if selectedAgent != nil {
+        streamError = "Reconnecting to the agent"
+        startStream(token: epoch, recovering: true)
+      }
+    } else {
+      epoch += 1
+      streamTask?.cancel()
+      streamTask = nil
+      conversationTask?.cancel()
+      conversationTask = nil
+      conversationRequested = false
+      invalidateLiveStream()
+    }
+  }
+
   /// Select an agent on a machine. A foreign machine's agent is refused.
   public func select(profileID: UUID, agent: AgentRow?) {
     clearSelection(profileID: profileID)
@@ -108,21 +153,36 @@ public final class SessionModel {
 
   /// Re-reads the conversation. Requests that arrive while one is running are coalesced into one more pass.
   public func requestConversation() {
+    guard foreground else { return }
     conversationRequested = true
     guard conversationTask == nil else { return }
     let token = epoch
     conversationTask = Task { [weak self] in
-      while let model = self, model.conversationRequested, model.epoch == token {
+      while !Task.isCancelled, let model = self, model.conversationRequested, model.epoch == token {
         model.conversationRequested = false
         await model.loadConversation(token: token)
       }
-      if let model = self, model.epoch == token { model.conversationTask = nil }
+      if !Task.isCancelled, let model = self, model.epoch == token { model.conversationTask = nil }
     }
   }
 
   /// Waits for the current stream to end. Tests use this to observe the reducer deterministically.
   func awaitStreamForTesting() async {
     await streamTask?.value
+  }
+
+  func awaitConversationForTesting() async {
+    await conversationTask?.value
+  }
+
+  private func applyConversation(_ snapshot: ConversationSnapshot) {
+    let recent = boundedConversation(snapshot.source == "canonical_log" ? snapshot.turns : [])
+    turns = recent.turns
+    omittedTurns = recent.omittedMessages
+    omittedTools = recent.omittedTools
+    conversationSource = snapshot.source
+    conversationID = snapshot.conversationID
+    stats = snapshot.stats
   }
 
   private func loadConversation(token: Int) async {
@@ -133,16 +193,9 @@ public final class SessionModel {
       if let machine = snapshot.machineID, machine != profile.machineID {
         throw BridgeError.protocolError("Conversation machine identity changed")
       }
-      guard token == epoch else { return }
+      guard token == epoch, !Task.isCancelled else { return }
       // Terminal snapshots arrive through the stream; only canonical history is shown here.
-      let recent = boundedConversation(
-        snapshot.source == "canonical_log" ? snapshot.turns : [])
-      turns = recent.turns
-      omittedTurns = recent.omittedMessages
-      omittedTools = recent.omittedTools
-      conversationSource = snapshot.source
-      conversationID = snapshot.conversationID
-      stats = snapshot.stats
+      applyConversation(snapshot)
     } catch {
       // Keep the turns already shown. A failed first load falls back to scrollback.
       guard token == epoch, !Task.isCancelled else { return }
@@ -150,51 +203,115 @@ public final class SessionModel {
     }
   }
 
-  private func startStream(token: Int) {
+  /// A read-only recovery attempt; it never replays a prompt, answer or control operation.
+  public func retryStream() {
+    guard foreground, selectedAgent != nil else { return }
+    invalidateLiveStream()
+    streamError = "Reconnecting to the agent"
+    startStream(token: epoch, recovering: true)
+  }
+
+  private func startStream(token: Int, recovering: Bool = false) {
+    guard foreground else { return }
     streamTask?.cancel()
     streamTask = Task { [weak self] in
-      await self?.runStream(token: token)
+      await self?.runStream(token: token, recovering: recovering)
     }
   }
 
-  private func runStream(token: Int) async {
+  private func runStream(token: Int, recovering: Bool) async {
     var budget = StreamRetryBudget()
-    while token == epoch, !Task.isCancelled {
+    var attached = recovering
+    while foreground, token == epoch, !Task.isCancelled {
       guard let agent = selectedAgent, let profile = selectedProfile else { return }
+      invalidateLiveStream()
       do {
-        let events = makeClient().events(base: profile.endpoint, session: agent.sessionID)
+        let client = makeClient()
+        if attached {
+          guard UUID(uuidString: agent.machineID) == profile.machineID,
+            agent.nativeSessionRef != nil,
+            try await client.verifyBinding(
+              base: profile.endpoint, machineID: profile.machineID, agent: agent)
+          else {
+            throw BridgeError.protocolError(
+              "Agent session identity is unavailable or replaced; reselect it")
+          }
+          guard token == epoch, !Task.isCancelled else { return }
+          // Recovery is serialized: obsolete coalesced reads cannot unlock or overwrite this
+          // attachment, even when their transport ignores cancellation.
+          conversationTask?.cancel()
+          conversationTask = nil
+          conversationRequested = false
+          let expectedConversation = conversationID
+          let snapshot = try await client.conversationSnapshot(
+            base: profile.endpoint, session: agent.sessionID, agent: agent.provider)
+          guard token == epoch, !Task.isCancelled else { return }
+          guard snapshot.source == "canonical_log" else {
+            throw BridgeError.unreachable("Canonical history unavailable; retry to enable actions")
+          }
+          guard snapshot.machineID == profile.machineID,
+            let identity = snapshot.conversationID, let provider = agent.provider,
+            CanonicalConversationID.isCanonical(identity, agent: provider),
+            expectedConversation == nil || identity == expectedConversation
+          else {
+            throw BridgeError.protocolError("Recovery history identity changed or is unavailable")
+          }
+          applyConversation(snapshot)
+        }
+        attached = true
+        var opened = false
+        let events = client.events(base: profile.endpoint, session: agent.sessionID)
         for try await event in events {
-          guard token == epoch else { return }
+          guard token == epoch, !Task.isCancelled else { return }
+          if case .agentStatus = event, !opened {
+            throw BridgeError.protocolError("Status arrived before stream_open")
+          }
           stream = try reduceStream(stream, event, selectedSession: agent.sessionID)
           switch event {
           case .error(let code, let message):
+            invalidateLiveStream()
+            if code == "upstream_unavailable" { throw BridgeError.unreachable(message) }
             streamError = "\(code): \(message)"
             return
           case .open:
-            // An attach that succeeded earns a fresh budget for the next transient drop.
-            budget = StreamRetryBudget()
+            opened = true
             requestConversation()
-          case .entries, .reset, .agentStatus:
+          case .entries, .reset:
+            requestConversation()
+          case .agentStatus(let session, _, _):
+            if session == agent.sessionID { streamError = nil }
             requestConversation()
           case .promptRequest, .promptResolved:
             break
           }
         }
-        return
+        throw BridgeError.unreachable("Bridge stream ended")
       } catch {
         guard token == epoch, !Task.isCancelled else { return }
+        invalidateLiveStream()
         // A protocol violation is final; transport failures retry within the budget.
         if case BridgeError.protocolError(let detail)? = error as? BridgeError {
           streamError = detail
+          return
+        }
+        if error as? BridgeError == .unauthorized || isBridgeTLSFailure(error) {
+          streamError = (error as? BridgeError)?.message ?? error.localizedDescription
           return
         }
         guard let delay = budget.nextDelayMillis() else {
           streamError = (error as? BridgeError)?.message ?? error.localizedDescription
           return
         }
-        try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
+        streamError = "Reconnecting to the agent"
+        do { try await retryPause(delay) } catch { return }
       }
     }
+  }
+
+  private func invalidateLiveStream() {
+    stream.pendingPrompt = nil
+    stream.agentStatus = nil
+    stream.agentStatusDetail = nil
   }
 
   /// Sends a prompt to the selected agent.
@@ -253,12 +370,17 @@ public final class SessionModel {
     guard let agent = selectedAgent, let profile = selectedProfile else { return false }
     let token = epoch
     actionError = nil
+    guard isLive else {
+      actionError = "Waiting for a fresh agent status"
+      return false
+    }
     guard supported else {
       actionError = unsupported
       return false
     }
     do {
       try await send(makeClient(), profile.endpoint, agent.sessionID)
+      guard token == epoch else { return false }
       return true
     } catch {
       guard token == epoch, !(error is CancellationError) else { return false }

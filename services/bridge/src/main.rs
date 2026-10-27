@@ -10,6 +10,7 @@ mod conversation;
 mod herdr;
 mod lifecycle;
 mod modules;
+mod mutation;
 mod prompt;
 mod questions;
 mod reconcile;

@@ -17,7 +17,7 @@ packages:
   CappuccinoApple:
     path: apps/ios
 targets:
-  Cappuccino:
+  CappuccinoPhone:
     type: application
     platform: iOS
     sources:
@@ -27,6 +27,7 @@ targets:
         product: CappuccinoUI
     settings:
       base:
+        PRODUCT_NAME: Cappuccino
         PRODUCT_BUNDLE_IDENTIFIER: com.azusachino.cappuccino
         INFOPLIST_KEY_CFBundleDisplayName: Cappuccino
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
@@ -40,11 +41,11 @@ targets:
     platform: iOS
     sources: [apps/ios/UITests]
     dependencies:
-      - target: Cappuccino
+      - target: CappuccinoPhone
 schemes:
   Cappuccino:
     build:
       targets:
-        Cappuccino: all
+        CappuccinoPhone: all
     test:
       targets: [CappuccinoUITests]

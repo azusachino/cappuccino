@@ -40,6 +40,8 @@ import SwiftUI
           }
           if let error = session.streamError {
             Text(error).foregroundStyle(palette.error)
+            Button("Retry connection") { session.retryStream() }
+              .accessibilityIdentifier("retry-stream")
           }
           if let error = session.actionError {
             Text(error).foregroundStyle(palette.error).accessibilityIdentifier("action-error")
@@ -111,7 +113,8 @@ import SwiftUI
   }
 
   private var liveStatusWord: String {
-    liveStatus(
+    guard session.isLive else { return "unknown" }
+    return liveStatus(
       pendingPrompt: session.stream.pendingPrompt != nil,
       streamStatus: session.stream.agentStatus,
       listedStatus: session.selectedAgent?.status ?? "idle")
@@ -133,7 +136,8 @@ func statusLabel(_ status: String) -> String {
   case "working": "Working"
   case "blocked": "Blocked"
   case "done": "Done"
-  default: "Idle"
+  case "idle": "Idle"
+  default: "Unknown"
   }
 }
 

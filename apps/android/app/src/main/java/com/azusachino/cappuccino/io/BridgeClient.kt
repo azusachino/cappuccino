@@ -21,10 +21,26 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.BufferedSource
 
+open class BridgeHttpRejectionException(message: String) : IOException(message)
+
+class BridgeMutationUnsupportedException(message: String) : BridgeHttpRejectionException(message)
+
+class BridgeStaleSessionException(message: String) : BridgeHttpRejectionException(message)
+
+class BridgeMutationOutcomeUnknownException(message: String) : IOException(message)
+
 class BridgeWebSocketClosedException(val code: Int, val reason: String) :
   IOException(
     "Bridge stream closed (code=$code${if (reason.isEmpty()) "" else ", reason=$reason"})"
   )
+
+/**
+ * The bounded local stream buffer overflowed because the consumer fell behind. The stream is lossy
+ * once this happens, so it terminates instead of silently dropping an event; the client recovers by
+ * reopening within its normal transport retry budget.
+ */
+class BridgeStreamOverflowException :
+  IOException("Bridge stream events arrived faster than the app consumed them; reopening")
 
 data class ConversationSnapshot(
   val turns: List<ConversationTurn>,
@@ -79,17 +95,29 @@ interface BridgeTransport {
     ConversationSnapshot(conversation(sessionId), "canonical_log")
 
   /** Sends [text]; [confirmed] says the owner approved the agent command it starts with. */
-  suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean = false) {}
+  suspend fun submitPrompt(
+    sessionId: String,
+    text: String,
+    confirmed: Boolean = false,
+    binding: MutationBinding,
+  ) {
+    throw BridgeHttpRejectionException("Session-bound prompt input unavailable")
+  }
 
   /** Owner control over a running agent: `interrupt` (Stop) or `new_session`. */
-  suspend fun controlAgent(sessionId: String, action: String) {}
+  suspend fun controlAgent(sessionId: String, action: String, binding: MutationBinding) {
+    throw BridgeHttpRejectionException("Session-bound controls unavailable")
+  }
 
   /** Answers every question of a pending AskUserQuestion card at once. */
   suspend fun answerQuestions(
     sessionId: String,
     promptId: String,
     answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
-  ) {}
+    binding: MutationBinding,
+  ) {
+    throw BridgeHttpRejectionException("Session-bound answers unavailable")
+  }
 
   suspend fun answerPrompt(
     sessionId: String,
@@ -97,7 +125,10 @@ interface BridgeTransport {
     optionIndex: Int?,
     optionId: String?,
     action: String?,
-  ) {}
+    binding: MutationBinding,
+  ) {
+    throw BridgeHttpRejectionException("Session-bound answers unavailable")
+  }
 }
 
 class BridgeClient(
@@ -173,12 +204,17 @@ class BridgeClient(
       ConversationSnapshot(parseConversationResponse(json), source, identity, machine, stats)
     }
 
-  override suspend fun submitPrompt(sessionId: String, text: String, confirmed: Boolean): Unit =
+  override suspend fun submitPrompt(
+    sessionId: String,
+    text: String,
+    confirmed: Boolean,
+    binding: MutationBinding,
+  ): Unit =
     withContext(Dispatchers.IO) {
-      if (bridgeDetails?.capabilities?.get("prompt_input") == false)
-        throw ProtocolException("Prompt input unsupported by this bridge")
+      requireMutation(binding, "prompt_input")
       val body =
         kotlinx.serialization.json.buildJsonObject {
+          put("expected_session", bindingJson(binding))
           put("type", kotlinx.serialization.json.JsonPrimitive("prompt"))
           put("text", kotlinx.serialization.json.JsonPrimitive(text))
           if (confirmed) put("confirmed", kotlinx.serialization.json.JsonPrimitive(true))
@@ -186,21 +222,32 @@ class BridgeClient(
       post("api/agents/$sessionId/prompt", body.toString())
     }
 
-  override suspend fun controlAgent(sessionId: String, action: String): Unit =
+  override suspend fun controlAgent(
+    sessionId: String,
+    action: String,
+    binding: MutationBinding,
+  ): Unit =
     withContext(Dispatchers.IO) {
-      if (bridgeDetails?.capabilities?.get("agent_control") == false)
-        throw ProtocolException("Agent controls unsupported by this bridge")
-      post("api/agents/$sessionId/control", """{"action":"$action"}""")
+      requireMutation(binding, "agent_control")
+      val body =
+        kotlinx.serialization.json.buildJsonObject {
+          put("action", kotlinx.serialization.json.JsonPrimitive(action))
+          put("expected_session", bindingJson(binding))
+        }
+      post("api/agents/$sessionId/control", body.toString())
     }
 
   override suspend fun answerQuestions(
     sessionId: String,
     promptId: String,
     answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
+    binding: MutationBinding,
   ): Unit =
     withContext(Dispatchers.IO) {
+      requireMutation(binding, "prompt_answers")
       val body =
         kotlinx.serialization.json.buildJsonObject {
+          put("expected_session", bindingJson(binding))
           put("type", kotlinx.serialization.json.JsonPrimitive("answer_question"))
           put("prompt_id", kotlinx.serialization.json.JsonPrimitive(promptId))
           put(
@@ -229,21 +276,39 @@ class BridgeClient(
     optionIndex: Int?,
     optionId: String?,
     action: String?,
+    binding: MutationBinding,
   ): Unit =
     withContext(Dispatchers.IO) {
-      if (bridgeDetails?.capabilities?.get("prompt_answers") == false)
-        throw ProtocolException("Prompt answers unsupported by this bridge")
-      val parts = mutableListOf<String>()
-      parts.add(""""type":"answer_prompt"""")
-      parts.add(""""prompt_id":"$promptId"""")
-      if (optionIndex != null) parts.add(""""option_index":$optionIndex""")
-      if (optionId != null) parts.add(""""option_id":"$optionId"""")
-      if (action != null) parts.add(""""action":"$action"""")
-      val body = "{" + parts.joinToString(",") + "}"
-      post("api/agents/$sessionId/prompt", body)
+      requireMutation(binding, "prompt_answers")
+      val body =
+        kotlinx.serialization.json.buildJsonObject {
+          put("type", kotlinx.serialization.json.JsonPrimitive("answer_prompt"))
+          put("prompt_id", kotlinx.serialization.json.JsonPrimitive(promptId))
+          put("expected_session", bindingJson(binding))
+          optionIndex?.let { put("option_index", kotlinx.serialization.json.JsonPrimitive(it)) }
+          optionId?.let { put("option_id", kotlinx.serialization.json.JsonPrimitive(it)) }
+          action?.let { put("action", kotlinx.serialization.json.JsonPrimitive(it)) }
+        }
+      post("api/agents/$sessionId/prompt", body.toString())
+    }
+
+  private suspend fun requireMutation(binding: MutationBinding, capability: String) {
+    verify(binding.machineId)
+    val flags = bridgeDetails?.capabilities
+    if (flags?.get("mutation_binding") != true || flags[capability] == false)
+      throw BridgeMutationUnsupportedException("Session-bound actions unsupported by this bridge")
+  }
+
+  private fun bindingJson(binding: MutationBinding) =
+    kotlinx.serialization.json.buildJsonObject {
+      put("machine_id", kotlinx.serialization.json.JsonPrimitive(binding.machineId.toString()))
+      put("pane_id", kotlinx.serialization.json.JsonPrimitive(binding.paneId))
+      put("native_session_ref", kotlinx.serialization.json.JsonPrimitive(binding.nativeSessionRef))
     }
 
   override fun stream(sessionId: String): Flow<StreamEvent> = callbackFlow {
+    // callbackFlow's default buffer (64) is the only local buffering; there is no unbounded
+    // queue. An overflow closes the stream with a typed error rather than dropping an event.
     val request = Request.Builder().url(endpoint.stream(sessionId).toString()).build()
     val socket =
       client.newWebSocket(
@@ -252,7 +317,12 @@ class BridgeClient(
           override fun onMessage(webSocket: WebSocket, text: String) {
             try {
               validateWebSocketMessage(text)
-              trySend(parseStreamEvent(parseJsonObject(text)))
+              val sent = trySend(parseStreamEvent(parseJsonObject(text)))
+              if (sent.isFailure) {
+                // A dropped event is silent corruption; fail the stream into recovery instead.
+                close(BridgeStreamOverflowException())
+                webSocket.cancel()
+              }
             } catch (error: Exception) {
               close(error)
               webSocket.cancel()
@@ -306,7 +376,15 @@ class BridgeClient(
     suspendCancellableCoroutine { continuation ->
       val body = jsonBody.toRequestBody("application/json".toMediaType())
       val request = Request.Builder().url(endpoint.route(path).toString()).post(body).build()
-      val call = client.newCall(request)
+      // An ambiguous POST must not be retried by OkHttp or followed to another endpoint.
+      val call =
+        client
+          .newBuilder()
+          .retryOnConnectionFailure(false)
+          .followRedirects(false)
+          .followSslRedirects(false)
+          .build()
+          .newCall(request)
       continuation.invokeOnCancellation { call.cancel() }
       call.enqueue(
         object : okhttp3.Callback {
@@ -319,11 +397,18 @@ class BridgeClient(
               try {
                 val text = readBounded(it.body.source(), MAX_HTTP_BODY_BYTES)
                 // The bridge's error envelope says why ("claude is working; stop it first").
-                if (!it.isSuccessful)
-                  throw IOException(
-                    runCatching { parseJsonObject(text).optionalString("message") }.getOrNull()
-                      ?: "Bridge returned HTTP ${it.code}"
-                  )
+                if (!it.isSuccessful) {
+                  val error = runCatching { parseJsonObject(text) }.getOrNull()
+                  val message =
+                    error?.optionalString("message") ?: "Bridge returned HTTP ${it.code}"
+                  val code = error?.optionalString("code")
+                  if (it.code == 409 && code == "stale_session")
+                    throw BridgeStaleSessionException(message)
+                  if (it.code == 502 && code == "mutation_outcome_unknown")
+                    throw BridgeMutationOutcomeUnknownException(message)
+                  if (it.code in 400..499) throw BridgeHttpRejectionException(message)
+                  throw IOException(message)
+                }
                 if (continuation.isActive) continuation.resume(text)
               } catch (error: Exception) {
                 if (continuation.isActive) continuation.resumeWithException(error)

@@ -21,6 +21,30 @@ Asobi. Detailed acceptance belongs in the owning issue or pull request.
 - **#9 approvals and grants:** approvals are answered from the screen today. The
   typed gate, reusable grants and pending-request handling come after delivery.
 
+## Bridge and Android reliability follow-through
+
+The owner's 2026-10-20 assessment is saved in
+[bridge and Android agent-product research](research/bridge-android-agent-products.md).
+The proposed [multi-step reliability plan](design/bridge-android-reliability-plan.md)
+turns those findings into dependency-ordered slices with acceptance tests, owning
+gates and explicit feasibility/approval checkpoints. Start with recoverable sends
+and restored session identity, and prove active-branch authority before claiming
+canonical parity. Typed delivery and approvals continue to belong to #8 and #9;
+reconcile their older terminology and acceptance with current intent first.
+
+The initial document was planning, not implementation or deployment approval.
+The owner subsequently authorized bounded implementation with Pi subagents;
+[the implementation handoff](design/bridge-android-reliability-handoff.md) records
+the verified A1/A2 Android, C1 bounded/source-unavailable bridge and C2 native
+recovery/history-before-actions checkpoints. Android's 51 synthetic UI tests and
+Apple's four fixture UI tests pass; live-agent and physical-device limits remain.
+The owner requested continuing with A3. Its
+[mutation session-binding contract](design/mutation-session-binding.md) has owner
+wire acceptance and [issue #45](https://github.com/azusachino/cappuccino/issues/45);
+bridge-first implementation and verification are in progress. The separately approved disposable
+D1 attempt did not establish runtime branch observation; typed-delivery
+prerequisites remain blocked.
+
 ## Next steps
 
 1. Verify canonical transcripts for Pi, Claude Code and Agy against a

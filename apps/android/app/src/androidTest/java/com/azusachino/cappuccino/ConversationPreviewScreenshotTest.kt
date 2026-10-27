@@ -107,7 +107,18 @@ class ConversationPreviewScreenshotTest {
         Endpoint.parse("https://bridge.example"),
         machine,
       )
-    val agent = AgentRow(machine, "synthetic-session", "pane-1", "pi", "pi", "idle", false, "main")
+    val agent =
+      AgentRow(
+        machine,
+        "synthetic-session",
+        "pane-1",
+        "pi",
+        "pi",
+        "idle",
+        false,
+        "main",
+        nativeSessionRef = "synthetic-preview-native",
+      )
     return mutableStateOf(
       ConnectedUiState(
         profiles = listOf(profile),
@@ -116,6 +127,18 @@ class ConversationPreviewScreenshotTest {
         selectedAgent = agent,
         conversationTurns = previewTurns(),
         connection = ConnectionState.Connected,
+        streamLive = true,
+        stream = StreamState(agent.sessionId, 1, agentStatus = "idle"),
+        bridgeDetails =
+          mapOf(
+            profile.id to
+              com.azusachino.cappuccino.io.BridgeDetails(
+                machine,
+                "fixture",
+                1,
+                mapOf("mutation_binding" to true, "prompt_input" to true),
+              )
+          ),
       )
     )
   }

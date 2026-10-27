@@ -13,10 +13,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private class BridgeStreamError(message: String) : Exception(message)
+
+/** Bridge reported a recoverable upstream loss; retried within the existing stream budget. */
+private class BridgeUpstreamUnavailableError(message: String) : Exception(message)
 
 sealed interface ConnectionState {
   data object Disconnected : ConnectionState
@@ -42,6 +46,26 @@ fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnecti
       MachineConnection(connection, agents.filter { it.machineId == profile.machineId }, busy)
     else MachineConnection()
 
+data class PromptSendState(val text: String, val outcome: String? = null)
+
+/** Live observation and an advertised binding contract are both required for writes. */
+val ConnectedUiState.canMutate: Boolean
+  get() =
+    connection == ConnectionState.Connected &&
+      streamLive &&
+      bridgeDetails[activeProfileId]?.capabilities?.get("mutation_binding") == true &&
+      selectedAgent?.let { MutationBinding.from(it) } != null
+
+/**
+ * Drafts bind to the native session so a replacement occupant of the same locator never inherits
+ * one.
+ */
+internal fun agentDraftKey(agent: AgentRow): String =
+  "${agent.machineId}:${agent.sessionId}:${agent.nativeSessionRef}"
+
+internal fun agentSendKey(profileId: String, agent: AgentRow): String =
+  "$profileId:${agentDraftKey(agent)}"
+
 data class ConnectedUiState(
   val profiles: List<MachineProfile> = emptyList(),
   val bridgeDetails: Map<String, BridgeDetails> = emptyMap(),
@@ -52,6 +76,11 @@ data class ConnectedUiState(
   val agents: List<AgentRow> = emptyList(),
   val selectedAgent: AgentRow? = null,
   val stream: StreamState = StreamState(),
+  /**
+   * True only after a fresh authoritative agent_status on the current stream connection;
+   * stream_open is transport, not live state, so actions stay disabled until then (C2).
+   */
+  val streamLive: Boolean = false,
   val conversationTurns: List<ConversationTurn> = emptyList(),
   val omittedConversationTurns: Int = 0,
   val omittedToolOperations: Int = 0,
@@ -71,9 +100,13 @@ data class ConnectedUiState(
   val appPalette: com.azusachino.cappuccino.ui.AppPalette =
     com.azusachino.cappuccino.ui.AppPalette.CATPPUCCIN,
   val drafts: Map<String, String> = emptyMap(),
+  val promptSends: Map<String, PromptSendState> = emptyMap(),
 )
 
 interface ConnectedActions {
+  /** Recheck the rendered native selection at click time; unsupported controllers fail closed. */
+  fun acceptsMutation(profileId: String?, agent: AgentRow): Boolean = false
+
   fun addMachine(label: String, url: String)
 
   fun renameProfile(id: String, label: String)
@@ -374,6 +407,7 @@ internal constructor(
         activeProfileId = id,
         selectedAgent = null,
         stream = StreamState(),
+        streamLive = false,
         connection = mutableState.value.machineConnection(profile).connection,
         agents = mutableState.value.machineConnection(profile).agents,
         conversationTurns = emptyList(),
@@ -403,6 +437,7 @@ internal constructor(
           selectedAgent = null,
           agents = emptyList(),
           stream = StreamState(),
+          streamLive = false,
           conversationTurns = emptyList(),
           conversationSource = null,
           sessionStats = null,
@@ -489,18 +524,41 @@ internal constructor(
           mutableState.value.offlineSavedAt != null
       )
         return
-      val selected =
-        mutableState.value.selectedAgent?.let { old ->
-          agents.firstOrNull { it.machineId == old.machineId && it.sessionId == old.sessionId }
+      val old = mutableState.value.selectedAgent
+      val selected = old?.let { target ->
+        agents.firstOrNull {
+          it.machineId == target.machineId &&
+            it.sessionId == target.sessionId &&
+            // A reused locator with a different native session is a replacement.
+            it.nativeSessionRef == target.nativeSessionRef
         }
+      }
+      val replacedLocators =
+        old != null &&
+          selected == null &&
+          agents.any { it.machineId == old.machineId && it.sessionId == old.sessionId }
+      if (replacedLocators) {
+        cancelOwnedWork()
+        clearSavedSelection()
+      }
       mutableState.value =
         mutableState.value.copy(
           agents = agents,
           selectedAgent = selected,
           connection =
-            if (mutableState.value.selectedAgent == null) ConnectionState.Connected
-            else mutableState.value.connection,
+            when {
+              replacedLocators ->
+                ConnectionState.Error("Selected session was replaced; select it again")
+              old == null -> ConnectionState.Connected
+              else -> mutableState.value.connection
+            },
           busy = false,
+          stream = if (replacedLocators) StreamState() else mutableState.value.stream,
+          conversationTurns =
+            if (replacedLocators) emptyList() else mutableState.value.conversationTurns,
+          conversationSource =
+            if (replacedLocators) null else mutableState.value.conversationSource,
+          sessionStats = if (replacedLocators) null else mutableState.value.sessionStats,
         )
     } catch (error: Exception) {
       if (error is kotlinx.coroutines.CancellationException) throw error
@@ -524,6 +582,7 @@ internal constructor(
         mutableState.value.copy(
           selectedAgent = null,
           stream = StreamState(),
+          streamLive = false,
           conversationTurns = emptyList(),
           conversationSource = null,
           sessionStats = null,
@@ -536,6 +595,7 @@ internal constructor(
       mutableState.value.copy(
         selectedAgent = agent,
         stream = StreamState(),
+        streamLive = false,
         conversationTurns = emptyList(),
         conversationSource = null,
         sessionStats = null,
@@ -546,13 +606,30 @@ internal constructor(
       savedStateHandle[SELECTED_PROFILE] = profile?.id
       savedStateHandle[SELECTED_MACHINE] = agent.machineId.toString()
       savedStateHandle[SELECTED_LOCATOR] = agent.sessionId
+      savedStateHandle[SELECTED_NATIVE_REF] = agent.nativeSessionRef
       pendingRestore = true
     }
     if (foreground && agent != null && profile != null) {
       loadConversation()
-      openStream(profile, agent)
+      openStream(profile, agent, allowLegacyInitial = true)
     }
   }
+
+  private fun applyConversationSnapshot(snapshot: ConversationSnapshot) =
+    com.azusachino.cappuccino.core
+      .boundedConversation(if (snapshot.source == "canonical_log") snapshot.turns else emptyList())
+      .also { recent ->
+        mutableState.value =
+          mutableState.value.copy(
+            conversationTurns = recent.turns,
+            omittedConversationTurns = recent.omittedMessages,
+            omittedToolOperations = recent.omittedTools,
+            conversationSource = snapshot.source,
+            sessionStats = snapshot.stats,
+            conversationId = snapshot.conversationId,
+            offlineSavedAt = null,
+          )
+      }
 
   override fun loadConversation() {
     if (mutableState.value.offlineSavedAt != null) return
@@ -577,7 +654,8 @@ internal constructor(
             throw ProtocolException("Conversation machine identity changed")
           val current = mutableState.value
           if (
-            token != epoch ||
+            !isActive ||
+              token != epoch ||
               !foreground ||
               current.activeProfileId != profile.id ||
               current.selectedAgent?.machineId != agent.machineId ||
@@ -592,20 +670,7 @@ internal constructor(
                 !snapshot.conversationId.startsWith("${agent.agent}:"))
           )
             throw ProtocolException("Canonical conversation provider mismatch")
-          val recent =
-            com.azusachino.cappuccino.core.boundedConversation(
-              if (snapshot.source == "canonical_log") snapshot.turns else emptyList()
-            )
-          mutableState.value =
-            current.copy(
-              conversationTurns = recent.turns,
-              omittedConversationTurns = recent.omittedMessages,
-              omittedToolOperations = recent.omittedTools,
-              conversationSource = snapshot.source,
-              sessionStats = snapshot.stats,
-              conversationId = snapshot.conversationId,
-              offlineSavedAt = null,
-            )
+          val recent = applyConversationSnapshot(snapshot)
           if (
             snapshot.source == "canonical_log" &&
               offlineHistory != null &&
@@ -638,7 +703,8 @@ internal constructor(
           // Keep earlier turns; on a newly opened view allow verified stream scrollback
           // rather than leaving a restored reader waiting for unavailable history.
           if (
-            token == epoch &&
+            isActive &&
+              token == epoch &&
               foreground &&
               mutableState.value.activeProfileId == profile.id &&
               mutableState.value.selectedAgent?.sessionId == agent.sessionId
@@ -649,7 +715,7 @@ internal constructor(
               )
           }
         }
-      } while (conversationRequested && token == epoch && foreground)
+      } while (isActive && conversationRequested && token == epoch && foreground)
     }
   }
 
@@ -660,34 +726,85 @@ internal constructor(
     mutableState.value = mutableState.value.copy(drafts = updated)
   }
 
+  override fun acceptsMutation(profileId: String?, agent: AgentRow): Boolean {
+    val current = mutableState.value.selectedAgent ?: return false
+    return actionsLive() &&
+      mutableState.value.activeProfileId == profileId &&
+      current.machineId == agent.machineId &&
+      current.sessionId == agent.sessionId &&
+      current.paneId == agent.paneId &&
+      current.nativeSessionRef == agent.nativeSessionRef
+  }
+
   override fun submitPrompt(text: String, confirmed: Boolean) {
     if (mutableState.value.offlineSavedAt != null) return
+    if (!actionsLive()) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
-    setDraft("${agent.machineId}:${agent.sessionId}", "")
-    val client = bridgeFor(profile.endpoint)
+    val binding = MutationBinding.from(agent) ?: return
     val requestEpoch = epoch
+    val key = agentSendKey(profile.id, agent)
+    if (
+      mutableState.value.promptSends[key]?.outcome == null && key in mutableState.value.promptSends
+    )
+      return
+    val draftKey = agentDraftKey(agent)
+    val submittedDraft = mutableState.value.drafts[draftKey].orEmpty()
+    updatePromptSend(key, PromptSendState(text))
+    val client = bridgeFor(profile.endpoint)
     viewModelScope.launch {
+      var result: PromptSendState
       try {
-        client.submitPrompt(agent.sessionId, text, confirmed)
+        client.submitPrompt(agent.sessionId, text, confirmed, binding)
+        result = PromptSendState(text, "Sent to bridge; agent admission is not confirmed.")
       } catch (error: Exception) {
-        if (error is kotlinx.coroutines.CancellationException) throw error
-        if (requestEpoch != epoch || mutableState.value.activeProfileId != profile.id) return@launch
-        mutableState.value =
-          mutableState.value.copy(
-            connection = ConnectionState.Error(error.message ?: "Failed to submit prompt")
-          )
+        if (error is kotlinx.coroutines.CancellationException) {
+          result =
+            PromptSendState(
+              text,
+              "Delivery unknown; draft retained. Do not resend unless verified.",
+            )
+        } else {
+          val rejected = error is BridgeHttpRejectionException
+          val outcome =
+            if (rejected) "Rejected by bridge; draft retained."
+            else "Delivery unknown; draft retained. Do not resend unless verified."
+          result = PromptSendState(text, outcome)
+          val currentDraft = mutableState.value.drafts[draftKey].orEmpty()
+          if (currentDraft == submittedDraft) setDraft(draftKey, text)
+          if (
+            requestEpoch == epoch &&
+              mutableState.value.activeProfileId == profile.id &&
+              mutableState.value.selectedAgent?.sessionId == agent.sessionId &&
+              mutableState.value.selectedAgent?.nativeSessionRef == agent.nativeSessionRef
+          ) {
+            mutableState.value = mutableState.value.copy(actionError = error.message ?: outcome)
+            invalidateMutationSource(error)
+          }
+        }
+      }
+      val current = mutableState.value.promptSends[key]
+      if (current?.outcome == null) updatePromptSend(key, result)
+      if (result.outcome?.startsWith("Sent to bridge") == true) {
+        val currentDraft = mutableState.value.drafts[draftKey].orEmpty()
+        if (currentDraft == submittedDraft) setDraft(draftKey, "")
       }
     }
   }
 
+  private fun updatePromptSend(key: String, send: PromptSendState) {
+    mutableState.value =
+      mutableState.value.copy(promptSends = mutableState.value.promptSends + (key to send))
+  }
+
   override fun controlAgent(action: String) {
     val profile = activeProfile() ?: return
+    if (!actionsLive()) return
     // Each request gets a fresh client; the capability comes from the machine's verified details.
     if (mutableState.value.bridgeDetails[profile.id]?.capabilities?.get("agent_control") != true)
       return
-    runAgentAction("Failed to control the agent") { client, agent ->
-      client.controlAgent(agent.sessionId, action)
+    runAgentAction("Failed to control the agent") { client, agent, binding ->
+      client.controlAgent(agent.sessionId, action, binding)
     }
   }
 
@@ -697,16 +814,16 @@ internal constructor(
     optionId: String?,
     action: String?,
   ) =
-    runAgentAction("Failed to answer prompt") { client, agent ->
-      client.answerPrompt(agent.sessionId, promptId, optionIndex, optionId, action)
+    runAgentAction("Failed to answer prompt") { client, agent, binding ->
+      client.answerPrompt(agent.sessionId, promptId, optionIndex, optionId, action, binding)
     }
 
   override fun answerQuestions(
     promptId: String,
     answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
   ) =
-    runAgentAction("Failed to answer the question") { client, agent ->
-      client.answerQuestions(agent.sessionId, promptId, answers)
+    runAgentAction("Failed to answer the question") { client, agent, binding ->
+      client.answerQuestions(agent.sessionId, promptId, answers, binding)
     }
 
   /**
@@ -715,23 +832,48 @@ internal constructor(
    */
   private fun runAgentAction(
     failure: String,
-    send: suspend (BridgeTransport, AgentRow) -> Unit,
+    send: suspend (BridgeTransport, AgentRow, MutationBinding) -> Unit,
   ) {
     if (mutableState.value.offlineSavedAt != null) return
+    if (!actionsLive()) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
+    val binding = MutationBinding.from(agent) ?: return
     val client = bridgeFor(profile.endpoint)
     val requestEpoch = epoch
     mutableState.value = mutableState.value.copy(actionError = null)
     viewModelScope.launch {
       try {
-        send(client, agent)
+        send(client, agent, binding)
       } catch (error: Exception) {
         if (error is kotlinx.coroutines.CancellationException) throw error
         if (requestEpoch != epoch || mutableState.value.activeProfileId != profile.id) return@launch
         mutableState.value = mutableState.value.copy(actionError = error.message ?: failure)
+        invalidateMutationSource(error)
       }
     }
+  }
+
+  private fun invalidateMutationSource(error: Exception) {
+    if (
+      error !is BridgeStaleSessionException &&
+        error !is BridgeMutationOutcomeUnknownException &&
+        error !is BridgeMutationUnsupportedException
+    )
+      return
+    cancelOwnedWork()
+    mutableState.value =
+      mutableState.value.copy(
+        streamLive = false,
+        busy = false,
+        connection = ConnectionState.Error(error.message ?: "Reselect the session before writing"),
+        stream =
+          mutableState.value.stream.copy(
+            pendingPrompt = null,
+            agentStatus = null,
+            agentStatusDetail = null,
+          ),
+      )
   }
 
   fun setForeground(value: Boolean) {
@@ -742,7 +884,17 @@ internal constructor(
       cancelOwnedWork()
       stopMachineJobs()
       mutableState.value =
-        mutableState.value.copy(connection = ConnectionState.Disconnected, busy = false)
+        mutableState.value.copy(
+          connection = ConnectionState.Disconnected,
+          streamLive = false,
+          stream =
+            mutableState.value.stream.copy(
+              pendingPrompt = null,
+              agentStatus = null,
+              agentStatusDetail = null,
+            ),
+          busy = false,
+        )
     } else {
       if (pendingRestore) {
         restoreSelection()
@@ -800,17 +952,105 @@ internal constructor(
     }
   }
 
-  private fun openStream(profile: MachineProfile, agent: AgentRow) {
+  private fun actionsLive() = mutableState.value.canMutate
+
+  private fun openStream(
+    profile: MachineProfile,
+    agent: AgentRow,
+    allowLegacyInitial: Boolean = false,
+  ) {
     cancelStream()
     val token = epoch
     val client = bridgeFor(profile.endpoint)
     streamJob = viewModelScope.launch {
       val retryBudget = StreamRetryBudget()
+      var hasAttached = false
       while (foreground && token == epoch) {
+        // Invalidate before any suspending handshake, not only after it succeeds.
+        mutableState.value =
+          mutableState.value.copy(
+            streamLive = false,
+            stream =
+              mutableState.value.stream.copy(
+                pendingPrompt = null,
+                agentStatus = null,
+                agentStatusDetail = null,
+              ),
+          )
         try {
           client.verify(profile.machineId)
           if (token != epoch) return@launch
           recordMachineName(profile, client.machineName, client.bridgeDetails)
+          // Native identity must still match before attaching. Preserve explicitly selected
+          // legacy views, but never treat two missing refs as proof for automatic recovery.
+          val agents = client.agents(profile.machineId)
+          if (!foreground || token != epoch) return@launch
+          val bound = agents.firstOrNull {
+            it.machineId == agent.machineId &&
+              it.sessionId == agent.sessionId &&
+              (agent.paneId == null || it.paneId == agent.paneId) &&
+              ((agent.nativeSessionRef != null && it.nativeSessionRef == agent.nativeSessionRef) ||
+                (allowLegacyInitial &&
+                  !hasAttached &&
+                  agent.nativeSessionRef == null &&
+                  it.nativeSessionRef == null))
+          }
+          if (bound == null) {
+            if (agent.nativeSessionRef == null) {
+              // A legacy row without native identity cannot be bound; never invent one. Keep the
+              // selection visible but fail closed until the owner reselects.
+              mutableState.value =
+                mutableState.value.copy(
+                  agents = agents,
+                  busy = false,
+                  streamLive = false,
+                  connection =
+                    ConnectionState.Error(
+                      "Selected session has no verified native identity; select it again"
+                    ),
+                )
+            } else {
+              epoch++
+              mutableState.value =
+                mutableState.value.copy(
+                  agents = agents,
+                  selectedAgent = null,
+                  stream = StreamState(),
+                  streamLive = false,
+                  busy = false,
+                  connection =
+                    ConnectionState.Error(
+                      "Selected session is missing or has changed; select it again"
+                    ),
+                )
+              clearSavedSelection()
+            }
+            return@launch
+          }
+          if (hasAttached || !allowLegacyInitial) {
+            // Serialize recovery history before opening a new stream. A cancelled previous
+            // refresh cannot publish later: loadConversation checks its own job's liveness.
+            conversationJob?.cancel()
+            conversationJob = null
+            conversationRequested = false
+            val expectedConversation = mutableState.value.conversationId
+            val snapshot = client.conversationSnapshot(agent.sessionId)
+            if (!isActive || token != epoch || !foreground) return@launch
+            if (snapshot.source != "canonical_log")
+              throw java.io.IOException("Canonical history unavailable; retry to enable actions")
+            val identity = snapshot.conversationId
+            if (
+              snapshot.machineId != profile.machineId ||
+                identity == null ||
+                !isCanonicalConversationId(identity) ||
+                !identity.startsWith("${agent.agent}:") ||
+                (expectedConversation != null && identity != expectedConversation)
+            )
+              throw ProtocolException("Recovery history identity changed or is unavailable")
+            applyConversationSnapshot(snapshot)
+          }
+          hasAttached = true
+          var opened = false
           client.stream(agent.sessionId).collect { event ->
             val selected = mutableState.value.selectedAgent
             if (
@@ -819,15 +1059,31 @@ internal constructor(
                 selected.sessionId != agent.sessionId
             )
               return@collect
+            if (event is StreamEvent.Open) opened = true
+            if (event is StreamEvent.AgentStatus && !opened)
+              throw ProtocolException("Agent status arrived before stream_open")
             val current = mutableState.value
             val reduced = reduce(current.stream, event, agent.sessionId)
             val streamError = (event as? StreamEvent.Error)?.let { "${it.code}: ${it.message}" }
+            val freshBaseline =
+              event is StreamEvent.AgentStatus && event.sessionId == agent.sessionId
             mutableState.value =
               current.copy(
                 stream = reduced,
-                connection = streamError?.let(ConnectionState::Error) ?: ConnectionState.Connected,
+                streamLive = if (freshBaseline) true else current.streamLive,
+                connection =
+                  when {
+                    streamError != null -> ConnectionState.Error(streamError)
+                    // Only a fresh agent_status marks the stream live; other events are transport.
+                    freshBaseline -> ConnectionState.Connected
+                    else -> current.connection
+                  },
               )
-            if (streamError != null) throw BridgeStreamError(streamError)
+            if (streamError != null) {
+              if (event.code == UPSTREAM_UNAVAILABLE_CODE)
+                throw BridgeUpstreamUnavailableError(streamError)
+              throw BridgeStreamError(streamError)
+            }
             if (
               event is StreamEvent.Open ||
                 event is StreamEvent.Entries ||
@@ -841,6 +1097,18 @@ internal constructor(
           if (error is kotlinx.coroutines.CancellationException) throw error
           if (!foreground || token != epoch || mutableState.value.activeProfileId != profile.id)
             return@launch
+          // Every loss, including terminal failures and retry exhaustion, invalidates actions
+          // and pending cards. Keep history available without presenting it as live state.
+          mutableState.value =
+            mutableState.value.copy(
+              streamLive = false,
+              stream =
+                mutableState.value.stream.copy(
+                  pendingPrompt = null,
+                  agentStatus = null,
+                  agentStatusDetail = null,
+                ),
+            )
           if (error is ProtocolException || error is SSLException || error is BridgeStreamError) {
             mutableState.value =
               mutableState.value.copy(
@@ -870,9 +1138,15 @@ internal constructor(
         runCatching { UUID.fromString(it) }.getOrNull()
       }
     val locator = savedStateHandle.get<String>(SELECTED_LOCATOR)
+    val nativeRef = savedStateHandle.get<String>(SELECTED_NATIVE_REF)
     val profile = mutableState.value.profiles.firstOrNull { it.id == profileId }
     if (profile == null || profile.machineId != machineId || locator.isNullOrBlank()) {
       clearRestoredSelection("Saved agent selection is no longer available")
+      return
+    }
+    // A saved selection without native identity cannot be matched safely; never guess.
+    if (nativeRef.isNullOrBlank()) {
+      clearRestoredSelection("Saved selection must be selected again")
       return
     }
     epoch++
@@ -881,6 +1155,7 @@ internal constructor(
       mutableState.value.copy(
         activeProfileId = profileId,
         connection = ConnectionState.Recovering,
+        streamLive = false,
         busy = true,
       )
     operation = viewModelScope.launch {
@@ -896,7 +1171,9 @@ internal constructor(
               mutableState.value.machines +
                 (profile.id to MachineConnection(ConnectionState.Connected, agents))
           )
-        val match = agents.firstOrNull { it.machineId == machineId && it.sessionId == locator }
+        val match = agents.firstOrNull {
+          it.machineId == machineId && it.sessionId == locator && it.nativeSessionRef == nativeRef
+        }
         if (match == null) {
           mutableState.value = mutableState.value.copy(agents = agents)
           clearRestoredSelection("Saved agent is missing or has changed")
@@ -932,6 +1209,7 @@ internal constructor(
     savedStateHandle[SELECTED_PROFILE] = null
     savedStateHandle[SELECTED_MACHINE] = null
     savedStateHandle[SELECTED_LOCATOR] = null
+    savedStateHandle[SELECTED_NATIVE_REF] = null
     pendingRestore = false
   }
 
@@ -940,6 +1218,7 @@ internal constructor(
       mutableState.value.copy(
         selectedAgent = null,
         stream = StreamState(),
+        streamLive = false,
         busy = false,
         connection = ConnectionState.Error(message),
       )
@@ -982,6 +1261,7 @@ internal constructor(
     const val SELECTED_PROFILE = "selected_profile_id"
     const val SELECTED_MACHINE = "selected_machine_id"
     const val SELECTED_LOCATOR = "selected_agent_locator"
+    const val SELECTED_NATIVE_REF = "selected_agent_native_ref"
     const val RESTORE_PENDING = "selection_restore_pending"
   }
 

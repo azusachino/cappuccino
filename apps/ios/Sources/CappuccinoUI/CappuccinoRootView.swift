@@ -29,7 +29,13 @@ import SwiftUI
     .glassTabBar()
     .tint(palette.accent)
     .preferredColorScheme(AppearanceMode(rawValue: appearance)?.colorScheme)
-    .onAppear { machines.setForeground(scenePhase == .active) }
-    .onChange(of: scenePhase) { _, phase in machines.setForeground(phase == .active) }
+    .onAppear {
+      machines.setForeground(scenePhase == .active)
+      session.setForeground(scenePhase == .active)
+    }
+    .onChange(of: scenePhase) { _, phase in
+      machines.setForeground(phase == .active)
+      session.setForeground(phase == .active)
+    }
   }
 }

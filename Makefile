@@ -100,7 +100,7 @@ ui-test: generate ## Run iPhone shell smoke on an explicitly selected simulator
 
 ui-test-android: ## Run Android shell smoke on one task-owned emulator and export screenshots
 	@test -n "$(ANDROID_SERIAL)" || { echo 'Set ANDROID_SERIAL=<task-owned emulator serial>' >&2; exit 2; }
-	$(ANDROID) :app:connectedDebugAndroidTest
+	python3 services/bridge/tests/android_journey.py --serial "$(ANDROID_SERIAL)"
 	mkdir -p .build/android/screens
 	@set -e; for screen in Machines AddMachineIme Settings; do \
 	  image=$$(find "$(ANDROID_TEST_OUTPUT)" -type f -name "$$screen.png"); \
@@ -109,7 +109,7 @@ ui-test-android: ## Run Android shell smoke on one task-owned emulator and expor
 	  cp "$$image" ".build/android/screens/$$screen.png"; \
 	done
 
-validate: validate-apple validate-android ## Build/check all apps; UI journeys remain explicit
+validate: validate-android check-bridge md-check ## Default Android/bridge/docs gate; Apple validation is explicit
 
 validate-apple: check-apple build-ios ## Apple source/test/build acceptance
 

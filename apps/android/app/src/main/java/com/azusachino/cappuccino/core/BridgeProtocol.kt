@@ -9,6 +9,9 @@ const val MAX_OUTPUT_ROWS = 2_000
 const val MAX_OUTPUT_UTF8_BYTES = 4 * 1024 * 1024
 const val BRIDGE_PLUGIN_ID = "cappuccino-bridge"
 
+/** Bridge stream error code for a recoverable upstream loss (C1b/C2 contract). */
+const val UPSTREAM_UNAVAILABLE_CODE = "upstream_unavailable"
+
 class StreamRetryBudget(private val maximumRetries: Int = 4) {
   private var retriesUsed = 0
 

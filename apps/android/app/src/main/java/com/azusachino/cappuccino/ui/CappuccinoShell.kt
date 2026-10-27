@@ -104,6 +104,9 @@ import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ConnectionState
 import com.azusachino.cappuccino.io.SessionStats
+import com.azusachino.cappuccino.io.agentDraftKey
+import com.azusachino.cappuccino.io.agentSendKey
+import com.azusachino.cappuccino.io.canMutate
 import com.azusachino.cappuccino.io.machineConnection
 import java.time.ZoneId
 import kotlinx.coroutines.launch
@@ -204,14 +207,19 @@ fun CappuccinoScreen(
   var pendingAdd by rememberSaveable { mutableStateOf(false) }
   var previousProfileIds by rememberSaveable { mutableStateOf("") }
   val selected = state.selectedAgent
+  fun mutate(send: (ConnectedActions) -> Unit) {
+    if (selected != null && actions.acceptsMutation(state.activeProfileId, selected)) send(actions)
+  }
   val selectedProfile = state.profiles.firstOrNull { it.id == state.activeProfileId }
   val selectedStatus =
-    if (state.stream.pendingPrompt != null) "blocked"
+    if (!state.streamLive) "unknown"
+    else if (state.stream.pendingPrompt != null) "blocked"
     else (state.stream.agentStatus ?: selected?.status)?.lowercase()
   val selectedIdle = selectedStatus !in setOf("working", "blocked")
   val agentControl =
     state.offlineSavedAt == null &&
       state.connection == ConnectionState.Connected &&
+      state.canMutate &&
       state.bridgeDetails[state.activeProfileId]?.capabilities?.get("agent_control") == true
   val detailsProfile =
     if (detailsProfileId == null) selectedProfile
@@ -219,7 +227,9 @@ fun CappuccinoScreen(
   val namingProfile = state.profiles.firstOrNull { it.id == namingProfileId } ?: selectedProfile
   var namingMachine by rememberSaveable { mutableStateOf(false) }
   var machineNameDraft by rememberSaveable { mutableStateOf("") }
-  val scopedConversation = selected?.let { state.conversationId ?: it.sessionId }
+  val scopedConversation = selected?.let {
+    state.conversationId ?: it.nativeSessionRef ?: it.sessionId
+  }
   val outputIdentity = Triple(state.activeProfileId, selected?.machineId, scopedConversation)
   val conversationKey = "${state.activeProfileId}|${selected?.machineId}|$scopedConversation"
   val outputStates =
@@ -289,6 +299,7 @@ fun CappuccinoScreen(
   var textLayoutRevision by remember(outputIdentity) { mutableStateOf(0) }
   val onTextLayoutChanged: () -> Unit = remember(outputIdentity) { { textLayoutRevision += 1 } }
   var observedFollowContent by remember(outputIdentity) { mutableStateOf<List<*>?>(null) }
+  var observedTextLayoutRevision by remember(outputIdentity) { mutableStateOf(textLayoutRevision) }
   val outputScope = rememberCoroutineScope()
 
   // A finger or fling owns the position; following is decided only once it settles.
@@ -314,9 +325,11 @@ fun CappuccinoScreen(
     followingOutput,
   ) {
     val newContent = observedFollowContent != followContent
+    val layoutChanged = observedTextLayoutRevision != textLayoutRevision
     observedFollowContent = followContent
+    observedTextLayoutRevision = textLayoutRevision
     if (selected != null && followContent.isNotEmpty()) {
-      if (followingOutput) {
+      if (followingOutput && (newContent || layoutChanged)) {
         automaticScroll = true
         try {
           // A bottom marker handles tall last turns and collapsed stream rows alike.
@@ -448,8 +461,7 @@ fun CappuccinoScreen(
             if (selected != null) {
               val status =
                 agentStatusStyle(
-                  if (state.stream.pendingPrompt != null) "blocked"
-                  else state.stream.agentStatus ?: selected.status,
+                  selectedStatus ?: "unknown",
                   MaterialTheme.colorScheme.background.luminance() < 0.5f,
                 )
               Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -742,9 +754,7 @@ fun CappuccinoScreen(
                         // The live line lives in the bottom marker so follow targets stay put.
                         item(key = "conversation-bottom") {
                           Column {
-                            val liveStatus =
-                              if (state.stream.pendingPrompt != null) "blocked"
-                              else (state.stream.agentStatus ?: selected.status).lowercase()
+                            val liveStatus = selectedStatus
                             if (
                               state.offlineSavedAt == null &&
                                 liveStatus in setOf("working", "blocked")
@@ -813,8 +823,11 @@ fun CappuccinoScreen(
               }
               state.stream.pendingPrompt?.let { card ->
                 val answersEnabled =
-                  state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_answers") !=
-                    false
+                  state.connection == ConnectionState.Connected &&
+                    state.canMutate &&
+                    state.bridgeDetails[state.activeProfileId]
+                      ?.capabilities
+                      ?.get("prompt_answers") != false
                 Box(
                   Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("pendingPrompt")
                 ) {
@@ -822,21 +835,33 @@ fun CappuccinoScreen(
                     QuestionFormCard(
                       prompt = card,
                       enabled = answersEnabled,
-                      onSubmit = { answers -> actions.answerQuestions(card.promptId, answers) },
-                      onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
+                      onSubmit = { answers ->
+                        mutate { it.answerQuestions(card.promptId, answers) }
+                      },
+                      onCancel = {
+                        mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                      },
                     )
                   else
                     PromptCardView(
                       prompt = card,
                       enabled = answersEnabled,
                       onSelectOption = { idx, optId ->
-                        actions.answerPrompt(card.promptId, idx, optId, "select_option")
+                        mutate { it.answerPrompt(card.promptId, idx, optId, "select_option") }
                       },
-                      onCancel = { actions.answerPrompt(card.promptId, null, null, "cancel") },
+                      onCancel = {
+                        mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                      },
                     )
                 }
               }
 
+              if (state.streamLive && !state.canMutate) {
+                Text(
+                  "Session-bound actions unavailable. Update the bridge or reselect a session with native identity.",
+                  Modifier.padding(horizontal = 16.dp),
+                )
+              }
               // Existing live prompt route; saved readers remain read-only.
               if (
                 state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") ==
@@ -844,27 +869,39 @@ fun CappuccinoScreen(
               ) {
                 Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
               }
-              val agentDraftKey = "${selected.machineId}:${selected.sessionId}"
-              val composerKey =
-                "${state.activeProfileId}|${selected.machineId}|${selected.sessionId}"
+              val draftKey = agentDraftKey(selected)
+              val sendState = state.promptSends[agentSendKey(state.activeProfileId ?: "", selected)]
+              val composerKey = agentSendKey(state.activeProfileId ?: "", selected)
               if (state.offlineSavedAt == null)
                 composerState.SaveableStateProvider(composerKey) {
                   PromptInputBar(
-                    onSend = { text, confirmed -> actions.submitPrompt(text, confirmed) },
+                    onSend = { text, confirmed -> mutate { it.submitPrompt(text, confirmed) } },
+                    pending = sendState != null && sendState.outcome == null,
+                    outcome = sendState?.outcome,
                     onStop =
                       if (agentControl && selectedStatus == "working") {
-                        { actions.controlAgent("interrupt") }
+                        { mutate { it.controlAgent("interrupt") } }
                       } else null,
+                    onNewSession =
+                      if (
+                        agentControl &&
+                          selected.agent in
+                            setOf("pi", "claude", "agy", "antigravity", "antigravity-cli")
+                      ) {
+                        { mutate { it.controlAgent("new_session") } }
+                      } else null,
+                    newSessionEnabled = selectedStatus == "idle",
                     model = state.sessionStats?.model,
                     thinkingLevel = state.sessionStats?.thinkingLevel,
                     placeholder = "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
                     enabled =
                       state.connection == ConnectionState.Connected &&
+                        state.canMutate &&
                         state.bridgeDetails[state.activeProfileId]
                           ?.capabilities
                           ?.get("prompt_input") != false,
-                    draft = state.drafts[agentDraftKey] ?: "",
-                    onDraftChange = { text -> actions.setDraft(agentDraftKey, text) },
+                    draft = state.drafts[draftKey] ?: "",
+                    onDraftChange = { text -> actions.setDraft(draftKey, text) },
                   )
                   state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                 }
@@ -1499,14 +1536,19 @@ fun PromptInputBar(
   modifier: Modifier = Modifier,
   placeholder: String = "Message agent…",
   onStop: (() -> Unit)? = null,
+  onNewSession: (() -> Unit)? = null,
+  newSessionEnabled: Boolean = false,
   model: String? = null,
   thinkingLevel: String? = null,
   draft: String = "",
   onDraftChange: ((String) -> Unit)? = null,
+  pending: Boolean = false,
+  outcome: String? = null,
 ) {
   var input by rememberSaveable(draft) { mutableStateOf(draft) }
   LaunchedEffect(draft) { if (input != draft) input = draft }
   var commandsOpen by remember { mutableStateOf(false) }
+  var confirmingNewSession by rememberSaveable { mutableStateOf(false) }
   var historyOpen by remember { mutableStateOf(false) }
   var isFocused by remember { mutableStateOf(false) }
   var promptHistory by rememberSaveable { mutableStateOf(listOf<String>()) }
@@ -1528,6 +1570,7 @@ fun PromptInputBar(
         text = { Text(slashCommandWarning(command)) },
         confirmButton = {
           TextButton(
+            enabled = !pending,
             onClick = {
               val textToSend =
                 if (input.isNotBlank() && slashCommand(input) == command) input else command
@@ -1536,10 +1579,9 @@ fun PromptInputBar(
                   (listOf(textToSend) + promptHistory.filter { it != textToSend }).take(20)
               }
               onSend(textToSend, true)
-              input = ""
-              onDraftChange?.invoke("")
+              input = textToSend
               confirmingCommand = null
-            }
+            },
           ) {
             Text("Run $command")
           }
@@ -1548,11 +1590,37 @@ fun PromptInputBar(
       )
     }
   }
+  if (confirmingNewSession && onNewSession != null) {
+    AlertDialog(
+      onDismissRequest = { confirmingNewSession = false },
+      title = { Text("Start a new session?") },
+      text = { Text("Start a fresh conversation in the same running agent. Your draft is kept.") },
+      confirmButton = {
+        TextButton(
+          enabled = enabled && !pending && newSessionEnabled,
+          onClick = {
+            confirmingNewSession = false
+            onNewSession()
+          },
+        ) {
+          Text("New session")
+        }
+      },
+      dismissButton = { TextButton(onClick = { confirmingNewSession = false }) { Text("Cancel") } },
+    )
+  }
   val colors = MaterialTheme.appColors
-  val canSend = enabled && input.isNotBlank()
+  val canSend = enabled && !pending && input.isNotBlank()
   val slashSuggestions = remember(input) { matchingSlashCommands(input) }
 
   Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+    if (pending || outcome != null)
+      Text(
+        if (pending) "Sending; not yet confirmed by the agent." else outcome.orEmpty(),
+        Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+        style = MaterialTheme.typography.labelSmall,
+        color = colors.muted,
+      )
     // 1. Quick Action Chips Row
     Row(
       Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp),
@@ -1561,7 +1629,7 @@ fun PromptInputBar(
     ) {
       QuickActionChip(
         label = "Continue",
-        enabled = enabled,
+        enabled = enabled && !pending,
         onClick = {
           if (promptHistory.firstOrNull() != "continue") {
             promptHistory =
@@ -1582,7 +1650,7 @@ fun PromptInputBar(
       }
       QuickActionChip(
         label = "Compact",
-        enabled = enabled,
+        enabled = enabled && !pending,
         onClick = { confirmingCommand = "/compact" },
         colors = colors,
       )
@@ -1701,6 +1769,16 @@ fun PromptInputBar(
             )
           }
           DropdownMenu(expanded = commandsOpen, onDismissRequest = { commandsOpen = false }) {
+            if (onNewSession != null) {
+              DropdownMenuItem(
+                text = { Text("New session") },
+                enabled = enabled && !pending && newSessionEnabled,
+                onClick = {
+                  commandsOpen = false
+                  confirmingNewSession = true
+                },
+              )
+            }
             COMMON_SLASH_COMMANDS.forEach { item ->
               DropdownMenuItem(
                 text = {
@@ -1771,7 +1849,7 @@ fun PromptInputBar(
         if (model != null)
           Text(
             listOfNotNull(shortModel(model), thinkingLevel).joinToString(" · "),
-            Modifier.padding(horizontal = 6.dp).widthIn(max = 160.dp),
+            Modifier.padding(horizontal = 6.dp).widthIn(max = 160.dp).testTag("composerModelLabel"),
             style = MaterialTheme.typography.labelSmall,
             color = colors.muted,
             maxLines = 1,
@@ -1815,8 +1893,6 @@ fun PromptInputBar(
                 confirmingCommand = command
               } else {
                 onSend(input, false)
-                input = ""
-                onDraftChange?.invoke("")
               }
             }
           },
@@ -1930,7 +2006,8 @@ internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
         )
       }
       Text(
-        "$percent%",
+        if (tokens != null) "$percent% · ${formatTokens(tokens)} / ${formatTokens(window)}"
+        else "$percent%",
         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
         color =
           when {
@@ -1941,9 +2018,9 @@ internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
       )
     }
 
-    if (tokens != null) {
+    stats.cachePercent?.let { cache ->
       Text(
-        "${formatTokens(tokens)} / ${formatTokens(window)}",
+        "cache $cache%",
         style = MaterialTheme.typography.labelSmall,
         color = colors.muted,
       )
@@ -2028,7 +2105,7 @@ fun ConversationTurnRow(
   val segments = remember(shownParts) { transcriptSegments(shownParts) }
   if (segments.isEmpty()) return
   Column(
-    modifier.fillMaxWidth().then(textModifier).semantics {
+    modifier.fillMaxWidth().semantics {
       contentDescription = if (isUser) "You" else assistantLabel
     },
     verticalArrangement = Arrangement.spacedBy(10.dp),

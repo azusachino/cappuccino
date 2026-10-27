@@ -9,7 +9,12 @@ import Testing
 final class FakeBridgeWebSocket: BridgeWebSocket, @unchecked Sendable {
   private let lock = NSLock()
   private var frames: [String?]
-  private(set) var closed = false
+  private var isClosed = false
+  var closed: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return isClosed
+  }
 
   init(frames: [String?]) {
     self.frames = frames
@@ -37,7 +42,7 @@ final class FakeBridgeWebSocket: BridgeWebSocket, @unchecked Sendable {
   private func markClosed() {
     lock.lock()
     defer { lock.unlock() }
-    closed = true
+    isClosed = true
   }
 }
 

@@ -69,7 +69,9 @@ public struct BridgeClient: Sendable {
         working: agent["working"] as? Bool ?? false,
         provider: agent["agent"] as? String,
         status: agent["status"] as? String,
-        cwd: agent["cwd"] as? String
+        cwd: agent["cwd"] as? String,
+        paneID: agent["pane_id"] as? String,
+        nativeSessionRef: agent["native_session_ref"] as? String
       )
     }
   }
@@ -128,6 +130,7 @@ public struct BridgeClient: Sendable {
     do {
       (bytes, response) = try await session.bytes(for: request)
     } catch {
+      if isBridgeTLSFailure(error) { throw error }
       throw BridgeError.unreachable(error.localizedDescription)
     }
     guard let http = response as? HTTPURLResponse else {
@@ -144,6 +147,7 @@ public struct BridgeClient: Sendable {
     } catch let error as BridgeError {
       throw error
     } catch {
+      if isBridgeTLSFailure(error) { throw error }
       throw BridgeError.unreachable(error.localizedDescription)
     }
     return (data, http)
