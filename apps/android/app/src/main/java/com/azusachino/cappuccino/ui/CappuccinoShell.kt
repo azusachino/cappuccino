@@ -1726,11 +1726,20 @@ fun PromptInputBar(
     }
 
     // 3. Rounded Input Container
+    val inputShape = RoundedCornerShape(16.dp)
     Column(
       Modifier.fillMaxWidth()
-        .background(colors.card, RoundedCornerShape(16.dp))
-        .border(1.dp, if (isFocused) colors.accent else colors.line, RoundedCornerShape(16.dp))
-        .clip(RoundedCornerShape(16.dp))
+        .glassSurface(
+          shape = inputShape,
+          // Keep the accent cue while editing: the rim gradient stays, focus adds a tint edge.
+          rimStroke = if (isFocused) 0.dp else GlassDefaults.RimStrokeWidth,
+        )
+        .then(
+          if (isFocused) {
+            Modifier.border(1.dp, colors.accent.copy(alpha = 0.6f), inputShape)
+          } else Modifier
+        )
+        .clip(inputShape)
     ) {
       Row(
         Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 4.dp),

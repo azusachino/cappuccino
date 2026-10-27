@@ -1,12 +1,14 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ListItem
@@ -40,36 +42,40 @@ internal fun SettingsScreen(
   val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }
   var choosingTheme by rememberSaveable { mutableStateOf(false) }
-  Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-    SettingsHeading("Appearance")
-    SettingRow(
-      "Theme",
-      value = themeMode.name.lowercase().replaceFirstChar { it.uppercase() },
-    ) {
-      if (onOpenAppearance != null) onOpenAppearance() else choosingTheme = true
+  Column(
+    Modifier
+      .fillMaxWidth()
+      .verticalScroll(rememberScrollState())
+      .padding(vertical = 12.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+  ) {
+    SettingsCard("Appearance") {
+      SettingRow(
+        "Theme",
+        value = themeMode.name.lowercase().replaceFirstChar { it.uppercase() },
+      ) {
+        if (onOpenAppearance != null) onOpenAppearance() else choosingTheme = true
+      }
     }
-    SettingsHeading("Notifications")
-    NotificationSettings()
-    SettingsHeading("Connections")
-    if (connections.isEmpty()) SettingNote("No machines added")
-    connections.forEach { connection ->
-      androidx.compose.runtime.key(connection.id) {
-        SettingRow(connection.label, value = connection.status) {
-          onConnectionDetails(connection.id)
+    SettingsCard("Notifications") { NotificationSettings() }
+    SettingsCard("Connections") {
+      if (connections.isEmpty()) SettingNote("No machines added")
+      connections.forEach { connection ->
+        androidx.compose.runtime.key(connection.id) {
+          SettingRow(connection.label, value = connection.status) {
+            onConnectionDetails(connection.id)
+          }
         }
       }
     }
-    SettingsHeading("About")
-    SettingRow(
-      "Version",
-      value = BuildConfig.VERSION_NAME,
-      onClick = null,
-    )
-    SettingRow("Setup guide", value = "GitHub") {
-      helpError =
-        runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
-          .exceptionOrNull()
-          ?.let { "Couldn't open the guide. Visit github.com/azusachino/cappuccino." }
+    SettingsCard("About") {
+      SettingRow("Version", value = BuildConfig.VERSION_NAME, onClick = null)
+      SettingRow("Setup guide", value = "GitHub") {
+        helpError =
+          runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
+            .exceptionOrNull()
+            ?.let { "Couldn't open the guide. Visit github.com/azusachino/cappuccino." }
+      }
     }
     helpError?.let { SettingNote(it, warning = true) }
     SettingNote("Agent sessions stay on your machines; this app only reads and relays them.")
@@ -107,16 +113,25 @@ internal fun SettingsScreen(
   }
 }
 
+/** One settings group: a liquid glass card holding its rows under a heading label. */
 @Composable
-private fun SettingsHeading(title: String) {
-  Text(
-    title,
-    Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp).semantics {
-      heading()
-    },
-    style = MaterialTheme.typography.labelMedium,
-    color = MaterialTheme.appColors.accent,
-  )
+private fun SettingsCard(title: String, content: @Composable () -> Unit) {
+  Column(
+    Modifier.fillMaxWidth()
+      .padding(horizontal = 12.dp)
+      .glassSurface(shape = RoundedCornerShape(GlassDefaults.CardCornerRadius))
+      .padding(vertical = 8.dp)
+  ) {
+    Text(
+      title,
+      Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp).semantics {
+        heading()
+      },
+      style = MaterialTheme.typography.labelMedium,
+      color = MaterialTheme.appColors.accent,
+    )
+    content()
+  }
 }
 
 /** A short explanation under a group, only where a row needs one. */
