@@ -51,6 +51,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -108,6 +109,8 @@ import com.azusachino.cappuccino.io.agentDraftKey
 import com.azusachino.cappuccino.io.agentSendKey
 import com.azusachino.cappuccino.io.canMutate
 import com.azusachino.cappuccino.io.machineConnection
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import java.time.ZoneId
 import kotlinx.coroutines.launch
 
@@ -191,6 +194,7 @@ fun CappuccinoScreen(
     }
   }
   val machineTreeState = rememberLazyListState()
+  val hazeState = rememberHazeState()
   val mainScreenState = rememberSaveableStateHolder()
   val composerState = rememberSaveableStateHolder()
   val readerState = rememberSaveableStateHolder()
@@ -456,155 +460,178 @@ fun CappuccinoScreen(
   mainScreenState.SaveableStateProvider("main-screen") {
     Scaffold(
       topBar = {
-        TopAppBar(
-          title = {
-            if (selected != null) {
-              val status =
-                agentStatusStyle(
-                  selectedStatus ?: "unknown",
-                  MaterialTheme.colorScheme.background.luminance() < 0.5f,
-                )
-              Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                  Icon(
-                    painterResource(agentIconResource(selected.agent)),
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.appColors.accent,
+        Column(
+          Modifier.fillMaxWidth()
+            .glassBackdrop(
+              hazeState = hazeState,
+              backgroundColor = MaterialTheme.colorScheme.background,
+              shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
+            )
+        ) {
+          TopAppBar(
+            colors =
+              TopAppBarDefaults.topAppBarColors(
+                containerColor = androidx.compose.ui.graphics.Color.Transparent
+              ),
+            title = {
+              if (selected != null) {
+                val status =
+                  agentStatusStyle(
+                    selectedStatus ?: "unknown",
+                    MaterialTheme.colorScheme.background.luminance() < 0.5f,
                   )
-                  Text(
-                    selected.label,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                  )
-                }
-                // Status keeps its color as a square beside its word, never color alone.
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                  if (state.offlineSavedAt != null) {
-                    StatusSquare(MaterialTheme.appColors.muted)
-                    Text(
-                      "Saved history · Read-only",
-                      style = MaterialTheme.typography.labelSmall,
-                      color = MaterialTheme.appColors.muted,
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                  ) {
+                    Icon(
+                      painterResource(agentIconResource(selected.agent)),
+                      contentDescription = null,
+                      modifier = Modifier.size(16.dp),
+                      tint = MaterialTheme.appColors.accent,
                     )
-                  } else {
-                    StatusSquare(status.background)
                     Text(
-                      listOfNotNull(
-                          status.label,
-                          selectedProfile?.label,
-                          selected.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf {
-                            it.isNotBlank()
-                          },
-                          selected.branch?.takeIf { it.isNotBlank() },
-                        )
-                        .joinToString(" · "),
-                      style = MaterialTheme.typography.labelSmall,
-                      color = MaterialTheme.appColors.muted,
+                      selected.label,
+                      style = MaterialTheme.typography.titleSmall,
                       maxLines = 1,
                       overflow = TextOverflow.Ellipsis,
                     )
                   }
-                }
-              }
-            } else {
-              Text(
-                stringResource(destination.title),
-                fontWeight = FontWeight.Bold,
-              )
-            }
-          },
-          navigationIcon = {
-            if (selected == null && destination == Destination.APPEARANCE) {
-              IconButton(onClick = { destination = Destination.SETTINGS }) {
-                Icon(
-                  painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
-                  contentDescription = "Back to settings",
-                )
-              }
-            } else if (selected != null) {
-              IconButton(
-                onClick = {
-                  if (state.offlineSavedAt != null && selectedProfile != null) {
-                    actions.selectProfile(selectedProfile.id)
-                    actions.selectAgent(selected)
-                  } else {
-                    actions.selectAgent(null)
+                  // Status keeps its color as a square beside its word, never color alone.
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  ) {
+                    if (state.offlineSavedAt != null) {
+                      StatusSquare(MaterialTheme.appColors.muted)
+                      Text(
+                        "Saved history · Read-only",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.appColors.muted,
+                      )
+                    } else {
+                      StatusSquare(status.background)
+                      Text(
+                        listOfNotNull(
+                            status.label,
+                            selectedProfile?.label,
+                            selected.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf {
+                              it.isNotBlank()
+                            },
+                            selected.branch?.takeIf { it.isNotBlank() },
+                          )
+                          .joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.appColors.muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                      )
+                    }
                   }
                 }
-              ) {
-                Icon(
-                  painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
-                  contentDescription =
-                    if (state.offlineSavedAt != null) "Back to live session" else "Back",
+              } else {
+                Text(
+                  stringResource(destination.title),
+                  fontWeight = FontWeight.Bold,
                 )
               }
-            }
-          },
-          // M3 app bar defaults apply: no colors override (android-material3.md region 1).
-          actions = {
-            if (destination == Destination.MACHINES && selected == null) {
-              IconButton(onClick = { adding = true }) {
-                Icon(
-                  painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
-                  contentDescription = "Add machine",
-                )
-              }
-            }
-            if (selectedProfile != null && selected != null) {
-              IconButton(
-                onClick = { showingHistory = true },
-                modifier = Modifier.testTag("conversationHistoryButton"),
-              ) {
-                Icon(
-                  painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
-                  contentDescription = "Conversation history",
-                )
-              }
-              IconButton(
-                onClick = {
-                  detailsProfileId = selectedProfile.id
-                  showingConnection = true
+            },
+            navigationIcon = {
+              if (selected == null && destination == Destination.APPEARANCE) {
+                IconButton(onClick = { destination = Destination.SETTINGS }) {
+                  Icon(
+                    painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
+                    contentDescription = "Back to settings",
+                  )
                 }
-              ) {
-                Icon(
-                  painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
-                  contentDescription = "Connection details",
-                )
+              } else if (selected != null) {
+                IconButton(
+                  onClick = {
+                    if (state.offlineSavedAt != null && selectedProfile != null) {
+                      actions.selectProfile(selectedProfile.id)
+                      actions.selectAgent(selected)
+                    } else {
+                      actions.selectAgent(null)
+                    }
+                  }
+                ) {
+                  Icon(
+                    painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
+                    contentDescription =
+                      if (state.offlineSavedAt != null) "Back to live session" else "Back",
+                  )
+                }
               }
-            }
-          },
-        )
+            },
+            // Liquid glass chrome: transcript blurs behind the bar (owner decision
+            // 2026-10-27, superseding the no-colors-override note in android-material3.md).
+            actions = {
+              if (destination == Destination.MACHINES && selected == null) {
+                IconButton(onClick = { adding = true }) {
+                  Icon(
+                    painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
+                    contentDescription = "Add machine",
+                  )
+                }
+              }
+              if (selectedProfile != null && selected != null) {
+                IconButton(
+                  onClick = { showingHistory = true },
+                  modifier = Modifier.testTag("conversationHistoryButton"),
+                ) {
+                  Icon(
+                    painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
+                    contentDescription = "Conversation history",
+                  )
+                }
+                IconButton(
+                  onClick = {
+                    detailsProfileId = selectedProfile.id
+                    showingConnection = true
+                  }
+                ) {
+                  Icon(
+                    painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
+                    contentDescription = "Connection details",
+                  )
+                }
+              }
+            },
+          )
+        }
       },
       bottomBar = {
         if (selected == null)
-          NavigationBar {
-            listOf(Destination.MACHINES, Destination.HISTORY, Destination.SETTINGS).forEach { item
-              ->
-              NavigationBarItem(
-                selected =
-                  destination == item ||
-                    (item == Destination.SETTINGS && destination == Destination.APPEARANCE),
-                onClick = {
-                  actions.selectAgent(null)
-                  destination = item
-                },
-                icon = { Icon(painterResource(item.icon), contentDescription = null) },
-                label = { Text(stringResource(item.title)) },
+          Column(
+            Modifier.fillMaxWidth()
+              .glassBackdrop(
+                hazeState = hazeState,
+                backgroundColor = MaterialTheme.colorScheme.background,
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
               )
+          ) {
+            NavigationBar(containerColor = androidx.compose.ui.graphics.Color.Transparent) {
+              listOf(Destination.MACHINES, Destination.HISTORY, Destination.SETTINGS).forEach { item
+                ->
+                NavigationBarItem(
+                  selected =
+                    destination == item ||
+                      (item == Destination.SETTINGS && destination == Destination.APPEARANCE),
+                  onClick = {
+                    actions.selectAgent(null)
+                    destination = item
+                  },
+                  icon = { Icon(painterResource(item.icon), contentDescription = null) },
+                  label = { Text(stringResource(item.title)) },
+                )
+              }
             }
           }
       },
     ) { contentPadding ->
       Column(
-        Modifier.fillMaxSize().padding(contentPadding).imePadding(),
+        Modifier.fillMaxSize().hazeSource(hazeState).padding(contentPadding).imePadding(),
         verticalArrangement = Arrangement.spacedBy(if (selected == null) 12.dp else 4.dp),
       ) {
         when {
