@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -94,24 +95,22 @@ internal fun UserPromptRow(
       style = MaterialTheme.typography.bodyMedium,
     )
     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-          "You",
-          style = MaterialTheme.typography.labelSmall,
-          fontWeight = FontWeight.SemiBold,
-          color = colors.accent,
-        )
-        if (time != null)
-          Text(
-            time,
-            Modifier.semantics {
-              if (timeDescription != null) contentDescription = timeDescription
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.muted,
-          )
-      }
+      Text(
+        "You",
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = colors.accent,
+      )
       body()
+      if (time != null)
+        Text(
+          time,
+          Modifier.align(Alignment.End).semantics {
+            if (timeDescription != null) contentDescription = timeDescription
+          },
+          style = MaterialTheme.typography.labelSmall,
+          color = colors.muted,
+        )
     }
   }
 }
@@ -132,35 +131,38 @@ internal fun ActivityGroup(
   val expanded = chosen ?: newest
   val summary = remember(parts) { activitySummary(parts) }
   val duration = remember(parts) { activityDuration(parts)?.let(::compactDuration) }
-  Column(Modifier.fillMaxWidth()) {
-    Row(
-      Modifier.fillMaxWidth()
-        .heightIn(min = 30.dp)
-        .clickable(role = Role.Button) {
-          if (!expanded) onInspect()
-          chosen = !expanded
-        }
-        .padding(start = 2.dp, end = 8.dp, top = 2.dp, bottom = 2.dp)
-        .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+  Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+    Surface(
+      onClick = {
+        if (!expanded) onInspect()
+        chosen = !expanded
+      },
+      shape = RoundedCornerShape(50),
+      color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+      modifier =
+        Modifier.semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
     ) {
-      Icon(
-        painterResource(R.drawable.ic_expand_more),
-        contentDescription = null,
-        modifier = Modifier.size(16.dp).rotate(if (expanded) 0f else -90f),
-        tint = colors.muted,
-      )
-      Text(
-        summary,
-        Modifier.weight(1f),
-        style = MaterialTheme.typography.labelMedium,
-        color = colors.muted,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-      )
-      if (duration != null)
-        Text(duration, style = MaterialTheme.typography.labelSmall, color = colors.muted)
+      Row(
+        Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Icon(
+          painterResource(R.drawable.ic_expand_more),
+          contentDescription = null,
+          modifier = Modifier.size(14.dp).rotate(if (expanded) 0f else -90f),
+          tint = colors.muted,
+        )
+        Text(
+          summary,
+          style = MaterialTheme.typography.labelMedium,
+          color = colors.muted,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        if (duration != null)
+          Text(duration, style = MaterialTheme.typography.labelSmall, color = colors.muted)
+      }
     }
     if (expanded) {
       val rule = colors.line

@@ -707,11 +707,7 @@ fun CappuccinoScreen(
                   LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
               ConnectionState.Recovering ->
-                Text(
-                  "Reconnecting; earlier output may be missing",
-                  Modifier.padding(16.dp),
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                WarningBanner("Reconnecting; earlier output may be missing")
               is ConnectionState.Error -> ErrorBanner(connection.message)
               else -> Unit
             }
@@ -739,54 +735,96 @@ fun CappuccinoScreen(
                         Text("Loading history…", Modifier.padding(16.dp))
                       }
                     } else if (turns.isNotEmpty()) {
-                      LazyColumn(
-                        state = outputListState,
-                        modifier =
-                          Modifier.fillMaxSize()
-                            .padding(horizontal = 16.dp)
-                            .testTag("recentOutputList"),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                      ) {
-                        items(
-                          chatTurns,
-                          key = {
-                            "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
-                          },
-                        ) { turn ->
-                          if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
-                            Text(
-                              "Older messages aren't loaded.",
-                              Modifier.padding(vertical = 12.dp),
-                              style = MaterialTheme.typography.bodySmall,
-                              color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      Box(Modifier.fillMaxSize()) {
+                        LazyColumn(
+                          state = outputListState,
+                          modifier =
+                            Modifier.fillMaxSize()
+                              .padding(horizontal = 16.dp)
+                              .testTag("recentOutputList"),
+                          verticalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                          items(
+                            chatTurns,
+                            key = {
+                              "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
+                            },
+                          ) { turn ->
+                            if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
+                              Text(
+                                "Older messages aren't loaded.",
+                                Modifier.padding(vertical = 12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                              )
+                            }
+                            ConversationTurnRow(
+                              turn,
+                              timeZone = timeZone,
+                              assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
+                              onInspect = { followingOutput = false },
+                              showToolsInline = true,
+                              onTextSizeChanged = onTextLayoutChanged,
+                              newest = turn.id in newestTurnIds,
                             )
                           }
-                          ConversationTurnRow(
-                            turn,
-                            timeZone = timeZone,
-                            assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
-                            onInspect = { followingOutput = false },
-                            showToolsInline = true,
-                            onTextSizeChanged = onTextLayoutChanged,
-                            newest = turn.id in newestTurnIds,
-                          )
-                        }
-                        // The live line lives in the bottom marker so follow targets stay put.
-                        item(key = "conversation-bottom") {
-                          Column {
-                            val liveStatus = selectedStatus
-                            if (
-                              state.offlineSavedAt == null &&
-                                liveStatus in setOf("working", "blocked")
-                            )
-                              LiveStatusLine(
-                                if (liveStatus == "working") "Working"
-                                else "Waiting for your answer",
-                                if (liveStatus == "working") MaterialTheme.appColors.working
-                                else MaterialTheme.appColors.warn,
-                                state.stream.agentStatusDetail,
+                          // The live line lives in the bottom marker so follow targets stay put.
+                          item(key = "conversation-bottom") {
+                            Column {
+                              val liveStatus = selectedStatus
+                              if (
+                                state.offlineSavedAt == null &&
+                                  liveStatus in setOf("working", "blocked")
                               )
-                            Spacer(Modifier.height(8.dp))
+                                LiveStatusLine(
+                                  if (liveStatus == "working") "Working"
+                                  else "Waiting for your answer",
+                                  if (liveStatus == "working") MaterialTheme.appColors.working
+                                  else MaterialTheme.appColors.warn,
+                                  state.stream.agentStatusDetail,
+                                )
+                              Spacer(Modifier.height(8.dp))
+                            }
+                          }
+                        }
+                        val atBottom = remember {
+                          derivedStateOf { !outputListState.canScrollForward }
+                        }
+                        androidx.compose.animation.AnimatedVisibility(
+                          visible = !atBottom.value,
+                          enter =
+                            androidx.compose.animation.fadeIn() +
+                              androidx.compose.animation.scaleIn(),
+                          exit =
+                            androidx.compose.animation.fadeOut() +
+                              androidx.compose.animation.scaleOut(),
+                          modifier =
+                            Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
+                              .padding(bottom = 12.dp),
+                        ) {
+                          Surface(
+                            onClick = {
+                              outputScope.launch {
+                                outputListState.animateScrollToItem(
+                                  outputListState.layoutInfo.totalItemsCount - 1
+                                )
+                              }
+                            },
+                            shape = CircleShape,
+                            color = MaterialTheme.appColors.card2,
+                            shadowElevation = 2.dp,
+                            modifier = Modifier.size(40.dp),
+                          ) {
+                            Box(contentAlignment = androidx.compose.ui.Alignment.Center) {
+                              Icon(
+                                painterResource(
+                                  com.azusachino.cappuccino.R.drawable.ic_arrow_downward
+                                ),
+                                contentDescription = "Scroll to latest",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.appColors.muted,
+                              )
+                            }
                           }
                         }
                       }
@@ -2015,6 +2053,31 @@ fun ConversationTurnRow(
   }
   val segments = remember(shownParts) { transcriptSegments(shownParts) }
   if (segments.isEmpty()) return
+  // Telegram grouping: prose blocks in one turn share a bubble shape; inner meeting
+  // corners collapse so consecutive blocks read as one lump with soft seams.
+  val proseSlots =
+    remember(segments, isUser) {
+      var n = 0
+      segments.map { seg ->
+        if (seg is TranscriptSegment.Prose && seg.part is ConversationPart.Text && !isUser) {
+          n++
+          n - 1
+        } else null
+      }
+    }
+  val proseCount = remember(proseSlots) { proseSlots.filterNotNull().size }
+  fun bubbleShape(slot: Int): RoundedCornerShape {
+    val outer = 18.dp
+    val seam = 6.dp
+    return when {
+      proseCount == 1 -> RoundedCornerShape(outer)
+      slot == 0 ->
+        RoundedCornerShape(topStart = outer, topEnd = outer, bottomEnd = seam, bottomStart = seam)
+      slot == proseCount - 1 ->
+        RoundedCornerShape(topStart = seam, topEnd = seam, bottomEnd = outer, bottomStart = outer)
+      else -> RoundedCornerShape(seam)
+    }
+  }
   Column(
     modifier.fillMaxWidth().semantics {
       contentDescription = if (isUser) "You" else assistantLabel
@@ -2051,13 +2114,22 @@ fun ConversationTurnRow(
                     },
                 timeDescription = turn.timestamp?.let { formatConversationTimestamp(it, timeZone) },
               )
-            else
-              MessageBody(
-                part.text,
-                onInspect = onInspect,
-                modifier = textModifier,
-                transcript = true,
-              )
+            else {
+              val slot = proseSlots[index] ?: 0
+              val colors = MaterialTheme.appColors
+              Box(
+                Modifier.fillMaxWidth()
+                  .background(colors.card, bubbleShape(slot))
+                  .padding(horizontal = 12.dp, vertical = 8.dp)
+              ) {
+                MessageBody(
+                  part.text,
+                  onInspect = onInspect,
+                  modifier = textModifier,
+                  transcript = true,
+                )
+              }
+            }
           }
         }
       }
