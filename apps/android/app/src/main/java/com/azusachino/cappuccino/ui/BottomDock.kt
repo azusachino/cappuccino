@@ -64,14 +64,9 @@ internal fun BottomDock(
             ) {
               Icon(
                 painterResource(item.iconRes),
-                contentDescription = null,
+                contentDescription = item.label,
                 modifier = Modifier.size(20.dp),
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
-              )
-              Text(
-                item.label,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
               )
             }
           } else {
