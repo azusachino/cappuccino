@@ -378,10 +378,8 @@ mod iroh_config_tests {
     fn load(content: &str) -> Result<BridgeConfig, String> {
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let unique = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "cap-iroh-cfg-{}-{unique}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("cap-iroh-cfg-{}-{unique}", std::process::id()));
         std::fs::write(&path, content).unwrap();
         BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None)
     }
