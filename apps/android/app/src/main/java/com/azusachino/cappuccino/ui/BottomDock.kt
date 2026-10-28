@@ -18,6 +18,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
@@ -51,13 +53,17 @@ internal fun BottomDock(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
+        val haptics = LocalHapticFeedback.current
         items.forEachIndexed { index, item ->
           val isSelected = index == selectedIndex
           if (isSelected) {
             Row(
               Modifier.clip(RoundedCornerShape(20.dp))
                 .background(MaterialTheme.colorScheme.primaryContainer)
-                .clickable { onSelect(index) }
+                .clickable {
+                  haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                  onSelect(index)
+                }
                 .padding(horizontal = 14.dp, vertical = 8.dp),
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(6.dp),

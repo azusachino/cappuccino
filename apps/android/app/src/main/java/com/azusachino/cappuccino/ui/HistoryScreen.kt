@@ -124,11 +124,11 @@ internal fun HistoryScreen(
           if (saved.messageCount == 1) "1 message" else "${saved.messageCount} messages"
 
         Surface(
-          shape = RoundedCornerShape(12.dp),
-          color = if (isCurrent) colors.accent.copy(alpha = 0.12f) else colors.card2,
+          shape = RoundedCornerShape(16.dp),
+          color = if (isCurrent) colors.accent.copy(alpha = 0.12f) else colors.card,
           border =
             BorderStroke(
-              1.dp,
+              GlassDefaults.RimStrokeWidth,
               if (isCurrent) colors.accent.copy(alpha = 0.5f) else colors.line,
             ),
           onClick = { onOpenSaved(saved.agent.machineId, saved.conversationId) },

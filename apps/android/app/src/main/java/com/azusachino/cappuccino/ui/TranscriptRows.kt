@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -314,8 +316,8 @@ internal fun JumpToLatest(newOutput: Boolean, modifier: Modifier = Modifier, onC
   Box(
     modifier
       .size(40.dp)
-      .background(MaterialTheme.colorScheme.background)
-      .border(2.dp, if (newOutput) colors.accent else colors.lineStrong)
+      .shadow(2.dp, CircleShape)
+      .background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape)
       .clickable(role = Role.Button, onClick = onClick)
       .semantics { contentDescription = if (newOutput) "Jump to new output" else "Jump to latest" }
       .testTag("jumpToLatest"),
@@ -327,6 +329,14 @@ internal fun JumpToLatest(newOutput: Boolean, modifier: Modifier = Modifier, onC
       modifier = Modifier.size(20.dp),
       tint = if (newOutput) colors.accent else colors.body,
     )
+    if (newOutput) {
+      Box(
+        Modifier.align(Alignment.TopEnd)
+          .size(10.dp)
+          .background(colors.accent, CircleShape)
+          .clearAndSetSemantics {}
+      )
+    }
   }
 }
 
