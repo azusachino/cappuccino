@@ -3,6 +3,7 @@ package com.azusachino.cappuccino.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -37,6 +38,7 @@ internal fun SettingsScreen(
   onReloadMachines: () -> Unit,
   connections: List<SettingsConnection>,
   onConnectionDetails: (String) -> Unit,
+  contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
   val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }

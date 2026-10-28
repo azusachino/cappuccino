@@ -49,6 +49,7 @@ internal fun HistoryScreen(
   onOpenSaved: (UUID, String) -> Unit,
   onDeleteSaved: (UUID, String) -> Unit,
   modifier: Modifier = Modifier,
+  contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
   val colors = MaterialTheme.appColors
   var pendingDelete by rememberSaveable { mutableStateOf<String?>(null) }
@@ -93,7 +94,13 @@ internal fun HistoryScreen(
   } else {
     LazyColumn(
       modifier = modifier.fillMaxSize(),
-      contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+      contentPadding =
+        PaddingValues(
+          start = 16.dp,
+          end = 16.dp,
+          top = contentPadding.calculateTopPadding() + 12.dp,
+          bottom = contentPadding.calculateBottomPadding() + 12.dp,
+        ),
       verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
       item(key = "history_header") {

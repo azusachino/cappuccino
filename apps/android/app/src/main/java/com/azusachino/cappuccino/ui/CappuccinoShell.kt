@@ -4,37 +4,34 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -42,8 +39,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -67,44 +62,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
-import com.azusachino.cappuccino.core.AgentRow
-import com.azusachino.cappuccino.core.COMMON_SLASH_COMMANDS
-import com.azusachino.cappuccino.core.ConversationPart
-import com.azusachino.cappuccino.core.ConversationTurn
-import com.azusachino.cappuccino.core.OutputRow
-import com.azusachino.cappuccino.core.PromptCard
-import com.azusachino.cappuccino.core.TranscriptSegment
-import com.azusachino.cappuccino.core.disallowedSlashCommandReason
-import com.azusachino.cappuccino.core.matchingSlashCommands
-import com.azusachino.cappuccino.core.slashCommand
-import com.azusachino.cappuccino.core.slashCommandWarning
-import com.azusachino.cappuccino.core.transcriptSegments
-import com.azusachino.cappuccino.core.visibleInChat
 import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ConnectionState
-import com.azusachino.cappuccino.io.SessionStats
 import com.azusachino.cappuccino.io.agentDraftKey
 import com.azusachino.cappuccino.io.agentSendKey
 import com.azusachino.cappuccino.io.canMutate
@@ -191,6 +165,9 @@ fun CappuccinoScreen(
   }
   val machineTreeState = rememberLazyListState()
   val hazeState = rememberHazeState()
+  // Floating islands: lists scroll beneath them, so their content padding clears both.
+  val chromeTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 76.dp
+  val dockBottom = 116.dp
   val mainScreenState = rememberSaveableStateHolder()
   val composerState = rememberSaveableStateHolder()
   val readerState = rememberSaveableStateHolder()
@@ -468,14 +445,18 @@ fun CappuccinoScreen(
   }
 
   mainScreenState.SaveableStateProvider("main-screen") {
-    Scaffold(
-      topBar = {
+    Scaffold(containerColor = MaterialTheme.colorScheme.background) { contentPadding ->
+      Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
         Column(
-          Modifier.fillMaxWidth()
+          Modifier.align(Alignment.TopCenter)
+            .fillMaxWidth()
+            .zIndex(2f)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .statusBarsPadding()
             .glassBackdrop(
               hazeState = hazeState,
               backgroundColor = MaterialTheme.colorScheme.background,
-              shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
+              shape = RoundedCornerShape(28.dp),
             )
         ) {
           TopAppBar(
@@ -600,36 +581,31 @@ fun CappuccinoScreen(
             },
           )
         }
-      },
-      bottomBar = {
-        if (selected == null)
-          Column(
-            Modifier.fillMaxWidth()
-              .glassBackdrop(
-                hazeState = hazeState,
-                backgroundColor = MaterialTheme.colorScheme.background,
-                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-              )
-          ) {
-            NavigationBar(containerColor = androidx.compose.ui.graphics.Color.Transparent) {
-              listOf(Destination.MACHINES, Destination.HISTORY, Destination.SETTINGS).forEach { item
-                ->
-                NavigationBarItem(
-                  selected = destination == item,
-                  onClick = {
-                    actions.selectAgent(null)
-                    destination = item
-                  },
-                  icon = { Icon(painterResource(item.icon), contentDescription = null) },
-                  label = { Text(stringResource(item.title)) },
-                )
-              }
-            }
-          }
-      },
-    ) { contentPadding ->
+      }
+      if (selected == null) {
+        BottomDock(
+          items =
+            listOf(Destination.MACHINES, Destination.HISTORY, Destination.SETTINGS).map {
+              DockItem(it.icon, stringResource(it.title))
+            },
+          selectedIndex =
+            when (destination) {
+              Destination.MACHINES -> 0
+              Destination.HISTORY -> 1
+              else -> 2
+            },
+          onSelect = { index ->
+            actions.selectAgent(null)
+            destination =
+              listOf(Destination.MACHINES, Destination.HISTORY, Destination.SETTINGS)[index]
+          },
+          hazeState = hazeState,
+          backgroundColor = MaterialTheme.colorScheme.background,
+          modifier = Modifier.zIndex(2f).navigationBarsPadding().padding(bottom = 10.dp),
+        )
+      }
       Column(
-        Modifier.fillMaxSize().hazeSource(hazeState).padding(contentPadding).imePadding(),
+        Modifier.fillMaxSize().hazeSource(hazeState).navigationBarsPadding().imePadding(),
         verticalArrangement = Arrangement.spacedBy(if (selected == null) 12.dp else 4.dp),
       ) {
         when {
@@ -731,11 +707,11 @@ fun CappuccinoScreen(
                         state.conversationSource == null &&
                         restoringReadingPosition
                     ) {
-                      Box(Modifier.fillMaxSize()) {
+                      Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                         Text("Loading history…", Modifier.padding(16.dp))
                       }
                     } else if (turns.isNotEmpty()) {
-                      Box(Modifier.fillMaxSize()) {
+                      Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                         LazyColumn(
                           state = outputListState,
                           modifier =
@@ -792,6 +768,7 @@ fun CappuccinoScreen(
                           Modifier.fillMaxSize()
                             .padding(horizontal = 16.dp)
                             .testTag("recentOutputList"),
+                        contentPadding = PaddingValues(top = chromeTop, bottom = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                       ) {
                         items(collapsedRows, key = { "row:${it.key}" }) { row ->
@@ -917,6 +894,7 @@ fun CappuccinoScreen(
                 savedHistoryAction?.invoke(machineId, convoId)
               },
               onDeleteSaved = actions::deleteSavedConversation,
+              contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
             )
           }
           destination == Destination.SETTINGS -> {
@@ -924,6 +902,7 @@ fun CappuccinoScreen(
               themeMode = state.themeMode,
               onSelectTheme = actions::setThemeMode,
               onReloadMachines = actions::refreshAll,
+              contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
               connections =
                 state.profiles.map { profile ->
                   SettingsConnection(
@@ -974,7 +953,8 @@ fun CappuccinoScreen(
 
             if (state.profiles.isEmpty()) {
               Box(
-                modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp),
+                modifier =
+                  Modifier.fillMaxWidth().weight(1f).padding(top = chromeTop).padding(24.dp),
                 contentAlignment = Alignment.Center,
               ) {
                 Column(
@@ -997,6 +977,7 @@ fun CappuccinoScreen(
               LazyColumn(
                 state = machineTreeState,
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
               ) {
                 items(state.profiles, key = { it.id }) { profile ->
@@ -1207,190 +1188,6 @@ fun CappuccinoScreen(
   }
 }
 
-private fun collapseOutputRows(rows: List<OutputRow>): List<OutputRow> {
-  if (rows.isEmpty()) return emptyList()
-  val result = mutableListOf<OutputRow>()
-  for (row in rows) {
-    if (row.gap) {
-      result += row
-      continue
-    }
-    val currentParsed = TranscriptParser.parseLine(row.text)
-    if (currentParsed.role == TranscriptRole.STATUS) {
-      if (currentParsed.text.isBlank()) continue
-      // Chrome/status lines (working · ..., [hh:mm:ss] ... running) represent transient TUI state.
-      // Remove any previously recorded status lines anywhere in the transcript to keep only the
-      // latest.
-      result.removeAll {
-        !it.gap && TranscriptParser.parseLine(it.text).role == TranscriptRole.STATUS
-      }
-      result += row
-      continue
-    }
-
-    if (currentParsed.role == TranscriptRole.USER) {
-      // If the last non-gap row was already the identical user prompt, collapse it
-      val lastNonGap = result.lastOrNull { !it.gap }
-      if (lastNonGap != null) {
-        val lastParsed = TranscriptParser.parseLine(lastNonGap.text)
-        if (lastParsed.role == TranscriptRole.USER && lastParsed.text == currentParsed.text) {
-          result[result.lastIndexOf(lastNonGap)] = row
-          continue
-        }
-      }
-    }
-
-    val last = result.lastOrNull()
-    if (last != null && !last.gap && shouldCollapseStreamTails(last.text, row.text)) {
-      result[result.lastIndex] = row
-    } else {
-      result += row
-    }
-  }
-  return result
-}
-
-private fun shouldCollapseStreamTails(prevText: String, currentText: String): Boolean {
-  if (prevText == currentText) return true
-  val p = prevText.trim()
-  val c = currentText.trim()
-  if (p.isEmpty() || c.isEmpty()) return false
-  if (c.startsWith(p) || p.startsWith(c)) return true
-  val pParsed = TranscriptParser.parseLine(p)
-  val cParsed = TranscriptParser.parseLine(c)
-  if (pParsed.role == TranscriptRole.STATUS && cParsed.role == TranscriptRole.STATUS) return true
-  if (pParsed.role == TranscriptRole.TOOL && cParsed.role == TranscriptRole.TOOL) {
-    if (pParsed.toolName == cParsed.toolName && pParsed.toolName != null) return true
-  }
-  return false
-}
-
-@Composable
-private fun OutputItemRow(row: OutputRow, onInspect: () -> Unit = {}) {
-  if (row.gap) {
-    // Gap markers are plain centered lines on the background (region 5d).
-    Text(
-      row.text,
-      modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-      textAlign = TextAlign.Center,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
-      style = MaterialTheme.typography.labelSmall,
-    )
-    return
-  }
-
-  val parsed = remember(row.text) { TranscriptParser.parseLine(row.text) }
-
-  when (parsed.role) {
-    TranscriptRole.USER -> {
-      Box(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        contentAlignment = Alignment.CenterEnd,
-      ) {
-        Surface(
-          shape = MaterialTheme.shapes.large,
-          color = MaterialTheme.colorScheme.primaryContainer,
-        ) {
-          Text(
-            parsed.text,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
-            style = MaterialTheme.typography.bodyMedium,
-          )
-        }
-      }
-    }
-    TranscriptRole.TOOL -> {
-      Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-      ) {
-        Text(
-          parsed.toolName ?: "tool",
-          color = MaterialTheme.colorScheme.onSurface,
-          fontFamily = JetBrainsMono,
-          style = MaterialTheme.typography.bodySmall,
-        )
-        parsed.toolArg?.let { arg ->
-          Text(
-            "($arg)",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontFamily = JetBrainsMono,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-          )
-        }
-      }
-    }
-    TranscriptRole.STATUS -> {
-      if (parsed.text.isNotBlank()) {
-        Row(
-          modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-          // Small semantic-color status dot; its visuals carry no semantics of their own.
-          Box(
-            modifier =
-              Modifier.size(6.dp)
-                .background(
-                  agentStatusStyle(
-                      "working",
-                      MaterialTheme.colorScheme.background.luminance() < 0.5f,
-                    )
-                    .background,
-                  CircleShape,
-                )
-                .clearAndSetSemantics {}
-          )
-          Text(
-            parsed.text,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 2,
-          )
-        }
-      }
-    }
-    TranscriptRole.AGENT -> {
-      if (parsed.text.isNotBlank()) {
-        Surface(
-          shape = MaterialTheme.shapes.large,
-          color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-          Column(Modifier.padding(12.dp)) {
-            MessageBody(parsed.text, markdown = false, onInspect = onInspect)
-          }
-        }
-      }
-    }
-  }
-}
-
-@Composable
-private fun AgentItemCard(
-  agent: AgentRow,
-  onClick: () -> Unit,
-) {
-  Surface(
-    onClick = onClick,
-    modifier = Modifier.fillMaxWidth(),
-    shape = MaterialTheme.shapes.medium,
-  ) {
-    ListItem(
-      headlineContent = { Text(agent.label, fontWeight = FontWeight.SemiBold) },
-      supportingContent = {
-        Text(
-          listOfNotNull(agent.agent.replaceFirstChar { it.uppercase() }, agent.branch)
-            .joinToString(" · ")
-        )
-      },
-      leadingContent = { AgentAvatar(agent.agent, 40.dp) },
-      trailingContent = { StatusBadge(agent.status) },
-    )
-  }
-}
-
 private fun ConnectionState.statusText(): String =
   when (this) {
     ConnectionState.Disconnected -> "Not connected"
@@ -1399,684 +1196,3 @@ private fun ConnectionState.statusText(): String =
     ConnectionState.Recovering -> "Recovering"
     is ConnectionState.Error -> "Connection error"
   }
-
-@Composable
-fun PromptCardView(
-  prompt: PromptCard,
-  onSelectOption: (Int, String) -> Unit,
-  onCancel: () -> Unit,
-  modifier: Modifier = Modifier,
-  enabled: Boolean = true,
-) {
-  // Approval stays prominent as a default ElevatedCard — no custom border (region 6).
-  ElevatedCard(modifier = modifier.fillMaxWidth()) {
-    Column(
-      modifier =
-        Modifier.padding(16.dp).heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text(text = prompt.title, style = MaterialTheme.typography.titleMedium)
-        Surface(
-          shape = CircleShape,
-          color = MaterialTheme.colorScheme.secondaryContainer,
-        ) {
-          Text(
-            text = prompt.type.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-          )
-        }
-      }
-
-      prompt.message?.let { msg ->
-        Text(
-          text = msg,
-          style = MaterialTheme.typography.bodyMedium,
-          color = MaterialTheme.colorScheme.onSurface,
-        )
-      }
-
-      prompt.command?.let { cmd ->
-        // Command on a tonal monospace block, no border.
-        Surface(
-          shape = MaterialTheme.shapes.small,
-          color = MaterialTheme.colorScheme.surfaceContainer,
-          modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp),
-        ) {
-          Text(
-            text = cmd,
-            fontFamily = JetBrainsMono,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(12.dp).horizontalScroll(rememberScrollState()),
-          )
-        }
-      }
-
-      if (!enabled) Text("This bridge can't accept answers.")
-      if (prompt.options.isNotEmpty()) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          prompt.options.forEachIndexed { index, option ->
-            FilledTonalButton(
-              onClick = { onSelectOption(index, option.id) },
-              enabled = enabled,
-              modifier = Modifier.fillMaxWidth(),
-            ) {
-              Column(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                horizontalAlignment = Alignment.Start,
-              ) {
-                Text(
-                  text = "${index + 1}. ${option.label}",
-                  style = MaterialTheme.typography.bodyMedium,
-                  fontWeight = FontWeight.SemiBold,
-                )
-                option.description?.let { desc ->
-                  Text(
-                    text = desc,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
-                }
-              }
-            }
-          }
-        }
-      }
-
-      TextButton(
-        onClick = onCancel,
-        enabled = enabled,
-        modifier = Modifier.align(Alignment.End),
-      ) {
-        Text("Cancel")
-      }
-    }
-  }
-}
-
-@Composable
-fun PromptInputBar(
-  /**
-   * Sends the draft; the flag is true once the owner confirmed the agent command it starts with.
-   */
-  onSend: (String, Boolean) -> Unit,
-  enabled: Boolean,
-  modifier: Modifier = Modifier,
-  placeholder: String = "Message agent…",
-  onStop: (() -> Unit)? = null,
-  model: String? = null,
-  thinkingLevel: String? = null,
-  draft: String = "",
-  onDraftChange: ((String) -> Unit)? = null,
-  pending: Boolean = false,
-  outcome: String? = null,
-) {
-  var input by rememberSaveable(draft) { mutableStateOf(draft) }
-  LaunchedEffect(draft) { if (input != draft) input = draft }
-  var commandsOpen by remember { mutableStateOf(false) }
-  var historyOpen by remember { mutableStateOf(false) }
-  var isFocused by remember { mutableStateOf(false) }
-  var promptHistory by rememberSaveable { mutableStateOf(listOf<String>()) }
-  // An agent command can cost far more than a message; it waits here, draft kept, until confirmed.
-  var confirmingCommand by rememberSaveable { mutableStateOf<String?>(null) }
-  confirmingCommand?.let { command ->
-    val disallowedReason = disallowedSlashCommandReason(command)
-    if (disallowedReason != null) {
-      AlertDialog(
-        onDismissRequest = { confirmingCommand = null },
-        title = { Text("Command Not Supported") },
-        text = { Text(disallowedReason) },
-        confirmButton = { TextButton(onClick = { confirmingCommand = null }) { Text("OK") } },
-      )
-    } else {
-      AlertDialog(
-        onDismissRequest = { confirmingCommand = null },
-        title = { Text("Run $command?") },
-        text = { Text(slashCommandWarning(command)) },
-        confirmButton = {
-          TextButton(
-            enabled = !pending,
-            onClick = {
-              val textToSend =
-                if (input.isNotBlank() && slashCommand(input) == command) input else command
-              if (promptHistory.firstOrNull() != textToSend) {
-                promptHistory =
-                  (listOf(textToSend) + promptHistory.filter { it != textToSend }).take(20)
-              }
-              onSend(textToSend, true)
-              input = textToSend
-              confirmingCommand = null
-            },
-          ) {
-            Text("Run $command")
-          }
-        },
-        dismissButton = { TextButton(onClick = { confirmingCommand = null }) { Text("Cancel") } },
-      )
-    }
-  }
-  val colors = MaterialTheme.appColors
-  val canSend = enabled && !pending && input.isNotBlank()
-  val slashSuggestions = remember(input) { matchingSlashCommands(input) }
-
-  Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-    if (pending || outcome != null)
-      Text(
-        if (pending) "Sending; not yet confirmed by the agent." else outcome.orEmpty(),
-        Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-        style = MaterialTheme.typography.labelSmall,
-        color = colors.muted,
-      )
-    // 1. Slash command suggestions overlay (when typing '/')
-    if (slashSuggestions.isNotEmpty() && isFocused) {
-      Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = colors.card,
-        border = BorderStroke(1.dp, colors.line),
-        shadowElevation = 3.dp,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-      ) {
-        Column(
-          Modifier.padding(vertical = 4.dp)
-            .heightIn(max = 200.dp)
-            .verticalScroll(rememberScrollState())
-        ) {
-          slashSuggestions.forEach { item ->
-            Row(
-              Modifier.fillMaxWidth()
-                .clickable {
-                  input = "${item.command} "
-                  onDraftChange?.invoke(input)
-                }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-              verticalAlignment = Alignment.CenterVertically,
-            ) {
-              Text(
-                item.command,
-                style =
-                  MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                color = colors.accent,
-              )
-              Spacer(Modifier.widthIn(min = 8.dp))
-              Text(
-                item.description,
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-              )
-            }
-          }
-        }
-      }
-    }
-
-    // 2. The input pill: one quiet glass surface; content first, chrome underneath.
-    val pillShape = RoundedCornerShape(24.dp)
-    Column(
-      Modifier.fillMaxWidth()
-        .glassSurface(
-          shape = pillShape,
-          rimStroke = if (isFocused) 0.dp else GlassDefaults.RimStrokeWidth,
-        )
-        .then(
-          if (isFocused) Modifier.border(1.dp, colors.accent.copy(alpha = 0.5f), pillShape)
-          else Modifier
-        )
-        .clip(pillShape)
-    ) {
-      Row(
-        Modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp, top = 12.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        androidx.compose.foundation.text.BasicTextField(
-          value = input,
-          onValueChange = {
-            input = it
-            onDraftChange?.invoke(it)
-          },
-          modifier =
-            Modifier.weight(1f).onFocusChanged { isFocused = it.isFocused }.testTag("promptInput"),
-          enabled = enabled,
-          maxLines = 6,
-          textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
-          cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.accent),
-          decorationBox = { field ->
-            Box {
-              if (input.isEmpty())
-                Text(
-                  if (enabled) placeholder else "Not connected",
-                  style = MaterialTheme.typography.bodyMedium,
-                  color = colors.faint,
-                )
-              field()
-            }
-          },
-        )
-        if (input.isNotEmpty()) {
-          IconButton(
-            onClick = {
-              input = ""
-              onDraftChange?.invoke("")
-            },
-            modifier = Modifier.size(28.dp),
-          ) {
-            Icon(
-              painterResource(com.azusachino.cappuccino.R.drawable.ic_close),
-              contentDescription = "Clear draft",
-              modifier = Modifier.size(16.dp),
-              tint = colors.muted,
-            )
-          }
-        }
-      }
-
-      Row(
-        Modifier.fillMaxWidth().padding(start = 10.dp, end = 12.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        // Commands (slash picker, one-tap continue/compact, new session)
-        Box {
-          IconButton(onClick = { commandsOpen = true }, modifier = Modifier.size(36.dp)) {
-            Icon(
-              painterResource(com.azusachino.cappuccino.R.drawable.ic_grid),
-              contentDescription = "Commands",
-              modifier = Modifier.size(18.dp),
-              tint = colors.muted,
-            )
-          }
-          DropdownMenu(expanded = commandsOpen, onDismissRequest = { commandsOpen = false }) {
-            if (enabled && !pending) {
-              DropdownMenuItem(
-                text = { Text("Continue") },
-                onClick = {
-                  commandsOpen = false
-                  onSend("continue", false)
-                },
-              )
-              DropdownMenuItem(
-                text = { Text("Compact context") },
-                onClick = {
-                  commandsOpen = false
-                  confirmingCommand = "/compact"
-                },
-              )
-            }
-            COMMON_SLASH_COMMANDS.forEach { item ->
-              DropdownMenuItem(
-                text = {
-                  Column {
-                    Text(
-                      item.command,
-                      style =
-                        MaterialTheme.typography.labelMedium.copy(
-                          fontFamily = FontFamily.Monospace
-                        ),
-                      color = colors.accent,
-                    )
-                    Text(
-                      item.description,
-                      style = MaterialTheme.typography.bodySmall,
-                      color = colors.muted,
-                    )
-                  }
-                },
-                onClick = {
-                  commandsOpen = false
-                  input = "${item.command} "
-                },
-              )
-            }
-          }
-        }
-
-        // Prompt history
-        if (promptHistory.isNotEmpty()) {
-          Box {
-            IconButton(onClick = { historyOpen = true }, modifier = Modifier.size(36.dp)) {
-              Icon(
-                painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
-                contentDescription = "Prompt history",
-                modifier = Modifier.size(18.dp),
-                tint = colors.muted,
-              )
-            }
-            DropdownMenu(expanded = historyOpen, onDismissRequest = { historyOpen = false }) {
-              Text(
-                "Recent prompts",
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.muted,
-              )
-              promptHistory.take(8).forEach { item ->
-                DropdownMenuItem(
-                  text = {
-                    Text(
-                      item,
-                      maxLines = 1,
-                      overflow = TextOverflow.Ellipsis,
-                      style = MaterialTheme.typography.bodySmall,
-                    )
-                  },
-                  onClick = {
-                    historyOpen = false
-                    input = item
-                    onDraftChange?.invoke(item)
-                  },
-                )
-              }
-            }
-          }
-        }
-
-        if (model != null)
-          Text(
-            listOfNotNull(shortModel(model), thinkingLevel).joinToString(" · "),
-            Modifier.padding(horizontal = 6.dp).widthIn(max = 160.dp).testTag("composerModelLabel"),
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.muted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
-
-        Spacer(Modifier.weight(1f))
-
-        if (onStop != null)
-          IconButton(onClick = onStop, modifier = Modifier.size(36.dp).testTag("stopAgent")) {
-            Box(
-              Modifier.size(18.dp)
-                .background(MaterialTheme.colorScheme.error, RoundedCornerShape(4.dp))
-                .semantics { contentDescription = "Stop" }
-            )
-          }
-
-        val send: () -> Unit = {
-          if (input.isNotBlank()) {
-            val trimmed = input.trim()
-            if (promptHistory.firstOrNull() != trimmed) {
-              promptHistory = (listOf(trimmed) + promptHistory.filter { it != trimmed }).take(20)
-            }
-            val command = slashCommand(input)
-            if (command != null) {
-              confirmingCommand = command
-            } else {
-              onSend(input, false)
-            }
-          }
-        }
-        if (pending) {
-          Box(
-            Modifier.size(40.dp).background(colors.card2, CircleShape).testTag("pendingIndicator"),
-            contentAlignment = Alignment.Center,
-          ) {
-            Box(Modifier.size(14.dp).background(colors.muted, RoundedCornerShape(3.dp)))
-          }
-        } else {
-          Box(
-            Modifier.size(40.dp)
-              .background(
-                if (canSend) MaterialTheme.colorScheme.primary else colors.card2,
-                CircleShape,
-              )
-              .clickable(enabled = canSend) { send() }
-              .testTag("sendPrompt"),
-            contentAlignment = Alignment.Center,
-          ) {
-            Icon(
-              painterResource(com.azusachino.cappuccino.R.drawable.ic_arrow_downward),
-              modifier = Modifier.size(18.dp).rotate(180f),
-              contentDescription = "Send",
-              tint = if (canSend) MaterialTheme.colorScheme.onPrimary else colors.faint,
-            )
-          }
-        }
-      }
-    }
-  }
-}
-
-/** A model id as people say it: "opus 5.5" for `claude-opus-5-5`. */
-internal fun shortModel(model: String): String =
-  model.removePrefix("claude-").replace(Regex("-(\\d+)-(\\d+)$"), " $1.$2")
-
-/** Under the message box: how full the context is and active rate limit quotas. */
-@Composable
-internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
-  val colors = MaterialTheme.appColors
-  val tokens = stats.contextTokens
-  val window = stats.contextWindow ?: defaultContextWindow(stats.model, agent)
-  val percent =
-    when {
-      tokens != null -> (tokens * 100 / window).coerceIn(0, 100).toInt()
-      else ->
-        stats.rateLimits?.windows?.firstOrNull { it.window == "session" }?.usedPercent?.toInt()
-    }
-
-  val modelLabel =
-    stats.model?.let { shortModel(it) }
-      ?: agent?.let {
-        if (it.lowercase() in setOf("agy", "antigravity", "antigravity-cli")) "gemini" else null
-      }
-  val modelParts = listOfNotNull(modelLabel, stats.thinkingLevel, stats.rateLimits?.planTier)
-
-  val rateLimitWindows =
-    stats.rateLimits?.windows?.filterNot {
-      it.window == "session" && percent != null && tokens == null
-    } ?: emptyList()
-
-  if (percent == null && modelParts.isEmpty() && rateLimitWindows.isEmpty()) return
-
-  Row(
-    Modifier.fillMaxWidth()
-      .horizontalScroll(rememberScrollState())
-      .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    if (percent != null) {
-      Box(
-        Modifier.size(width = 52.dp, height = 4.dp)
-          .background(colors.card2, RoundedCornerShape(2.dp))
-          .clip(RoundedCornerShape(2.dp))
-      ) {
-        Box(
-          Modifier.fillMaxHeight()
-            .fillMaxWidth(percent / 100f)
-            .background(
-              when {
-                percent >= 85 -> MaterialTheme.colorScheme.error
-                percent >= 70 -> colors.warn
-                else -> colors.accent
-              }
-            )
-        )
-      }
-      Text(
-        if (tokens != null) "$percent% · ${formatTokens(tokens)} / ${formatTokens(window)}"
-        else "$percent%",
-        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-        color =
-          when {
-            percent >= 85 -> MaterialTheme.colorScheme.error
-            percent >= 70 -> colors.warn
-            else -> colors.text
-          },
-      )
-    }
-
-    stats.cachePercent?.let { cache ->
-      Text(
-        "cache $cache%",
-        style = MaterialTheme.typography.labelSmall,
-        color = colors.muted,
-      )
-    }
-
-    if (modelParts.isNotEmpty()) {
-      if (percent != null || tokens != null) {
-        Text("·", style = MaterialTheme.typography.labelSmall, color = colors.faint)
-      }
-      Text(
-        modelParts.joinToString(" · "),
-        style = MaterialTheme.typography.labelSmall,
-        color = colors.muted,
-      )
-    }
-
-    for (win in rateLimitWindows) {
-      Text("·", style = MaterialTheme.typography.labelSmall, color = colors.faint)
-      val prefix = if (win.window == "quota") stats.rateLimits?.provider ?: "quota" else win.window
-      val resetText =
-        win.resetsIn?.let { if (it.startsWith("~") || it.startsWith("↻")) " $it" else " ~$it" }
-          ?: ""
-      val label = "$prefix: ${win.usedPercent}%$resetText"
-      val winColor =
-        when {
-          win.usedPercent >= 85 -> MaterialTheme.colorScheme.error
-          win.usedPercent >= 70 -> colors.warn
-          else -> colors.muted
-        }
-      Text(
-        label,
-        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-        color = winColor,
-      )
-    }
-  }
-}
-
-internal fun defaultContextWindow(model: String?, agent: String? = null): Long {
-  val m = model?.lowercase()
-  val a = agent?.lowercase()
-  return when {
-    m != null && "gemini" in m -> 1_000_000L
-    m != null && "deepseek" in m -> 64_000L
-    m != null && ("gpt-4" in m || "o1" in m || "o3" in m) -> 128_000L
-    a in setOf("agy", "antigravity", "antigravity-cli") -> 1_000_000L
-    else -> 200_000L
-  }
-}
-
-/** 1234 as "1.2K", 200000 as "200K", 1234567 as "1.2M". */
-internal fun formatTokens(count: Long): String =
-  when {
-    count >= 1_000_000 -> String.format(java.util.Locale.ROOT, "%.1fM", count / 1_000_000.0)
-    count >= 1_000 -> String.format(java.util.Locale.ROOT, "%.1fK", count / 1_000.0)
-    else -> count.toString()
-  }.replace(".0", "")
-
-@Composable
-fun ConversationTurnRow(
-  turn: ConversationTurn,
-  modifier: Modifier = Modifier,
-  timeZone: ZoneId = ZoneId.systemDefault(),
-  assistantLabel: String = "Assistant",
-  onInspect: () -> Unit = {},
-  showToolsInline: Boolean = true,
-  onTextSizeChanged: (() -> Unit)? = null,
-  newest: Boolean = false,
-) {
-  val textModifier =
-    remember(onTextSizeChanged) {
-      if (onTextSizeChanged == null) Modifier else Modifier.onSizeChanged { onTextSizeChanged() }
-    }
-  val isUser = turn.role.lowercase() == "user"
-  val parts = buildList {
-    turn.text?.takeIf { it.isNotBlank() }?.let { add(ConversationPart.Text(it)) }
-    addAll(turn.parts)
-  }
-  val shownParts = parts.filter {
-    it.visibleInChat || (showToolsInline && it is ConversationPart.ToolCall)
-  }
-  val segments = remember(shownParts) { transcriptSegments(shownParts) }
-  if (segments.isEmpty()) return
-  // Telegram grouping: prose blocks in one turn share a bubble shape; inner meeting
-  // corners collapse so consecutive blocks read as one lump with soft seams.
-  val proseSlots =
-    remember(segments, isUser) {
-      var n = 0
-      segments.map { seg ->
-        if (seg is TranscriptSegment.Prose && seg.part is ConversationPart.Text && !isUser) {
-          n++
-          n - 1
-        } else null
-      }
-    }
-  val proseCount = remember(proseSlots) { proseSlots.filterNotNull().size }
-  fun bubbleShape(slot: Int): RoundedCornerShape {
-    val outer = 18.dp
-    val seam = 6.dp
-    return when {
-      proseCount == 1 -> RoundedCornerShape(outer)
-      slot == 0 ->
-        RoundedCornerShape(topStart = outer, topEnd = outer, bottomEnd = seam, bottomStart = seam)
-      slot == proseCount - 1 ->
-        RoundedCornerShape(topStart = seam, topEnd = seam, bottomEnd = outer, bottomStart = outer)
-      else -> RoundedCornerShape(seam)
-    }
-  }
-  Column(
-    modifier.fillMaxWidth().semantics {
-      contentDescription = if (isUser) "You" else assistantLabel
-    },
-    verticalArrangement = Arrangement.spacedBy(10.dp),
-  ) {
-    segments.forEachIndexed { index, segment ->
-      key(turn.id, index) {
-        when (segment) {
-          is TranscriptSegment.Activity -> ActivityGroup(segment.parts, newest, onInspect)
-          is TranscriptSegment.Prose -> {
-            val part = segment.part
-            if (part is ConversationPart.ResponseStatus) ResponseStatusRow(part)
-            // Thinking and tool calls arrive grouped as activity, never as prose.
-            else if (part !is ConversationPart.Text) Unit
-            else if (isUser)
-              UserPromptRow(
-                body = {
-                  MessageBody(
-                    part.text,
-                    modifier = textModifier,
-                    markdown = false,
-                    onInspect = onInspect,
-                    transcript = true,
-                  )
-                },
-                time =
-                  turn.timestamp
-                    ?.takeIf { index == 0 }
-                    ?.let {
-                      java.time.Instant.parse(it)
-                        .atZone(timeZone)
-                        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-                    },
-                timeDescription = turn.timestamp?.let { formatConversationTimestamp(it, timeZone) },
-              )
-            else {
-              val slot = proseSlots[index] ?: 0
-              val colors = MaterialTheme.appColors
-              Box(
-                Modifier.fillMaxWidth()
-                  .background(colors.card, bubbleShape(slot))
-                  .padding(horizontal = 12.dp, vertical = 8.dp)
-              ) {
-                MessageBody(
-                  part.text,
-                  onInspect = onInspect,
-                  modifier = textModifier,
-                  transcript = true,
-                )
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
