@@ -83,6 +83,15 @@ Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, op
 
 `serve.auto_apply` defaults to `true`. On `start` and `status`, the binary checks `tailscale serve status` and may apply a Serve entry if one is missing. This can mutate the machine's Tailscale Serve configuration. Set the config value to `false` or `CAPP_BRIDGE_SERVE_AUTO_APPLY=0` to prevent all Tailscale commands; accepted false spellings are `0`, `false`, `no`, and `off` (case-insensitive), and the only true spelling is `true`. Invalid values fail closed. Disabled mode prints the manual command without running it.
 
+### iroh transport (optional, off by default)
+
+`iroh.enabled` (default `false`, strict boolean) starts an iroh endpoint beside the loopback listener. When false no endpoint is created. The phone reaches the same routes through iroh ALPN `cappuccino/1`, admitted only for EndpointIds on the allowlist. ALPN `cappuccino-pair/1` admits unknown ids for one token exchange. `auth.pair_token_ttl_secs` (default `600`, range 1 to 3600) sets the token lifetime. The secret key (`iroh-secret.key`) and allowlist (`iroh-allowlist.json`) live in the data dir with mode 0600.
+
+- `cappuccino-bridge pair` prints a QR and the payload. It asks the running bridge over the owner-only admin socket `iroh-admin.sock` in the data dir. Start the bridge first, or the command reports that it is not running.
+- `cappuccino-bridge pair --revoke <EndpointId>` removes the id and closes its live tunnel connections.
+- Payload format v1, compact JSON: `{"v":1,"endpoint_id":"<id>","relay":"<url>|null","addrs":["ip:port"],"token":"<64 hex>"}`. Unknown `v` values must be rejected by clients.
+- Pairing tokens and secret keys are never logged.
+
 ## Agent integration prerequisite
 
 Prepare Herdr's integration for each agent before using Cappuccino's canonical

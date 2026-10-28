@@ -17,6 +17,7 @@ Native phone clients reach selected machine-local Herdr APIs through a separate 
 - `POST /api/agents/{sessionId}/control`: `interrupt` sends Escape; `new_session` types the agent's `/new` command and is refused while the agent is working or blocked.
 - `GET /api/transcript`: resolves the Herdr-reported session path and fails closed unless it is inside the canonical session store.
 - `WS /api/stream`: the read-only pane-line stream.
+- `GET /pair`: only when `iroh.enabled` is true (otherwise 404). Issues a fresh single-use pairing token on each load and renders it as an inline-SVG QR code plus the copy-paste payload. Loopback only, like every route; it is reachable from the tailnet only through Tailscale Serve.
 
 The prompt and control routes type into an existing pane. They do not start or stop a process, use Pi's queue API, or prove that a phone transcript matches a live canonical session.
 

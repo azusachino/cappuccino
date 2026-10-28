@@ -8,6 +8,7 @@ mod compression;
 mod config;
 mod conversation;
 mod herdr;
+mod iroh_transport;
 mod lifecycle;
 mod modules;
 mod mutation;
@@ -37,6 +38,7 @@ fn main() {
         {
             run_server_with_runtime(args.get(1).cloned())
         }
+        Some("pair") => iroh_transport::run_pair_command(&args[1..]),
         Some("start" | "stop" | "status" | "logs") if args.len() == 1 => {
             lifecycle::execute(args[0].as_str())
         }
@@ -76,11 +78,24 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
     }
     let machine_id = agents::machine_id();
     let state = Arc::new(routes::BridgeState::new(machine_id));
+    let iroh_hub = if config.iroh_enabled {
+        let target = iroh_transport::Target {
+            host: bind.clone(),
+            port,
+        };
+        Some(
+            iroh_transport::start(&config.data_dir, target, config.auth.pair_token_ttl_secs)
+                .await?,
+        )
+    } else {
+        None
+    };
 
     let mut app = Router::new().route("/api/session", get(routes::session));
     for module in modules::all() {
         app = app.merge((module.router)());
     }
+    let app = iroh_transport::with_routes(app, iroh_hub);
     let app = app
         .layer(compression::json_layer())
         .layer(axum::middleware::from_fn(auth_middleware))
