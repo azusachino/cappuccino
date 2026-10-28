@@ -53,8 +53,9 @@ bridge iroh endpoint (Rust, in cappuccino-bridge)
   bi-stream ⇄ TCP pipe → 127.0.0.1:7392 (existing axum, unchanged)
 ```
 
-`BridgeClient`, the bridge routes, and the behavior spec do not change. The
-transport changes; the contract does not. There is no phone-side TCP listener:
+`BridgeClient`, the existing bridge routes, and the behavior spec do not
+change; the only addition is the `GET /pair` page below. The transport
+changes; the contract does not. There is no phone-side TCP listener:
 OkHttp's `SocketFactory` hands out sockets backed by iroh streams, so REST and
 the WebSocket upgrade both ride the tunnel and no other app on the phone can
 reach it.
@@ -85,7 +86,12 @@ In order of enforcement:
    pre-auth-ALPN split). The token is compared constant-time; on a match the
    bridge adds the phone's EndpointId to the allowlist and discards the
    token. After pairing, trust rests on the EndpointId alone — no
-   per-connection token.
+   per-connection token. The same QR is also served as a `GET /pair` page on
+   the loopback bridge, so it can be opened from any tailnet device through
+   Tailscale Serve. Each CLI run or page load issues a fresh token that
+   replaces any outstanding one and expires after 10 minutes. Paired phones
+   can reach the page through the tunnel too; that is accepted, because a
+   paired phone already controls the agents.
 3. **Transport identity.** iroh's QUIC TLS already authenticates the remote
    EndpointId, so a man-in-the-middle cannot sit between phone and bridge
    without the bridge's private key.
@@ -110,7 +116,8 @@ in logs.
 **Revocation.** `cappuccino-bridge pair --revoke <EndpointId>` removes a phone
 from the allowlist and closes that phone's live connections; every revocation
 is audit-logged. Revocation is CLI-only: phones get no control call, so the
-HTTP contract and the two ALPNs above stay the whole protocol surface.
+HTTP contract (plus `GET /pair`) and the two ALPNs above stay the whole
+protocol surface.
 
 **Versioning.** ALPN `cappuccino/1`, bumped on breaking protocol changes;
 bridge and app upgrade in lockstep. A mismatch fails the iroh dial cleanly and
@@ -124,13 +131,17 @@ the app falls back to tailnet.
   order is re-probed. On redial the old iroh connection is closed first
   (a new connect can otherwise stay pinned to a dead path). Existing
   tailnet-only machines keep working untouched.
-- iroh cannot see Android network changes itself: the app forwards
-  `ConnectivityManager` callbacks to iroh's network-change hook, and calls
-  `IrohAndroid.installAndroidContext` at startup so DNS resolves through the
-  system resolver.
+- The app calls `IrohAndroid.installAndroidContext` at startup so DNS
+  resolves through the system resolver. It does **not** use iroh-android's
+  `watchNetworkChange`: on the device it spins instead of firing on changes
+  (see [spike results](#spike-results-2026-10-29)). On a `ConnectivityManager`
+  default-network change the app cancels any in-flight dial and redials at
+  once; after repeated dial failures it rebuilds the iroh endpoint, because a
+  restarted bridge otherwise takes about a minute to reach again.
 - A small badge per machine shows the active transport: tailnet, iroh direct
-  or iroh relayed. Mobile paths flap between direct and relayed, so the badge
-  and cadence switch only after a hold-down period, tuned from the spike.
+  or iroh relayed. It reacts only to direct ⇄ relayed changes, after a short
+  hold-down; iroh switching between direct addresses (LAN IPv4/IPv6, public
+  address) is normal and not shown.
 - Poll cadence: 5 s on a direct path, backing off to 30 s while iroh reports
   the path as relayed. Push from bridge to phone is a separate future design.
 - One Kotlin iroh endpoint per app process (iroh's own recommendation),
@@ -168,10 +179,9 @@ the app falls back to tailnet.
 
 - iroh-ffi exposes fewer knobs than iroh core: no GSO toggle, keep-alive or
   idle-timeout settings. An open upstream issue reports cellular uploads
-  falling back to relay unless GSO is disabled. The spike measures this
-  before slice 3.
-- Android network-change handling through iroh-ffi is unverified at runtime;
-  the spike covers it.
+  falling back to relay unless GSO is disabled. **Unmeasured:** the spike
+  phone had no SIM, so carrier NAT, the mobile relayed share and this upload
+  issue remain open until a SIM run or daily use.
 - Mobile paths flap (carrier NAT rebinding, IPv4/IPv6 switching); relayed
   periods add latency. Hold-down on the badge and cadence keeps that from
   thrashing the UI.
@@ -196,17 +206,17 @@ the app falls back to tailnet.
 
 ## Implementation slices (each independently shippable)
 
-0. Spike (throwaway, real phone): iroh-android dial to a bridge stub;
-   switch Wi-Fi ⇄ cellular and record reconnection, the network-change hook,
-   GSO behaviour on cellular and direct/relayed flapping. Results set the
-   hold-down values and confirm or change slice 3.
+0. Spike (throwaway, real phone): done 2026-10-29 on Wi-Fi only; see
+   [spike results](#spike-results-2026-10-29).
 1. Bridge: iroh endpoint behind `iroh.enabled` (default off), allowlist hook on
    `cappuccino/1`, pairing on `cappuccino-pair/1`, stream→TCP pipe, `pair`
-   subcommand with QR and one-time token, hermetic tests.
+   subcommand and `GET /pair` page with QR and one-time token, hermetic
+   tests.
 2. App dependency: pin `computer.iroh:iroh-android`, check APK size.
 3. App foreground: iroh pairing (QR scan), `no_backup` key file, OkHttp
-   iroh `SocketFactory`, network-change forwarding, iroh-first auto
-   fallback, transport badge with hold-down, relayed-path poll back-off.
+   iroh `SocketFactory`, cancel-and-redial on Android network change,
+   endpoint rebuild after repeated dial failures, iroh-first auto fallback,
+   transport badge with hold-down, relayed-path poll back-off.
 4. App background: per-poll iroh connection in `AgentNotificationService`,
    checked on a device.
 5. Hardening batch: rate limits, body caps, audit log, `pair --revoke` (also
@@ -214,3 +224,27 @@ the app falls back to tailnet.
 6. Relay spike: measure direct-path rates on n0 versus `iroh-relay` on
    harus-k3s behind a Cloudflare Tunnel; adopt only if the numbers hold
    (cross-repo with harus-k3s).
+
+## Spike results (2026-10-29)
+
+Slice 0 ran a throwaway iroh-android 1.2.0 app against an iroh 1.4.1 echo stub
+on the bridge Mac (branch `spike/iroh-device`, never merged; issue #50). Phone:
+OnePlus 8 on Android 16, home Wi-Fi, **no SIM**, so no mobile-network data.
+Relays were pinned to n0's `aps1`, the closer n0 relay from Japan.
+
+| Test | Result |
+| --- | --- |
+| Direct on LAN | 8–45 ms per ping (iroh path RTT about 5 ms) |
+| Relay only | 200–440 ms per ping (path RTT about 250 ms) |
+| Relay to direct | Dialled with a relay-only address; direct path found within 1 s of connecting |
+| Bridge restart | 68 s to reconnect: a fresh dial sticks to the dead path |
+| Wi-Fi off/on ×3 | Reconnected about 2 s after Android reported the network, except when a 20 s dial was still in flight |
+| `watchNetworkChange` | Spins continuously (millions of callbacks) instead of firing on changes |
+| Screen off, app not in foreground | Network cut within 10 s for the whole screen-off period |
+| App sent to background | Frozen by Android within 10 s |
+| Forced Doze, app in foreground | No effect |
+
+Consequences, applied above: no `watchNetworkChange`; cancel-and-redial on
+Android network changes; rebuild the endpoint after repeated dial failures;
+all background iroh work lives in the foreground service; the badge reacts
+only to direct ⇄ relayed.
