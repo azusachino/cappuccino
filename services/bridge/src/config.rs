@@ -17,9 +17,12 @@ pub struct BridgeConfig {
     /// Status/startup apply the `tailscale serve` entry automatically when
     /// true (default); false never touches Tailscale (safe verification).
     pub serve_auto_apply: bool,
+    /// Opt-in iroh transport (`iroh.enabled`, default false). When false no
+    /// iroh endpoint is created and `GET /pair` is not served.
+    pub iroh_enabled: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)] // reserved sections are parsed now, consumed by a later authenticator
 pub struct AuthConfig {
     /// Reserved. The MVP ships auth-free behind the tailnet/loopback boundary.
@@ -29,6 +32,25 @@ pub struct AuthConfig {
     /// until one exists, so the config never changes shape).
     #[serde(default)]
     pub options: serde_json::Map<String, serde_json::Value>,
+    /// Lifetime of an iroh pairing token (`auth.pair_token_ttl_secs`).
+    #[serde(default = "default_pair_token_ttl_secs")]
+    pub pair_token_ttl_secs: u64,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        AuthConfig {
+            enabled: false,
+            options: serde_json::Map::new(),
+            pair_token_ttl_secs: default_pair_token_ttl_secs(),
+        }
+    }
+}
+
+pub const PAIR_TOKEN_TTL_MAX_SECS: u64 = 3600;
+
+fn default_pair_token_ttl_secs() -> u64 {
+    600
 }
 
 /// Strict knob: accepted values are true/false (JSON booleans) or the
@@ -80,6 +102,12 @@ struct ConfigFile {
     data_dir: Option<PathBuf>,
     auth: Option<AuthConfig>,
     serve: Option<ServeConfig>,
+    iroh: Option<IrohFileConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct IrohFileConfig {
+    enabled: Option<StrictBool>,
 }
 
 impl BridgeConfig {
@@ -94,6 +122,7 @@ impl BridgeConfig {
             )),
             auth: AuthConfig::default(),
             serve_auto_apply: true,
+            iroh_enabled: false,
         }
     }
 
@@ -159,6 +188,9 @@ impl BridgeConfig {
                 if let Some(serve) = file.serve {
                     config.serve_auto_apply = serve.auto_apply.0;
                 }
+                if let Some(iroh) = file.iroh {
+                    config.iroh_enabled = iroh.enabled.unwrap_or(StrictBool(false)).0;
+                }
             }
         }
         if let Some(bind) = host_override {
@@ -174,6 +206,11 @@ impl BridgeConfig {
         }
         if let Some(value) = serve_auto_apply_override {
             config.serve_auto_apply = parse_serve_auto_apply(value)?;
+        }
+        if !(1..=PAIR_TOKEN_TTL_MAX_SECS).contains(&config.auth.pair_token_ttl_secs) {
+            return Err(format!(
+                "auth.pair_token_ttl_secs must be between 1 and {PAIR_TOKEN_TTL_MAX_SECS}"
+            ));
         }
         if config.auth.enabled {
             return Err(
@@ -331,5 +368,49 @@ mod knob_tests {
         let path = config_file(r#"{"serve": {"auto_apply": 3}}"#);
         let error = BridgeConfig::load_from(Some(&path), None, None, None).unwrap_err();
         assert!(error.contains("invalid serve.auto_apply"));
+    }
+}
+
+#[cfg(test)]
+mod iroh_config_tests {
+    use super::*;
+
+    fn load(content: &str) -> Result<BridgeConfig, String> {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "cap-iroh-cfg-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::write(&path, content).unwrap();
+        BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None)
+    }
+
+    #[test]
+    fn iroh_is_disabled_and_pairing_ttl_is_ten_minutes_by_default() {
+        let config = BridgeConfig::defaults();
+        assert!(!config.iroh_enabled);
+        assert_eq!(config.auth.pair_token_ttl_secs, 600);
+        let config = load("{}").unwrap();
+        assert!(!config.iroh_enabled);
+        assert_eq!(config.auth.pair_token_ttl_secs, 600);
+    }
+
+    #[test]
+    fn iroh_enabled_is_a_strict_boolean() {
+        assert!(load(r#"{"iroh": {"enabled": true}}"#).unwrap().iroh_enabled);
+        assert!(load(r#"{"iroh": {"enabled": "on"}}"#).is_err());
+        assert!(load(r#"{"iroh": {"enabled": "maybe"}}"#).is_err());
+        assert!(!load(r#"{"iroh": {}}"#).unwrap().iroh_enabled);
+    }
+
+    #[test]
+    fn pairing_token_ttl_is_bounded() {
+        let config = load(r#"{"auth": {"pair_token_ttl_secs": 120}}"#).unwrap();
+        assert_eq!(config.auth.pair_token_ttl_secs, 120);
+        assert!(load(r#"{"auth": {"pair_token_ttl_secs": 0}}"#)
+            .unwrap_err()
+            .contains("pair_token_ttl_secs"));
+        assert!(load(r#"{"auth": {"pair_token_ttl_secs": 3601}}"#).is_err());
     }
 }

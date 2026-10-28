@@ -738,6 +738,7 @@ mod tests {
                 data_dir: PathBuf::new(),
                 auth: crate::config::AuthConfig::default(),
                 serve_auto_apply: false,
+                iroh_enabled: false,
             },
             Duration::from_millis(100),
         );
