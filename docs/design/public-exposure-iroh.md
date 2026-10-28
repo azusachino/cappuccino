@@ -26,8 +26,10 @@ EndpointId reaches the allowlist only by presenting a one-time pairing token.
 Add **iroh** (n0-computer) as a second transport, coexisting with
 tailscale-serve. iroh gives dial-by-EndpointId (ed25519 public key), QUIC
 with TLS 1.3, NAT hole-punching with encrypted relay fallback, and
-first-party Kotlin bindings for the phone. Android aarch64/armv7 are
-supported by the bindings (currently built from source — CI owns that job).
+first-party Kotlin bindings for the phone, published on Maven Central as
+`computer.iroh:iroh-android` with prebuilt native libraries. iroh is past 1.0
+and keeps wire compatibility across 1.x minors (see
+[iroh research](../research/iroh-best-practices.md)).
 Swift bindings are official, so a future iPhone app reuses the same design.
 
 The bridge keeps speaking its existing HTTP/WS protocol on loopback. iroh is
@@ -39,7 +41,8 @@ phone (Kotlin)
   local iroh endpoint (Kotlin FFI) ── QUIC stream, ALPN cappuccino/1 ──┐
                                                                        ▼
 bridge iroh endpoint (Rust, in cappuccino-bridge)
-  accept hook: remote EndpointId must be on the allowlist
+  ALPN cappuccino/1: remote EndpointId must be on the allowlist
+  ALPN cappuccino-pair/1: any EndpointId, one-time token exchange only
   bi-stream ⇄ TCP pipe → 127.0.0.1:7392 (existing axum, unchanged)
 ```
 
@@ -62,23 +65,29 @@ ingress.
 In order of enforcement:
 
 1. **Node allowlist.** The bridge persists the EndpointIds (ed25519 public
-   keys) of paired phones and rejects every other dial in the accept hook —
-   before any application bytes flow. Pairing adds one id.
+   keys) of paired phones and rejects every other dial on ALPN
+   `cappuccino/1` in the accept hook — before any application bytes flow.
+   Pairing adds one id. The hook runs only at handshake, so removing an id
+   also closes that phone's live connections.
 2. **One-time pairing token.** `cappuccino-bridge pair` prints a QR code
    (copy-paste fallback; the app clears the clipboard after use) carrying the
-   bridge EndpointId and a 32-byte random token. The phone presents the token
-   once, compared constant-time; the bridge then adds the phone's EndpointId
-   to the allowlist and discards the token. After pairing, trust rests on the
-   EndpointId alone — no per-connection token.
+   bridge's full EndpointAddr (EndpointId plus relay URL, so the first dial
+   needs no discovery) and a 32-byte random token. An unpaired phone dials
+   the separate ALPN `cappuccino-pair/1`, which admits unknown EndpointIds
+   but serves only the token exchange (n0's auth-hook example uses the same
+   pre-auth-ALPN split). The token is compared constant-time; on a match the
+   bridge adds the phone's EndpointId to the allowlist and discards the
+   token. After pairing, trust rests on the EndpointId alone — no
+   per-connection token.
 3. **Transport identity.** iroh's QUIC TLS already authenticates the remote
    EndpointId, so a man-in-the-middle cannot sit between phone and bridge
    without the bridge's private key.
 4. **Relays.** Ship on n0's public relays: they hold no keys and see no
    plaintext, only metadata (IPs, EndpointIds, timing, volume). Self-hosting
-   comes later as its own slice: `iroh-relay` on harus-k3s behind a
-   Cloudflare Tunnel (outbound only, WebSocket relay; no QUIC address
-   discovery because the tunnel carries no UDP). That swaps n0 for Cloudflare
-   as the metadata observer and gives us control of relay uptime and version.
+   behind a Cloudflare Tunnel is deferred to a measured spike: the tunnel
+   carries no UDP, so the relay loses QUIC address discovery, and mobile
+   paths may stay relayed. The spike compares direct-path rates on n0 versus
+   a tunnelled relay before anything is committed.
 5. **Loopback only.** The axum server keeps binding 127.0.0.1. The iroh
    tunnel is the only path in; disabling iroh (`bridge.transport = "tailscale"`)
    returns the system to today's boundary — the kill switch.
@@ -103,9 +112,16 @@ the app falls back to tailnet.
 - A machine can carry both a tailnet URL and an iroh pairing (EndpointId).
   **Auto fallback: iroh first, then tailnet.** The transport that worked is
   kept until Android reports a network change or a request fails, then the
-  order is re-probed. Existing tailnet-only machines keep working untouched.
+  order is re-probed. On redial the old iroh connection is closed first
+  (a new connect can otherwise stay pinned to a dead path). Existing
+  tailnet-only machines keep working untouched.
+- iroh cannot see Android network changes itself: the app forwards
+  `ConnectivityManager` callbacks to iroh's network-change hook, and calls
+  `IrohAndroid.installAndroidContext` at startup so DNS resolves through the
+  system resolver.
 - A small badge per machine shows the active transport: tailnet, iroh direct
-  or iroh relayed.
+  or iroh relayed. Mobile paths flap between direct and relayed, so the badge
+  and cadence switch only after a hold-down period, tuned from the spike.
 - Poll cadence: 5 s on a direct path, backing off to 30 s while iroh reports
   the path as relayed. Push from bridge to phone is a separate future design.
 - One Kotlin iroh endpoint per app process (iroh's own recommendation),
@@ -114,20 +130,21 @@ the app falls back to tailnet.
   Keystore cannot hold it non-exportably).
 - OkHttp gets a custom `SocketFactory` whose sockets are iroh bi-streams; no
   localhost listener exists.
-- Background notifications follow the foreground order (iroh first), which
-  keeps an FFI endpoint alive from the background worker. This lands as its
-  own slice after the foreground one, with a battery/lifetime check on a real
-  device.
-- Android native library (aarch64 only) is built from source in CI
-  (`cargo-ndk`) and shipped in the APK; pinned iroh minor, bumped
-  deliberately.
+- Background notifications follow the foreground order (iroh first). Each
+  WorkManager run opens the endpoint, polls once and closes it — no
+  long-lived background socket and no foreground service. This lands as its
+  own slice after the foreground one, checked on a real device.
+- Native library: the `computer.iroh:iroh-android` Maven artifact, pinned to
+  a 1.x minor and bumped deliberately. Building with `cargo-ndk` stays the
+  fallback if a needed version is not published.
 
 ## Testing
 
-- Bridge: hermetic tokio test with two in-process iroh endpoints — dial,
-  accept hook rejects an unknown EndpointId, pairing consumes the token
-  exactly once, an allowlisted dial pipes to a stub TCP server. No network
-  needed.
+- Bridge: hermetic tokio test with two in-process iroh endpoints — an
+  unknown EndpointId is rejected on `cappuccino/1` but can pair on
+  `cappuccino-pair/1`, pairing consumes the token exactly once, revocation
+  closes a live connection, an allowlisted dial pipes to a stub TCP server.
+  No network needed.
 - App: unit tests for key storage, pairing payload parsing and the fallback
   state machine (order, stickiness, re-probe on network change); the existing
   UI journeys stay green because tailnet machines are unchanged.
@@ -135,17 +152,19 @@ the app falls back to tailnet.
 
 ## Risks
 
-- iroh 0.9x is a canary series; 1.0 is announced as coming. We pin the
-  current minor and re-evaluate at 1.0 before calling this stable.
-- Android bindings build from source today — a CI job and a pinned
-  toolchain, not a research project.
-- Relay fallback adds latency when hole-punching fails; direct connections
-  are the common case on real networks, and the status row already surfaces
-  connection quality honestly.
+- iroh-ffi exposes fewer knobs than iroh core: no GSO toggle, keep-alive or
+  idle-timeout settings. An open upstream issue reports cellular uploads
+  falling back to relay unless GSO is disabled. The spike measures this
+  before slice 3.
+- Android network-change handling through iroh-ffi is unverified at runtime;
+  the spike covers it.
+- Mobile paths flap (carrier NAT rebinding, IPv4/IPv6 switching); relayed
+  periods add latency. Hold-down on the badge and cadence keeps that from
+  thrashing the UI.
 - Two transports now exist, with automatic fallback between them. The
   transport badge and the re-probe rules keep that debuggable.
-- The background worker holding an iroh endpoint is the riskiest code
-  (lifetime, battery); it ships last among the app slices for that reason.
+- Background iroh use is the riskiest app code (lifetime, battery); the
+  per-run connection keeps it short, and it ships last among the app slices.
 
 ## Alternatives considered
 
@@ -163,17 +182,21 @@ the app falls back to tailnet.
 
 ## Implementation slices (each independently shippable)
 
-1. Bridge: iroh endpoint behind `bridge.transport` config, allowlist accept
-   hook, stream→TCP pipe, `pair` subcommand with QR and one-time token,
-   hermetic tests.
-2. CI: Android native library build job (`cargo-ndk`, aarch64), artifact
-   attached to the debug APK.
+0. Spike (throwaway, real phone): iroh-android dial to a bridge stub;
+   switch Wi-Fi ⇄ cellular and record reconnection, the network-change hook,
+   GSO behaviour on cellular and direct/relayed flapping. Results set the
+   hold-down values and confirm or change slice 3.
+1. Bridge: iroh endpoint behind `bridge.transport` config, allowlist hook on
+   `cappuccino/1`, pairing on `cappuccino-pair/1`, stream→TCP pipe, `pair`
+   subcommand with QR and one-time token, hermetic tests.
+2. App dependency: pin `computer.iroh:iroh-android`, check APK size.
 3. App foreground: iroh pairing (QR scan), `no_backup` key file, OkHttp
-   iroh `SocketFactory`, iroh-first auto fallback, transport badge,
-   relayed-path poll back-off.
-4. App background: notifications over iroh, verified on a device for
-   lifetime and battery.
-5. Hardening batch: rate limits, body caps, audit log, `pair --revoke`, and
-   revocation from another paired phone.
-6. Self-hosted relay: `iroh-relay` on harus-k3s behind a Cloudflare Tunnel
+   iroh `SocketFactory`, network-change forwarding, iroh-first auto
+   fallback, transport badge with hold-down, relayed-path poll back-off.
+4. App background: per-run iroh connection in the notification worker,
+   checked on a device.
+5. Hardening batch: rate limits, body caps, audit log, `pair --revoke` (also
+   closing live connections), and revocation from another paired phone.
+6. Relay spike: measure direct-path rates on n0 versus `iroh-relay` on
+   harus-k3s behind a Cloudflare Tunnel; adopt only if the numbers hold
    (cross-repo with harus-k3s).
