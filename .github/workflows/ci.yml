@@ -206,6 +206,7 @@ jobs:
         env:
           APPLE_RESULT: ${{ needs.apple.result }}
           ANDROID_RESULT: ${{ needs.android.result }}
+          BRIDGE_RESULT: ${{ needs.bridge.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
         run: |
           for res in "$APPLE_RESULT" "$ANDROID_RESULT" "$BRIDGE_RESULT" "$DOCS_RESULT"; do
