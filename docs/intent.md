@@ -11,7 +11,7 @@ Herdr and Pi own process/session lifetime. Opening the app never launches, repla
 ## First prototype
 
 - Personal use, Pi first, mostly coding tasks. Prove the existing-session bridge and connected iPhone journey first; Android follows before Mac-specific UX. No Mac app is planned (2026-10-13).
-- Manually register machines on private tailnet connections; the owner selected a no-auth bridge with tailnet membership as the network boundary on 2026-10-06. No public ingress or cloud relay.
+- Manually register machines on private tailnet connections; the owner selected a no-auth bridge with tailnet membership as the network boundary on 2026-10-06. No public ingress. Amended 2026-10-28: an additive iroh transport, authenticated by a paired EndpointId allowlist and allowed to use iroh relays, reaches machines off the tailnet ([design](design/public-exposure-iroh.md)).
 - Direct agent conversations and one cross-machine attention inbox; no coordinating assistant.
 - Full history of the selected session's active branch, with code blocks and expandable tool details.
 - Explicit Nudge (steer at the next boundary) and Follow-up (after task completion).
