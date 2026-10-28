@@ -337,7 +337,15 @@ fn spawn_accept_loop(endpoint: Endpoint, pairing: Arc<Pairing>, target: Target) 
 }
 
 async fn serve_tunnel(conn: Connection, pairing: Arc<Pairing>, target: Target) {
-    pairing.track(conn.remote_id(), conn.weak_handle());
+    let id = conn.remote_id();
+    // Track before checking: revoke clears the allowlist before it closes
+    // tracked connections, so either revoke sees this entry or this check
+    // sees the cleared allowlist.
+    pairing.track(id, conn.weak_handle());
+    if !pairing.is_allowed(&id) {
+        conn.close(VarInt::from_u32(CLOSE_REVOKED), b"revoked");
+        return;
+    }
     while let Ok((send, recv)) = conn.accept_bi().await {
         tokio::spawn(pipe(send, recv, target.clone()));
     }
@@ -748,6 +756,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Reproduces the window between the handshake hook and `serve_tunnel`:
+    /// the connection is admitted, revoked before anything is tracked, and
+    /// then `serve_tunnel` must still refuse to serve it.
+    #[tokio::test]
+    async fn tunnel_admitted_then_revoked_before_serving_is_closed() {
+        let dir = scratch_dir("revoke-window");
+        let pairing = Arc::new(Pairing::load(&dir, Duration::from_secs(600)).unwrap());
+        let server = test_endpoint(SecretKey::generate(), &pairing).await;
+        let server_addr = EndpointAddr::new(server.id()).with_ip_addr(server.bound_sockets()[0]);
+        let client = client_endpoint().await;
+        let token = pairing.issue_token();
+        pairing.redeem(token.as_bytes(), client.id()).unwrap();
+
+        let (client_conn, server_conn) = tokio::time::timeout(SHORT, async {
+            tokio::join!(client.connect(server_addr, ALPN_TUNNEL), async {
+                server.accept().await.unwrap().await.unwrap()
+            })
+        })
+        .await
+        .expect("handshake completes");
+        let client_conn = client_conn.unwrap();
+        assert!(pairing.revoke(&client.id()).unwrap());
+
+        let target = Target {
+            host: "127.0.0.1".into(),
+            port: 1,
+        };
+        tokio::time::timeout(
+            SHORT,
+            serve_tunnel(server_conn, Arc::clone(&pairing), target),
+        )
+        .await
+        .expect("serve_tunnel refuses a revoked connection instead of serving it");
+        let closed = tokio::time::timeout(SHORT, client_conn.closed())
+            .await
+            .expect("client sees the close");
+        assert!(
+            matches!(
+                &closed,
+                ConnectionError::ApplicationClosed(close)
+                    if close.error_code == VarInt::from_u32(CLOSE_REVOKED)
+            ),
+            "{closed:?}"
+        );
     }
 
     #[tokio::test]
