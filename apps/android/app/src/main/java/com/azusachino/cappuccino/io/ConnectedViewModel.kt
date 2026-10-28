@@ -107,6 +107,9 @@ interface ConnectedActions {
 
   fun addMachine(label: String, url: String)
 
+  /** Pairs over iroh with a payload from the QR scan or paste, then adds the machine. */
+  fun addIrohMachine(label: String, payload: String) = Unit
+
   fun renameProfile(id: String, label: String)
 
   fun selectProfile(id: String)
@@ -161,6 +164,7 @@ internal constructor(
   private val offlineHistory: OfflineConversations? = null,
   private val offlineDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
   private val onMonitorPause: ((String, Boolean) -> Unit)? = null,
+  private val irohPairing: (suspend (IrohPairing) -> Unit)? = null,
 ) : ViewModel(), ConnectedActions {
   private val mutableState =
     MutableStateFlow(
@@ -344,14 +348,25 @@ internal constructor(
     mutableState.value = mutableState.value.copy(profiles = store.read())
   }
 
-  override fun addMachine(label: String, url: String) {
+  override fun addMachine(label: String, url: String) =
+    startAdd(label) { Endpoint.parse(url, allowLocalHttp = BuildConfig.DEBUG) }
+
+  override fun addIrohMachine(label: String, payload: String) =
+    startAdd(label) {
+      val pairing = parseIrohPairing(payload)
+      val redeem = irohPairing ?: throw IllegalStateException("iroh is unavailable")
+      redeem(pairing)
+      Endpoint.iroh(pairing.endpoint)
+    }
+
+  private fun startAdd(label: String, endpointFor: suspend () -> Endpoint) {
     addEpoch++
     val token = addEpoch
     addJob?.cancel()
     mutableState.value = mutableState.value.copy(busy = true, addError = null)
     addJob = viewModelScope.launch {
       try {
-        val endpoint = Endpoint.parse(url, allowLocalHttp = BuildConfig.DEBUG)
+        val endpoint = endpointFor()
         val client = bridgeFor(endpoint)
         val machineId = client.verify()
         if (token != addEpoch) return@launch

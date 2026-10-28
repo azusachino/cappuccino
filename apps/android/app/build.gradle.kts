@@ -57,9 +57,13 @@ dependencies {
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.okhttp)
   implementation(libs.iroh.android)
+  implementation(libs.play.services.code.scanner)
   constraints {
     // iroh-android pins JNA 5.15.0, whose x86_64 libjnidispatch.so fails the 16 KB alignment lint.
     implementation(libs.jna)
+    // play-services-base (via the code scanner) pins fragment 1.0.0, which lint rejects for
+    // ActivityResult.
+    implementation(libs.androidx.fragment)
   }
   implementation(libs.lifecycle.runtime.compose)
   implementation(libs.lifecycle.viewmodel.compose)

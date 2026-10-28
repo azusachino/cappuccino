@@ -1,5 +1,6 @@
 package com.azusachino.cappuccino.core
 
+import com.azusachino.cappuccino.io.IrohEndpointAddr
 import java.net.URI
 import java.util.UUID
 
@@ -23,8 +24,14 @@ class StreamRetryBudget(private val maximumRetries: Int = 4) {
 
 class ProtocolException(message: String) : Exception(message)
 
-class Endpoint private constructor(val base: URI) {
+class Endpoint private constructor(val base: URI, val iroh: IrohEndpointAddr? = null) {
   companion object {
+    /** Placeholder host for iroh machines: the socket factory ignores it, and it never resolves. */
+    private val IROH_BASE = URI("http://iroh.invalid/")
+
+    /** An iroh machine. Its URLs stay on the placeholder host; the transport carries the bytes. */
+    fun iroh(addr: IrohEndpointAddr): Endpoint = Endpoint(IROH_BASE, addr)
+
     fun parse(input: String, allowLocalHttp: Boolean = false): Endpoint {
       val uri =
         try {
@@ -56,9 +63,10 @@ class Endpoint private constructor(val base: URI) {
 
   fun route(path: String): URI = base.resolve(path.removePrefix("/"))
 
-  override fun equals(other: Any?): Boolean = other is Endpoint && base == other.base
+  override fun equals(other: Any?): Boolean =
+    other is Endpoint && base == other.base && iroh == other.iroh
 
-  override fun hashCode(): Int = base.hashCode()
+  override fun hashCode(): Int = 31 * base.hashCode() + (iroh?.hashCode() ?: 0)
 
   fun stream(sessionId: String): URI =
     URI.create(
