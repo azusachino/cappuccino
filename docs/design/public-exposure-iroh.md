@@ -210,7 +210,8 @@ the app falls back to tailnet.
    [spike results](#spike-results-2026-10-29).
 1. Bridge: iroh endpoint behind `iroh.enabled` (default off), allowlist hook on
    `cappuccino/1`, pairing on `cappuccino-pair/1`, stream→TCP pipe, `pair`
-   subcommand with QR and one-time token, hermetic tests.
+   subcommand and `GET /pair` page with QR and one-time token, hermetic
+   tests.
 2. App dependency: pin `computer.iroh:iroh-android`, check APK size.
 3. App foreground: iroh pairing (QR scan), `no_backup` key file, OkHttp
    iroh `SocketFactory`, cancel-and-redial on Android network change,
