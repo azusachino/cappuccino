@@ -17,6 +17,8 @@ commonmark = "0.30.1"
 mikepenz-markdown = "0.45.0"
 textmate = "0.3.0"
 haze = "2.0.1"
+iroh = "1.2.0"
+jna = "5.19.1"
 
 [libraries]
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
@@ -42,6 +44,8 @@ lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel
 lifecycle-viewmodel-savedstate = { module = "androidx.lifecycle:lifecycle-viewmodel-savedstate", version.ref = "lifecycle" }
 coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+iroh-android = { module = "computer.iroh:iroh-android", version.ref = "iroh" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
