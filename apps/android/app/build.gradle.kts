@@ -17,6 +17,7 @@ android {
     versionCode = 1
     versionName = "0.1.0"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
   }
 
   compileOptions {
@@ -55,6 +56,11 @@ dependencies {
   implementation(libs.activity.compose)
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.okhttp)
+  implementation(libs.iroh.android)
+  constraints {
+    // iroh-android pins JNA 5.15.0, whose x86_64 libjnidispatch.so fails the 16 KB alignment lint.
+    implementation(libs.jna)
+  }
   implementation(libs.lifecycle.runtime.compose)
   implementation(libs.lifecycle.viewmodel.compose)
   implementation(libs.lifecycle.viewmodel.savedstate)
