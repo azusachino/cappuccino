@@ -777,53 +777,10 @@ fun CappuccinoScreen(
                                   liveStatus in setOf("working", "blocked")
                               )
                                 LiveStatusLine(
-                                  if (liveStatus == "working") "Working"
-                                  else "Waiting for your answer",
-                                  if (liveStatus == "working") MaterialTheme.appColors.working
-                                  else MaterialTheme.appColors.warn,
+                                  MaterialTheme.appColors.working,
                                   state.stream.agentStatusDetail,
                                 )
                               Spacer(Modifier.height(8.dp))
-                            }
-                          }
-                        }
-                        val atBottom = remember {
-                          derivedStateOf { !outputListState.canScrollForward }
-                        }
-                        androidx.compose.animation.AnimatedVisibility(
-                          visible = !atBottom.value,
-                          enter =
-                            androidx.compose.animation.fadeIn() +
-                              androidx.compose.animation.scaleIn(),
-                          exit =
-                            androidx.compose.animation.fadeOut() +
-                              androidx.compose.animation.scaleOut(),
-                          modifier =
-                            Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
-                              .padding(bottom = 12.dp),
-                        ) {
-                          Surface(
-                            onClick = {
-                              outputScope.launch {
-                                outputListState.animateScrollToItem(
-                                  outputListState.layoutInfo.totalItemsCount - 1
-                                )
-                              }
-                            },
-                            shape = CircleShape,
-                            color = MaterialTheme.appColors.card2,
-                            shadowElevation = 2.dp,
-                            modifier = Modifier.size(40.dp),
-                          ) {
-                            Box(contentAlignment = androidx.compose.ui.Alignment.Center) {
-                              Icon(
-                                painterResource(
-                                  com.azusachino.cappuccino.R.drawable.ic_arrow_downward
-                                ),
-                                contentDescription = "Scroll to latest",
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.appColors.muted,
-                              )
                             }
                           }
                         }
@@ -1144,15 +1101,7 @@ fun CappuccinoScreen(
                       ) {
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                       } else if (machine.connection != ConnectionState.Connected) {
-                        if (machine.connection is ConnectionState.Error)
-                          Text(
-                            machine.connection.message,
-                            Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                          )
+                        // The banner above carries the error; details live in the sheet.
                       } else {
                         val agents = machine.agents.filter { it.machineId == profile.machineId }
                         if (agents.isEmpty()) Text("No active agents", Modifier.padding(16.dp))

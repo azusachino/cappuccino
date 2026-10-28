@@ -283,14 +283,13 @@ private fun ActivityStep(part: ConversationPart, onInspect: () -> Unit) {
 
 /** The transcript's last line while something is happening: a colored square and what it is. */
 @Composable
-internal fun LiveStatusLine(label: String, color: Color, detail: String? = null) {
+internal fun LiveStatusLine(color: Color, detail: String? = null) {
   Row(
     Modifier.fillMaxWidth().padding(vertical = 4.dp).semantics(mergeDescendants = true) {},
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     StatusSquare(color)
-    Text(label, style = MaterialTheme.typography.labelMedium, color = color)
     if (!detail.isNullOrBlank())
       Text(
         detail,
