@@ -53,8 +53,9 @@ bridge iroh endpoint (Rust, in cappuccino-bridge)
   bi-stream ⇄ TCP pipe → 127.0.0.1:7392 (existing axum, unchanged)
 ```
 
-`BridgeClient`, the bridge routes, and the behavior spec do not change. The
-transport changes; the contract does not. There is no phone-side TCP listener:
+`BridgeClient`, the existing bridge routes, and the behavior spec do not
+change; the only addition is the `GET /pair` page below. The transport
+changes; the contract does not. There is no phone-side TCP listener:
 OkHttp's `SocketFactory` hands out sockets backed by iroh streams, so REST and
 the WebSocket upgrade both ride the tunnel and no other app on the phone can
 reach it.
@@ -85,7 +86,12 @@ In order of enforcement:
    pre-auth-ALPN split). The token is compared constant-time; on a match the
    bridge adds the phone's EndpointId to the allowlist and discards the
    token. After pairing, trust rests on the EndpointId alone — no
-   per-connection token.
+   per-connection token. The same QR is also served as a `GET /pair` page on
+   the loopback bridge, so it can be opened from any tailnet device through
+   Tailscale Serve. Each CLI run or page load issues a fresh token that
+   replaces any outstanding one and expires after 10 minutes. Paired phones
+   can reach the page through the tunnel too; that is accepted, because a
+   paired phone already controls the agents.
 3. **Transport identity.** iroh's QUIC TLS already authenticates the remote
    EndpointId, so a man-in-the-middle cannot sit between phone and bridge
    without the bridge's private key.
@@ -110,7 +116,8 @@ in logs.
 **Revocation.** `cappuccino-bridge pair --revoke <EndpointId>` removes a phone
 from the allowlist and closes that phone's live connections; every revocation
 is audit-logged. Revocation is CLI-only: phones get no control call, so the
-HTTP contract and the two ALPNs above stay the whole protocol surface.
+HTTP contract (plus `GET /pair`) and the two ALPNs above stay the whole
+protocol surface.
 
 **Versioning.** ALPN `cappuccino/1`, bumped on breaking protocol changes;
 bridge and app upgrade in lockstep. A mismatch fails the iroh dial cleanly and
