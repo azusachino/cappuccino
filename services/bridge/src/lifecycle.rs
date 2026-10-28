@@ -96,16 +96,25 @@ fn start() -> Result<(), String> {
     reject_legacy_pid_record(&state)?;
 
     if let Some(token) = read_record(&state)? {
-        let pid = control_request(&state, &token, "PING")?;
-        if !healthy(&config.bind, config.port) {
-            return Err("bridge control endpoint answered but HTTP health check failed".into());
+        match control_request(&state, &token, "PING") {
+            Ok(pid) => {
+                if !healthy(&config.bind, config.port) {
+                    return Err(
+                        "bridge control endpoint answered but HTTP health check failed".into(),
+                    );
+                }
+                println!(
+                    "cappuccino-bridge: already running (pid {pid}, port {})",
+                    config.port
+                );
+                ensure_serve(&config);
+                return Ok(());
+            }
+            // A record without a live control socket means the bridge died without
+            // cleanup (for example a host reboot). Discard the stale state and
+            // start fresh instead of failing every future startup hook.
+            Err(_) => discard_stale_control_state(&state, &token)?,
         }
-        println!(
-            "cappuccino-bridge: already running (pid {pid}, port {})",
-            config.port
-        );
-        ensure_serve(&config);
-        return Ok(());
     }
     state.require_absent(CONTROL_SOCKET)?;
 
@@ -459,6 +468,13 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
         == 0
 }
 
+/// Removes a lifecycle record and control socket left behind by a bridge that
+/// died without cleanup. The record contents are verified before removal.
+fn discard_stale_control_state(state: &StateDir, token: &str) -> Result<(), String> {
+    state.remove_owned_socket_path(CONTROL_SOCKET)?;
+    state.remove_owned_file(RECORD_FILE, &format!("{token}\n"))
+}
+
 fn control_request(state: &StateDir, token: &str, action: &str) -> Result<u32, String> {
     state.socket_identity(CONTROL_SOCKET)?;
     let path = state.socket_path(CONTROL_SOCKET)?;
@@ -655,6 +671,38 @@ mod tests {
             token.as_bytes(),
             "cd".repeat(32).as_bytes()
         ));
+    }
+
+    #[test]
+    fn stale_control_state_is_discarded_so_startup_can_proceed() {
+        let root = PathBuf::from("/tmp").canonicalize().unwrap();
+        let token = random_token().unwrap();
+        let state_root = root.join(format!("s{}-{}", std::process::id(), &token[..16]));
+        fs::create_dir(&state_root).unwrap();
+        fs::set_permissions(&state_root, fs::Permissions::from_mode(0o700)).unwrap();
+        let state = StateDir::open(&state_root.join("state")).unwrap();
+        let record = format!("{token}\n");
+        let mut record_file = state.create_file(RECORD_FILE).unwrap();
+        use std::io::Write as _;
+        record_file.write_all(record.as_bytes()).unwrap();
+        record_file.sync_all().unwrap();
+        let socket_path = state.socket_path(CONTROL_SOCKET).unwrap();
+        let socket = UnixListener::bind(&socket_path).unwrap();
+        fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600)).unwrap();
+        drop(socket); // Dead socket path remains, like after a host reboot.
+
+        discard_stale_control_state(&state, &token).unwrap();
+        state.require_absent(CONTROL_SOCKET).unwrap();
+        state.require_absent(RECORD_FILE).unwrap();
+        // A tampered record must not be discarded.
+        let forged = format!("{}\n", "cd".repeat(32));
+        let mut record_file = state.create_file(RECORD_FILE).unwrap();
+        record_file.write_all(forged.as_bytes()).unwrap();
+        record_file.sync_all().unwrap();
+        assert!(discard_stale_control_state(&state, &token).is_err());
+        state.require_absent(CONTROL_SOCKET).unwrap();
+        assert!(state.open_existing(RECORD_FILE).unwrap().is_some());
+        fs::remove_dir_all(&state_root).unwrap();
     }
 
     #[test]

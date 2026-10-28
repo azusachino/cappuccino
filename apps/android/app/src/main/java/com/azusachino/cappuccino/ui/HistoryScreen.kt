@@ -48,12 +48,11 @@ internal fun HistoryScreen(
   timeZone: ZoneId,
   onOpenSaved: (UUID, String) -> Unit,
   onDeleteSaved: (UUID, String) -> Unit,
-  onClearAll: () -> Unit,
   modifier: Modifier = Modifier,
+  contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
   val colors = MaterialTheme.appColors
   var pendingDelete by rememberSaveable { mutableStateOf<String?>(null) }
-  var confirmingClearAll by rememberSaveable { mutableStateOf(false) }
 
   if (conversations.isEmpty()) {
     Box(
@@ -85,7 +84,7 @@ internal fun HistoryScreen(
           color = colors.text,
         )
         Text(
-          "Conversations are preserved automatically when agents run or when starting a fresh session (/new). They are kept locally for 30 days.",
+          "Nothing brewing yet. Conversations are preserved automatically while agents run or start a fresh session (/new), and kept locally for 30 days.",
           style = MaterialTheme.typography.bodyMedium,
           color = colors.muted,
           textAlign = TextAlign.Center,
@@ -95,27 +94,22 @@ internal fun HistoryScreen(
   } else {
     LazyColumn(
       modifier = modifier.fillMaxSize(),
-      contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+      contentPadding =
+        PaddingValues(
+          start = 16.dp,
+          end = 16.dp,
+          top = contentPadding.calculateTopPadding() + 12.dp,
+          bottom = contentPadding.calculateBottomPadding() + 12.dp,
+        ),
       verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
       item(key = "history_header") {
-        Row(
-          modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-          Text(
-            "Retained locally for 30 days · ${conversations.size} saved",
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.muted,
-          )
-          TextButton(
-            onClick = { confirmingClearAll = true },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-          ) {
-            Text("Clear all", style = MaterialTheme.typography.labelMedium, color = colors.muted)
-          }
-        }
+        Text(
+          "Retained locally for 30 days · ${conversations.size} saved",
+          Modifier.fillMaxWidth().padding(bottom = 4.dp),
+          style = MaterialTheme.typography.labelMedium,
+          color = colors.muted,
+        )
       }
 
       items(conversations, key = { "${it.agent.machineId}:${it.conversationId}" }) { saved ->
@@ -130,11 +124,11 @@ internal fun HistoryScreen(
           if (saved.messageCount == 1) "1 message" else "${saved.messageCount} messages"
 
         Surface(
-          shape = RoundedCornerShape(12.dp),
-          color = if (isCurrent) colors.accent.copy(alpha = 0.12f) else colors.card2,
+          shape = RoundedCornerShape(16.dp),
+          color = if (isCurrent) colors.accent.copy(alpha = 0.12f) else colors.card,
           border =
             BorderStroke(
-              1.dp,
+              GlassDefaults.RimStrokeWidth,
               if (isCurrent) colors.accent.copy(alpha = 0.5f) else colors.line,
             ),
           onClick = { onOpenSaved(saved.agent.machineId, saved.conversationId) },
@@ -145,20 +139,7 @@ internal fun HistoryScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
           ) {
-            Surface(
-              shape = RoundedCornerShape(8.dp),
-              color = colors.card,
-              modifier = Modifier.size(36.dp),
-            ) {
-              Box(contentAlignment = Alignment.Center) {
-                Icon(
-                  painter = painterResource(agentIconResource(saved.agent.agent)),
-                  contentDescription = saved.agent.agent,
-                  modifier = Modifier.size(20.dp),
-                  tint = colors.accent,
-                )
-              }
-            }
+            AgentAvatar(saved.agent.agent, 36.dp)
 
             Column(modifier = Modifier.weight(1f)) {
               Row(
@@ -244,29 +225,6 @@ internal fun HistoryScreen(
         }
       },
       dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
-    )
-  }
-
-  if (confirmingClearAll) {
-    AlertDialog(
-      onDismissRequest = { confirmingClearAll = false },
-      title = { Text("Clear all saved history?") },
-      text = {
-        Text(
-          "All ${conversations.size} saved conversation snapshots will be deleted. This action cannot be undone."
-        )
-      },
-      confirmButton = {
-        TextButton(
-          onClick = {
-            onClearAll()
-            confirmingClearAll = false
-          }
-        ) {
-          Text("Clear all", color = MaterialTheme.colorScheme.error)
-        }
-      },
-      dismissButton = { TextButton(onClick = { confirmingClearAll = false }) { Text("Cancel") } },
     )
   }
 }

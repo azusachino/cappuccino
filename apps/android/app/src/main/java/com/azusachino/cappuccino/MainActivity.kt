@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
   // surface. enableEdgeToEdge() in onCreate stays the one edge-to-edge enabler; this sync
   // corrects only the icon appearance on top of it.
   internal fun applySystemBarAppearance(isDark: Boolean) {
-    val bgColor = if (isDark) 0xFF1E1E2E.toInt() else 0xFFEFF1F5.toInt()
+    val bgColor = if (isDark) 0xFF1B202B.toInt() else 0xFFF7F8FA.toInt()
     window.decorView.setBackgroundColor(bgColor)
     window.setBackgroundDrawable(bgColor.toDrawable())
     enableEdgeToEdge(
@@ -192,7 +192,6 @@ class MainActivity : ComponentActivity() {
       val state by vm.state.collectAsStateWithLifecycle()
       CappuccinoTheme(
         themeMode = state.themeMode,
-        palette = state.appPalette,
         onResolvedDarkChanged = ::applySystemBarAppearance,
       ) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

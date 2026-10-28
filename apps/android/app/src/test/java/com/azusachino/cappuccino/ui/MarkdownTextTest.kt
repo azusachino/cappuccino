@@ -16,7 +16,7 @@ class MarkdownTextTest {
   fun preservesInlineCodeEmphasisEscapesAndBreaks() {
     val paragraph = parser.parse("Use **bold `a*b`** and \\*literal\\*.\nNext  \nline.").firstChild
     val rendered = markdownInlineText(paragraph, Color.Gray)
-    assertEquals("Use bold a*b and *literal*. Next\nline.", rendered.text)
+    assertEquals("Use bold a*b and *literal*.\nNext\nline.", rendered.text)
     assertTrue(rendered.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
     val code = rendered.spanStyles.single { it.item.fontFamily == JetBrainsMono }
     assertEquals("a*b", rendered.text.substring(code.start, code.end))

@@ -2,3 +2,7 @@
 disable = ["MD013"]
 respect-gitignore = true
 exclude = [".build/**", ".swiftpm/**", "Cappuccino.xcodeproj/**"]
+
+# The README's centered icon and badge row need inline HTML.
+[per-file-ignores]
+"README.md" = ["MD033"]

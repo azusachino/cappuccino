@@ -66,39 +66,6 @@ class ConnectedViewModelTest {
   }
 
   @Test
-  fun palettePersistsAcrossViewModelRecreationWithoutChangingProfilesOrMode() =
-    runTest(dispatcher) {
-      store.saveThemeMode(com.azusachino.cappuccino.ui.ThemeMode.DARK)
-      viewModel =
-        ConnectedViewModel(
-          store,
-          { error("Appearance must not connect a bridge") },
-          {},
-          SavedStateHandle(),
-        )
-      val before = viewModel.state.value
-      viewModel.setAppPalette(com.azusachino.cappuccino.ui.AppPalette.DEFAULT)
-      assertEquals(
-        before.copy(appPalette = com.azusachino.cappuccino.ui.AppPalette.DEFAULT),
-        viewModel.state.value,
-      )
-      assertEquals(com.azusachino.cappuccino.ui.AppPalette.DEFAULT, store.readAppPalette())
-      viewModel =
-        ConnectedViewModel(
-          store,
-          { error("Appearance must not connect a bridge") },
-          {},
-          SavedStateHandle(),
-        )
-      assertEquals(
-        com.azusachino.cappuccino.ui.AppPalette.DEFAULT,
-        viewModel.state.value.appPalette,
-      )
-      assertEquals(before.profiles, viewModel.state.value.profiles)
-      assertEquals(before.themeMode, viewModel.state.value.themeMode)
-    }
-
-  @Test
   fun openThenFailureExhaustsInitialAndFourRetriesWithoutReset() =
     runTest(dispatcher) {
       var attempts = 0
@@ -2065,14 +2032,6 @@ class ConnectedViewModelTest {
     }
 
     private var themeMode = com.azusachino.cappuccino.ui.ThemeMode.SYSTEM
-
-    private var palette = com.azusachino.cappuccino.ui.AppPalette.CATPPUCCIN
-
-    override fun readAppPalette() = palette
-
-    override fun saveAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette) {
-      this.palette = palette
-    }
 
     override fun readThemeMode() = themeMode
 

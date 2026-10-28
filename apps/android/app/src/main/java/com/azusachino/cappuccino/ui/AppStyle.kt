@@ -119,11 +119,11 @@ fun appColors(scheme: ColorScheme, dark: Boolean): AppColors {
     faint = fg.over(bg, if (dark) 0.38f else 0.58f),
     codeBackground = if (dark) Color.Black.over(bg, 0.22f) else fg.over(bg, 0.05f),
     accent = scheme.primary,
-    // Catppuccin Mocha / Latte hues: palettes disagree on which role is green, status must not.
-    ok = if (dark) Color(0xFFA6E3A1) else Color(0xFF40A02B),
-    warn = if (dark) Color(0xFFF9E2AF) else Color(0xFFDF8E1D),
+    // Status hues stay semantic: green, amber, Chino blue, rose.
+    ok = if (dark) Color(0xFFA3D9B0) else Color(0xFF33774A),
+    warn = if (dark) Color(0xFFE3C48E) else Color(0xFF8F5D26),
     err = scheme.error,
-    working = if (dark) Color(0xFF89B4FA) else Color(0xFF1E66F5),
+    working = if (dark) Color(0xFF9CC4EE) else Color(0xFF35639F),
   )
 }
 
@@ -152,3 +152,18 @@ val LocalAppColors = staticCompositionLocalOf { appColors(FallbackDarkColorSchem
 
 val MaterialTheme.appColors: AppColors
   @Composable @ReadOnlyComposable get() = LocalAppColors.current
+
+/** Telegram-style avatar brand colors: a soft vertical gradient per agent. */
+internal fun agentBrandColors(agent: String, dark: Boolean): Pair<Color, Color> =
+  when (agent.lowercase()) {
+    "pi" ->
+      if (dark) Color(0xFF9CC4EE) to Color(0xFF5B8FD0) else Color(0xFF5B8FD0) to Color(0xFF35639F)
+    "claude" ->
+      if (dark) Color(0xFFE8946A) to Color(0xFFB85C33) else Color(0xFFC15F3C) to Color(0xFF9A4A2C)
+    "agy",
+    "antigravity",
+    "antigravity-cli" ->
+      if (dark) Color(0xFFB08FE8) to Color(0xFF7A55C4) else Color(0xFF8E6AD9) to Color(0xFF6A4AB0)
+    else ->
+      if (dark) Color(0xFF8A94A8) to Color(0xFF5A6478) else Color(0xFF7A8498) to Color(0xFF58617A)
+  }

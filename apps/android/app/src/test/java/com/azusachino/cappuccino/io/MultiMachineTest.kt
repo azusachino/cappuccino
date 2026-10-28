@@ -44,14 +44,6 @@ class MultiMachineTest {
           profiles.removeAll { it.id == id }
         }
 
-        private var palette = com.azusachino.cappuccino.ui.AppPalette.CATPPUCCIN
-
-        override fun readAppPalette() = palette
-
-        override fun saveAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette) {
-          this.palette = palette
-        }
-
         override fun readThemeMode() = ThemeMode.DARK
 
         override fun saveThemeMode(mode: ThemeMode) {}

@@ -1,25 +1,18 @@
 package com.azusachino.cappuccino.ui
 
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ThemeTest {
-  private val dynamicLight = lightColorScheme()
-  private val dynamicDark = darkColorScheme()
-  private val fallbackLight = lightColorScheme(primary = androidx.compose.ui.graphics.Color.Red)
-  private val fallbackDark = darkColorScheme(primary = androidx.compose.ui.graphics.Color.Blue)
 
   @Test
   fun catppuccinCanvasesAndNormalTextHaveReadableContrast() {
-    assertEquals(Color(0xFFEFF1F5), FallbackLightColorScheme.background)
-    assertEquals(Color(0xFF1E1E2E), FallbackDarkColorScheme.background)
+    assertEquals(Color(0xFFF7F8FA), FallbackLightColorScheme.background)
+    assertEquals(Color(0xFF1B202B), FallbackDarkColorScheme.background)
     for (scheme in listOf(FallbackLightColorScheme, FallbackDarkColorScheme)) {
       for ((foreground, background) in
         listOf(
@@ -51,12 +44,12 @@ class ThemeTest {
   }
 
   @Test
-  fun statusBadgesUseDistinctCatppuccinColorsAndReadableLabels() {
+  fun statusBadgesUseDistinctPaletteColorsAndReadableLabels() {
     for (dark in listOf(false, true)) {
       val badges = listOf("working", "idle", "done", "blocked").map { agentStatusStyle(it, dark) }
       assertEquals(4, badges.map { it.background }.distinct().size)
       assertEquals(listOf("Working", "Idle", "Done", "Blocked"), badges.map { it.label })
-      assertEquals(Color(if (dark) 0xFF89B4FA else 0xFF1E66F5), badges.first().background)
+      assertEquals(Color(if (dark) 0xFF9CC4EE else 0xFF35639F), badges.first().background)
       for (badge in badges + agentStatusStyle("unreported", dark)) {
         val a = badge.foreground.luminance()
         val b = badge.background.luminance()
@@ -72,11 +65,10 @@ class ThemeTest {
 
   @Test
   fun agentIconsAreDistinctAndUnknownAgentsHaveANeutralFallback() {
-    assertTrue(agentIconResource("pi") != agentIconResource("agy"))
-    assertTrue(agentIconResource("claude") != agentIconResource("pi"))
-    assertTrue(agentIconResource("claude") != agentIconResource("agy"))
-    assertEquals(agentIconResource("agy"), agentIconResource("antigravity-cli"))
-    assertEquals(com.azusachino.cappuccino.R.drawable.ic_machine, agentIconResource("unknown"))
+    val brands =
+      listOf("pi", "claude", "agy", "unknown").map { agentBrandColors(it, dark = false).first }
+    assertEquals(4, brands.distinct().size)
+    assertEquals(agentBrandColors("agy", false), agentBrandColors("antigravity-cli", false))
   }
 
   @Test
@@ -85,103 +77,5 @@ class ThemeTest {
     assertFalse(resolveIsDark(ThemeMode.LIGHT, systemDark = true))
     assertTrue(resolveIsDark(ThemeMode.SYSTEM, systemDark = true))
     assertFalse(resolveIsDark(ThemeMode.SYSTEM, systemDark = false))
-  }
-
-  @Test
-  fun explicitFixedPaletteRemainsAvailableEvenOnApi31() {
-    assertSame(
-      fallbackLight,
-      selectColorScheme(
-        31,
-        dark = false,
-        dynamicLight,
-        dynamicDark,
-        fallbackLight,
-        fallbackDark,
-        useDynamic = false,
-      ),
-    )
-    assertSame(
-      fallbackDark,
-      selectColorScheme(
-        34,
-        dark = true,
-        dynamicLight,
-        dynamicDark,
-        fallbackLight,
-        fallbackDark,
-        useDynamic = false,
-      ),
-    )
-  }
-
-  @Test
-  fun catppuccinColorsAreTheDefaultOnSupportedDevices() {
-    for (dark in listOf(false, true)) {
-      assertSame(
-        if (dark) fallbackDark else fallbackLight,
-        selectColorScheme(31, dark, dynamicLight, dynamicDark, fallbackLight, fallbackDark),
-      )
-      assertSame(
-        if (dark) fallbackDark else fallbackLight,
-        selectColorScheme(30, dark, dynamicLight, dynamicDark, fallbackLight, fallbackDark),
-      )
-    }
-  }
-
-  @Test
-  fun selectsWallpaperColorsWhenDynamicColorExplicitlyEnabled() {
-    assertSame(
-      dynamicLight,
-      selectColorScheme(
-        31,
-        dark = false,
-        dynamicLight,
-        dynamicDark,
-        fallbackLight,
-        fallbackDark,
-        useDynamic = true,
-      ),
-    )
-    assertSame(
-      dynamicDark,
-      selectColorScheme(
-        37,
-        dark = true,
-        dynamicLight,
-        dynamicDark,
-        fallbackLight,
-        fallbackDark,
-        useDynamic = true,
-      ),
-    )
-  }
-
-  @Test
-  fun selectsLightAndDarkFallbackBeforeApi31() {
-    assertSame(
-      fallbackLight,
-      selectColorScheme(
-        26,
-        dark = false,
-        dynamicLight,
-        dynamicDark,
-        fallbackLight,
-        fallbackDark,
-        useDynamic = true,
-      ),
-    )
-    assertSame(
-      fallbackDark,
-      selectColorScheme(
-        30,
-        dark = true,
-        dynamicLight,
-        dynamicDark,
-        fallbackLight,
-        fallbackDark,
-        useDynamic = true,
-      ),
-    )
   }
 }

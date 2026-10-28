@@ -2,7 +2,6 @@ package com.azusachino.cappuccino.ui
 
 import android.Manifest
 import android.content.Intent
-import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,10 +27,8 @@ internal fun NotificationSettings() {
       if (it && enabled) AgentNotificationService.start(context)
     }
   fun requestPermission() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      preferences.permissionRequested = true
-      permission.launch(Manifest.permission.POST_NOTIFICATIONS)
-    }
+    preferences.permissionRequested = true
+    permission.launch(Manifest.permission.POST_NOTIFICATIONS)
   }
   SettingRow(
     "Agent notifications",

@@ -20,7 +20,7 @@ class SettingsConnectionsTest {
   fun eachMachineKeepsItsOwnStatusAndDetailsTarget() {
     var target: String? = null
     compose.activity.setContent {
-      CappuccinoTheme(useDynamicColor = false) {
+      CappuccinoTheme() {
         SettingsScreen(
           themeMode = ThemeMode.SYSTEM,
           onSelectTheme = {},

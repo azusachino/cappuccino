@@ -8,7 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -16,7 +15,6 @@ import androidx.core.content.ContextCompat
 import com.azusachino.cappuccino.MainActivity
 import com.azusachino.cappuccino.R
 import com.azusachino.cappuccino.core.AgentCompletions
-import com.azusachino.cappuccino.ui.agentIconResource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -198,7 +196,8 @@ class AgentNotificationService : Service() {
     if (manager.getNotificationChannel(ALERTS)?.importance == NotificationManager.IMPORTANCE_NONE)
       return
     if (preferences.wasNotified(key)) return
-    val icon = agent?.let { agentIconResource(it) } ?: R.drawable.ic_notification
+    // The status-bar icon identifies the app; the notification text names the agent.
+    val icon = R.drawable.ic_notification
     val publicVersion =
       NotificationCompat.Builder(this, ALERTS)
         .setSmallIcon(icon)
@@ -259,9 +258,8 @@ class AgentNotificationService : Service() {
     private const val IDLE_TIMEOUT_MS = 5 * 60 * 1_000L
 
     fun permissionGranted(context: Context): Boolean =
-      Build.VERSION.SDK_INT < 33 ||
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-          PackageManager.PERMISSION_GRANTED
+      ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+        PackageManager.PERMISSION_GRANTED
 
     fun start(context: Context) {
       if (

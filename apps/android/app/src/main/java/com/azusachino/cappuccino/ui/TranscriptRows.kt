@@ -14,9 +14,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -80,7 +84,8 @@ internal fun UserPromptRow(
   Row(
     modifier
       .fillMaxWidth()
-      .background(colors.card)
+      .padding(start = 4.dp, end = 32.dp, bottom = 2.dp)
+      .background(colors.card, RoundedCornerShape(14.dp))
       .padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 10.dp),
     horizontalArrangement = Arrangement.spacedBy(10.dp),
   ) {
@@ -92,24 +97,22 @@ internal fun UserPromptRow(
       style = MaterialTheme.typography.bodyMedium,
     )
     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-          "You",
-          style = MaterialTheme.typography.labelSmall,
-          fontWeight = FontWeight.SemiBold,
-          color = colors.accent,
-        )
-        if (time != null)
-          Text(
-            time,
-            Modifier.semantics {
-              if (timeDescription != null) contentDescription = timeDescription
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.muted,
-          )
-      }
+      Text(
+        "You",
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = colors.accent,
+      )
       body()
+      if (time != null)
+        Text(
+          time,
+          Modifier.align(Alignment.End).semantics {
+            if (timeDescription != null) contentDescription = timeDescription
+          },
+          style = MaterialTheme.typography.labelSmall,
+          color = colors.muted,
+        )
     }
   }
 }
@@ -130,35 +133,38 @@ internal fun ActivityGroup(
   val expanded = chosen ?: newest
   val summary = remember(parts) { activitySummary(parts) }
   val duration = remember(parts) { activityDuration(parts)?.let(::compactDuration) }
-  Column(Modifier.fillMaxWidth()) {
-    Row(
-      Modifier.fillMaxWidth()
-        .heightIn(min = 30.dp)
-        .clickable(role = Role.Button) {
-          if (!expanded) onInspect()
-          chosen = !expanded
-        }
-        .padding(start = 2.dp, end = 8.dp, top = 2.dp, bottom = 2.dp)
-        .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+  Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+    Surface(
+      onClick = {
+        if (!expanded) onInspect()
+        chosen = !expanded
+      },
+      shape = RoundedCornerShape(50),
+      color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+      modifier =
+        Modifier.semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
     ) {
-      Icon(
-        painterResource(R.drawable.ic_expand_more),
-        contentDescription = null,
-        modifier = Modifier.size(16.dp).rotate(if (expanded) 0f else -90f),
-        tint = colors.muted,
-      )
-      Text(
-        summary,
-        Modifier.weight(1f),
-        style = MaterialTheme.typography.labelMedium,
-        color = colors.muted,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-      )
-      if (duration != null)
-        Text(duration, style = MaterialTheme.typography.labelSmall, color = colors.muted)
+      Row(
+        Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Icon(
+          painterResource(R.drawable.ic_expand_more),
+          contentDescription = null,
+          modifier = Modifier.size(14.dp).rotate(if (expanded) 0f else -90f),
+          tint = colors.muted,
+        )
+        Text(
+          summary,
+          style = MaterialTheme.typography.labelMedium,
+          color = colors.muted,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        if (duration != null)
+          Text(duration, style = MaterialTheme.typography.labelSmall, color = colors.muted)
+      }
     }
     if (expanded) {
       val rule = colors.line
@@ -279,14 +285,13 @@ private fun ActivityStep(part: ConversationPart, onInspect: () -> Unit) {
 
 /** The transcript's last line while something is happening: a colored square and what it is. */
 @Composable
-internal fun LiveStatusLine(label: String, color: Color, detail: String? = null) {
+internal fun LiveStatusLine(color: Color, detail: String? = null) {
   Row(
     Modifier.fillMaxWidth().padding(vertical = 4.dp).semantics(mergeDescendants = true) {},
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     StatusSquare(color)
-    Text(label, style = MaterialTheme.typography.labelMedium, color = color)
     if (!detail.isNullOrBlank())
       Text(
         detail,
@@ -311,8 +316,8 @@ internal fun JumpToLatest(newOutput: Boolean, modifier: Modifier = Modifier, onC
   Box(
     modifier
       .size(40.dp)
-      .background(MaterialTheme.colorScheme.background)
-      .border(2.dp, if (newOutput) colors.accent else colors.lineStrong)
+      .shadow(2.dp, CircleShape)
+      .background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape)
       .clickable(role = Role.Button, onClick = onClick)
       .semantics { contentDescription = if (newOutput) "Jump to new output" else "Jump to latest" }
       .testTag("jumpToLatest"),
@@ -324,6 +329,14 @@ internal fun JumpToLatest(newOutput: Boolean, modifier: Modifier = Modifier, onC
       modifier = Modifier.size(20.dp),
       tint = if (newOutput) colors.accent else colors.body,
     )
+    if (newOutput) {
+      Box(
+        Modifier.align(Alignment.TopEnd)
+          .size(10.dp)
+          .background(colors.accent, CircleShape)
+          .clearAndSetSemantics {}
+      )
+    }
   }
 }
 

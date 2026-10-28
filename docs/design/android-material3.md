@@ -1,6 +1,11 @@
 # Native Material 3 design contract — conversation screen
 
-Status: accepted 2026-10-08 for the conversation screen only. The owner approved the seven preview captures in [the evidence record](https://github.com/azusachino/cappuccino/blob/35e72ff/docs/evidence/android-material3/README.md). Other screens, layouts beyond the shared color tokens, and any broader rollout remain out of scope.
+Status: superseded 2026-10-27 by the owner's liquid-glass direction for Android
+(the floating glass islands, dock and composer pill). Kept for the transcript
+grammar rules that still apply: prose is plain text, activity collapses to one
+line, and no receipt claims. The original decision follows.
+
+Original status: accepted 2026-10-08 for the conversation screen only. The owner approved the seven preview captures in [the evidence record](https://github.com/azusachino/cappuccino/blob/35e72ff/docs/evidence/android-material3/README.md). Other screens, layouts beyond the shared color tokens, and any broader rollout remain out of scope.
 
 Target clarified by the owner: **native Material 3** (standard Android M3 surfaces, app
 bars, type, navigation), not web-MUI and not square-everything. M3 uses shape and

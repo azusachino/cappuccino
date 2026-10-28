@@ -1,20 +1,22 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Surface
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.azusachino.cappuccino.BuildConfig
 
 internal data class SettingsConnection(val id: String, val label: String, val status: String)
@@ -35,90 +38,112 @@ internal fun SettingsScreen(
   onReloadMachines: () -> Unit,
   connections: List<SettingsConnection>,
   onConnectionDetails: (String) -> Unit,
-  appPalette: AppPalette = AppPalette.CATPPUCCIN,
-  onOpenAppearance: (() -> Unit)? = null,
+  contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
   val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }
-  var choosingTheme by rememberSaveable { mutableStateOf(false) }
-  Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-    SettingsHeading("Appearance")
-    SettingRow(
-      "Theme",
-      value =
-        "${appPalette.label} · ${themeMode.name.lowercase().replaceFirstChar { it.uppercase() }}",
-    ) {
-      if (onOpenAppearance != null) onOpenAppearance() else choosingTheme = true
-    }
-    SettingsHeading("Notifications")
-    NotificationSettings()
-    SettingsHeading("Connections")
-    if (connections.isEmpty()) SettingNote("No machines added")
-    connections.forEach { connection ->
-      androidx.compose.runtime.key(connection.id) {
-        SettingRow(connection.label, value = connection.status) {
-          onConnectionDetails(connection.id)
+  Column(
+    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 12.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+  ) {
+    SettingsCard("Appearance") {
+      Text(
+        "Theme",
+        Modifier.padding(start = 16.dp, top = 4.dp),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.appColors.text,
+      )
+      SingleChoiceSegmentedButtonRow(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+      ) {
+        ThemeMode.entries.forEachIndexed { index, value ->
+          SegmentedButton(
+            selected = themeMode == value,
+            onClick = { onSelectTheme(value) },
+            shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
+          ) {
+            Text(value.name.lowercase().replaceFirstChar { it.uppercase() })
+          }
         }
       }
     }
-    SettingsHeading("About")
-    SettingRow(
-      "Version",
-      value = BuildConfig.VERSION_NAME,
-      onClick = null,
-    )
-    SettingRow("Setup guide", value = "GitHub") {
-      helpError =
-        runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
-          .exceptionOrNull()
-          ?.let { "Couldn't open the guide. Visit github.com/azusachino/cappuccino." }
-    }
-    helpError?.let { SettingNote(it, warning = true) }
-    SettingNote("Agent sessions stay on your machines; this app only reads and relays them.")
-  }
-  if (choosingTheme) {
-    AlertDialog(
-      onDismissRequest = { choosingTheme = false },
-      title = { Text("Theme") },
-      text = {
-        Column {
-          ThemeMode.entries.forEach { mode ->
-            Surface(
-              color = androidx.compose.ui.graphics.Color.Transparent,
-              onClick = {
-                onSelectTheme(mode)
-                choosingTheme = false
-              },
-            ) {
-              ListItem(
-                colors =
-                  androidx.compose.material3.ListItemDefaults.colors(
-                    containerColor = androidx.compose.ui.graphics.Color.Transparent
-                  ),
-                headlineContent = {
-                  Text(mode.name.lowercase().replaceFirstChar { it.uppercase() })
-                },
-                leadingContent = { RadioButton(selected = themeMode == mode, onClick = null) },
-              )
-            }
+    SettingsCard("Notifications") { NotificationSettings() }
+    SettingsCard("Connections") {
+      if (connections.isEmpty()) SettingNote("No machines added")
+      connections.forEach { connection ->
+        androidx.compose.runtime.key(connection.id) {
+          SettingRow(connection.label, value = connection.status) {
+            onConnectionDetails(connection.id)
           }
         }
-      },
-      confirmButton = { TextButton(onClick = { choosingTheme = false }) { Text("Cancel") } },
-    )
+      }
+    }
+    SettingsCard("Help") {
+      SettingRow("Setup guide", value = "GitHub") {
+        helpError =
+          runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
+            .exceptionOrNull()
+            ?.let { "Couldn't open the guide. Visit github.com/azusachino/cappuccino." }
+      }
+      SettingsDivider()
+      SettingRow("Herdr", value = "herdr.dev") {
+        helpError =
+          runCatching { uriHandler.openUri("https://herdr.dev") }
+            .exceptionOrNull()
+            ?.let { "Couldn't open herdr.dev." }
+      }
+    }
+    SettingsCard("About") {
+      SettingRow("Version", value = BuildConfig.VERSION_NAME, onClick = null)
+      SettingsDivider()
+      SettingRow("Source", value = "GitHub") {
+        helpError =
+          runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino") }
+            .exceptionOrNull()
+            ?.let { "Couldn't open github.com/azusachino/cappuccino." }
+      }
+      SettingsDivider()
+      SettingRow("License", value = "GPL-3.0", onClick = null)
+    }
+    helpError?.let { SettingNote(it, warning = true) }
   }
 }
 
+/** 0.5dp hairline between rows inside a group card. */
 @Composable
-private fun SettingsHeading(title: String) {
+private fun SettingsDivider() {
+  HorizontalDivider(
+    Modifier.padding(horizontal = 16.dp),
+    thickness = 0.5.dp,
+    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+  )
+}
+
+/** Uppercase section header, latte-style: quiet, letterspaced, above the card. */
+@Composable
+private fun SettingsSectionHeader(title: String) {
   Text(
-    title,
-    Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp).semantics {
+    title.uppercase(),
+    Modifier.padding(start = 28.dp, end = 24.dp, top = 20.dp, bottom = 8.dp).semantics {
       heading()
     },
-    style = MaterialTheme.typography.labelMedium,
-    color = MaterialTheme.appColors.accent,
+    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.5.sp),
+    color = MaterialTheme.colorScheme.primary,
   )
+}
+
+/** One settings group: an elevated liquid glass card holding its rows. */
+@Composable
+private fun SettingsCard(title: String, content: @Composable () -> Unit) {
+  SettingsSectionHeader(title)
+  Column(
+    Modifier.fillMaxWidth()
+      .padding(horizontal = 16.dp)
+      .glassSurface(shape = RoundedCornerShape(16.dp), isElevated = true)
+      .padding(vertical = 4.dp)
+  ) {
+    content()
+  }
 }
 
 /** A short explanation under a group, only where a row needs one. */

@@ -97,8 +97,6 @@ data class ConnectedUiState(
   val busy: Boolean = false,
   val themeMode: com.azusachino.cappuccino.ui.ThemeMode =
     com.azusachino.cappuccino.ui.ThemeMode.SYSTEM,
-  val appPalette: com.azusachino.cappuccino.ui.AppPalette =
-    com.azusachino.cappuccino.ui.AppPalette.CATPPUCCIN,
   val drafts: Map<String, String> = emptyMap(),
   val promptSends: Map<String, PromptSendState> = emptyMap(),
 )
@@ -125,13 +123,14 @@ interface ConnectedActions {
 
   fun selectAgent(agent: AgentRow?)
 
+  /** Dismisses an open saved conversation and returns to its list; no connection is touched. */
+  fun closeSavedConversation() = Unit
+
   fun removeProfile(id: String)
 
   fun retry()
 
   fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode)
-
-  fun setAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette)
 
   fun submitPrompt(text: String, confirmed: Boolean = false)
 
@@ -168,7 +167,6 @@ internal constructor(
       ConnectedUiState(
         profiles = store.read(),
         themeMode = store.readThemeMode(),
-        appPalette = store.readAppPalette(),
       )
     )
   val state: StateFlow<ConnectedUiState> = mutableState.asStateFlow()
@@ -195,18 +193,16 @@ internal constructor(
     val history = offlineHistory ?: return
     offlineIndexJob?.cancel()
     offlineIndexJob = viewModelScope.launch {
-      val machines = mutableState.value.profiles.map { it.machineId }.toSet()
       try {
         val (saved, bytes) =
           withContext(offlineDispatcher) {
-            history.list(machines).map {
+            history.list().map {
               SavedConversationInfo(it.agent, it.savedAt, it.history.turns.size, it.conversationId)
             } to history.bytes()
           }
-        val currentMachines = mutableState.value.profiles.map { it.machineId }.toSet()
         mutableState.value =
           mutableState.value.copy(
-            savedConversations = saved.filter { it.agent.machineId in currentMachines },
+            savedConversations = saved,
             offlineBytes = bytes,
             offlineProblem = null,
           )
@@ -367,6 +363,7 @@ internal constructor(
             machineId,
           )
         store.save(profile)
+        reloadSavedHistory()
         mutableState.value =
           mutableState.value.copy(
             profiles = store.read(),
@@ -448,11 +445,6 @@ internal constructor(
     }
     mutableState.value =
       mutableState.value.copy(machines = mutableState.value.machines + (id to MachineConnection()))
-  }
-
-  override fun setAppPalette(palette: com.azusachino.cappuccino.ui.AppPalette) {
-    store.saveAppPalette(palette)
-    mutableState.value = mutableState.value.copy(appPalette = palette)
   }
 
   override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
@@ -926,11 +918,8 @@ internal constructor(
         machines = current.machines - id,
         bridgeDetails = current.bridgeDetails - id,
         activeProfileId = current.activeProfileId.takeUnless { it == id },
-        savedConversations =
-          current.savedConversations.filter { row ->
-            row.agent.machineId in store.read().map { it.machineId }
-          },
       )
+    reloadSavedHistory()
   }
 
   override fun retry() {
@@ -1203,6 +1192,25 @@ internal constructor(
         }
       }
     }
+  }
+
+  override fun closeSavedConversation() {
+    cancelOwnedWork()
+    clearSavedSelection()
+    mutableState.value =
+      mutableState.value.copy(
+        selectedAgent = null,
+        stream = StreamState(),
+        streamLive = false,
+        conversationTurns = emptyList(),
+        omittedConversationTurns = 0,
+        omittedToolOperations = 0,
+        conversationSource = null,
+        sessionStats = null,
+        conversationId = null,
+        offlineSavedAt = null,
+        busy = false,
+      )
   }
 
   private fun clearSavedSelection() {

@@ -134,7 +134,7 @@ internal class OfflineConversations(
   }
 
   @Synchronized
-  fun list(machineIds: Set<UUID>): List<SavedConversation> {
+  fun list(machineIds: Set<UUID>? = null): List<SavedConversation> {
     prune(null)
     return files()
       .mapNotNull { file ->
@@ -149,7 +149,7 @@ internal class OfflineConversations(
           null
         }
       }
-      .filter { it.agent.machineId in machineIds }
+      .filter { machineIds == null || it.agent.machineId in machineIds }
       .sortedByDescending { it.savedAt }
   }
 
