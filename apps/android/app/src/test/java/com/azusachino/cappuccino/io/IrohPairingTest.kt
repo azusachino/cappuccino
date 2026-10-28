@@ -2,6 +2,7 @@ package com.azusachino.cappuccino.io
 
 import com.azusachino.cappuccino.core.ProtocolException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -14,6 +15,17 @@ class IrohPairingTest {
       parseIrohPairing(text)
       fail("expected rejection: $text")
     } catch (expected: ProtocolException) {}
+  }
+
+  @Test
+  fun nullRelayParsesToNull() {
+    val pairing = parseIrohPairing(valid.replace("\"https://relay.example/\"", "null"))
+    assertNull(pairing.endpoint.relayUrl)
+  }
+
+  @Test
+  fun rejectsEmptyStringRelay() {
+    assertRejected(valid.replace("\"https://relay.example/\"", "\"\""))
   }
 
   @Test
@@ -49,6 +61,11 @@ class IrohPairingTest {
   fun rejectsEmptyEndpointIdOrToken() {
     assertRejected(valid.replace("\"abc123\"", "\"\""))
     assertRejected(valid.replace("\"tok\"", "\"\""))
+  }
+
+  @Test
+  fun rejectsNonStringNonNullRelay() {
+    assertRejected(valid.replace("\"https://relay.example/\"", "42"))
   }
 
   @Test

@@ -1,5 +1,6 @@
 package com.azusachino.cappuccino.io
 
+import com.azusachino.cappuccino.core.JsonObject
 import com.azusachino.cappuccino.core.JsonValue
 import com.azusachino.cappuccino.core.ProtocolException
 import com.azusachino.cappuccino.core.parseJsonObject
@@ -24,7 +25,16 @@ fun parseIrohPairing(text: String): IrohPairing {
       (it as? JsonValue.StringValue)?.value ?: throw ProtocolException("Invalid pairing addr")
     } ?: throw ProtocolException("Invalid addrs")
   return IrohPairing(
-    endpoint = IrohEndpointAddr(endpointId, json.string("relay"), addrs),
+    endpoint = IrohEndpointAddr(endpointId, relayUrl(json), addrs),
     token = token,
   )
 }
+
+/** The bridge sends `null` until its endpoint has a home relay; the key itself is required. */
+private fun relayUrl(json: JsonObject): String? =
+  when (val value = json.fields["relay"]) {
+    JsonValue.Null -> null
+    is JsonValue.StringValue ->
+      value.value.ifEmpty { throw ProtocolException("Empty pairing relay") }
+    else -> throw ProtocolException("Invalid relay")
+  }

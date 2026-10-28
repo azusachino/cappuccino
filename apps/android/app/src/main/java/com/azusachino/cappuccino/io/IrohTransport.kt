@@ -16,7 +16,7 @@ enum class IrohPathKind {
 /** Bridge endpoint from a pairing payload. Kept free of iroh types so pure code can use it. */
 data class IrohEndpointAddr(
   val endpointId: String,
-  val relayUrl: String,
+  val relayUrl: String?,
   val directAddrs: List<String>,
 )
 
