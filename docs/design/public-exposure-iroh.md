@@ -3,6 +3,13 @@
 Status: **proposed** (needs owner approval before implementation). Additive to
 the existing tailscale-serve path; nothing in this doc removes it.
 
+**Amends accepted decisions.** This supersedes "No public ingress or cloud
+relay" in the [intent](../intent.md) (owner, 2026-10-06) and the tailnet-only
+boundary in the [architecture](../architecture.md): iroh adds an
+EndpointId-authenticated path that may traverse n0's public relays. There is
+still no public ingress port. Both documents are amended in the same change
+as this proposal, so accepting it accepts the amendment.
+
 ## Goal
 
 Reach configured Herdr machines from any network — office, travel, mobile
@@ -89,8 +96,11 @@ In order of enforcement:
    paths may stay relayed. The spike compares direct-path rates on n0 versus
    a tunnelled relay before anything is committed.
 5. **Loopback only.** The axum server keeps binding 127.0.0.1. The iroh
-   tunnel is the only path in; disabling iroh (`bridge.transport = "tailscale"`)
-   returns the system to today's boundary — the kill switch.
+   tunnel is the only path in; disabling iroh (`iroh.enabled = false`, the
+   default) returns the system to today's boundary — the kill switch. It sits
+   beside the existing `serve_auto_apply`; the pairing allowlist is the
+   authenticator the reserved `auth` section in `services/bridge/src/config.rs`
+   was kept for, and its settings live there.
 
 Remaining hardening checklist (applies regardless of transport, tracked as
 bridge issues): per-connection rate limit and body-size caps at the axum
@@ -98,10 +108,9 @@ layer, structured audit log of pairing and rejected dials, no tokens or keys
 in logs.
 
 **Revocation.** `cappuccino-bridge pair --revoke <EndpointId>` removes a phone
-from the allowlist. Any paired phone may also revoke any other paired phone
-(not itself) through a bridge control call; every revocation is audit-logged.
-A misused phone can at worst lock others out, which the bridge CLI undoes by
-re-pairing.
+from the allowlist and closes that phone's live connections; every revocation
+is audit-logged. Revocation is CLI-only: phones get no control call, so the
+HTTP contract and the two ALPNs above stay the whole protocol surface.
 
 **Versioning.** ALPN `cappuccino/1`, bumped on breaking protocol changes;
 bridge and app upgrade in lockstep. A mismatch fails the iroh dial cleanly and
@@ -130,13 +139,18 @@ the app falls back to tailnet.
   Keystore cannot hold it non-exportably).
 - OkHttp gets a custom `SocketFactory` whose sockets are iroh bi-streams; no
   localhost listener exists.
-- Background notifications follow the foreground order (iroh first). Each
-  WorkManager run opens the endpoint, polls once and closes it — no
-  long-lived background socket and no foreground service. This lands as its
-  own slice after the foreground one, checked on a real device.
+- Background notifications follow the foreground order (iroh first) inside
+  the existing `AgentNotificationService` foreground service. Each poll opens
+  an iroh connection, makes its request and closes the connection, trading a
+  handshake per poll for no long-lived background connection. This lands as
+  its own slice after the foreground one, checked on a real device.
+- The iroh transport sits behind a Kotlin interface, so the fallback state
+  machine, pairing parsing and key-storage tests run on the JVM without
+  loading the native library.
 - Native library: the `computer.iroh:iroh-android` Maven artifact, pinned to
-  a 1.x minor and bumped deliberately. Building with `cargo-ndk` stays the
-  fallback if a needed version is not published.
+  a 1.x minor and bumped deliberately. It ships x86_64 as well as arm64, so
+  emulator UI tests can load it. Building with `cargo-ndk` stays the fallback
+  if a needed version is not published.
 
 ## Testing
 
@@ -164,7 +178,7 @@ the app falls back to tailnet.
 - Two transports now exist, with automatic fallback between them. The
   transport badge and the re-probe rules keep that debuggable.
 - Background iroh use is the riskiest app code (lifetime, battery); the
-  per-run connection keeps it short, and it ships last among the app slices.
+  per-poll connection keeps it short, and it ships last among the app slices.
 
 ## Alternatives considered
 
@@ -186,17 +200,17 @@ the app falls back to tailnet.
    switch Wi-Fi ⇄ cellular and record reconnection, the network-change hook,
    GSO behaviour on cellular and direct/relayed flapping. Results set the
    hold-down values and confirm or change slice 3.
-1. Bridge: iroh endpoint behind `bridge.transport` config, allowlist hook on
+1. Bridge: iroh endpoint behind `iroh.enabled` (default off), allowlist hook on
    `cappuccino/1`, pairing on `cappuccino-pair/1`, stream→TCP pipe, `pair`
    subcommand with QR and one-time token, hermetic tests.
 2. App dependency: pin `computer.iroh:iroh-android`, check APK size.
 3. App foreground: iroh pairing (QR scan), `no_backup` key file, OkHttp
    iroh `SocketFactory`, network-change forwarding, iroh-first auto
    fallback, transport badge with hold-down, relayed-path poll back-off.
-4. App background: per-run iroh connection in the notification worker,
+4. App background: per-poll iroh connection in `AgentNotificationService`,
    checked on a device.
 5. Hardening batch: rate limits, body caps, audit log, `pair --revoke` (also
-   closing live connections), and revocation from another paired phone.
+   closing live connections).
 6. Relay spike: measure direct-path rates on n0 versus `iroh-relay` on
    harus-k3s behind a Cloudflare Tunnel; adopt only if the numbers hold
    (cross-repo with harus-k3s).
