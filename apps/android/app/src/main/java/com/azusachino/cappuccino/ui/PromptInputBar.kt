@@ -447,15 +447,6 @@ fun PromptInputBar(
 
         Spacer(Modifier.weight(1f))
 
-        if (onStop != null)
-          IconButton(onClick = onStop, modifier = Modifier.size(36.dp).testTag("stopAgent")) {
-            Box(
-              Modifier.size(18.dp)
-                .background(MaterialTheme.colorScheme.error, RoundedCornerShape(4.dp))
-                .semantics { contentDescription = "Stop" }
-            )
-          }
-
         val send: () -> Unit = {
           if (input.isNotBlank()) {
             val trimmed = input.trim()
@@ -472,10 +463,17 @@ fun PromptInputBar(
         }
         if (pending) {
           Box(
-            Modifier.size(40.dp).background(colors.card2, CircleShape).testTag("pendingIndicator"),
+            Modifier.size(40.dp)
+              .background(MaterialTheme.colorScheme.primary, CircleShape)
+              .then(if (onStop != null) Modifier.clickable { onStop() } else Modifier)
+              .testTag("pendingIndicator"),
             contentAlignment = Alignment.Center,
           ) {
-            Box(Modifier.size(14.dp).background(colors.muted, RoundedCornerShape(3.dp)))
+            Box(
+              Modifier.size(14.dp)
+                .background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(3.dp))
+                .semantics { contentDescription = "Stop" }
+            )
           }
         } else {
           Box(
