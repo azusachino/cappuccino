@@ -15,7 +15,6 @@ import androidx.core.content.ContextCompat
 import com.azusachino.cappuccino.MainActivity
 import com.azusachino.cappuccino.R
 import com.azusachino.cappuccino.core.AgentCompletions
-import com.azusachino.cappuccino.ui.agentIconResource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -197,7 +196,15 @@ class AgentNotificationService : Service() {
     if (manager.getNotificationChannel(ALERTS)?.importance == NotificationManager.IMPORTANCE_NONE)
       return
     if (preferences.wasNotified(key)) return
-    val icon = agent?.let { agentIconResource(it) } ?: R.drawable.ic_notification
+    val icon =
+      when (agent?.lowercase()) {
+        "pi" -> R.drawable.ic_notif_pi
+        "claude" -> R.drawable.ic_notif_claude
+        "agy",
+        "antigravity",
+        "antigravity-cli" -> R.drawable.ic_notif_agy
+        else -> R.drawable.ic_notification
+      }
     val publicVersion =
       NotificationCompat.Builder(this, ALERTS)
         .setSmallIcon(icon)

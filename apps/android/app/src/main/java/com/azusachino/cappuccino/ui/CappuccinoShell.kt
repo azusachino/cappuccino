@@ -1391,16 +1391,6 @@ private fun AgentItemCard(
   }
 }
 
-internal fun agentIconResource(agent: String): Int =
-  when (agent.lowercase()) {
-    "pi" -> com.azusachino.cappuccino.R.drawable.ic_agent_pi
-    "agy",
-    "antigravity",
-    "antigravity-cli" -> com.azusachino.cappuccino.R.drawable.ic_agent_spark
-    "claude" -> com.azusachino.cappuccino.R.drawable.ic_agent_claude
-    else -> com.azusachino.cappuccino.R.drawable.ic_machine
-  }
-
 private fun ConnectionState.statusText(): String =
   when (this) {
     ConnectionState.Disconnected -> "Not connected"
