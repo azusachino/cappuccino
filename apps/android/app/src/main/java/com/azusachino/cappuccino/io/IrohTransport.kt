@@ -51,6 +51,12 @@ interface IrohTransport {
   /** Closes the endpoint and every connection on it. */
   suspend fun stop()
 
+  /**
+   * Closes every cached connection but keeps the endpoint. A redial after a network change calls
+   * this first, because a cached connection can stay pinned to a dead path.
+   */
+  suspend fun dropConnections()
+
   /** Dials [addr] on [alpn] (the bridge ALPN by default) and opens a bi-stream to it. */
   suspend fun openStream(addr: IrohEndpointAddr, alpn: String = IROH_BRIDGE_ALPN): IrohBiStream
 

@@ -22,7 +22,14 @@ class StreamRetryBudget(private val maximumRetries: Int = 4) {
   }
 }
 
-class ProtocolException(message: String) : Exception(message)
+class ProtocolException(message: String) : Exception(message), BridgeAnswered
+
+/**
+ * Marks an error raised after the bridge answered (a status, a rejection or a response that failed
+ * to parse). Only errors without this marker count as transport failures; the router uses that to
+ * decide whether another transport may be tried.
+ */
+interface BridgeAnswered
 
 class Endpoint private constructor(val base: URI, val iroh: IrohEndpointAddr? = null) {
   companion object {
@@ -35,6 +42,9 @@ class Endpoint private constructor(val base: URI, val iroh: IrohEndpointAddr? = 
      * so keep their `iroh.invalid` entries in sync with this constant.
      */
     fun iroh(addr: IrohEndpointAddr): Endpoint = Endpoint(IROH_BASE, addr)
+
+    /** The placeholder URL an iroh-only machine stores as its `endpoint`. */
+    val IROH_PLACEHOLDER_URL: String = IROH_BASE.toString()
 
     fun parse(input: String, allowLocalHttp: Boolean = false): Endpoint {
       val uri =
@@ -66,6 +76,25 @@ class Endpoint private constructor(val base: URI, val iroh: IrohEndpointAddr? = 
   }
 
   fun route(path: String): URI = base.resolve(path.removePrefix("/"))
+
+  /** True when the machine has a tailnet URL, not only the iroh placeholder. */
+  val hasTailnet: Boolean
+    get() = base.toString() != IROH_PLACEHOLDER_URL
+
+  /** The same machine with its iroh pairing set (or replaced). */
+  fun withIroh(addr: IrohEndpointAddr): Endpoint = Endpoint(base, addr)
+
+  /** The same machine with a tailnet URL; the iroh pairing, if any, is kept. */
+  fun withTailnet(tailnet: Endpoint): Endpoint {
+    require(tailnet.hasTailnet && tailnet.iroh == null) { "Expected a tailnet bridge URL" }
+    return Endpoint(tailnet.base, iroh)
+  }
+
+  /** The tailnet side alone, or null for an iroh-only machine. */
+  fun tailnetOnly(): Endpoint? = if (hasTailnet) Endpoint(base) else null
+
+  /** The iroh side alone, or null for a tailnet-only machine. */
+  fun irohOnly(): Endpoint? = iroh?.let { Endpoint.iroh(it) }
 
   override fun equals(other: Any?): Boolean =
     other is Endpoint && base == other.base && iroh == other.iroh

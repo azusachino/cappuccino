@@ -72,6 +72,13 @@ class IrohEndpointTransport private constructor(private val keyFile: File) : Iro
     }
   }
 
+  override suspend fun dropConnections() {
+    mutex.withLock {
+      connections.values.forEach { runCatching { it.close(0L, ByteArray(0)) } }
+      connections.clear()
+    }
+  }
+
   override suspend fun openStream(addr: IrohEndpointAddr, alpn: String): IrohBiStream {
     val bi =
       try {

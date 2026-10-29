@@ -277,11 +277,13 @@ class AgentNotificationService : Service() {
 }
 
 /**
- * Profiles the background poll dials. Iroh machines are skipped until slice 4 adds a per-poll iroh
- * connection; the plain client cannot reach their placeholder host.
+ * Profiles the background poll dials. Iroh-only machines are skipped until slice 4 adds a per-poll
+ * iroh connection; the plain client cannot reach their placeholder host. A machine with both
+ * transports polls over tailnet in the background for now: its tailnet URL is what the plain client
+ * dials, and the iroh-first order applies only in the foreground.
  */
 internal fun backgroundPollProfiles(
   profiles: List<MachineProfile>,
   paused: Set<String>,
 ): Map<String, MachineProfile> =
-  profiles.filter { it.id !in paused && it.endpoint.iroh == null }.associateBy { it.id }
+  profiles.filter { it.id !in paused && it.endpoint.hasTailnet }.associateBy { it.id }

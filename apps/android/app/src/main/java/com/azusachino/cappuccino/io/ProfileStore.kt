@@ -39,8 +39,10 @@ interface MachineProfileStore {
 
 /**
  * The stored profile list as JSON. Tailnet rows keep the original shape (no `type`), so profiles
- * saved before iroh decode unchanged and re-encode byte-for-byte. Iroh rows add `"type":"iroh"` and
- * an `iroh` object; their `endpoint` is the placeholder host and is not read back.
+ * saved before iroh decode unchanged and re-encode byte-for-byte. Rows with an iroh pairing add
+ * `"type":"iroh"` and an `iroh` object. Their `endpoint` is the placeholder host for an iroh-only
+ * machine, or the tailnet URL for a machine that has both transports. Pre-both builds read a
+ * both-transport row as iroh-only, which is the only transport they knew.
  */
 internal object MachineProfileCodec {
   fun encode(profiles: List<MachineProfile>): String = buildJsonArray {
@@ -77,7 +79,13 @@ internal object MachineProfileCodec {
       val endpoint =
         when (row["type"]?.jsonPrimitive?.content) {
           null -> Endpoint.parse(row.string("endpoint"), allowLocalHttp)
-          IROH_TYPE -> Endpoint.iroh(irohAddr(row.getValue("iroh").jsonObject))
+          IROH_TYPE -> {
+            val addr = irohAddr(row.getValue("iroh").jsonObject)
+            val stored = row.string("endpoint")
+            // An iroh-only row keeps the placeholder; a row with a tailnet URL carries both.
+            if (stored == Endpoint.IROH_PLACEHOLDER_URL) Endpoint.iroh(addr)
+            else Endpoint.parse(stored, allowLocalHttp).withIroh(addr)
+          }
           else -> throw IllegalArgumentException("Unknown machine type")
         }
       MachineProfile(

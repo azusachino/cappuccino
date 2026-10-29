@@ -71,6 +71,39 @@ class MachineProfileCodecTest {
   }
 
   @Test
+  fun irohOnlyRowWrittenBySliceThreeADecodesAndReEncodesByteForByte() {
+    val json =
+      """[{"id":"office","label":"Office","endpoint":"http://iroh.invalid/","machine_id":"$machine","type":"iroh","iroh":{"endpoint_id":"bridge-id","relay":null,"addrs":["10.0.0.2:4433"]}}]"""
+    val decoded = MachineProfileCodec.decode(json, allowLocalHttp = false)
+    assertEquals(
+      listOf(
+        MachineProfile(
+          "office",
+          "Office",
+          Endpoint.iroh(IrohEndpointAddr("bridge-id", null, listOf("10.0.0.2:4433"))),
+          machine,
+        )
+      ),
+      decoded,
+    )
+    assertEquals(json, MachineProfileCodec.encode(decoded))
+  }
+
+  @Test
+  fun machineWithBothTransportsRoundTripsAndKeepsItsTailnetUrl() {
+    val both =
+      Endpoint.parse("https://mac.example")
+        .withIroh(IrohEndpointAddr("bridge-id", "https://relay.example/", listOf("10.0.0.2:4433")))
+    val profile = MachineProfile("mac", "MacMini", both, machine)
+    val json = MachineProfileCodec.encode(listOf(profile))
+    val decoded = MachineProfileCodec.decode(json, allowLocalHttp = false).single()
+    assertEquals(profile, decoded)
+    assertEquals("https://mac.example/", decoded.endpoint.base.toString())
+    assertTrue(decoded.endpoint.hasTailnet)
+    assertEquals("bridge-id", decoded.endpoint.iroh?.endpointId)
+  }
+
+  @Test
   fun unknownMachineTypeIsRejectedInsteadOfGuessed() {
     val json =
       """[{"id":"x","label":"X","endpoint":"https://x.example/","machine_id":"$machine","type":"future"}]"""

@@ -30,10 +30,9 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.azusachino.cappuccino.io.BridgeClient
 import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.IrohEndpointTransport
-import com.azusachino.cappuccino.io.IrohHttpClients
+import com.azusachino.cappuccino.io.MachineTransports
 import com.azusachino.cappuccino.io.ProfileStore
 import com.azusachino.cappuccino.io.redeemIrohPairing
 import com.azusachino.cappuccino.ui.CappuccinoShell
@@ -149,8 +148,8 @@ class MainActivity : ComponentActivity() {
     IrohAndroid.installAndroidContext(this)
     alertRequest = readAlert(intent)
     enableEdgeToEdge()
+    val transports = MachineTransports.shared(this)
     val irohTransport = IrohEndpointTransport.shared(this)
-    val irohClients = IrohHttpClients(irohTransport, BridgeClient.defaultClient())
     setContent {
       val vm: ConnectedViewModel =
         viewModel(
@@ -159,13 +158,7 @@ class MainActivity : ComponentActivity() {
               initializer {
                 ConnectedViewModel(
                   ProfileStore(application),
-                  { endpoint ->
-                    BridgeClient(
-                      endpoint,
-                      endpoint.iroh?.let { irohClients.clientFor(it) }
-                        ?: BridgeClient.defaultClient(),
-                    )
-                  },
+                  { endpoint -> transports.bridgeFor(endpoint) },
                   { kotlinx.coroutines.delay(it) },
                   createSavedStateHandle(),
                   com.azusachino.cappuccino.io.OfflineConversations(
@@ -177,6 +170,7 @@ class MainActivity : ComponentActivity() {
                       .setPaused(id, paused)
                   },
                   irohPairing = { pairing -> redeemIrohPairing(irohTransport, pairing) },
+                  transportBadge = { endpoint -> transports.badge(endpoint) },
                 )
               }
             }
