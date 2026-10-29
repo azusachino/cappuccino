@@ -29,7 +29,11 @@ class Endpoint private constructor(val base: URI, val iroh: IrohEndpointAddr? = 
     /** Placeholder host for iroh machines: the socket factory ignores it, and it never resolves. */
     private val IROH_BASE = URI("http://iroh.invalid/")
 
-    /** An iroh machine. Its URLs stay on the placeholder host; the transport carries the bytes. */
+    /**
+     * An iroh machine. Its URLs stay on the placeholder host; the transport carries the bytes. The
+     * host is allowed as cleartext only in the network security configs (main and debug res/xml),
+     * so keep their `iroh.invalid` entries in sync with this constant.
+     */
     fun iroh(addr: IrohEndpointAddr): Endpoint = Endpoint(IROH_BASE, addr)
 
     fun parse(input: String, allowLocalHttp: Boolean = false): Endpoint {
