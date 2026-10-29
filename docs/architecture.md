@@ -37,7 +37,7 @@ The manifest invokes the installed `cappuccino-bridge` command for `start`, `sto
 
 The `serve.auto_apply` setting defaults to true. With `false`, or `CAPP_BRIDGE_SERVE_AUTO_APPLY=0`, the bridge runs no Tailscale command and only prints the manual exposure command. Invalid values fail closed.
 
-Config precedence is defaults, then optional JSON (`CAPP_BRIDGE_CONFIG` or `~/.config/cappuccino-bridge/config.json`), then supported environment overrides. Bind addresses must stay on loopback. See the [bridge setup and commands](../services/bridge/README.md).
+Config precedence is defaults, then optional JSON (`CAPP_BRIDGE_CONFIG`, else `$XDG_CONFIG_HOME/cappuccino-bridge/config.json`, else `~/.config/cappuccino-bridge/config.json`), then supported environment overrides. Bind addresses must stay on loopback. See the [bridge setup and commands](../services/bridge/README.md).
 
 ## Delivery acceptance remains open
 
