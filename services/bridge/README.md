@@ -95,6 +95,8 @@ Paths, on macOS and Linux alike:
 
 ### iroh transport (optional, off by default)
 
+Setup, pairing and relay operations: [docs/iroh-setup.md](../../docs/iroh-setup.md).
+
 `iroh.enabled` (default `false`, strict boolean) starts an iroh endpoint beside the loopback listener. When false no endpoint is created. The phone reaches the same routes through iroh ALPN `cappuccino/1`, admitted only for EndpointIds on the allowlist. ALPN `cappuccino-pair/1` admits unknown ids for one token exchange. Pairing uses a code that rotates every 60 s and is single-use per window; `cappuccino-bridge pair` prints the current code. The secret key (`iroh-secret.key`) and allowlist (`iroh-allowlist.json`) live in the data dir with mode 0600.
 
 `iroh.relay_url` (optional, absolute `https` URL, strict: a bad value stops startup) makes the endpoint use only that relay instead of n0's. Unset keeps n0. Point it at a relay whose access allowlist admits the bridge's EndpointId; a relay that admits everyone is a relay that will carry anyone's traffic. A relay behind a Cloudflare Tunnel carries no UDP, so the endpoint gets no QUIC address discovery and its address is relay-only; paths can stay relayed. The pairing payload then carries that relay URL and no direct addresses.
