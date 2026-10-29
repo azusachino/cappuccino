@@ -177,8 +177,12 @@ class MachinesJourneyTest {
     compose.onNodeWithContentDescription("Retry Failing bridge").assertIsDisplayed()
     compose.onNodeWithContentDescription("Retry Healthy bridge").assertDoesNotExist()
     compose.onNodeWithContentDescription("Disconnect Failing bridge").assertDoesNotExist()
-    // The longest real status (error plus transport badge) lays out as one line.
-    val status = compose.onNodeWithText("Connection error · iroh relayed").assertIsDisplayed()
+    // The longest real status (error plus transport badge) lays out as one line. Match the status
+    // Text itself: the merged tree resolves to the clickable row, whose layout is not the status.
+    val status =
+      compose
+        .onNodeWithText("Connection error · iroh relayed", useUnmergedTree = true)
+        .assertIsDisplayed()
     val lines = mutableListOf<TextLayoutResult>()
     status.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action?.invoke(lines)
     assertEquals(1, lines.single().lineCount)
