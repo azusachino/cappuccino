@@ -43,7 +43,12 @@ internal fun SettingsScreen(
   val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }
   Column(
-    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 12.dp),
+    Modifier.fillMaxWidth()
+      .verticalScroll(rememberScrollState())
+      .padding(
+        top = contentPadding.calculateTopPadding() + 12.dp,
+        bottom = contentPadding.calculateBottomPadding() + 12.dp,
+      ),
     verticalArrangement = Arrangement.spacedBy(16.dp),
   ) {
     SettingsCard("Appearance") {

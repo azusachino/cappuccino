@@ -4,24 +4,28 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.azusachino.cappuccino.core.AgentRow
 import com.azusachino.cappuccino.core.Endpoint
 import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectionState
+import com.azusachino.cappuccino.io.MachineConnection
 import com.azusachino.cappuccino.io.MachineProfile
+import com.azusachino.cappuccino.io.TransportBadge
 import com.azusachino.cappuccino.ui.CappuccinoScreen
 import com.azusachino.cappuccino.ui.CappuccinoTheme
 import java.util.UUID
@@ -110,33 +114,103 @@ class MachinesJourneyTest {
     }
     openMachines()
     compose.waitForIdle()
-    // Retry must be hit-testable below the floating header, not under it.
-    val header = compose.onNodeWithText("Machines").fetchSemanticsNode().boundsInRoot
-    val retry =
-      compose.onNodeWithText("Retry").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    // The errored row sits under the floating header, not beneath it.
+    val header =
+      compose.onNode(hasText("Machines") and !hasClickAction()).fetchSemanticsNode().boundsInRoot
+    val row =
+      compose
+        .onNodeWithText("Synthetic bridge")
+        .assertIsDisplayed()
+        .fetchSemanticsNode()
+        .boundsInRoot
     assertTrue(
-      "Retry sits under the header: retry=$retry header=$header",
-      retry.top > header.bottom,
+      "Machine row sits under the header: row=$row header=$header",
+      row.top > header.bottom,
     )
-    // The first machine row follows the banner closely: one inset, not the header inset twice.
-    val banner = compose.onNodeWithTag("machinesConnectionBanner").fetchSemanticsNode().boundsInRoot
-    val row = compose.onNodeWithText("Synthetic bridge").fetchSemanticsNode().boundsInRoot
-    val gap = row.top - banner.bottom
-    assertTrue(
-      "Machine row sits ${gap}px below the banner: row=$row banner=$banner",
-      gap >= 0f && gap <= with(compose.density) { 32.dp.toPx() },
-    )
-    compose.onNodeWithText("Retry").performClick()
+    compose.onNodeWithContentDescription("Retry Synthetic bridge").performClick()
     // The injected click is delivered after waitForIdle can return; wait for its effect, then
     // require exactly one call so a double-fire still fails.
-    compose.waitUntil(timeoutMillis = 5_000) { actions.retryCalls > 0 }
+    compose.waitUntil(timeoutMillis = 5_000) { actions.refreshCalls > 0 }
     compose.waitForIdle()
-    assertEquals(1, actions.retryCalls)
+    assertEquals(1, actions.refreshCalls)
     compose.onNodeWithContentDescription("Machine actions").performClick()
     compose.onNodeWithText("Remove").performClick()
     compose.onNodeWithText("No machines configured").assertIsDisplayed()
     assertTrue(state.value.profiles.isEmpty())
   }
+
+  @Test
+  fun retryShowsOnlyOnErroredRowAndStatusStaysOneLine() {
+    val failing =
+      MachineProfile(
+        "failing",
+        "Failing bridge",
+        Endpoint.parse("https://a.example"),
+        UUID.randomUUID(),
+      )
+    val healthy =
+      MachineProfile(
+        "healthy",
+        "Healthy bridge",
+        Endpoint.parse("https://b.example"),
+        UUID.randomUUID(),
+      )
+    val state =
+      mutableStateOf(
+        ConnectedUiState(
+          profiles = listOf(failing, healthy),
+          activeProfileId = failing.id,
+          connection = ConnectionState.Error("Synthetic offline"),
+          machines = mapOf(healthy.id to MachineConnection(ConnectionState.Connected)),
+          machineBadges = mapOf(failing.id to TransportBadge.IROH_RELAYED),
+        )
+      )
+    val actions = TestActions(state)
+    compose.activity.setContent {
+      CappuccinoTheme {
+        val s by state
+        CappuccinoScreen(s, actions) { _, _ -> }
+      }
+    }
+    openMachines()
+    compose.waitForIdle()
+    compose.onNodeWithContentDescription("Retry Failing bridge").assertIsDisplayed()
+    compose.onNodeWithContentDescription("Retry Healthy bridge").assertDoesNotExist()
+    compose.onNodeWithContentDescription("Disconnect Failing bridge").assertDoesNotExist()
+    // The longest real status (error plus transport badge) lays out as one line.
+    val status = compose.onNodeWithText("Connection error · iroh relayed").assertIsDisplayed()
+    val lines = mutableListOf<TextLayoutResult>()
+    status.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action?.invoke(lines)
+    assertEquals(1, lines.single().lineCount)
+  }
+
+  @Test
+  fun dockLabelsAreAlwaysDisplayedAndSelectionKeepsTabWidths() {
+    val state = mutableStateOf(ConnectedUiState())
+    val actions = TestActions(state)
+    compose.activity.setContent {
+      CappuccinoTheme { CappuccinoScreen(state.value, actions) { _, _ -> } }
+    }
+    compose.waitForIdle()
+    val labels = listOf("Machines", "History", "Settings")
+    val widthsBefore = labels.associateWith { dockTabWidth(it) }
+    labels.forEach { compose.onNode(hasText(it) and hasClickAction()).assertIsDisplayed() }
+    labels.forEach { label ->
+      compose.onNode(hasContentDescription(label) and hasClickAction()).performClick()
+      compose.waitForIdle()
+      compose.onNode(hasContentDescription(label) and hasClickAction()).assertIsSelected()
+      labels.forEach { compose.onNode(hasText(it) and hasClickAction()).assertIsDisplayed() }
+      labels.forEach { assertEquals(widthsBefore.getValue(it), dockTabWidth(it)) }
+    }
+  }
+
+  private fun dockTabWidth(label: String): Float =
+    compose
+      .onNode(hasContentDescription(label) and hasClickAction())
+      .fetchSemanticsNode()
+      .size
+      .width
+      .toFloat()
 
   @Test
   fun machineTreeOpensAgentDirectlyAndPreservesExpansionOnBack() {
@@ -265,7 +339,7 @@ class MachinesJourneyTest {
   }
 
   private class TestActions(private val state: MutableState<ConnectedUiState>) : ConnectedActions {
-    var retryCalls = 0
+    var refreshCalls = 0
 
     override fun addMachine(label: String, url: String) = Unit
 
@@ -302,9 +376,11 @@ class MachinesJourneyTest {
         )
     }
 
-    override fun retry() {
-      retryCalls++
+    override fun refreshProfile(id: String) {
+      refreshCalls++
     }
+
+    override fun retry() = Unit
 
     override fun setThemeMode(mode: com.azusachino.cappuccino.ui.ThemeMode) {
       state.value = state.value.copy(themeMode = mode)
