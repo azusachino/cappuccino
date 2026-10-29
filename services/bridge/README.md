@@ -88,6 +88,7 @@ Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, op
 `iroh.enabled` (default `false`, strict boolean) starts an iroh endpoint beside the loopback listener. When false no endpoint is created. The phone reaches the same routes through iroh ALPN `cappuccino/1`, admitted only for EndpointIds on the allowlist. ALPN `cappuccino-pair/1` admits unknown ids for one token exchange. `auth.pair_token_ttl_secs` (default `600`, range 1 to 3600) sets the token lifetime. The secret key (`iroh-secret.key`) and allowlist (`iroh-allowlist.json`) live in the data dir with mode 0600.
 
 - `cappuccino-bridge pair` prints a QR and the payload. It asks the running bridge over the owner-only admin socket `iroh-admin.sock` in the data dir. Start the bridge first, or the command reports that it is not running.
+- The payload carries direct addresses only when no relay is known yet (`relay` null). With a relay, `addrs` is empty and the phone finds the direct path after connecting, which keeps the QR about 55 to 59 columns and 28 to 30 rows (error level L, one-module quiet zone). If the terminal is narrower, the command prints a hint; widen it or open `/pair` on a tailnet device, which shows the same payload as a QR.
 - `cappuccino-bridge pair --revoke <EndpointId>` removes the id and closes its live tunnel connections.
 - Payload format v1, compact JSON: `{"v":1,"endpoint_id":"<id>","relay":"<url>|null","addrs":["ip:port"],"token":"<64 hex>"}`. Unknown `v` values must be rejected by clients.
 - Pairing tokens and secret keys are never logged.
