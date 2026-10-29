@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import com.azusachino.cappuccino.R
 import com.azusachino.cappuccino.core.COMMON_SLASH_COMMANDS
 import com.azusachino.cappuccino.core.PromptCard
+import com.azusachino.cappuccino.core.busyAgentCommandReason
 import com.azusachino.cappuccino.core.disallowedSlashCommandReason
 import com.azusachino.cappuccino.core.matchingSlashCommands
 import com.azusachino.cappuccino.core.slashCommand
@@ -175,6 +176,7 @@ fun PromptInputBar(
   draft: String = "",
   onDraftChange: ((String) -> Unit)? = null,
   pending: Boolean = false,
+  agentWorking: Boolean = false,
   outcome: String? = null,
 ) {
   var input by rememberSaveable(draft) { mutableStateOf(draft) }
@@ -186,7 +188,8 @@ fun PromptInputBar(
   // An agent command can cost far more than a message; it waits here, draft kept, until confirmed.
   var confirmingCommand by rememberSaveable { mutableStateOf<String?>(null) }
   confirmingCommand?.let { command ->
-    val disallowedReason = disallowedSlashCommandReason(command)
+    val disallowedReason =
+      disallowedSlashCommandReason(command) ?: busyAgentCommandReason(command, agentWorking)
     if (disallowedReason != null) {
       AlertDialog(
         onDismissRequest = { confirmingCommand = null },
@@ -370,6 +373,7 @@ fun PromptInputBar(
             }
             COMMON_SLASH_COMMANDS.forEach { item ->
               DropdownMenuItem(
+                enabled = !(agentWorking && item.command == "/new"),
                 text = {
                   Column {
                     Text(
@@ -381,7 +385,8 @@ fun PromptInputBar(
                       color = colors.accent,
                     )
                     Text(
-                      item.description,
+                      if (agentWorking && item.command == "/new") "Stop the agent first"
+                      else item.description,
                       style = MaterialTheme.typography.bodySmall,
                       color = colors.muted,
                     )
@@ -461,18 +466,25 @@ fun PromptInputBar(
             }
           }
         }
+        if (onStop != null)
+          IconButton(onClick = onStop, modifier = Modifier.size(36.dp).testTag("stopAgent")) {
+            Box(
+              Modifier.size(18.dp)
+                .background(MaterialTheme.colorScheme.error, RoundedCornerShape(4.dp))
+                .semantics { contentDescription = "Stop" }
+            )
+          }
         if (pending) {
           Box(
             Modifier.size(40.dp)
               .background(MaterialTheme.colorScheme.primary, CircleShape)
-              .then(if (onStop != null) Modifier.clickable { onStop() } else Modifier)
-              .testTag("pendingIndicator"),
+              .testTag("pendingIndicator")
+              .semantics { contentDescription = "Sending" },
             contentAlignment = Alignment.Center,
           ) {
             Box(
               Modifier.size(14.dp)
                 .background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(3.dp))
-                .semantics { contentDescription = "Stop" }
             )
           }
         } else {

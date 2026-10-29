@@ -882,6 +882,7 @@ fun CappuccinoScreen(
                     PromptInputBar(
                       onSend = { text, confirmed -> mutate { it.submitPrompt(text, confirmed) } },
                       pending = sendState != null && sendState.outcome == null,
+                      agentWorking = selectedStatus == "working",
                       outcome = sendState?.outcome,
                       onStop =
                         if (agentControl && selectedStatus == "working") {

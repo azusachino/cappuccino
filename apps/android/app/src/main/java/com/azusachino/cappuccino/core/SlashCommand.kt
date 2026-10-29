@@ -35,6 +35,17 @@ fun disallowedSlashCommandReason(command: String): String? =
     else -> null
   }
 
+/**
+ * Why [text] cannot be sent while the agent is working: `/new` starts a fresh session, so it waits
+ * until the agent is idle (pre-redesign rule, kept after New session became a command). Null when
+ * the text may be sent.
+ */
+fun busyAgentCommandReason(text: String, agentWorking: Boolean): String? {
+  val command = slashCommand(text)?.lowercase() ?: return null
+  return if (agentWorking && command == "/new") "Stop the agent first, then start a new session."
+  else null
+}
+
 data class AgentSlashCommand(val command: String, val description: String)
 
 val COMMON_SLASH_COMMANDS: List<AgentSlashCommand> =
