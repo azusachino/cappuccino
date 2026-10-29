@@ -76,7 +76,7 @@ class AgentNotificationService : Service() {
           stopSelf()
           break
         }
-        val profiles = store.read().filter { it.id !in preferences.paused() }.associateBy { it.id }
+        val profiles = backgroundPollProfiles(store.read(), preferences.paused())
         if (
           profiles.isEmpty() || System.currentTimeMillis() - lastActivityTimestamp > IDLE_TIMEOUT_MS
         ) {
@@ -275,3 +275,13 @@ class AgentNotificationService : Service() {
     }
   }
 }
+
+/**
+ * Profiles the background poll dials. Iroh machines are skipped until slice 4 adds a per-poll iroh
+ * connection; the plain client cannot reach their placeholder host.
+ */
+internal fun backgroundPollProfiles(
+  profiles: List<MachineProfile>,
+  paused: Set<String>,
+): Map<String, MachineProfile> =
+  profiles.filter { it.id !in paused && it.endpoint.iroh == null }.associateBy { it.id }

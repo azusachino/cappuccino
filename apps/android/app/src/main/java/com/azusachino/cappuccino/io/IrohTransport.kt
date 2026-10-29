@@ -1,10 +1,10 @@
 package com.azusachino.cappuccino.io
 
-import java.io.InputStream
-import java.io.OutputStream
-
 /** ALPN the bridge serves its iroh endpoint on. */
 const val IROH_BRIDGE_ALPN = "cappuccino/1"
+
+/** ALPN the bridge serves the one-time pairing exchange on. */
+const val IROH_PAIR_ALPN = "cappuccino-pair/1"
 
 /** Path the transport currently uses to reach a peer; NONE means no live path. */
 enum class IrohPathKind {
@@ -20,8 +20,25 @@ data class IrohEndpointAddr(
   val directAddrs: List<String>,
 )
 
-/** The two directions of one bi-stream, ready to be wrapped by a `java.net.Socket`. */
-class IrohStreamPair(val input: InputStream, val output: OutputStream)
+/**
+ * One bi-directional iroh stream at the suspend level. The socket adapter wraps it in blocking
+ * `java.io` streams. Finish and stop stay separate because iroh distinguishes them on the wire.
+ */
+interface IrohBiStream {
+  /** Next chunk of at most [max] bytes. An empty array means the peer finished its send side. */
+  suspend fun read(max: Int): ByteArray
+
+  suspend fun write(bytes: ByteArray)
+
+  /** Ends our send side (QUIC FIN): the peer reads EOF after the bytes already written. */
+  suspend fun finish()
+
+  /** Tells the peer we no longer read this stream. */
+  suspend fun stopReading()
+
+  /** Releases native handles. Safe to call more than once. */
+  fun release()
+}
 
 /**
  * One iroh endpoint per app process. Implementations load the native library, so only the Android
@@ -34,8 +51,8 @@ interface IrohTransport {
   /** Closes the endpoint and every connection on it. */
   suspend fun stop()
 
-  /** Dials [addr] on [IROH_BRIDGE_ALPN] and opens a bi-stream to it. */
-  suspend fun openStream(addr: IrohEndpointAddr): IrohStreamPair
+  /** Dials [addr] on [alpn] (the bridge ALPN by default) and opens a bi-stream to it. */
+  suspend fun openStream(addr: IrohEndpointAddr, alpn: String = IROH_BRIDGE_ALPN): IrohBiStream
 
   /** Reports the current path kind to [addr], without dialling. */
   fun pathKind(addr: IrohEndpointAddr): IrohPathKind

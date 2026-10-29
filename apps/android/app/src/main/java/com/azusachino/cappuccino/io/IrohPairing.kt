@@ -38,3 +38,36 @@ private fun relayUrl(json: JsonObject): String? =
       value.value.ifEmpty { throw ProtocolException("Empty pairing relay") }
     else -> throw ProtocolException("Invalid relay")
   }
+
+private const val MAX_PAIR_REPLY_BYTES = 16
+
+/**
+ * Presents the one-time token on [IROH_PAIR_ALPN] and returns once the bridge replies `OK\n`. The
+ * bridge's `ERR\n` and any other reply fail; the token never appears in an error message.
+ */
+suspend fun redeemIrohPairing(transport: IrohTransport, pairing: IrohPairing) {
+  val stream = transport.openStream(pairing.endpoint, IROH_PAIR_ALPN)
+  try {
+    stream.write(pairing.token.toByteArray(Charsets.UTF_8))
+    stream.finish()
+    val reply = readToEnd(stream)
+    when (reply.toString(Charsets.UTF_8)) {
+      "OK\n" -> Unit
+      "ERR\n" -> throw ProtocolException("Bridge rejected the pairing token")
+      else -> throw ProtocolException("Unexpected pairing reply")
+    }
+  } finally {
+    runCatching { stream.stopReading() }
+    stream.release()
+  }
+}
+
+private suspend fun readToEnd(stream: IrohBiStream): ByteArray {
+  val reply = java.io.ByteArrayOutputStream()
+  while (true) {
+    val chunk = stream.read(MAX_PAIR_REPLY_BYTES)
+    if (chunk.isEmpty()) return reply.toByteArray()
+    reply.write(chunk)
+    if (reply.size() > MAX_PAIR_REPLY_BYTES) throw ProtocolException("Pairing reply too long")
+  }
+}

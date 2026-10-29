@@ -63,11 +63,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -132,6 +134,7 @@ fun StatusBadge(status: String, modifier: Modifier = Modifier) {
 fun CappuccinoShell(
   viewModel: ConnectedViewModel,
   timeZone: ZoneId = ZoneId.systemDefault(),
+  requestIrohConnect: (String, String) -> Unit = { _, _ -> },
   requestConnect: (String, String) -> Unit,
 ) {
   val state by viewModel.state.collectAsStateWithLifecycle()
@@ -141,6 +144,7 @@ fun CappuccinoShell(
     timeZone,
     savedHistoryAction = viewModel::openSavedConversation,
     requestConnect = requestConnect,
+    requestIrohConnect = requestIrohConnect,
   )
 }
 
@@ -151,6 +155,7 @@ fun CappuccinoScreen(
   actions: ConnectedActions,
   timeZone: ZoneId = ZoneId.systemDefault(),
   savedHistoryAction: ((java.util.UUID, String) -> Unit)? = null,
+  requestIrohConnect: (String, String) -> Unit = { _, _ -> },
   requestConnect: (String, String) -> Unit,
 ) {
   var destination by rememberSaveable { mutableStateOf(Destination.MACHINES) }
@@ -184,6 +189,10 @@ fun CappuccinoScreen(
   var endpoint by rememberSaveable { mutableStateOf("") }
   var pendingAdd by rememberSaveable { mutableStateOf(false) }
   var previousProfileIds by rememberSaveable { mutableStateOf("") }
+  var irohMode by rememberSaveable { mutableStateOf(false) }
+  var payload by rememberSaveable { mutableStateOf("") }
+  var scanError by rememberSaveable { mutableStateOf<String?>(null) }
+  val context = LocalContext.current
   val selected = state.selectedAgent
   fun mutate(send: (ConnectedActions) -> Unit) {
     if (selected != null && actions.acceptsMutation(state.activeProfileId, selected)) send(actions)
@@ -326,6 +335,7 @@ fun CappuccinoScreen(
       adding = false
       pendingAdd = false
       endpoint = ""
+      payload = ""
       destination = Destination.MACHINES
     }
   }
@@ -1143,27 +1153,83 @@ fun CappuccinoScreen(
                 unfocusedBorderColor = MaterialTheme.colorScheme.outline,
               ),
           )
-          OutlinedTextField(
-            value = endpoint,
-            onValueChange = { endpoint = it },
-            label = { Text("Bridge address") },
-            placeholder = { Text("https://machine.tailnet.ts.net") },
-            keyboardOptions =
-              androidx.compose.foundation.text.KeyboardOptions(
-                keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
-                autoCorrectEnabled = false,
-              ),
-            singleLine = true,
-            isError = state.addError != null,
-            modifier = Modifier.fillMaxWidth(),
-            colors =
-              OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-              ),
-          )
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { irohMode = false }, enabled = irohMode) { Text("Bridge URL") }
+            TextButton(onClick = { irohMode = true }, enabled = !irohMode) {
+              Text("Pair over iroh")
+            }
+          }
+          if (!irohMode)
+            OutlinedTextField(
+              value = endpoint,
+              onValueChange = { endpoint = it },
+              label = { Text("Bridge address") },
+              placeholder = { Text("https://machine.tailnet.ts.net") },
+              keyboardOptions =
+                androidx.compose.foundation.text.KeyboardOptions(
+                  keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                  autoCorrectEnabled = false,
+                ),
+              singleLine = true,
+              isError = state.addError != null,
+              modifier = Modifier.fillMaxWidth(),
+              colors =
+                OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = MaterialTheme.colorScheme.surface,
+                  unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                  focusedBorderColor = MaterialTheme.colorScheme.primary,
+                  unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                ),
+            )
+          if (irohMode) {
+            OutlinedTextField(
+              value = payload,
+              onValueChange = { payload = it },
+              label = { Text("Pairing payload") },
+              visualTransformation = PasswordVisualTransformation(),
+              singleLine = true,
+              enabled = !state.busy,
+              modifier = Modifier.fillMaxWidth(),
+              colors =
+                OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = MaterialTheme.colorScheme.surface,
+                  unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                  focusedBorderColor = MaterialTheme.colorScheme.primary,
+                  unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                ),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              TextButton(
+                onClick = {
+                  scanPairingPayload(
+                    context,
+                    onPayload = {
+                      payload = it
+                      scanError = null
+                    },
+                    onFailure = { scanError = it },
+                  )
+                },
+                enabled = !state.busy,
+              ) {
+                Text("Scan QR")
+              }
+              TextButton(
+                onClick = {
+                  val pasted = takePairingPayloadFromClipboard(context)
+                  if (pasted == null) scanError = "Clipboard has no pairing payload"
+                  else {
+                    payload = pasted
+                    scanError = null
+                  }
+                },
+                enabled = !state.busy,
+              ) {
+                Text("Paste")
+              }
+            }
+            scanError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
+          }
           state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
           if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }
@@ -1173,9 +1239,9 @@ fun CappuccinoScreen(
           onClick = {
             previousProfileIds = state.addedProfileIds.joinToString("|")
             pendingAdd = true
-            requestConnect(label, endpoint)
+            if (irohMode) requestIrohConnect(label, payload) else requestConnect(label, endpoint)
           },
-          enabled = !state.busy && endpoint.isNotBlank(),
+          enabled = !state.busy && (if (irohMode) payload.isNotBlank() else endpoint.isNotBlank()),
         ) {
           Text("Connect")
         }

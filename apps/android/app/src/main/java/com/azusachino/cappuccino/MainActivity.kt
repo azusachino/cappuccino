@@ -30,10 +30,15 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.azusachino.cappuccino.io.BridgeClient
 import com.azusachino.cappuccino.io.ConnectedViewModel
+import com.azusachino.cappuccino.io.IrohEndpointTransport
+import com.azusachino.cappuccino.io.IrohHttpClients
 import com.azusachino.cappuccino.io.ProfileStore
+import com.azusachino.cappuccino.io.redeemIrohPairing
 import com.azusachino.cappuccino.ui.CappuccinoShell
 import com.azusachino.cappuccino.ui.CappuccinoTheme
+import computer.iroh.IrohAndroid
 import java.time.ZoneId
 
 class MainActivity : ComponentActivity() {
@@ -141,8 +146,11 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    IrohAndroid.installAndroidContext(this)
     alertRequest = readAlert(intent)
     enableEdgeToEdge()
+    val irohTransport = IrohEndpointTransport.shared(this)
+    val irohClients = IrohHttpClients(irohTransport, BridgeClient.defaultClient())
     setContent {
       val vm: ConnectedViewModel =
         viewModel(
@@ -151,7 +159,13 @@ class MainActivity : ComponentActivity() {
               initializer {
                 ConnectedViewModel(
                   ProfileStore(application),
-                  { endpoint -> com.azusachino.cappuccino.io.BridgeClient(endpoint) },
+                  { endpoint ->
+                    BridgeClient(
+                      endpoint,
+                      endpoint.iroh?.let { irohClients.clientFor(it) }
+                        ?: BridgeClient.defaultClient(),
+                    )
+                  },
                   { kotlinx.coroutines.delay(it) },
                   createSavedStateHandle(),
                   com.azusachino.cappuccino.io.OfflineConversations(
@@ -162,6 +176,7 @@ class MainActivity : ComponentActivity() {
                       .NotificationPreferences(application)
                       .setPaused(id, paused)
                   },
+                  irohPairing = { pairing -> redeemIrohPairing(irohTransport, pairing) },
                 )
               }
             }
@@ -195,7 +210,11 @@ class MainActivity : ComponentActivity() {
         onResolvedDarkChanged = ::applySystemBarAppearance,
       ) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-          CappuccinoShell(vm, timeZone = deviceTimeZone) { label, url ->
+          CappuccinoShell(
+            vm,
+            timeZone = deviceTimeZone,
+            requestIrohConnect = { label, payload -> vm.addIrohMachine(label, payload) },
+          ) { label, url ->
             if (
               Build.VERSION.SDK_INT >= 37 &&
                 checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") !=

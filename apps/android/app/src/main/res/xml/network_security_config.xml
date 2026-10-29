@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+  <!--
+    Cleartext is off everywhere except the iroh placeholder host. The iroh tunnel is QUIC/TLS end
+    to end, and iroh.invalid never resolves to a real network host: the socket factory answers its
+    DNS lookup with loopback and carries the bytes over the iroh stream instead.
+    Keep this entry in sync with IROH_BASE in core/BridgeProtocol.kt.
+  -->
+  <base-config cleartextTrafficPermitted="false" />
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">iroh.invalid</domain>
+  </domain-config>
+</network-security-config>
