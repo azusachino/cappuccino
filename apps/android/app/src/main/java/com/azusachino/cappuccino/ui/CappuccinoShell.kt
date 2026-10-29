@@ -687,6 +687,14 @@ fun CappuccinoScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                   )
               }
+              val bannerInset =
+                if (
+                  state.connection is ConnectionState.Connecting ||
+                    state.connection is ConnectionState.Recovering ||
+                    state.connection is ConnectionState.Error
+                )
+                  12.dp
+                else chromeTop
               when (val connection = state.connection) {
                 ConnectionState.Connecting ->
                   Column(
@@ -790,7 +798,7 @@ fun CappuccinoScreen(
                             Modifier.fillMaxSize()
                               .padding(horizontal = 16.dp)
                               .testTag("recentOutputList"),
-                          contentPadding = PaddingValues(top = chromeTop, bottom = 12.dp),
+                          contentPadding = PaddingValues(top = bannerInset, bottom = 12.dp),
                           verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                           items(collapsedRows, key = { "row:${it.key}" }) { row ->
@@ -945,10 +953,14 @@ fun CappuccinoScreen(
             else -> {
               // Destination.MACHINES
               val connection = state.connection
+              val machinesTop = if (connection is ConnectionState.Error) 12.dp else chromeTop
               if (connection is ConnectionState.Error) {
                 Surface(
                   modifier =
-                    Modifier.fillMaxWidth().padding(top = chromeTop).padding(horizontal = 16.dp),
+                    Modifier.fillMaxWidth()
+                      .padding(top = chromeTop)
+                      .padding(horizontal = 16.dp)
+                      .testTag("machinesConnectionBanner"),
                   shape = RoundedCornerShape(8.dp),
                   color = MaterialTheme.colorScheme.errorContainer,
                 ) {
@@ -980,7 +992,7 @@ fun CappuccinoScreen(
               if (state.profiles.isEmpty()) {
                 Box(
                   modifier =
-                    Modifier.fillMaxWidth().weight(1f).padding(top = chromeTop).padding(24.dp),
+                    Modifier.fillMaxWidth().weight(1f).padding(top = machinesTop).padding(24.dp),
                   contentAlignment = Alignment.Center,
                 ) {
                   Column(
@@ -1003,7 +1015,7 @@ fun CappuccinoScreen(
                 LazyColumn(
                   state = machineTreeState,
                   modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
-                  contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
+                  contentPadding = PaddingValues(top = machinesTop, bottom = dockBottom),
                   verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                   items(state.profiles, key = { it.id }) { profile ->
