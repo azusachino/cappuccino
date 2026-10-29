@@ -21,13 +21,17 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.BufferedSource
 
-open class BridgeHttpRejectionException(message: String) : IOException(message)
+open class BridgeHttpRejectionException(message: String) : IOException(message), BridgeAnswered
+
+/** The bridge answered with a non-success status that is not a typed rejection. */
+class BridgeHttpStatusException(val code: Int, message: String) :
+  IOException(message), BridgeAnswered
 
 class BridgeMutationUnsupportedException(message: String) : BridgeHttpRejectionException(message)
 
 class BridgeStaleSessionException(message: String) : BridgeHttpRejectionException(message)
 
-class BridgeMutationOutcomeUnknownException(message: String) : IOException(message)
+class BridgeMutationOutcomeUnknownException(message: String) : IOException(message), BridgeAnswered
 
 class BridgeWebSocketClosedException(val code: Int, val reason: String) :
   IOException(
@@ -360,7 +364,8 @@ class BridgeClient(
         override fun onResponse(call: okhttp3.Call, response: Response) {
           response.use {
             try {
-              if (!it.isSuccessful) throw IOException("Bridge returned HTTP ${it.code}")
+              if (!it.isSuccessful)
+                throw BridgeHttpStatusException(it.code, "Bridge returned HTTP ${it.code}")
               val text = readBounded(it.body.source(), MAX_HTTP_BODY_BYTES)
               if (continuation.isActive) continuation.resume(text)
             } catch (error: Exception) {
@@ -407,7 +412,7 @@ class BridgeClient(
                   if (it.code == 502 && code == "mutation_outcome_unknown")
                     throw BridgeMutationOutcomeUnknownException(message)
                   if (it.code in 400..499) throw BridgeHttpRejectionException(message)
-                  throw IOException(message)
+                  throw BridgeHttpStatusException(it.code, message)
                 }
                 if (continuation.isActive) continuation.resume(text)
               } catch (error: Exception) {

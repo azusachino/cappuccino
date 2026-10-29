@@ -22,7 +22,14 @@ class StreamRetryBudget(private val maximumRetries: Int = 4) {
   }
 }
 
-class ProtocolException(message: String) : Exception(message)
+class ProtocolException(message: String) : Exception(message), BridgeAnswered
+
+/**
+ * Marks an error raised after the bridge answered (a status, a rejection or a response that failed
+ * to parse). Only errors without this marker count as transport failures; the router uses that to
+ * decide whether another transport may be tried.
+ */
+interface BridgeAnswered
 
 class Endpoint private constructor(val base: URI, val iroh: IrohEndpointAddr? = null) {
   companion object {

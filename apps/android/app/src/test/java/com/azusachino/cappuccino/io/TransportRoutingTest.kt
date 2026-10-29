@@ -1,6 +1,7 @@
 package com.azusachino.cappuccino.io
 
 import java.io.IOException
+import java.net.SocketTimeoutException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -154,6 +155,58 @@ class MachineRouterTest {
     up = false
     repeat(2) { runCatching { router.request(block) } }
     assertEquals(0, iroh.stops)
+  }
+
+  @Test
+  fun bridgeAnswerOverIrohPropagatesWithoutFallbackOrCounting() = runTest {
+    val iroh = RecordingIroh()
+    val calls = mutableListOf<String>()
+    val router = MachineRouter(both, FakeClock(), iroh)
+    val answered: suspend (String) -> String = { client ->
+      calls += client
+      throw BridgeHttpStatusException(500, "bridge error")
+    }
+    repeat(3) {
+      val error = runCatching { router.request(answered) }.exceptionOrNull()
+      assertEquals(BridgeHttpStatusException::class.java, error?.javaClass)
+    }
+    // Three answered errors never reach tailnet and never trigger an endpoint rebuild.
+    assertEquals(listOf("iroh", "iroh", "iroh"), calls)
+    assertEquals(0, iroh.stops)
+  }
+
+  @Test
+  fun aRejectionFromTailnetKeepsTailnetSticky() = runTest {
+    var irohUp = false
+    val calls = mutableListOf<String>()
+    val router = MachineRouter(both, FakeClock(), RecordingIroh())
+    val block: suspend (String) -> String = { client ->
+      calls += client
+      if (client == "iroh" && !irohUp) throw IOException("dial failed")
+      if (client == "tailnet") throw BridgeHttpRejectionException("conflict")
+      client
+    }
+    val error = runCatching { router.request(block) }.exceptionOrNull()
+    assertEquals(BridgeHttpRejectionException::class.java, error?.javaClass)
+    irohUp = true
+    runCatching { router.request(block) }
+    // Tailnet answered, so it stays sticky and iroh is not probed again.
+    assertEquals(listOf("iroh", "tailnet", "tailnet"), calls)
+  }
+
+  @Test
+  fun ioTimeoutOverIrohFallsThroughToTailnetAndCountsTowardRebuild() = runTest {
+    val iroh = RecordingIroh()
+    val fallthrough = MachineRouter(both, FakeClock(), iroh)
+    val block: suspend (String) -> String = { client ->
+      if (client == "iroh") throw SocketTimeoutException("iroh connect timed out")
+      client
+    }
+    assertEquals("tailnet", fallthrough.request(block))
+
+    val irohOnly = MachineRouter(mapOf(TransportKind.IROH to "iroh"), FakeClock(), iroh)
+    repeat(IROH_REBUILD_AFTER_FAILURES) { runCatching { irohOnly.request(block) } }
+    assertEquals(1, iroh.stops)
   }
 
   @Test

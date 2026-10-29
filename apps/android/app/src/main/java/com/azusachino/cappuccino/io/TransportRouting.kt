@@ -1,5 +1,7 @@
 package com.azusachino.cappuccino.io
 
+import com.azusachino.cappuccino.core.BridgeAnswered
+import java.io.IOException
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
@@ -42,6 +44,13 @@ const val POLL_RELAYED_MS = 30_000L
  */
 fun pollIntervalMs(badge: TransportBadge): Long =
   if (badge == TransportBadge.IROH_RELAYED) POLL_RELAYED_MS else POLL_DIRECT_MS
+
+/**
+ * True when no answer came back from the transport: a dial or connect failure, a socket error or
+ * timeout, or an iroh connection error (IrohSocket reports those as IOExceptions). Errors the
+ * bridge sent back, and errors raised while parsing a response, are not transport failures.
+ */
+fun isTransportFailure(error: Exception): Boolean = error is IOException && error !is BridgeAnswered
 
 /** Row text for a badge; null while there is no reading yet. */
 fun TransportBadge.label(): String? =
@@ -128,6 +137,12 @@ class MachineRouter<C : Any>(
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
+        if (!isTransportFailure(error)) {
+          // The bridge answered over this transport, so the path works; the error belongs to the
+          // caller. No fall-through and no failure count. Other errors are bugs, not path health.
+          if (error is BridgeAnswered) recordSuccess(kind)
+          throw error
+        }
         recordFailure(kind)
         lastError = error
       }
