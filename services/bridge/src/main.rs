@@ -84,10 +84,7 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
             host: bind.clone(),
             port,
         };
-        Some(
-            iroh_transport::start(&config.data_dir, target, config.auth.pair_token_ttl_secs)
-                .await?,
-        )
+        Some(iroh_transport::start(&config.data_dir, target).await?)
     } else {
         None
     };

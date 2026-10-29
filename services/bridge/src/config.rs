@@ -23,6 +23,7 @@ pub struct BridgeConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)] // reserved sections are parsed now, consumed by a later authenticator
 pub struct AuthConfig {
     /// Reserved. The MVP ships auth-free behind the tailnet/loopback boundary.
@@ -32,9 +33,6 @@ pub struct AuthConfig {
     /// until one exists, so the config never changes shape).
     #[serde(default)]
     pub options: serde_json::Map<String, serde_json::Value>,
-    /// Lifetime of an iroh pairing token (`auth.pair_token_ttl_secs`).
-    #[serde(default = "default_pair_token_ttl_secs")]
-    pub pair_token_ttl_secs: u64,
 }
 
 impl Default for AuthConfig {
@@ -42,15 +40,8 @@ impl Default for AuthConfig {
         AuthConfig {
             enabled: false,
             options: serde_json::Map::new(),
-            pair_token_ttl_secs: default_pair_token_ttl_secs(),
         }
     }
-}
-
-pub const PAIR_TOKEN_TTL_MAX_SECS: u64 = 3600;
-
-fn default_pair_token_ttl_secs() -> u64 {
-    600
 }
 
 /// Strict knob: accepted values are true/false (JSON booleans) or the
@@ -206,11 +197,6 @@ impl BridgeConfig {
         }
         if let Some(value) = serve_auto_apply_override {
             config.serve_auto_apply = parse_serve_auto_apply(value)?;
-        }
-        if !(1..=PAIR_TOKEN_TTL_MAX_SECS).contains(&config.auth.pair_token_ttl_secs) {
-            return Err(format!(
-                "auth.pair_token_ttl_secs must be between 1 and {PAIR_TOKEN_TTL_MAX_SECS}"
-            ));
         }
         if config.auth.enabled {
             return Err(
@@ -385,13 +371,9 @@ mod iroh_config_tests {
     }
 
     #[test]
-    fn iroh_is_disabled_and_pairing_ttl_is_ten_minutes_by_default() {
-        let config = BridgeConfig::defaults();
-        assert!(!config.iroh_enabled);
-        assert_eq!(config.auth.pair_token_ttl_secs, 600);
-        let config = load("{}").unwrap();
-        assert!(!config.iroh_enabled);
-        assert_eq!(config.auth.pair_token_ttl_secs, 600);
+    fn iroh_is_disabled_by_default() {
+        assert!(!BridgeConfig::defaults().iroh_enabled);
+        assert!(!load("{}").unwrap().iroh_enabled);
     }
 
     #[test]
@@ -403,12 +385,7 @@ mod iroh_config_tests {
     }
 
     #[test]
-    fn pairing_token_ttl_is_bounded() {
-        let config = load(r#"{"auth": {"pair_token_ttl_secs": 120}}"#).unwrap();
-        assert_eq!(config.auth.pair_token_ttl_secs, 120);
-        assert!(load(r#"{"auth": {"pair_token_ttl_secs": 0}}"#)
-            .unwrap_err()
-            .contains("pair_token_ttl_secs"));
-        assert!(load(r#"{"auth": {"pair_token_ttl_secs": 3601}}"#).is_err());
+    fn retired_pair_token_ttl_is_a_parse_error() {
+        assert!(load(r#"{"auth": {"pair_token_ttl_secs": 120}}"#).is_err());
     }
 }

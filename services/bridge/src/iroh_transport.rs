@@ -3,15 +3,15 @@
 //! fresh TCP connection to the bridge's own listener, so the HTTP contract is
 //! unchanged. Trust is the EndpointId allowlist, enforced by an endpoint hook
 //! at handshake; ALPN `cappuccino-pair/1` admits unknown ids but serves only a
-//! one-time token exchange. Design: docs/design/public-exposure-iroh.md.
+//! pairing-code exchange. Design: docs/design/public-exposure-iroh.md.
 
-use crate::config::PAIR_TOKEN_TTL_MAX_SECS;
 use axum::{
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
     Extension, Router,
 };
+use hmac::{Hmac, Mac};
 use iroh::{
     endpoint::{
         presets, AfterHandshakeOutcome, Connection, EndpointHooks, QuicTransportConfig, RecvStream,
@@ -20,6 +20,7 @@ use iroh::{
     Endpoint, EndpointAddr, EndpointId, SecretKey, TransportAddr,
 };
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
@@ -29,7 +30,7 @@ use std::{
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use subtle::ConstantTimeEq;
 use tokio::{
@@ -64,7 +65,11 @@ pub const PAIR_ATTEMPT_WINDOW: Duration = Duration::from_secs(60);
 /// Connections still in the QUIC/TLS handshake; the accept loop waits when full,
 /// so a flood of half-open handshakes cannot pin unbounded tasks.
 pub const MAX_PENDING_HANDSHAKES: usize = 32;
-/// A token is 64 hex characters; anything longer is refused before comparison.
+/// Length of a pairing code's window. The code rotates at each boundary.
+pub const PAIR_WINDOW_SECS: u64 = 60;
+/// Domain separator for the pairing code HMAC.
+const PAIR_CODE_DOMAIN: &[u8] = b"cappuccino-pair/1";
+/// A code is 64 hex characters; anything longer is refused before comparison.
 const PAIR_REQUEST_MAX: usize = 128;
 const PAIR_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
 const STOPPED_TIMEOUT: Duration = Duration::from_secs(5);
@@ -81,11 +86,29 @@ pub struct Target {
     pub port: u16,
 }
 
-/// Allowlist and the single outstanding pairing token. Both sit behind one
-/// lock so a redemption is atomic with respect to revocation and issue.
+/// Source of wall-clock seconds. Injected so window arithmetic is testable.
+pub trait Clock: Send + Sync {
+    fn unix_secs(&self) -> u64;
+}
+
+struct SystemClock;
+
+impl Clock for SystemClock {
+    fn unix_secs(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or(0)
+    }
+}
+
+/// Allowlist and rotating pairing-code state. Both sit behind one lock so a
+/// redemption is atomic with respect to revocation.
 pub struct Pairing {
     allowlist_path: PathBuf,
-    ttl: Duration,
+    /// In-memory only: never persisted or logged. A restart invalidates codes.
+    secret: [u8; 32],
+    clock: Arc<dyn Clock>,
     state: Mutex<PairingState>,
     /// Live tunnel connections by remote id, held weakly so the connection
     /// still closes on drop; revocation upgrades them and closes them.
@@ -98,20 +121,31 @@ pub struct Pairing {
 #[derive(Default)]
 struct PairingState {
     allowed: BTreeSet<EndpointId>,
-    pending: Option<PendingToken>,
+    /// Windows whose code a successful pairing has used. Only the current and
+    /// previous windows can still be redeemed, so older entries are pruned.
+    burned: BTreeSet<u64>,
     /// Admitted pairing attempts per remote id within PAIR_ATTEMPT_WINDOW.
     pair_attempts: BTreeMap<EndpointId, Vec<Instant>>,
 }
 
 /// Why a pairing exchange was refused. Only the variant name reaches the
-/// audit log; the presented token never does.
+/// audit log; the presented code never does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PairFailure {
-    None,
-    Expired,
+    /// Matches neither the current nor the previous window's code.
     Mismatch,
+    /// Matches a code whose window a successful pairing already used.
+    Burned,
     RateLimited,
     Persist,
+}
+
+/// What `GET /pair` and `pair` show for the current window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeStatus {
+    pub code: String,
+    pub seconds_left: u64,
+    pub burned: bool,
 }
 
 /// Where audit lines go: stdout, which the managed lifecycle writes to
@@ -133,11 +167,6 @@ fn default_audit_sink() -> AuditSink {
     AuditSink::Captured(Mutex::new(Vec::new()))
 }
 
-struct PendingToken {
-    value: String,
-    expires_at: Instant,
-}
-
 #[derive(Serialize, Deserialize)]
 struct AllowlistFile {
     v: u32,
@@ -148,16 +177,33 @@ impl std::fmt::Debug for Pairing {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pairing")
             .field("allowlist_path", &self.allowlist_path)
-            .field("ttl", &self.ttl)
             .finish_non_exhaustive()
     }
 }
 
+/// Window index for a Unix time: the code changes every PAIR_WINDOW_SECS.
+fn window_of(now: u64) -> u64 {
+    now / PAIR_WINDOW_SECS
+}
+
+/// The pairing code for `window`: lowercase hex of
+/// HMAC-SHA256(secret, PAIR_CODE_DOMAIN || window as u64 big-endian).
+fn code_for(secret: &[u8; 32], window: u64) -> String {
+    let mut mac = <Hmac<Sha256>>::new_from_slice(secret).expect("HMAC accepts any key length");
+    mac.update(PAIR_CODE_DOMAIN);
+    mac.update(&window.to_be_bytes());
+    hex(&mac.finalize().into_bytes())
+}
+
 impl Pairing {
-    /// Loads the persisted allowlist. A missing file is an empty allowlist;
-    /// an unreadable or malformed one stops startup rather than admitting
-    /// anyone.
-    pub fn load(data_dir: &Path, ttl: Duration) -> Result<Self, String> {
+    /// Loads the persisted allowlist and starts a fresh in-memory pairing
+    /// secret. A missing file is an empty allowlist; an unreadable or
+    /// malformed one stops startup rather than admitting anyone.
+    pub fn load(data_dir: &Path) -> Result<Self, String> {
+        Self::load_with_clock(data_dir, Arc::new(SystemClock))
+    }
+
+    fn load_with_clock(data_dir: &Path, clock: Arc<dyn Clock>) -> Result<Self, String> {
         let allowlist_path = data_dir.join(ALLOWLIST_FILE);
         let allowed = match fs::read(&allowlist_path) {
             Ok(bytes) => {
@@ -187,10 +233,11 @@ impl Pairing {
         };
         Ok(Self {
             allowlist_path,
-            ttl,
+            secret: rand::random(),
+            clock,
             state: Mutex::new(PairingState {
                 allowed,
-                pending: None,
+                burned: BTreeSet::new(),
                 pair_attempts: BTreeMap::new(),
             }),
             live: Mutex::new(Vec::new()),
@@ -203,25 +250,33 @@ impl Pairing {
         self.state.lock().unwrap().allowed.contains(id)
     }
 
-    /// Replaces any outstanding token with a fresh 32-byte random one.
-    /// `source` names the issuing surface (`cli` or `page`) for the audit log.
-    pub fn issue_token(&self, source: &str) -> String {
-        let token = hex(&rand::random::<[u8; 32]>());
-        self.state.lock().unwrap().pending = Some(PendingToken {
-            value: token.clone(),
-            expires_at: Instant::now() + self.ttl,
-        });
-        self.audit(format!(
-            "token_issued source={source} ttl_secs={}",
-            self.ttl.as_secs()
-        ));
-        token
+    /// The current window's code, its remaining lifetime, and whether a
+    /// successful pairing already used it. Reads only; no state changes.
+    pub fn code_status(&self) -> CodeStatus {
+        let now = self.clock.unix_secs();
+        let window = window_of(now);
+        let burned = self.state.lock().unwrap().burned.contains(&window);
+        CodeStatus {
+            code: code_for(&self.secret, window),
+            seconds_left: PAIR_WINDOW_SECS - now % PAIR_WINDOW_SECS,
+            burned,
+        }
     }
 
-    /// Consumes the outstanding token on a constant-time match and persists
-    /// the redeeming EndpointId. A wrong guess leaves the token in place; an
-    /// expired one is discarded. Every attempt counts against the per-id rate
-    /// limit, whether or not the token matches.
+    /// Records that the operator read the code from the local CLI. The page
+    /// view is not audited: it changes nothing and runs on every reload.
+    pub fn audit_code_read(&self, source: &str) {
+        let status = self.code_status();
+        self.audit(format!(
+            "code_read source={source} seconds_left={} burned={}",
+            status.seconds_left, status.burned
+        ));
+    }
+
+    /// Accepts the code of the current or previous window, compared
+    /// constant-time against both. A match burns that window, so the same code
+    /// cannot pair a second phone. A wrong guess burns nothing, and every
+    /// attempt counts against the per-id rate limit.
     pub fn redeem(&self, presented: &[u8], id: EndpointId) -> Result<(), PairFailure> {
         let mut state = self.state.lock().unwrap();
         if !admit_attempt(&mut state.pair_attempts, id, Instant::now()) {
@@ -229,17 +284,20 @@ impl Pairing {
             self.audit(format!("limit_hit limit=pair_attempts endpoint={id}"));
             return Err(PairFailure::RateLimited);
         }
-        let outcome = self.check_token(&mut state, presented);
-        if let Err(failure) = outcome {
+        let window = window_of(self.clock.unix_secs());
+        let Some(matched) = self.matching_window(presented, window) else {
             drop(state);
-            self.audit(format!(
-                "pair_failed endpoint={id} reason={}",
-                failure.label()
-            ));
-            return Err(failure);
+            self.audit(format!("pair_failed endpoint={id} reason=mismatch"));
+            return Err(PairFailure::Mismatch);
+        };
+        if state.burned.contains(&matched) {
+            drop(state);
+            self.audit(format!("pair_failed endpoint={id} reason=burned"));
+            return Err(PairFailure::Burned);
         }
         let mut next = state.allowed.clone();
         next.insert(id);
+        // Persist before burning: a failed write leaves the code redeemable.
         if let Err(error) = persist_allowlist(&self.allowlist_path, &next) {
             drop(state);
             self.audit(format!("pair_failed endpoint={id} reason=persist_failed"));
@@ -247,25 +305,30 @@ impl Pairing {
             return Err(PairFailure::Persist);
         }
         state.allowed = next;
+        state.burned.insert(matched);
+        // Only the current and previous windows stay redeemable, so anything
+        // older can be forgotten.
+        state
+            .burned
+            .retain(|burned| burned.saturating_add(1) >= window);
         drop(state);
         self.audit(format!("pair_ok endpoint={id}"));
         Ok(())
     }
 
-    fn check_token(&self, state: &mut PairingState, presented: &[u8]) -> Result<(), PairFailure> {
-        let Some(pending) = state.pending.as_ref() else {
-            return Err(PairFailure::None);
-        };
-        if Instant::now() >= pending.expires_at {
-            state.pending = None;
-            return Err(PairFailure::Expired);
+    /// The window whose code equals `presented`, among the current and the
+    /// previous one. Both codes are always compared, so timing does not reveal
+    /// which window matched.
+    fn matching_window(&self, presented: &[u8], window: u64) -> Option<u64> {
+        let mut matched = None;
+        for candidate in [Some(window), window.checked_sub(1)].into_iter().flatten() {
+            let code = code_for(&self.secret, candidate);
+            let equal: bool = code.as_bytes().ct_eq(presented).into();
+            if equal && matched.is_none() {
+                matched = Some(candidate);
+            }
         }
-        let matches: bool = pending.value.as_bytes().ct_eq(presented).into();
-        if !matches {
-            return Err(PairFailure::Mismatch);
-        }
-        state.pending = None;
-        Ok(())
+        matched
     }
 
     /// Removes an id and closes its live tunnel connections. Returns whether
@@ -339,18 +402,6 @@ impl Pairing {
     }
 }
 
-impl PairFailure {
-    fn label(self) -> &'static str {
-        match self {
-            PairFailure::None => "none",
-            PairFailure::Expired => "expired",
-            PairFailure::Mismatch => "mismatch",
-            PairFailure::RateLimited => "rate_limited",
-            PairFailure::Persist => "persist_failed",
-        }
-    }
-}
-
 /// Records one attempt for `id` unless it already used its window budget.
 /// Attempts older than the window are dropped first, and ids with no recent
 /// attempts are removed, so the map stays small.
@@ -407,14 +458,16 @@ pub struct IrohHub {
 }
 
 impl IrohHub {
-    /// Issues a fresh token and returns the copy-paste pairing payload. The
-    /// token is issued after the endpoint is online so the payload carries the
-    /// relay URL; if that takes too long the payload is still emitted with
-    /// whatever addresses are known.
-    pub async fn pairing_payload(&self, source: &str) -> String {
+    /// The current window's pairing payload and status. Waits for the endpoint
+    /// to be online so the payload carries the relay URL; if that takes too
+    /// long the payload is still emitted with whatever addresses are known.
+    /// The status is read after the wait, so it describes the window the
+    /// payload was built for. Reads only: nothing is issued or recorded.
+    pub async fn pairing_view(&self) -> (String, CodeStatus) {
         let _ = tokio::time::timeout(self.online_wait, self.endpoint.online()).await;
-        let token = self.pairing.issue_token(source);
-        encode_payload(&self.endpoint.addr(), &token)
+        let status = self.pairing.code_status();
+        let payload = encode_payload(&self.endpoint.addr(), &status.code);
+        (payload, status)
     }
 }
 
@@ -443,14 +496,11 @@ pub fn encode_payload(addr: &EndpointAddr, token: &str) -> String {
 
 /// Starts the endpoint with the persisted key, the allowlist hook and the
 /// accept loop, and serves the admin socket. Errors stop the bridge.
-pub async fn start(data_dir: &Path, target: Target, ttl_secs: u64) -> Result<Arc<IrohHub>, String> {
-    if !(1..=PAIR_TOKEN_TTL_MAX_SECS).contains(&ttl_secs) {
-        return Err("pairing token TTL out of range".into());
-    }
+pub async fn start(data_dir: &Path, target: Target) -> Result<Arc<IrohHub>, String> {
     fs::create_dir_all(data_dir)
         .map_err(|error| format!("create data dir {}: {error}", data_dir.display()))?;
     let key = load_or_create_secret_key(&data_dir.join(SECRET_KEY_FILE))?;
-    let pairing = Arc::new(Pairing::load(data_dir, Duration::from_secs(ttl_secs))?);
+    let pairing = Arc::new(Pairing::load(data_dir)?);
     let endpoint = configure(Endpoint::builder(presets::N0), key, &pairing)
         .bind()
         .await
@@ -611,7 +661,7 @@ fn bind_admin_socket(path: &Path) -> Result<UnixListener, String> {
 /// Local admin protocol for the `pair` subcommand. It lives on a 0600 Unix
 /// socket in the data dir, so it is reachable only as the owning user and
 /// never through the HTTP listener that Tailscale Serve exposes.
-///   `ISSUE`            -> `OK <pairing payload>`
+///   `CODE`             -> `OK {"payload":..|null,"seconds_left":N,"burned":bool}`
 ///   `REVOKE <id>`      -> `OK revoked|not-paired`
 async fn serve_admin(listener: UnixListener, hub: Arc<IrohHub>) {
     while let Ok((stream, _)) = listener.accept().await {
@@ -631,7 +681,16 @@ async fn handle_admin(stream: UnixStream, hub: Arc<IrohHub>) {
     }
     let request = line.trim_end();
     let reply = match request.split_once(' ') {
-        None if request == "ISSUE" => format!("OK {}\n", hub.pairing_payload("cli").await),
+        None if request == "CODE" => {
+            let (payload, status) = hub.pairing_view().await;
+            hub.pairing.audit_code_read("cli");
+            let body = serde_json::json!({
+                "payload": (!status.burned).then_some(payload),
+                "seconds_left": status.seconds_left,
+                "burned": status.burned,
+            });
+            format!("OK {body}\n")
+        }
         Some(("REVOKE", id)) => match id.parse::<EndpointId>() {
             Ok(id) => match hub.pairing.revoke(&id) {
                 Ok(true) => "OK revoked\n".to_string(),
@@ -658,24 +717,11 @@ pub fn with_routes<S: Clone + Send + Sync + 'static>(
 }
 
 async fn pair_page(Extension(hub): Extension<Arc<IrohHub>>) -> Response {
-    let payload = hub.pairing_payload("page").await;
-    let svg = match qr_svg(&payload) {
-        Ok(svg) => svg,
-        Err(error) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response();
-        }
+    let (payload, status) = hub.pairing_view().await;
+    let html = match render_pair_page(&payload, &status) {
+        Ok(html) => html,
+        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
     };
-    let html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Cappuccino pairing</title>\
-         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-         <style>body{{font-family:system-ui,sans-serif;margin:2rem;max-width:40rem}}\
-         svg{{width:18rem;height:18rem}}pre{{white-space:pre-wrap;word-break:break-all}}</style>\
-         </head><body><h1>Pair a phone</h1>\
-         <p>Scan with the Cappuccino app, or copy the text below. Reload for a new code; \
-         each code is single-use and expires in ten minutes.</p>\
-         {svg}<pre>{payload}</pre></body></html>",
-        payload = html_escape(&payload),
-    );
     (
         [
             (header::CONTENT_TYPE, "text/html; charset=utf-8"),
@@ -684,6 +730,34 @@ async fn pair_page(Extension(hub): Extension<Arc<IrohHub>>) -> Response {
         html,
     )
         .into_response()
+}
+
+/// The `/pair` page for one window. It reloads itself at the window boundary
+/// with a meta refresh (no script, no external assets). Once this window's code
+/// has paired a phone, it shows that instead of a code.
+pub fn render_pair_page(payload: &str, status: &CodeStatus) -> Result<String, String> {
+    let seconds = status.seconds_left;
+    let body = if status.burned {
+        format!("<h1>Paired</h1><p>New code in {seconds} s.</p>")
+    } else {
+        format!(
+            "<h1>Pair a phone</h1>\
+             <p>Scan with the Cappuccino app, or copy the text below. The code changes in \
+             {seconds} s and this page updates itself. The previous code also works until \
+             the change; each code pairs one phone.</p>\
+             {svg}<pre>{payload}</pre>",
+            svg = qr_svg(payload)?,
+            payload = html_escape(payload),
+        )
+    };
+    Ok(format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Cappuccino pairing</title>\
+         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
+         <meta http-equiv=\"refresh\" content=\"{seconds}\">\
+         <style>body{{font-family:system-ui,sans-serif;margin:2rem;max-width:40rem}}\
+         svg{{width:18rem;height:18rem}}pre{{white-space:pre-wrap;word-break:break-all}}</style>\
+         </head><body>{body}</body></html>"
+    ))
 }
 
 /// Inline SVG, generated server-side: no external assets.
@@ -801,9 +875,23 @@ pub fn run_pair_command(args: &[String]) -> Result<(), String> {
     }
     match args {
         [] => {
-            let payload = admin_request(&config.data_dir, "ISSUE")?;
-            println!("{}\n", qr_terminal(&payload)?);
-            println!("{payload}");
+            let reply = admin_request(&config.data_dir, "CODE")?;
+            let view: serde_json::Value = serde_json::from_str(&reply)
+                .map_err(|error| format!("bridge sent an unreadable code: {error}"))?;
+            let seconds = view["seconds_left"].as_u64().unwrap_or_default();
+            match view["payload"].as_str() {
+                Some(payload) => {
+                    println!("{}\n", qr_terminal(payload)?);
+                    println!("{payload}\n");
+                    println!(
+                        "valid for about {seconds} s (rotates every {PAIR_WINDOW_SECS} s; \
+                         the previous code is accepted for one more window)"
+                    );
+                }
+                None => {
+                    println!("this code already paired a phone; a new code in about {seconds} s")
+                }
+            }
             Ok(())
         }
         [flag, id] if flag == "--revoke" => {
@@ -863,21 +951,50 @@ mod tests {
             .unwrap()
     }
 
+    /// A clock the test moves by hand. Starts mid-window (30 s before the
+    /// boundary) so the boundary tests have room on either side.
+    struct ManualClock(AtomicU64);
+
+    impl ManualClock {
+        const START: u64 = 1_800_000_030;
+
+        fn new() -> Arc<Self> {
+            Arc::new(ManualClock(AtomicU64::new(Self::START)))
+        }
+
+        fn advance(&self, secs: u64) {
+            self.0.fetch_add(secs, Ordering::SeqCst);
+        }
+    }
+
+    impl Clock for ManualClock {
+        fn unix_secs(&self) -> u64 {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
     struct TestBridge {
         pairing: Arc<Pairing>,
         addr: EndpointAddr,
         dir: PathBuf,
+        clock: Arc<ManualClock>,
+    }
+
+    /// The pairing code the bridge shows right now.
+    fn code(bridge: &TestBridge) -> String {
+        bridge.pairing.code_status().code
     }
 
     /// A bridge endpoint with direct-address dialing only (no relays, no
     /// discovery), tunnelling into `port` on loopback.
-    async fn spawn_bridge(port: u16, ttl: Duration) -> TestBridge {
-        spawn_bridge_with_key(port, ttl, SecretKey::generate()).await
+    async fn spawn_bridge(port: u16) -> TestBridge {
+        spawn_bridge_with_key(port, SecretKey::generate()).await
     }
 
-    async fn spawn_bridge_with_key(port: u16, ttl: Duration, key: SecretKey) -> TestBridge {
+    async fn spawn_bridge_with_key(port: u16, key: SecretKey) -> TestBridge {
         let dir = scratch_dir("bridge");
-        let pairing = Arc::new(Pairing::load(&dir, ttl).unwrap());
+        let clock = ManualClock::new();
+        let pairing = Arc::new(Pairing::load_with_clock(&dir, clock.clone()).unwrap());
         let endpoint = test_endpoint(key, &pairing).await;
         let addr = EndpointAddr::new(endpoint.id()).with_ip_addr(endpoint.bound_sockets()[0]);
         spawn_accept_loop(
@@ -888,7 +1005,12 @@ mod tests {
                 port,
             },
         );
-        TestBridge { pairing, addr, dir }
+        TestBridge {
+            pairing,
+            addr,
+            dir,
+            clock,
+        }
     }
 
     /// Stub TCP server: reads to EOF, echoes the bytes, then closes.
@@ -954,11 +1076,11 @@ mod tests {
     #[tokio::test]
     async fn tunnel_admitted_then_revoked_before_serving_is_closed() {
         let dir = scratch_dir("revoke-window");
-        let pairing = Arc::new(Pairing::load(&dir, Duration::from_secs(600)).unwrap());
+        let pairing = Arc::new(Pairing::load(&dir).unwrap());
         let server = test_endpoint(SecretKey::generate(), &pairing).await;
         let server_addr = EndpointAddr::new(server.id()).with_ip_addr(server.bound_sockets()[0]);
         let client = client_endpoint().await;
-        let token = pairing.issue_token("test");
+        let token = pairing.code_status().code;
         pairing.redeem(token.as_bytes(), client.id()).unwrap();
 
         let (client_conn, server_conn) = tokio::time::timeout(SHORT, async {
@@ -996,7 +1118,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_id_is_rejected_on_the_tunnel_alpn() {
-        let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
+        let bridge = spawn_bridge(1).await;
         let client = client_endpoint().await;
         assert_tunnel_refused(&client, &bridge.addr).await;
     }
@@ -1004,9 +1126,9 @@ mod tests {
     #[tokio::test]
     async fn unknown_id_can_pair_on_the_pair_alpn_and_is_then_accepted() {
         let echo = spawn_echo().await;
-        let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
+        let bridge = spawn_bridge(echo).await;
         let client = client_endpoint().await;
-        let token = bridge.pairing.issue_token("test");
+        let token = code(&bridge);
         assert_eq!(pair(&client, &bridge.addr, &token).await, "OK\n");
         assert!(bridge.pairing.is_allowed(&client.id()));
 
@@ -1023,9 +1145,9 @@ mod tests {
     #[tokio::test]
     async fn bi_stream_round_trips_bytes_through_tcp_with_half_close() {
         let echo = spawn_echo().await;
-        let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
+        let bridge = spawn_bridge(echo).await;
         let client = client_endpoint().await;
-        let token = bridge.pairing.issue_token("test");
+        let token = code(&bridge);
         assert_eq!(pair(&client, &bridge.addr, &token).await, "OK\n");
 
         let conn = client
@@ -1048,9 +1170,9 @@ mod tests {
 
     #[tokio::test]
     async fn wrong_token_is_rejected_and_does_not_pair() {
-        let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
+        let bridge = spawn_bridge(1).await;
         let client = client_endpoint().await;
-        let token = bridge.pairing.issue_token("test");
+        let token = code(&bridge);
         let wrong_same_len = format!(
             "{}{}",
             &token[..63],
@@ -1060,12 +1182,15 @@ mod tests {
         assert_eq!(pair(&client, &bridge.addr, "short").await, "ERR\n");
         assert!(!bridge.pairing.is_allowed(&client.id()));
         assert_tunnel_refused(&client, &bridge.addr).await;
+        // Wrong guesses burn nothing: the window's real code still pairs.
+        assert!(!bridge.pairing.code_status().burned);
+        assert_eq!(pair(&client, &bridge.addr, &token).await, "OK\n");
     }
 
     #[tokio::test]
     async fn token_is_single_use() {
-        let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
-        let token = bridge.pairing.issue_token("test");
+        let bridge = spawn_bridge(1).await;
+        let token = code(&bridge);
         let first = client_endpoint().await;
         let second = client_endpoint().await;
         assert_eq!(pair(&first, &bridge.addr, &token).await, "OK\n");
@@ -1074,30 +1199,73 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn expired_token_is_rejected() {
-        let bridge = spawn_bridge(1, Duration::ZERO).await;
-        let token = bridge.pairing.issue_token("test");
+    async fn code_is_stable_within_a_window_and_rotates_at_the_boundary() {
+        let bridge = spawn_bridge(1).await;
+        let first = code(&bridge);
+        assert_eq!(first.len(), 64);
+        bridge.clock.advance(20);
+        assert_eq!(code(&bridge), first, "same window, same code");
+        // Start was 30 s before the boundary, so 20 s more is still inside.
+        bridge.clock.advance(10);
+        assert_ne!(code(&bridge), first, "next window, next code");
+    }
+
+    #[tokio::test]
+    async fn previous_window_code_is_accepted_for_one_more_window() {
+        let bridge = spawn_bridge(1).await;
+        let previous = code(&bridge);
+        bridge.clock.advance(30);
         let client = client_endpoint().await;
-        assert_eq!(pair(&client, &bridge.addr, &token).await, "ERR\n");
+        assert_eq!(pair(&client, &bridge.addr, &previous).await, "OK\n");
+        assert!(bridge.pairing.is_allowed(&client.id()));
+    }
+
+    #[tokio::test]
+    async fn code_from_two_windows_ago_is_rejected() {
+        let bridge = spawn_bridge(1).await;
+        let old = code(&bridge);
+        bridge.clock.advance(90);
+        let client = client_endpoint().await;
+        assert_eq!(pair(&client, &bridge.addr, &old).await, "ERR\n");
         assert!(!bridge.pairing.is_allowed(&client.id()));
     }
 
     #[tokio::test]
-    async fn issuing_a_new_token_replaces_the_outstanding_one() {
-        let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
-        let old = bridge.pairing.issue_token("test");
-        let new = bridge.pairing.issue_token("test");
-        let client = client_endpoint().await;
-        assert_eq!(pair(&client, &bridge.addr, &old).await, "ERR\n");
-        assert_eq!(pair(&client, &bridge.addr, &new).await, "OK\n");
+    async fn burned_code_is_rejected_and_the_next_window_code_works() {
+        let bridge = spawn_bridge(1).await;
+        let used = code(&bridge);
+        let first = client_endpoint().await;
+        assert_eq!(pair(&first, &bridge.addr, &used).await, "OK\n");
+        let second = client_endpoint().await;
+        assert_eq!(pair(&second, &bridge.addr, &used).await, "ERR\n");
+        assert!(!bridge.pairing.is_allowed(&second.id()));
+        assert!(bridge.pairing.code_status().burned);
+
+        bridge.clock.advance(30);
+        assert!(!bridge.pairing.code_status().burned);
+        let next = code(&bridge);
+        assert_eq!(pair(&second, &bridge.addr, &next).await, "OK\n");
+    }
+
+    #[tokio::test]
+    async fn burned_code_stays_rejected_while_its_window_is_still_redeemable() {
+        // Burn window W, move to W+1: W's code is still inside the grace
+        // window, so it must stay rejected rather than pair a second phone.
+        let bridge = spawn_bridge(1).await;
+        let used = code(&bridge);
+        let first = client_endpoint().await;
+        assert_eq!(pair(&first, &bridge.addr, &used).await, "OK\n");
+        bridge.clock.advance(30);
+        let second = client_endpoint().await;
+        assert_eq!(pair(&second, &bridge.addr, &used).await, "ERR\n");
     }
 
     #[tokio::test]
     async fn revoke_closes_a_live_connection_and_refuses_redial() {
         let echo = spawn_echo().await;
-        let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
+        let bridge = spawn_bridge(echo).await;
         let client = client_endpoint().await;
-        let token = bridge.pairing.issue_token("test");
+        let token = code(&bridge);
         assert_eq!(pair(&client, &bridge.addr, &token).await, "OK\n");
 
         let conn = client
@@ -1127,11 +1295,11 @@ mod tests {
 
     #[tokio::test]
     async fn pairing_survives_restart_and_key_file_is_owner_only() {
-        let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
-        let token = bridge.pairing.issue_token("test");
+        let bridge = spawn_bridge(1).await;
+        let token = code(&bridge);
         let client = client_endpoint().await;
         assert_eq!(pair(&client, &bridge.addr, &token).await, "OK\n");
-        let reloaded = Pairing::load(&bridge.dir, Duration::from_secs(600)).unwrap();
+        let reloaded = Pairing::load(&bridge.dir).unwrap();
         assert!(reloaded.is_allowed(&client.id()));
 
         let key_path = bridge.dir.join(SECRET_KEY_FILE);
@@ -1151,7 +1319,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn admin_socket_issues_v1_payload_and_revokes() {
         let dir = scratch_dir("admin");
-        let pairing = Arc::new(Pairing::load(&dir, Duration::from_secs(600)).unwrap());
+        let pairing = Arc::new(Pairing::load_with_clock(&dir, ManualClock::new()).unwrap());
         let endpoint = test_endpoint(SecretKey::generate(), &pairing).await;
         let hub = Arc::new(IrohHub {
             endpoint: endpoint.clone(),
@@ -1161,18 +1329,29 @@ mod tests {
         let listener = bind_admin_socket(&dir.join(ADMIN_SOCKET_FILE)).unwrap();
         tokio::spawn(serve_admin(listener, Arc::clone(&hub)));
 
-        let body = admin_request(&dir, "ISSUE").unwrap();
-        let payload: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let body = admin_request(&dir, "CODE").unwrap();
+        let view: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(view["burned"], false);
+        let seconds = view["seconds_left"].as_u64().unwrap();
+        assert!((1..=PAIR_WINDOW_SECS).contains(&seconds), "{seconds}");
+        let payload: serde_json::Value =
+            serde_json::from_str(view["payload"].as_str().unwrap()).unwrap();
         assert_eq!(payload["v"], 1);
         assert_eq!(payload["endpoint_id"], endpoint.id().to_string());
-        let token = payload["token"].as_str().unwrap();
-        assert_eq!(token.len(), 64);
+        let code = payload["token"].as_str().unwrap();
+        assert_eq!(code.len(), 64);
         assert!(pairing
             .redeem(
-                token.as_bytes(),
+                code.as_bytes(),
                 EndpointId::from(SecretKey::generate().public())
             )
             .is_ok());
+        // Reading the code is a read: after the redemption it reports burned
+        // and carries no payload.
+        let body = admin_request(&dir, "CODE").unwrap();
+        let view: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(view["burned"], true);
+        assert!(view["payload"].is_null());
 
         let id = SecretKey::generate().public();
         assert_eq!(
@@ -1197,7 +1376,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         let dir = scratch_dir("pair-page");
-        let pairing = Arc::new(Pairing::load(&dir, Duration::from_secs(600)).unwrap());
+        let pairing = Arc::new(Pairing::load(&dir).unwrap());
         let endpoint = test_endpoint(SecretKey::generate(), &pairing).await;
         let hub = Arc::new(IrohHub {
             endpoint,
@@ -1228,7 +1407,7 @@ mod tests {
 
     /// Pairs `client` with `bridge` using a fresh token.
     async fn pair_client(bridge: &TestBridge, client: &Endpoint) {
-        let token = bridge.pairing.issue_token("test");
+        let token = code(&bridge);
         assert_eq!(pair(client, &bridge.addr, &token).await, "OK\n");
     }
 
@@ -1260,7 +1439,7 @@ mod tests {
     #[tokio::test]
     async fn tunnel_streams_are_capped_per_connection() {
         let echo = spawn_echo().await;
-        let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
+        let bridge = spawn_bridge(echo).await;
         let client = client_endpoint().await;
         pair_client(&bridge, &client).await;
         let conn = client
@@ -1307,7 +1486,7 @@ mod tests {
     #[tokio::test]
     async fn tunnel_connections_are_capped_per_paired_id() {
         let echo = spawn_echo().await;
-        let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
+        let bridge = spawn_bridge(echo).await;
         let client = client_endpoint().await;
         pair_client(&bridge, &client).await;
 
@@ -1329,11 +1508,12 @@ mod tests {
     #[tokio::test]
     async fn tunnel_connections_are_capped_overall() {
         let echo = spawn_echo().await;
-        let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
+        let bridge = spawn_bridge(echo).await;
         let mut live = Vec::new();
         let mut clients = Vec::new();
         while live.len() < MAX_TUNNEL_CONNECTIONS {
             let client = client_endpoint().await;
+            bridge.clock.advance(PAIR_WINDOW_SECS);
             pair_client(&bridge, &client).await;
             for _ in 0..MAX_TUNNEL_CONNECTIONS_PER_ID.min(MAX_TUNNEL_CONNECTIONS - live.len()) {
                 let conn = client
@@ -1347,6 +1527,7 @@ mod tests {
         }
         // Another paired id is refused once the bridge-wide cap is reached.
         let client = client_endpoint().await;
+        bridge.clock.advance(PAIR_WINDOW_SECS);
         pair_client(&bridge, &client).await;
         let excess = client.connect(bridge.addr.clone(), ALPN_TUNNEL).await;
         assert_refused_with(excess, CLOSE_LIMIT).await;
@@ -1354,7 +1535,7 @@ mod tests {
 
     #[tokio::test]
     async fn pair_connections_are_capped_and_excess_is_refused() {
-        let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
+        let bridge = spawn_bridge(1).await;
         // Hold each pair connection without opening its exchange stream, so the
         // exchange waits and keeps its slot until the timeout.
         let mut held = Vec::new();
@@ -1390,8 +1571,8 @@ mod tests {
 
     #[tokio::test]
     async fn pair_attempts_are_rate_limited_and_wrong_guesses_keep_the_token() {
-        let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
-        let token = bridge.pairing.issue_token("test");
+        let bridge = spawn_bridge(1).await;
+        let token = code(&bridge);
         let abuser = client_endpoint().await;
         for _ in 0..PAIR_ATTEMPTS_PER_WINDOW {
             assert_eq!(pair(&abuser, &bridge.addr, "wrong").await, "ERR\n");
@@ -1434,20 +1615,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn audit_log_records_events_and_never_contains_token_or_secret_key() {
+    async fn audit_log_records_events_and_never_contains_codes_or_secrets() {
         let key = SecretKey::generate();
         let key_bytes = key.to_bytes();
         let echo = spawn_echo().await;
-        let bridge = spawn_bridge_with_key(echo, Duration::from_secs(600), key).await;
+        let bridge = spawn_bridge_with_key(echo, key).await;
 
-        let token = bridge.pairing.issue_token("cli");
+        let shown = code(&bridge);
+        bridge.pairing.audit_code_read("cli");
         let mistaken = client_endpoint().await;
-        assert_eq!(
-            pair(&mistaken, &bridge.addr, "not-the-token").await,
-            "ERR\n"
-        );
+        assert_eq!(pair(&mistaken, &bridge.addr, "not-the-code").await, "ERR\n");
         let paired = client_endpoint().await;
-        assert_eq!(pair(&paired, &bridge.addr, &token).await, "OK\n");
+        assert_eq!(pair(&paired, &bridge.addr, &shown).await, "OK\n");
+        let reused = client_endpoint().await;
+        assert_eq!(pair(&reused, &bridge.addr, &shown).await, "ERR\n");
         let conn = paired
             .connect(bridge.addr.clone(), ALPN_TUNNEL)
             .await
@@ -1459,9 +1640,10 @@ mod tests {
 
         let lines = bridge.pairing.audit_lines();
         let expect = [
-            "token_issued source=cli".to_string(),
+            "code_read source=cli".to_string(),
             format!("pair_failed endpoint={} reason=mismatch", mistaken.id()),
             format!("pair_ok endpoint={}", paired.id()),
+            format!("pair_failed endpoint={} reason=burned", reused.id()),
             format!(
                 "tunnel_rejected endpoint={} reason=not_paired",
                 stranger.id()
@@ -1475,11 +1657,19 @@ mod tests {
             );
         }
 
+        // Neither the displayed code (in any window) nor the pairing secret,
+        // nor the bridge's iroh key, may appear in any audit line.
+        let pairing_secret = bridge.pairing.secret;
         let secret_forms = [
-            token.clone(),
-            token.to_uppercase(),
+            shown.clone(),
+            shown.to_uppercase(),
+            hex(&pairing_secret),
+            hex(&pairing_secret).to_uppercase(),
+            data_encoding::BASE32_NOPAD.encode(&pairing_secret),
+            data_encoding::BASE32_NOPAD
+                .encode(&pairing_secret)
+                .to_lowercase(),
             hex(&key_bytes),
-            hex(&key_bytes).to_uppercase(),
             data_encoding::BASE32_NOPAD.encode(&key_bytes),
             data_encoding::BASE32_NOPAD
                 .encode(&key_bytes)
@@ -1493,5 +1683,98 @@ mod tests {
                 );
             }
         }
+    }
+
+    async fn get_pair_page(app: &Router) -> String {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get("/pair")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn pair_page_is_idempotent_within_a_window_and_refreshes_itself() {
+        let dir = scratch_dir("pair-page-window");
+        let clock = ManualClock::new();
+        let pairing = Arc::new(Pairing::load_with_clock(&dir, clock.clone()).unwrap());
+        let endpoint = test_endpoint(SecretKey::generate(), &pairing).await;
+        let hub = Arc::new(IrohHub {
+            endpoint,
+            pairing: Arc::clone(&pairing),
+            online_wait: Duration::ZERO,
+        });
+        let app = with_routes(Router::<()>::new(), Some(hub));
+        let shown = pairing.code_status().code;
+        let audit_before = pairing.audit_lines();
+
+        let first = get_pair_page(&app).await;
+        let second = get_pair_page(&app).await;
+        assert_eq!(
+            first, second,
+            "two loads in one window render the same page"
+        );
+        assert!(first.contains(&shown));
+        assert!(first.contains("<meta http-equiv=\"refresh\" content=\"30\">"));
+        assert!(first.contains("<svg"));
+        assert_eq!(
+            pairing.audit_lines(),
+            audit_before,
+            "viewing the page writes no audit line"
+        );
+
+        clock.advance(10);
+        let later = get_pair_page(&app).await;
+        assert!(
+            later.contains("content=\"20\""),
+            "countdown follows the clock"
+        );
+        assert!(later.contains(&shown));
+
+        clock.advance(20);
+        let next_window = get_pair_page(&app).await;
+        assert!(next_window.contains("content=\"60\""));
+        assert!(
+            !next_window.contains(&shown),
+            "a new window shows a new code"
+        );
+    }
+
+    #[tokio::test]
+    async fn pair_page_shows_paired_once_the_window_code_is_used() {
+        let dir = scratch_dir("pair-page-burned");
+        let clock = ManualClock::new();
+        let pairing = Arc::new(Pairing::load_with_clock(&dir, clock.clone()).unwrap());
+        let endpoint = test_endpoint(SecretKey::generate(), &pairing).await;
+        let hub = Arc::new(IrohHub {
+            endpoint,
+            pairing: Arc::clone(&pairing),
+            online_wait: Duration::ZERO,
+        });
+        let app = with_routes(Router::<()>::new(), Some(hub));
+        let shown = pairing.code_status().code;
+        pairing
+            .redeem(
+                shown.as_bytes(),
+                EndpointId::from(SecretKey::generate().public()),
+            )
+            .unwrap();
+
+        let page = get_pair_page(&app).await;
+        assert!(page.contains("<h1>Paired</h1>"));
+        assert!(page.contains("New code in 30 s."));
+        assert!(!page.contains("<svg"), "no QR for a used code");
+        assert!(!page.contains(&shown));
+        assert!(page.contains("content=\"30\""));
     }
 }
