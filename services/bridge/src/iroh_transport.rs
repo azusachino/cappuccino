@@ -732,24 +732,26 @@ async fn pair_page(Extension(hub): Extension<Arc<IrohHub>>) -> Response {
         .into_response()
 }
 
-/// Page CSS. The countdown and bar animate with CSS only: `--left` is a
-/// registered integer, so the counter ticks once a second; without `@property`
-/// support the server-rendered number stays visible. The bar shrinks with
-/// `transform`, which needs no registration.
+/// Page CSS. The countdown is a CSS-only animation: `--left` is registered as
+/// an integer where `@property` exists, so the counter ticks once a second.
+/// Elsewhere `--left` stays at its unanimated value `--s`, so the page still
+/// shows the number and the bar still moves. The bar uses `transform`, which
+/// needs no registration.
 const PAIR_PAGE_CSS: &str = r#"
-body{font-family:system-ui,sans-serif;margin:2rem;max-width:40rem}
-svg{width:18rem;height:18rem}
-pre{white-space:pre-wrap;word-break:break-all}
+body{font-family:system-ui,sans-serif;margin:0;padding:2rem 1.25rem;text-align:center}
+main{max-width:40rem;margin:0 auto}
+h1{font-size:1.5rem;margin:0 0 .5rem}
+p{line-height:1.5}
+svg{display:block;margin:1.25rem auto;width:min(80vw,22rem);height:auto;shape-rendering:crispEdges}
+.countdown{font-size:1.75rem;font-weight:600;margin:.75rem 0}
+.bar{height:4px;background:#e5e5e5;border-radius:2px;overflow:hidden;margin:0 0 1.5rem}
+.fill{height:100%;background:#333;transform-origin:left;transform:scaleX(var(--f));animation:shrink linear forwards}
+pre{text-align:left;white-space:pre-wrap;word-break:break-all;font-family:ui-monospace,monospace;font-size:.85rem;background:#f5f5f5;padding:.75rem;border-radius:6px}
 @property --left{syntax:'<integer>';inherits:false;initial-value:0}
 @keyframes tick{from{--left:var(--s)}to{--left:0}}
 @keyframes shrink{from{transform:scaleX(var(--f))}to{transform:scaleX(0)}}
 .tick{--left:var(--s);animation:tick linear forwards}
-.bar{height:4px;background:#e5e5e5;border-radius:2px;overflow:hidden;margin:1rem 0}
-.fill{height:100%;background:#333;transform-origin:left;transform:scaleX(var(--f));animation:shrink linear forwards}
-@supports (syntax:"<integer>"){
-.tick .static{display:none}
 .tick::after{content:counter(left);counter-reset:left var(--left)}
-}
 @media (prefers-reduced-motion:reduce){.tick,.fill{animation:none}}
 "#;
 
@@ -761,22 +763,21 @@ pub fn render_pair_page(payload: &str, status: &CodeStatus) -> Result<String, St
     let seconds = status.seconds_left;
     let fraction = seconds as f64 / PAIR_WINDOW_SECS as f64;
     let countdown = format!(
-        "<span class=\"tick\" style=\"--s:{seconds};animation-duration:{seconds}s\">\
-         <span class=\"static\">{seconds}</span></span>"
+        "<span class=\"tick\" style=\"--s:{seconds};animation-duration:{seconds}s\"></span>"
     );
     let bar = format!(
         "<div class=\"bar\"><div class=\"fill\" \
          style=\"--f:{fraction:.4};animation-duration:{seconds}s\"></div></div>"
     );
     let body = if status.burned {
-        format!("<h1>Paired</h1><p>New code in {countdown} s.</p>{bar}")
+        format!("<h1>Paired</h1><p class=\"countdown\">New code in {countdown} s</p>{bar}")
     } else {
         format!(
             "<h1>Pair a phone</h1>\
-             <p>Scan with the Cappuccino app, or copy the text below. The code changes in \
-             {countdown} s and this page updates itself. The previous code also works until \
-             the change; each code pairs one phone.</p>\
-             {bar}{svg}<pre>{payload}</pre>",
+             <p>Scan with the Cappuccino app, or copy the text below. The code changes every \
+             minute; a code still works for a minute after it changes. Each code pairs one \
+             phone.</p>\
+             {svg}<p class=\"countdown\">New code in {countdown} s</p>{bar}<pre>{payload}</pre>",
             svg = qr_svg(payload)?,
             payload = html_escape(payload),
         )
@@ -786,7 +787,7 @@ pub fn render_pair_page(payload: &str, status: &CodeStatus) -> Result<String, St
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
          <meta http-equiv=\"refresh\" content=\"{seconds}\">\
          <style>{PAIR_PAGE_CSS}</style>\
-         </head><body>{body}</body></html>"
+         </head><body><main>{body}</main></body></html>"
     ))
 }
 
@@ -1760,6 +1761,11 @@ mod tests {
         assert!(first.contains("--s:30;animation-duration:30s"));
         assert!(first.contains("--f:0.5000;animation-duration:30s"));
         assert!(!first.contains("<script"), "no script on the pairing page");
+        assert!(!first.contains("@supports"), "no feature gate");
+        assert!(!first.contains("static"), "no fallback span to hide");
+        assert!(first.contains("a code still works for a minute after it changes"));
+        assert!(first.contains(".tick::after{content:counter(left)"));
+        assert!(first.contains("counter-reset:left var(--left)"));
         assert_eq!(
             pairing.audit_lines(),
             audit_before,
@@ -1807,7 +1813,7 @@ mod tests {
         let page = get_pair_page(&app).await;
         assert!(page.contains("<h1>Paired</h1>"));
         assert!(page.contains("New code in <span class=\"tick\""));
-        assert!(page.contains("<span class=\"static\">30</span>"));
+        assert!(!page.contains("static"), "no fallback span to hide");
         assert!(!page.contains("<svg"), "no QR for a used code");
         assert!(!page.contains(&shown));
         assert!(page.contains("content=\"30\""));
