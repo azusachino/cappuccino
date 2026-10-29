@@ -129,7 +129,10 @@ In order of enforcement:
    replies return on the relay the datagram arrived on
    (`RelayRecvDatagram { url: self.url }`). The phone's own n0 home relay is
    only needed for inbound dials and address publication. Device proof with n0
-   blocked is still pending.
+   blocked is still pending. Because the N0 preset's address lookup is kept,
+   the bridge still publishes its EndpointAddr, including the custom relay
+   URL, to n0's DNS discovery: n0 learns that this EndpointId uses that relay,
+   though no traffic passes through n0.
 5. **Loopback only.** The axum server keeps binding 127.0.0.1. The iroh
    tunnel is the only path in; disabling iroh (`iroh.enabled = false`, the
    default) returns the system to today's boundary — the kill switch. It sits
