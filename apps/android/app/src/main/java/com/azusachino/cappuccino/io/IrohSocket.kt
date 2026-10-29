@@ -12,6 +12,7 @@ import java.net.SocketAddress
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import javax.net.SocketFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +24,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.ConnectionPool
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 
@@ -282,4 +284,21 @@ class IrohHttpClients(
         .proxy(Proxy.NO_PROXY)
         .build()
     }
+
+  /**
+   * A client for one background poll, whose streams come from that poll's connection. It keeps no
+   * idle sockets, so each request's stream is released when the request ends and the poll can close
+   * its connection without a pooled socket still holding a stream.
+   */
+  fun pollClientFor(
+    addr: IrohEndpointAddr,
+    open: suspend (IrohEndpointAddr) -> IrohBiStream,
+  ): OkHttpClient =
+    base
+      .newBuilder()
+      .socketFactory(IrohSocketFactory(addr, open))
+      .dns(IROH_DNS)
+      .proxy(Proxy.NO_PROXY)
+      .connectionPool(ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
+      .build()
 }

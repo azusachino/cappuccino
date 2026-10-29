@@ -67,6 +67,7 @@ class AgentNotificationService : Service() {
     scope.launch {
       val store = ProfileStore(this@AgentNotificationService)
       val preferences = NotificationPreferences(this@AgentNotificationService)
+      val transports = MachineTransports.shared(this@AgentNotificationService)
       while (isActive) {
         if (
           !preferences.enabled ||
@@ -93,15 +94,17 @@ class AgentNotificationService : Service() {
             jobs[profile.id] =
               profile to
                 scope.launch {
-                  val client = BridgeClient(profile.endpoint)
                   val completions = AgentCompletions()
                   val blocked = mutableMapOf<String, String>()
                   var consecutiveErrors = 0
                   while (isActive) {
                     var anyActive = false
                     try {
-                      client.verify(profile.machineId)
-                      val agents = client.agents(profile.machineId)
+                      val agents =
+                        transports.backgroundPoll(profile.endpoint) { bridge ->
+                          bridge.verify(profile.machineId)
+                          bridge.agents(profile.machineId)
+                        }
                       consecutiveErrors = 0
                       anyActive = agents.any { it.working || it.status == "blocked" }
                       if (anyActive) {
@@ -277,13 +280,10 @@ class AgentNotificationService : Service() {
 }
 
 /**
- * Profiles the background poll dials. Iroh-only machines are skipped until slice 4 adds a per-poll
- * iroh connection; the plain client cannot reach their placeholder host. A machine with both
- * transports polls over tailnet in the background for now: its tailnet URL is what the plain client
- * dials, and the iroh-first order applies only in the foreground.
+ * Profiles the background poll dials: every machine not paused. Iroh-only and dual machines poll
+ * iroh-first through [BackgroundPoller], the same order the foreground uses.
  */
 internal fun backgroundPollProfiles(
   profiles: List<MachineProfile>,
   paused: Set<String>,
-): Map<String, MachineProfile> =
-  profiles.filter { it.id !in paused && it.endpoint.hasTailnet }.associateBy { it.id }
+): Map<String, MachineProfile> = profiles.filter { it.id !in paused }.associateBy { it.id }

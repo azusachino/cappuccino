@@ -47,6 +47,9 @@ class TcpTunnelTransport(private val port: Int) : IrohTransport {
     withContext(Dispatchers.IO) { TcpBackedStream(java.net.Socket("127.0.0.1", port)) }
 
   override fun pathKind(addr: IrohEndpointAddr): IrohPathKind = IrohPathKind.NONE
+
+  override fun dialPoll(addr: IrohEndpointAddr, alpn: String): IrohPollConnection =
+    error("not used by this test")
 }
 
 private class TcpBackedStream(private val socket: java.net.Socket) : IrohBiStream {

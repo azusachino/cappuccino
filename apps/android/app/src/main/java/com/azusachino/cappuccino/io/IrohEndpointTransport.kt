@@ -110,6 +110,50 @@ class IrohEndpointTransport private constructor(private val keyFile: File) : Iro
     }
   }
 
+  override fun dialPoll(addr: IrohEndpointAddr, alpn: String): IrohPollConnection =
+    PollConnection(addr, alpn)
+
+  /**
+   * One background poll's connection. It lives outside [connections], so the foreground never sees
+   * it. Dial, open and the open-stream count happen under [mutex], as on the foreground path, so
+   * the endpoint idle close cannot land between them.
+   */
+  private inner class PollConnection(
+    private val addr: IrohEndpointAddr,
+    private val alpn: String,
+  ) : IrohPollConnection {
+    private var connection: Connection? = null
+    private var closed = false
+
+    override suspend fun openStream(): IrohBiStream {
+      val bi = mutex.withLock {
+        check(!closed) { "poll connection is closed" }
+        val current =
+          connection?.takeIf { it.closeReason() == null }
+            ?: run {
+              val ep = endpointLocked()
+              val dialed = addr.toIroh().use { ep.connect(it, alpn.toByteArray(Charsets.UTF_8)) }
+              connection = dialed
+              dialed
+            }
+        val opened = current.openBi()
+        openStreams += 1
+        idleJob?.cancel()
+        idleJob = null
+        opened
+      }
+      return AndroidBiStream(bi) { onStreamReleased() }
+    }
+
+    override suspend fun close() {
+      mutex.withLock {
+        closed = true
+        connection?.let { runCatching { it.close(0L, ByteArray(0)) } }
+        connection = null
+      }
+    }
+  }
+
   private suspend fun openBi(addr: IrohEndpointAddr, alpn: String): BiStream = mutex.withLock {
     val connection = connectionLocked(addr, alpn)
     connection.openBi()

@@ -18,17 +18,26 @@ class BackgroundPollProfilesTest {
       UUID.randomUUID(),
     )
 
+  private val dual =
+    MachineProfile(
+      "dual",
+      "Dual",
+      Endpoint.parse("https://dual.example")
+        .withIroh(IrohEndpointAddr("dual-id", null, emptyList())),
+      UUID.randomUUID(),
+    )
+
   @Test
-  fun backgroundPollKeepsTailnetMachinesAndSkipsIrohAndPausedOnes() {
-    val selected = backgroundPollProfiles(listOf(tailnet, paused, iroh), setOf("paused"))
-    assertEquals(listOf("mac"), selected.keys.toList())
+  fun backgroundPollSelectsTailnetIrohAndDualMachinesAndSkipsPausedOnes() {
+    val selected = backgroundPollProfiles(listOf(tailnet, paused, iroh, dual), setOf("paused"))
+    assertEquals(listOf("mac", "office", "dual"), selected.keys.toList())
   }
 
   @Test
-  fun onlyIrohMachinesYieldNoBackgroundPolls() {
+  fun onlyPausedMachinesYieldNoBackgroundPolls() {
     assertEquals(
       emptyMap<String, MachineProfile>(),
-      backgroundPollProfiles(listOf(iroh), emptySet()),
+      backgroundPollProfiles(listOf(paused), setOf("paused")),
     )
   }
 }
