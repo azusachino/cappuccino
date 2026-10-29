@@ -26,7 +26,8 @@ app only works on tailnet devices. The gap this doc closes: machines must be
 reachable from networks we do not control, with a boundary we can state in
 one sentence — **a connection is trusted if and only if it arrived over an
 iroh transport whose remote EndpointId is on the bridge's allowlist**, and an
-EndpointId reaches the allowlist only by presenting a one-time pairing token.
+EndpointId reaches the allowlist only by presenting the bridge's current
+pairing code, which is single-use per 60 s window.
 
 ## Decision
 
@@ -49,7 +50,7 @@ phone (Kotlin)
                                                                        ▼
 bridge iroh endpoint (Rust, in cappuccino-bridge)
   ALPN cappuccino/1: remote EndpointId must be on the allowlist
-  ALPN cappuccino-pair/1: any EndpointId, one-time token exchange only
+  ALPN cappuccino-pair/1: any EndpointId, pairing-code exchange only
   bi-stream ⇄ TCP pipe → 127.0.0.1:7392 (existing axum, unchanged)
 ```
 
@@ -77,21 +78,33 @@ In order of enforcement:
    `cappuccino/1` in the accept hook — before any application bytes flow.
    Pairing adds one id. The hook runs only at handshake, so removing an id
    also closes that phone's live connections.
-2. **One-time pairing token.** `cappuccino-bridge pair` prints a QR code
-   (copy-paste fallback; the app clears the clipboard after use) carrying the
-   bridge's full EndpointAddr (EndpointId plus relay URL, so the first dial
-   needs no discovery) and a 32-byte random token. An unpaired phone dials
-   the separate ALPN `cappuccino-pair/1`, which admits unknown EndpointIds
-   but serves only the token exchange (n0's auth-hook example uses the same
-   pre-auth-ALPN split). The token is compared constant-time; on a match the
-   bridge adds the phone's EndpointId to the allowlist and discards the
-   token. After pairing, trust rests on the EndpointId alone — no
-   per-connection token. The same QR is also served as a `GET /pair` page on
-   the loopback bridge, so it can be opened from any tailnet device through
-   Tailscale Serve. Each CLI run or page load issues a fresh token that
-   replaces any outstanding one and expires after 10 minutes. Paired phones
-   can reach the page through the tunnel too; that is accepted, because a
-   paired phone already controls the agents.
+2. **Rotating pairing code (TOTP-style).** `cappuccino-bridge pair` prints a
+   QR code (copy-paste fallback; the app clears the clipboard after use)
+   carrying the bridge's full EndpointAddr (EndpointId plus relay URL, so the
+   first dial needs no discovery) and the current pairing code. The code is
+   the lowercase hex of HMAC-SHA256, keyed by a 32-byte secret generated at
+   bridge start, over the domain `cappuccino-pair/1` and the index of the
+   current 60 s window (`floor(unix_secs / 60)`, big-endian u64). It is 64 hex
+   characters, the same shape as before. The secret lives in memory only: it
+   is never persisted or logged, so a bridge restart invalidates the code.
+   An unpaired phone dials the separate ALPN `cappuccino-pair/1`, which admits
+   unknown EndpointIds but serves only the code exchange (n0's auth-hook
+   example uses the same pre-auth-ALPN split). The bridge accepts the code of
+   the current window or the previous one, so a scan at the boundary still
+   works; both are compared in constant time. A successful pairing burns that
+   window's code, so one code pairs one phone, and a burned code is refused
+   until its window leaves the grace period. A wrong guess burns nothing. On a
+   match the bridge adds the phone's EndpointId to the allowlist. After
+   pairing, trust rests on the EndpointId alone: no per-connection code. The
+   code is also shown on `GET /pair` on the loopback bridge, so it can be
+   opened from any tailnet device through Tailscale Serve. That page is
+   side-effect-free: it renders the current window's code, reloads itself at
+   the window boundary through a meta refresh (no script, no external assets),
+   and shows "Paired" once that window's code is used. Every load within a
+   window shows the same code and is not audited. `cappuccino-bridge pair`
+   reads the same code and never creates one. Paired phones can reach the page
+   through the tunnel too; that is accepted, because a paired phone already
+   controls the agents.
 3. **Transport identity.** iroh's QUIC TLS already authenticates the remote
    EndpointId, so a man-in-the-middle cannot sit between phone and bridge
    without the bridge's private key.
@@ -108,10 +121,45 @@ In order of enforcement:
    authenticator the reserved `auth` section in `services/bridge/src/config.rs`
    was kept for, and its settings live there.
 
-Remaining hardening checklist (applies regardless of transport, tracked as
-bridge issues): per-connection rate limit and body-size caps at the axum
-layer, structured audit log of pairing and rejected dials, no tokens or keys
-in logs.
+**Limits (slice 5).** Named constants in `services/bridge/src/iroh_transport.rs`
+and `main.rs`, not config: they bound resource use, and nothing here is
+per-machine tuning.
+
+| Limit | Value | Enforced by | Justification |
+| --- | --- | --- | --- |
+| Request body | 2 MiB (`MAX_REQUEST_BODY_BYTES`) | `RequestBodyLimitLayer` on every route; over-limit is 413 | Equal to the apps' own ceiling for any HTTP body (`MAX_HTTP_BODY_BYTES` on Android, `maxHTTPBodyBytes` on Apple): a client never sends a body the bridge refuses for a reason it cannot see. Prompt text is the only large request body. Declared length is refused unread; streamed bodies stop at the cap. |
+| Streams per tunnel connection | 32 (`MAX_TUNNEL_STREAMS`) | QUIC `max_concurrent_bidi_streams` | Above the phone's normal request concurrency. Extra opens wait. QUIC returns credit in batches, so a waiting open resumes after a batch of streams finish, not after one. |
+| Tunnel connections per EndpointId | 4 (`MAX_TUNNEL_CONNECTIONS_PER_ID`) | Tracking in `serve_tunnel`; excess closed | A paired phone uses one or two connections. |
+| Tunnel connections overall | 16 (`MAX_TUNNEL_CONNECTIONS`) | Same | Caps the total for one bridge. |
+| Unpaired pair exchanges at once | 4 (`MAX_PAIR_CONNECTIONS`) | Semaphore in `serve_pair`; excess closed at once | A pair exchange can hold a task up to about 20 s, so this caps pinned tasks. |
+| Pair attempts per EndpointId | 5 per 60 s (`PAIR_ATTEMPTS_PER_WINDOW`, `PAIR_ATTEMPT_WINDOW`) | Per-id window in `redeem`; every attempt counts, match or not | A wrong guess burns nothing, so the rate limit protects resources, not the code. |
+| Handshakes in flight | 32 (`MAX_PENDING_HANDSHAKES`) | Accept loop waits before spawning | Bounds tasks that exist before the ALPN is known. |
+
+**Audit log.** Each security event is one line on stdout, which the managed
+lifecycle writes to `bridge.log` (`cappuccino-bridge logs`). Format:
+`cappuccino-bridge: audit <event> key=value...`. Lines never contain a pairing
+code, the pairing secret, the iroh secret key, or a request body, and a test
+asserts this (`audit_log_records_events_and_never_contains_codes_or_secrets`).
+
+```text
+cappuccino-bridge: audit code_read source=cli seconds_left=<n> burned=false|true
+cappuccino-bridge: audit pair_ok endpoint=<64-hex EndpointId>
+cappuccino-bridge: audit pair_failed endpoint=<id> reason=mismatch|burned|persist_failed
+cappuccino-bridge: audit tunnel_rejected endpoint=<id> reason=not_paired|revoked
+cappuccino-bridge: audit revoked endpoint=<id> was_paired=true|false closed=<n>
+cappuccino-bridge: audit limit_hit limit=tunnel_connections_per_id|tunnel_connections endpoint=<id>
+cappuccino-bridge: audit limit_hit limit=pair_connections endpoint=<id>
+cappuccino-bridge: audit limit_hit limit=pair_attempts endpoint=<id>
+cappuccino-bridge: audit limit_hit limit=request_body max_bytes=2097152
+```
+
+A code from older than the grace window is logged as `mismatch`: the bridge
+keeps no past codes, so it cannot tell a stale code from a wrong one. The
+stream cap is not logged: QUIC holds the phone's extra opens without a
+bridge-side event. A `request_body` line has no EndpointId, because the
+loopback HTTP listener does not know which transport a request arrived on.
+Pre-handshake connections are bounded by `MAX_PENDING_HANDSHAKES` but are not
+logged.
 
 **Revocation.** `cappuccino-bridge pair --revoke <EndpointId>` removes a phone
 from the allowlist and closes that phone's live connections; every revocation
@@ -170,7 +218,8 @@ the app falls back to tailnet.
 
 - Bridge: hermetic tokio test with two in-process iroh endpoints — an
   unknown EndpointId is rejected on `cappuccino/1` but can pair on
-  `cappuccino-pair/1`, pairing consumes the token exactly once, revocation
+  `cappuccino-pair/1`, a paired window's code cannot pair a second phone and
+  the next window's code works, revocation
   closes a live connection, an allowlisted dial pipes to a stub TCP server.
   No network needed.
 - App: unit tests for key storage, pairing payload parsing and the fallback
@@ -224,7 +273,9 @@ the app falls back to tailnet.
    checked on a device. Code done on `feat/iroh-background-notify` (JVM
    tests); device check pending.
 5. Hardening batch: rate limits, body caps, audit log, `pair --revoke` (also
-   closing live connections).
+   closing live connections). **Done** (issue #55): the limits and audit
+   events are listed in the security model under "Limits (slice 5)" and
+   "Audit log"; `pair --revoke` shipped with slice 1.
 6. Relay spike: measure direct-path rates on n0 versus `iroh-relay` on
    harus-k3s behind a Cloudflare Tunnel; adopt only if the numbers hold
    (cross-repo with harus-k3s).

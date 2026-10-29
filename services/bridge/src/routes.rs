@@ -45,6 +45,22 @@ fn host_name() -> Option<String> {
     }
 }
 
+/// Maps a rejected JSON body: an over-limit body is 413, anything else 400.
+pub fn body_rejection(rejection: axum::extract::rejection::JsonRejection) -> Response {
+    if rejection.into_response().status() == StatusCode::PAYLOAD_TOO_LARGE {
+        return error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload_too_large",
+            "Request body exceeds the bridge limit",
+        );
+    }
+    error_response(
+        StatusCode::BAD_REQUEST,
+        "bad_request",
+        "Invalid mutation body",
+    )
+}
+
 pub fn error_response(status: StatusCode, code: &str, message: &str) -> Response {
     (
         status,
@@ -541,12 +557,9 @@ pub async fn control_agent(
     AxumPath(session_id): AxumPath<String>,
     body: Result<Json<serde_json::Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
-    let Ok(Json(body)) = body else {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            "Invalid mutation body",
-        );
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(rejection) => return body_rejection(rejection),
     };
     let binding = match mutation::Binding::from_body(&body) {
         Ok(binding) => binding,
@@ -620,12 +633,9 @@ pub async fn submit_agent_prompt(
     AxumPath(session_id): AxumPath<String>,
     body: Result<Json<serde_json::Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
-    let Ok(Json(body)) = body else {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            "Invalid mutation body",
-        );
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(rejection) => return body_rejection(rejection),
     };
     let binding = match mutation::Binding::from_body(&body) {
         Ok(binding) => binding,
