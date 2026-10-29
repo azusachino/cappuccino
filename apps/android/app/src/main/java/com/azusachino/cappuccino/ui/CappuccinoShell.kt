@@ -69,7 +69,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -193,6 +192,11 @@ fun CappuccinoScreen(
   var irohMode by rememberSaveable { mutableStateOf(false) }
   var payload by rememberSaveable { mutableStateOf("") }
   var scanError by rememberSaveable { mutableStateOf<String?>(null) }
+  // Existing-machine pairing: iroh pairing for a tailnet machine, or a tailnet URL for iroh-only.
+  var editingProfileId by rememberSaveable { mutableStateOf<String?>(null) }
+  var editingIroh by rememberSaveable { mutableStateOf(true) }
+  var editingUrl by rememberSaveable { mutableStateOf("") }
+  var pendingEdit by rememberSaveable { mutableStateOf(false) }
   val context = LocalContext.current
   val selected = state.selectedAgent
   fun mutate(send: (ConnectedActions) -> Unit) {
@@ -1086,6 +1090,33 @@ fun CappuccinoScreen(
                                       machineMenuId = null
                                     },
                                   )
+                                  if (profile.endpoint.iroh == null) {
+                                    DropdownMenuItem(
+                                      text = { Text("Pair over iroh") },
+                                      onClick = {
+                                        editingProfileId = profile.id
+                                        editingIroh = true
+                                        payload = ""
+                                        scanError = null
+                                        pendingEdit = false
+                                        machineMenuId = null
+                                      },
+                                    )
+                                  }
+                                  if (
+                                    profile.endpoint.iroh != null && !profile.endpoint.hasTailnet
+                                  ) {
+                                    DropdownMenuItem(
+                                      text = { Text("Add tailnet URL") },
+                                      onClick = {
+                                        editingProfileId = profile.id
+                                        editingIroh = false
+                                        editingUrl = ""
+                                        pendingEdit = false
+                                        machineMenuId = null
+                                      },
+                                    )
+                                  }
                                   DropdownMenuItem(
                                     text = { Text("Remove") },
                                     onClick = {
@@ -1134,6 +1165,76 @@ fun CappuccinoScreen(
           }
         }
       }
+    }
+  }
+
+  val editing = state.profiles.firstOrNull { it.id == editingProfileId }
+  if (editing != null) {
+    AlertDialog(
+      onDismissRequest = { if (!state.busy) editingProfileId = null },
+      title = { Text(if (editingIroh) "Pair over iroh" else "Add tailnet URL") },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          if (editingIroh) {
+            PairingPayloadInput(
+              payload = payload,
+              onPayload = { payload = it },
+              scanError = scanError,
+              onScanError = { scanError = it },
+              busy = state.busy,
+            )
+          } else {
+            OutlinedTextField(
+              value = editingUrl,
+              onValueChange = { editingUrl = it },
+              label = { Text("Bridge address") },
+              placeholder = { Text("https://machine.tailnet.ts.net") },
+              keyboardOptions =
+                androidx.compose.foundation.text.KeyboardOptions(
+                  keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                  autoCorrectEnabled = false,
+                ),
+              singleLine = true,
+              enabled = !state.busy,
+              isError = state.addError != null,
+              modifier = Modifier.fillMaxWidth(),
+              colors =
+                OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = MaterialTheme.colorScheme.surface,
+                  unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                  focusedBorderColor = MaterialTheme.colorScheme.primary,
+                  unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                ),
+            )
+          }
+          state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
+          if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+        }
+      },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            pendingEdit = true
+            if (editingIroh) actions.addIrohPairing(editing.id, payload)
+            else actions.addTailnetUrl(editing.id, editingUrl)
+          },
+          enabled =
+            !state.busy && (if (editingIroh) payload.isNotBlank() else editingUrl.isNotBlank()),
+        ) {
+          Text("Connect")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { editingProfileId = null }, enabled = !state.busy) { Text("Cancel") }
+      },
+    )
+  }
+  // Close only after a busy round finishes without an error; a failed attempt keeps the dialog
+  // open.
+  LaunchedEffect(state.busy, pendingEdit) {
+    if (pendingEdit && !state.busy && state.addError == null) {
+      pendingEdit = false
+      editingProfileId = null
     }
   }
 
@@ -1191,53 +1292,13 @@ fun CappuccinoScreen(
                 ),
             )
           if (irohMode) {
-            OutlinedTextField(
-              value = payload,
-              onValueChange = { payload = it },
-              label = { Text("Pairing payload") },
-              visualTransformation = PasswordVisualTransformation(),
-              singleLine = true,
-              enabled = !state.busy,
-              modifier = Modifier.fillMaxWidth(),
-              colors =
-                OutlinedTextFieldDefaults.colors(
-                  focusedContainerColor = MaterialTheme.colorScheme.surface,
-                  unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                  focusedBorderColor = MaterialTheme.colorScheme.primary,
-                  unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                ),
+            PairingPayloadInput(
+              payload = payload,
+              onPayload = { payload = it },
+              scanError = scanError,
+              onScanError = { scanError = it },
+              busy = state.busy,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              TextButton(
-                onClick = {
-                  scanPairingPayload(
-                    context,
-                    onPayload = {
-                      payload = it
-                      scanError = null
-                    },
-                    onFailure = { scanError = it },
-                  )
-                },
-                enabled = !state.busy,
-              ) {
-                Text("Scan QR")
-              }
-              TextButton(
-                onClick = {
-                  val pasted = takePairingPayloadFromClipboard(context)
-                  if (pasted == null) scanError = "Clipboard has no pairing payload"
-                  else {
-                    payload = pasted
-                    scanError = null
-                  }
-                },
-                enabled = !state.busy,
-              ) {
-                Text("Paste")
-              }
-            }
-            scanError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
           }
           state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
           if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
