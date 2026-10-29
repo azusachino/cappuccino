@@ -4,6 +4,7 @@
 //! catalog contract, which the client models were written against.
 
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 
 /// One agent row on the wire; field names keep the retired slice-A daemon shape
 /// the client models were written against.
@@ -179,24 +180,95 @@ pub fn same_directory(a: &str, b: &str) -> bool {
     meta_a.dev() == meta_b.dev() && meta_a.ino() == meta_b.ino()
 }
 
-/// Stable per-machine identity, same store the retired slice-A daemon used
-/// (~/Library/Application Support/cappuccino-spike/machine-id, 0600).
-pub fn machine_id() -> String {
-    let dir = format!(
-        "{}/Library/Application Support/cappuccino-spike",
+const MACHINE_ID_FILE: &str = "machine-id";
+
+/// Stable per-machine identity, stored as `machine-id` (0600) in the bridge
+/// data dir. Earlier builds kept it under `~/Library/Application Support`; that
+/// value is copied once when the new file is absent. Logs name the path taken,
+/// never the id.
+pub fn machine_id(data_dir: &Path) -> Result<String, String> {
+    let legacy = PathBuf::from(format!(
+        "{}/Library/Application Support/cappuccino-spike/{MACHINE_ID_FILE}",
         home_dir()
-    );
-    let file = format!("{dir}/machine-id");
-    if let Ok(existing) = std::fs::read_to_string(&file) {
-        let trimmed = existing.trim().to_string();
-        if !trimmed.is_empty() {
-            return trimmed;
+    ));
+    resolve_machine_id(data_dir, Some(&legacy), &|line| {
+        eprintln!("cappuccino-bridge: {line}")
+    })
+}
+
+/// Pure resolution over explicit paths. Order: the data dir's `machine-id`
+/// (used as-is); else a one-time copy of a readable, non-empty legacy id; else
+/// a fresh id, generated only when neither source holds one. An unreadable
+/// legacy file (permission error) logs a warning and falls through to
+/// generation; it is never deleted.
+pub fn resolve_machine_id(
+    data_dir: &Path,
+    legacy: Option<&Path>,
+    log: &dyn Fn(&str),
+) -> Result<String, String> {
+    let file = data_dir.join(MACHINE_ID_FILE);
+    match std::fs::read_to_string(&file) {
+        Ok(text) if !text.trim().is_empty() => return Ok(text.trim().to_string()),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "cannot read machine id {}: {error}",
+                file.display()
+            ))
+        }
+    }
+    if let Some(path) = legacy {
+        match std::fs::read_to_string(path) {
+            Ok(text) if !text.trim().is_empty() => {
+                let id = text.trim().to_string();
+                write_machine_id(data_dir, &file, &id)?;
+                log(&format!(
+                    "migrated machine id from {} to {} (id unchanged)",
+                    path.display(),
+                    file.display()
+                ));
+                return Ok(id);
+            }
+            Ok(_) => log(&format!(
+                "legacy machine id {} is empty; ignoring it",
+                path.display()
+            )),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => log(&format!(
+                "warning: legacy machine id {} is unreadable ({error}); not migrating it",
+                path.display()
+            )),
         }
     }
     let fresh = uuid_v4();
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(&file, &fresh);
-    fresh
+    write_machine_id(data_dir, &file, &fresh)?;
+    log(&format!("generated a new machine id at {}", file.display()));
+    Ok(fresh)
+}
+
+fn write_machine_id(data_dir: &Path, file: &Path, id: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    // Explicit chmod: the managed child runs under umask 0177, which would
+    // otherwise leave a created directory without owner search permission.
+    if !data_dir.is_dir() {
+        std::fs::create_dir_all(data_dir)
+            .map_err(|error| format!("create data dir {}: {error}", data_dir.display()))?;
+        std::fs::set_permissions(data_dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("chmod data dir {}: {error}", data_dir.display()))?;
+    }
+    let mut handle = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(file)
+        .map_err(|error| format!("write machine id {}: {error}", file.display()))?;
+    handle
+        .write_all(id.as_bytes())
+        .and_then(|()| handle.set_permissions(std::fs::Permissions::from_mode(0o600)))
+        .map_err(|error| format!("write machine id {}: {error}", file.display()))
 }
 
 /// UUID v4 from /dev/urandom (macOS/BSD); a deterministic fallback keeps the
@@ -325,11 +397,139 @@ mod tests {
         assert!(map_agents(&result, "m-1").is_err());
     }
 
+    /// Fresh temp dir per test; never under ~/Library.
+    fn temp_root(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "cap-machine-id-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn logs() -> (std::rc::Rc<std::cell::RefCell<Vec<String>>>, impl Fn(&str)) {
+        let sink = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let log = {
+            let sink = sink.clone();
+            move |line: &str| sink.borrow_mut().push(line.to_string())
+        };
+        (sink, log)
+    }
+
     #[test]
-    fn machine_id_is_stable() {
-        let first = machine_id();
-        let second = machine_id();
-        assert_eq!(first, second);
+    fn machine_id_uses_data_dir_file_when_present() {
+        let root = temp_root("present");
+        let data = root.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("machine-id"), "existing-id\n").unwrap();
+        let legacy = root.join("old/machine-id");
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, "old-id").unwrap();
+        let (sink, log) = logs();
+
+        let id = resolve_machine_id(&data, Some(&legacy), &log).unwrap();
+
+        assert_eq!(id, "existing-id");
+        assert!(
+            sink.borrow().is_empty(),
+            "no migration log: {:?}",
+            sink.borrow()
+        );
+        assert_eq!(std::fs::read_to_string(&legacy).unwrap(), "old-id");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn machine_id_migrates_legacy_once_and_keeps_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_root("migrate");
+        let data = root.join("data");
+        let legacy = root.join("old/machine-id");
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, "legacy-id\n").unwrap();
+        let (sink, log) = logs();
+
+        let id = resolve_machine_id(&data, Some(&legacy), &log).unwrap();
+
+        assert_eq!(id, "legacy-id");
+        let new_file = data.join("machine-id");
+        assert_eq!(std::fs::read_to_string(&new_file).unwrap(), "legacy-id");
+        let mode = std::fs::metadata(&new_file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert!(
+            std::fs::metadata(&legacy).is_ok(),
+            "legacy path is never deleted"
+        );
+        assert!(sink.borrow()[0].starts_with("migrated machine id"));
+        assert!(
+            !sink.borrow()[0].contains("legacy-id"),
+            "id must not be logged"
+        );
+
+        // Later starts read the new file even if the legacy value changes.
+        std::fs::write(&legacy, "changed").unwrap();
+        assert_eq!(
+            resolve_machine_id(&data, Some(&legacy), &|_| {}).unwrap(),
+            "legacy-id"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn machine_id_generates_when_no_legacy_exists() {
+        let root = temp_root("fresh");
+        let data = root.join("data");
+        let legacy = root.join("missing/machine-id");
+        let (sink, log) = logs();
+
+        let first = resolve_machine_id(&data, Some(&legacy), &log).unwrap();
+        let second = resolve_machine_id(&data, Some(&legacy), &log).unwrap();
+
         assert_eq!(first.len(), 36);
+        assert_eq!(first, second);
+        assert_eq!(
+            sink.borrow().len(),
+            1,
+            "generated once: {:?}",
+            sink.borrow()
+        );
+        assert!(sink.borrow()[0].starts_with("generated a new machine id"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn machine_id_unreadable_legacy_warns_and_generates() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_root("unreadable");
+        let data = root.join("data");
+        let locked = root.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::write(locked.join("machine-id"), "hidden-id").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let legacy = locked.join("machine-id");
+        let (sink, log) = logs();
+
+        let id = resolve_machine_id(&data, Some(&legacy), &log);
+        // Restore before asserting so cleanup works even on failure.
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let id = id.unwrap();
+        assert_ne!(id, "hidden-id");
+        assert_eq!(id.len(), 36);
+        assert!(sink.borrow()[0].starts_with("warning: legacy machine id"));
+        assert!(sink.borrow()[1].starts_with("generated a new machine id"));
+        assert_eq!(
+            std::fs::read_to_string(data.join("machine-id")).unwrap(),
+            id
+        );
+        assert!(
+            locked.join("machine-id").exists(),
+            "legacy path is never deleted"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

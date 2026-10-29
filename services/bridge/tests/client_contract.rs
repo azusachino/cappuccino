@@ -387,9 +387,7 @@ async fn spawn_bridge_with(
             }
             // A parallel child can win the released port while this child is
             // still starting. TCP readiness alone may borrow that other server.
-            let identity_path = root
-                .path
-                .join("home/Library/Application Support/cappuccino-spike/machine-id");
+            let identity_path = root.path.join("data/machine-id");
             if let Ok(expected) = std::fs::read_to_string(identity_path) {
                 if let Ok(exchange) =
                     probe::get(&probe_options(&bridge.base_url()), "/api/session").await
