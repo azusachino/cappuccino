@@ -952,47 +952,10 @@ fun CappuccinoScreen(
             }
             else -> {
               // Destination.MACHINES
-              val connection = state.connection
-              val machinesTop = if (connection is ConnectionState.Error) 12.dp else chromeTop
-              if (connection is ConnectionState.Error) {
-                Surface(
-                  modifier =
-                    Modifier.fillMaxWidth()
-                      .padding(top = chromeTop)
-                      .padding(horizontal = 16.dp)
-                      .testTag("machinesConnectionBanner"),
-                  shape = RoundedCornerShape(8.dp),
-                  color = MaterialTheme.colorScheme.errorContainer,
-                ) {
-                  Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                  ) {
-                    Text(
-                      connection.message,
-                      modifier = Modifier.weight(1f),
-                      color = MaterialTheme.colorScheme.onErrorContainer,
-                      style = MaterialTheme.typography.bodySmall,
-                      maxLines = 3,
-                      overflow = TextOverflow.Ellipsis,
-                    )
-                    if (state.activeProfileId != null) {
-                      FilledTonalButton(
-                        onClick = actions::retry,
-                        modifier = Modifier.padding(start = 8.dp),
-                      ) {
-                        Text("Retry")
-                      }
-                    }
-                  }
-                }
-              }
-
               if (state.profiles.isEmpty()) {
                 Box(
                   modifier =
-                    Modifier.fillMaxWidth().weight(1f).padding(top = machinesTop).padding(24.dp),
+                    Modifier.fillMaxWidth().weight(1f).padding(top = chromeTop).padding(24.dp),
                   contentAlignment = Alignment.Center,
                 ) {
                   Column(
@@ -1015,7 +978,7 @@ fun CappuccinoScreen(
                 LazyColumn(
                   state = machineTreeState,
                   modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
-                  contentPadding = PaddingValues(top = machinesTop, bottom = dockBottom),
+                  contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
                   verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                   items(state.profiles, key = { it.id }) { profile ->
@@ -1043,7 +1006,9 @@ fun CappuccinoScreen(
                                   machine.connection.statusText(),
                                   state.machineBadges[profile.id]?.label(),
                                 )
-                                .joinToString(" · ")
+                                .joinToString(" · "),
+                              maxLines = 1,
+                              overflow = TextOverflow.Ellipsis,
                             )
                           },
                           leadingContent = {
@@ -1054,23 +1019,20 @@ fun CappuccinoScreen(
                           },
                           trailingContent = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                              IconButton(
-                                onClick = { actions.refreshProfile(profile.id) },
-                                enabled = !machine.busy,
-                              ) {
-                                Icon(
-                                  painterResource(com.azusachino.cappuccino.R.drawable.ic_refresh),
-                                  contentDescription = "Refresh ${profile.label}",
-                                )
-                              }
-                              IconButton(
-                                onClick = { actions.disconnectMachine(profile.id) },
-                                enabled = machine.connection != ConnectionState.Disconnected,
-                              ) {
-                                Icon(
-                                  painterResource(com.azusachino.cappuccino.R.drawable.ic_close),
-                                  contentDescription = "Disconnect ${profile.label}",
-                                )
+                              // Retry is offered only where the row is in error; the banner it
+                              // replaced used to carry this.
+                              if (machine.connection is ConnectionState.Error) {
+                                IconButton(
+                                  onClick = { actions.refreshProfile(profile.id) },
+                                  enabled = !machine.busy,
+                                ) {
+                                  Icon(
+                                    painterResource(
+                                      com.azusachino.cappuccino.R.drawable.ic_refresh
+                                    ),
+                                    contentDescription = "Retry ${profile.label}",
+                                  )
+                                }
                               }
                               Box {
                                 IconButton(onClick = { machineMenuId = profile.id }) {
@@ -1155,7 +1117,7 @@ fun CappuccinoScreen(
                         ) {
                           LinearProgressIndicator(Modifier.fillMaxWidth())
                         } else if (machine.connection != ConnectionState.Connected) {
-                          // The banner above carries the error; details live in the sheet.
+                          // The row's status line carries the error; details live in the sheet.
                         } else {
                           val agents = machine.agents.filter { it.machineId == profile.machineId }
                           if (agents.isEmpty()) Text("No active agents", Modifier.padding(16.dp))
