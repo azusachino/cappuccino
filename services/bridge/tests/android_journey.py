@@ -180,7 +180,7 @@ def running_fixture(binary):
         home = root / "home"
         home.mkdir()
         machine = str(uuid.uuid4())
-        identity = home / "Library/Application Support/cappuccino-spike/machine-id"
+        identity = root / "data" / "machine-id"
         identity.parent.mkdir(parents=True)
         identity.write_text(machine)
         fixture = Fixture(home)

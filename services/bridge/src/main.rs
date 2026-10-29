@@ -77,7 +77,7 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
             "refusing non-loopback bind {bind}; tailnet exposure belongs to tailscale serve"
         ));
     }
-    let machine_id = agents::machine_id();
+    let machine_id = agents::machine_id(&config.data_dir)?;
     let state = Arc::new(routes::BridgeState::new(machine_id));
     let iroh_hub = if config.iroh_enabled {
         let target = iroh_transport::Target {
