@@ -79,13 +79,22 @@ the selected Pi session's identity.
 
 ## Configuration and security
 
-Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, optional JSON (`CAPP_BRIDGE_CONFIG` or `~/.config/cappuccino-bridge/config.json`), then environment (`CAPP_BRIDGE_HOST`, `CAPP_BRIDGE_PORT`, `CAPP_BRIDGE_DATA_DIR`, `CAPP_BRIDGE_SERVE_AUTO_APPLY`). Non-loopback binds and enabled reserved auth are rejected.
+Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, optional JSON, then environment (`CAPP_BRIDGE_HOST`, `CAPP_BRIDGE_PORT`, `CAPP_BRIDGE_DATA_DIR`, `CAPP_BRIDGE_SERVE_AUTO_APPLY`). Non-loopback binds and enabled reserved auth are rejected.
+
+Paths, on macOS and Linux alike:
+
+- Config file: `CAPP_BRIDGE_CONFIG`, else `$XDG_CONFIG_HOME/cappuccino-bridge/config.json`, else `~/.config/cappuccino-bridge/config.json`.
+- Runtime state (`data_dir`): `$XDG_STATE_HOME/cappuccino-bridge`, else `~/.local/state/cappuccino-bridge`. Set `data_dir` in the config file, or `CAPP_BRIDGE_DATA_DIR`, to use another directory; the environment variable wins over the file.
+- XDG variables are used only when they are absolute paths; relative or empty values are ignored.
+- A missing data dir is created with mode 0700. Existing files keep their modes; the secret key and allowlist are 0600.
+- Earlier macOS builds used `~/Library/Application Support/cappuccino-bridge`. Nothing is migrated automatically. To keep using that directory, set `"data_dir"` in the config file to that absolute path.
+- The admin socket is `iroh-admin.sock` in the data dir. macOS limits Unix socket paths to 104 bytes; a typical `~/.local/state/cappuccino-bridge` path is about 64 bytes. The bridge refuses to start with a "set data_dir to a shorter path" error if the socket path would be too long.
 
 `serve.auto_apply` defaults to `true`. On `start` and `status`, the binary checks `tailscale serve status` and may apply a Serve entry if one is missing. This can mutate the machine's Tailscale Serve configuration. Set the config value to `false` or `CAPP_BRIDGE_SERVE_AUTO_APPLY=0` to prevent all Tailscale commands; accepted false spellings are `0`, `false`, `no`, and `off` (case-insensitive), and the only true spelling is `true`. Invalid values fail closed. Disabled mode prints the manual command without running it.
 
 ### iroh transport (optional, off by default)
 
-`iroh.enabled` (default `false`, strict boolean) starts an iroh endpoint beside the loopback listener. When false no endpoint is created. The phone reaches the same routes through iroh ALPN `cappuccino/1`, admitted only for EndpointIds on the allowlist. ALPN `cappuccino-pair/1` admits unknown ids for one token exchange. `auth.pair_token_ttl_secs` (default `600`, range 1 to 3600) sets the token lifetime. The secret key (`iroh-secret.key`) and allowlist (`iroh-allowlist.json`) live in the data dir with mode 0600.
+`iroh.enabled` (default `false`, strict boolean) starts an iroh endpoint beside the loopback listener. When false no endpoint is created. The phone reaches the same routes through iroh ALPN `cappuccino/1`, admitted only for EndpointIds on the allowlist. ALPN `cappuccino-pair/1` admits unknown ids for one token exchange. Pairing uses a code that rotates every 60 s and is single-use per window; `cappuccino-bridge pair` prints the current code. The secret key (`iroh-secret.key`) and allowlist (`iroh-allowlist.json`) live in the data dir with mode 0600.
 
 - `cappuccino-bridge pair` prints a QR and the payload. It asks the running bridge over the owner-only admin socket `iroh-admin.sock` in the data dir. Start the bridge first, or the command reports that it is not running.
 - The payload carries direct addresses only when no relay is known yet (`relay` null). With a relay, `addrs` is empty and the phone finds the direct path after connecting, which keeps the QR about 55 to 59 columns and 28 to 30 rows (error level L, one-module quiet zone). If the terminal is narrower, the command prints a hint; widen it or open `/pair` on a tailnet device, which shows the same payload as a QR.

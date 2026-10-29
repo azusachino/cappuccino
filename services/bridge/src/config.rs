@@ -6,7 +6,7 @@
 
 use serde::Deserialize;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct BridgeConfig {
@@ -101,28 +101,64 @@ struct IrohFileConfig {
     enabled: Option<StrictBool>,
 }
 
+/// Resolves an XDG base directory: the variable's value when it is an absolute
+/// path, otherwise `$HOME/<home_relative>`. Relative and empty values are
+/// ignored, as the XDG Base Directory spec requires.
+fn xdg_base(xdg_value: Option<&str>, home: &str, home_relative: &str) -> PathBuf {
+    match xdg_value.map(Path::new) {
+        Some(path) if path.is_absolute() => path.to_path_buf(),
+        _ => Path::new(home).join(home_relative),
+    }
+}
+
+/// Default runtime state dir: `$XDG_STATE_HOME/cappuccino-bridge`, else
+/// `$HOME/.local/state/cappuccino-bridge`, on macOS and Linux alike.
+pub fn default_data_dir(xdg_state_home: Option<&str>, home: &str) -> PathBuf {
+    xdg_base(xdg_state_home, home, ".local/state").join("cappuccino-bridge")
+}
+
+/// Config file path: `CAPP_BRIDGE_CONFIG` when set, else
+/// `$XDG_CONFIG_HOME/cappuccino-bridge/config.json`, else
+/// `$HOME/.config/cappuccino-bridge/config.json`.
+pub fn resolve_config_path(
+    capp_bridge_config: Option<&str>,
+    xdg_config_home: Option<&str>,
+    home: &str,
+) -> String {
+    match capp_bridge_config {
+        Some(path) => path.to_string(),
+        None => xdg_base(xdg_config_home, home, ".config")
+            .join("cappuccino-bridge/config.json")
+            .to_string_lossy()
+            .into_owned(),
+    }
+}
+
 impl BridgeConfig {
     /// Defaults for the tailnet-only MVP.
     fn defaults() -> Self {
         BridgeConfig {
             bind: "127.0.0.1".to_string(),
             port: 7392,
-            data_dir: PathBuf::from(format!(
-                "{}/Library/Application Support/cappuccino-bridge",
-                home_dir()
-            )),
+            data_dir: default_data_dir(
+                std::env::var("XDG_STATE_HOME").ok().as_deref(),
+                &home_dir(),
+            ),
             auth: AuthConfig::default(),
             serve_auto_apply: true,
             iroh_enabled: false,
         }
     }
 
-    /// File first (CAPP_BRIDGE_CONFIG or ~/.config/cappuccino-bridge/config.json),
-    /// then environment overrides. Unknown file fields are ignored so the
-    /// config can be written forward-compatibly.
+    /// File first (CAPP_BRIDGE_CONFIG or the XDG config path), then
+    /// environment overrides. Unknown file fields are ignored so the config
+    /// can be written forward-compatibly.
     pub fn load() -> Result<Self, String> {
-        let path = std::env::var("CAPP_BRIDGE_CONFIG")
-            .unwrap_or_else(|_| format!("{}/.config/cappuccino-bridge/config.json", home_dir()));
+        let path = resolve_config_path(
+            std::env::var("CAPP_BRIDGE_CONFIG").ok().as_deref(),
+            std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
+            &home_dir(),
+        );
         Self::load_from_with_serve(
             Some(&path),
             std::env::var("CAPP_BRIDGE_HOST").ok().as_deref(),
@@ -387,5 +423,76 @@ mod iroh_config_tests {
     #[test]
     fn retired_pair_token_ttl_is_a_parse_error() {
         assert!(load(r#"{"auth": {"pair_token_ttl_secs": 120}}"#).is_err());
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn data_dir_uses_absolute_xdg_state_home() {
+        assert_eq!(
+            default_data_dir(Some("/xdg/state"), "/home/u"),
+            PathBuf::from("/xdg/state/cappuccino-bridge")
+        );
+    }
+
+    #[test]
+    fn data_dir_falls_back_to_home_local_state_when_unset() {
+        assert_eq!(
+            default_data_dir(None, "/Users/u"),
+            PathBuf::from("/Users/u/.local/state/cappuccino-bridge")
+        );
+    }
+
+    #[test]
+    fn data_dir_ignores_relative_and_empty_xdg_state_home() {
+        for value in ["relative/state", "./state", ""] {
+            assert_eq!(
+                default_data_dir(Some(value), "/Users/u"),
+                PathBuf::from("/Users/u/.local/state/cappuccino-bridge"),
+                "XDG_STATE_HOME={value:?} must be ignored"
+            );
+        }
+    }
+
+    #[test]
+    fn config_path_prefers_capp_bridge_config_over_xdg() {
+        assert_eq!(
+            resolve_config_path(Some("/etc/cap.json"), Some("/xdg/config"), "/home/u"),
+            "/etc/cap.json"
+        );
+    }
+
+    #[test]
+    fn config_path_uses_absolute_xdg_config_home() {
+        assert_eq!(
+            resolve_config_path(None, Some("/xdg/config"), "/home/u"),
+            "/xdg/config/cappuccino-bridge/config.json"
+        );
+    }
+
+    #[test]
+    fn config_path_falls_back_to_home_dot_config() {
+        assert_eq!(
+            resolve_config_path(None, None, "/Users/u"),
+            "/Users/u/.config/cappuccino-bridge/config.json"
+        );
+        assert_eq!(
+            resolve_config_path(None, Some("relative/config"), "/Users/u"),
+            "/Users/u/.config/cappuccino-bridge/config.json"
+        );
+    }
+
+    #[test]
+    fn file_data_dir_and_env_override_win_over_default() {
+        let path = std::env::temp_dir().join(format!("cap-datadir-{}", std::process::id()));
+        std::fs::write(&path, r#"{"data_dir": "/from/file"}"#).unwrap();
+        let file = path.to_str().unwrap();
+        let from_file = BridgeConfig::load_from(Some(file), None, None, None).unwrap();
+        assert_eq!(from_file.data_dir, PathBuf::from("/from/file"));
+        let from_env = BridgeConfig::load_from(Some(file), None, None, Some("/from/env")).unwrap();
+        assert_eq!(from_env.data_dir, PathBuf::from("/from/env"));
     }
 }
