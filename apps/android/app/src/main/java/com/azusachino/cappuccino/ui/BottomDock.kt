@@ -30,6 +30,9 @@ import dev.chrisbanes.haze.HazeState
 /** One dock entry: icon plus the label people read. */
 internal data class DockItem(val iconRes: Int, val label: String)
 
+/** Fully rounded capsule: 50% corners stay a stadium at any tab height. */
+private val DockPillShape = RoundedCornerShape(percent = 50)
+
 /**
  * Telegram-style floating glass dock: a detached rounded island the content scrolls beneath. The
  * selected destination is a filled pill; the rest stay quiet icons with small labels.
@@ -64,11 +67,12 @@ internal fun BottomDock(
           val tint =
             if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
             else MaterialTheme.appColors.muted
+          // Every tab clips to the same capsule, so the press ripple and the selected fill are
+          // both round from the first frame; an unclipped idle tab flashed a square ripple.
           Column(
-            Modifier.then(
-                if (isSelected)
-                  Modifier.clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer)
+            Modifier.clip(DockPillShape)
+              .then(
+                if (isSelected) Modifier.background(MaterialTheme.colorScheme.primaryContainer)
                 else Modifier
               )
               .selectable(
