@@ -750,8 +750,8 @@ pre{text-align:left;white-space:pre-wrap;word-break:break-all;font-family:ui-mon
 @property --left{syntax:'<integer>';inherits:false;initial-value:0}
 @keyframes tick{from{--left:var(--s)}to{--left:0}}
 @keyframes shrink{from{transform:scaleX(var(--f))}to{transform:scaleX(0)}}
-.tick{--left:var(--s);animation:tick linear forwards}
-.tick::after{content:counter(left);counter-reset:left var(--left)}
+.tick{--left:var(--s);animation:tick linear forwards;counter-reset:left var(--left)}
+.tick::after{content:counter(left)}
 @media (prefers-reduced-motion:reduce){.tick,.fill{animation:none}}
 "#;
 
@@ -1764,8 +1764,13 @@ mod tests {
         assert!(!first.contains("@supports"), "no feature gate");
         assert!(!first.contains("static"), "no fallback span to hide");
         assert!(first.contains("a code still works for a minute after it changes"));
-        assert!(first.contains(".tick::after{content:counter(left)"));
-        assert!(first.contains("counter-reset:left var(--left)"));
+        // counter-reset must sit on the element that animates --left (inherits
+        // is false, so the ::after child would see the initial 0).
+        assert!(first.contains(
+            ".tick{--left:var(--s);animation:tick linear forwards;counter-reset:left var(--left)}"
+        ));
+        assert!(first.contains(".tick::after{content:counter(left)}"));
+        assert!(!first.contains("::after{content:counter(left);counter-reset"));
         assert_eq!(
             pairing.audit_lines(),
             audit_before,
