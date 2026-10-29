@@ -1,5 +1,6 @@
 package com.azusachino.cappuccino.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -179,12 +181,13 @@ fun ConversationTurnRow(
     }
   val proseCount = remember(proseSlots) { proseSlots.filterNotNull().size }
   fun bubbleShape(slot: Int): RoundedCornerShape {
-    val outer = 18.dp
+    val outer = 16.dp
     val seam = 6.dp
     return when {
-      proseCount == 1 -> RoundedCornerShape(outer)
+      proseCount == 1 ->
+        RoundedCornerShape(topStart = 4.dp, topEnd = outer, bottomStart = outer, bottomEnd = outer)
       slot == 0 ->
-        RoundedCornerShape(topStart = outer, topEnd = outer, bottomEnd = seam, bottomStart = seam)
+        RoundedCornerShape(topStart = 4.dp, topEnd = outer, bottomEnd = seam, bottomStart = seam)
       slot == proseCount - 1 ->
         RoundedCornerShape(topStart = seam, topEnd = seam, bottomEnd = outer, bottomStart = outer)
       else -> RoundedCornerShape(seam)
@@ -230,16 +233,24 @@ fun ConversationTurnRow(
               val slot = proseSlots[index] ?: 0
               val colors = MaterialTheme.appColors
               Box(
-                Modifier.fillMaxWidth()
-                  .background(colors.card, bubbleShape(slot))
-                  .padding(horizontal = 12.dp, vertical = 8.dp)
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                contentAlignment = Alignment.CenterStart,
               ) {
-                MessageBody(
-                  part.text,
-                  onInspect = onInspect,
-                  modifier = textModifier,
-                  transcript = true,
-                )
+                Surface(
+                  shape = bubbleShape(slot),
+                  color = colors.card,
+                  border = BorderStroke(1.dp, colors.line.copy(alpha = 0.6f)),
+                  modifier = Modifier.fillMaxWidth().padding(end = 24.dp),
+                ) {
+                  Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    MessageBody(
+                      part.text,
+                      onInspect = onInspect,
+                      modifier = textModifier,
+                      transcript = true,
+                    )
+                  }
+                }
               }
             }
           }

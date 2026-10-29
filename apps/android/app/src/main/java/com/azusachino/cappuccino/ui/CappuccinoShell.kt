@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
@@ -510,7 +512,7 @@ fun CappuccinoScreen(
         ) {
           if (selected != null) {
             Row(
-              Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 4.dp),
+              Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
               verticalAlignment = Alignment.CenterVertically,
             ) {
               IconButton(
@@ -531,41 +533,49 @@ fun CappuccinoScreen(
                   selectedStatus ?: "unknown",
                   MaterialTheme.colorScheme.background.luminance() < 0.5f,
                 )
-              Column(
-                Modifier.weight(1f).padding(horizontal = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(1.dp),
+              Row(
+                Modifier.weight(1f)
+                  .clip(RoundedCornerShape(8.dp))
+                  .clickable(enabled = selectedProfile != null) {
+                    detailsProfileId = selectedProfile?.id
+                    showingConnection = true
+                  }
+                  .padding(horizontal = 6.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
               ) {
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                AgentAvatar(selected.agent, 32.dp)
+                Column(
+                  Modifier.weight(1f),
+                  verticalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
-                  AgentAvatar(selected.agent, 20.dp)
                   Text(
                     selected.label,
-                    style = MaterialTheme.typography.titleSmall,
+                    style =
+                      MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                   )
-                }
-                // Status keeps its color as a square beside its word, never color alone.
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                  if (state.offlineSavedAt != null) {
-                    StatusSquare(MaterialTheme.appColors.muted)
-                    Text(
-                      "Saved history · Read-only",
-                      style = MaterialTheme.typography.labelSmall,
-                      color = MaterialTheme.appColors.muted,
-                    )
-                  } else {
-                    StatusSquare(status.background)
-                    Text(
-                      status.label,
-                      style = MaterialTheme.typography.labelSmall,
-                      color = MaterialTheme.appColors.muted,
-                    )
+                  // Status keeps its color as a square beside its word, never color alone.
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                  ) {
+                    if (state.offlineSavedAt != null) {
+                      StatusSquare(MaterialTheme.appColors.muted)
+                      Text(
+                        "Saved history · Read-only",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.appColors.muted,
+                      )
+                    } else {
+                      StatusSquare(status.background)
+                      Text(
+                        status.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.appColors.muted,
+                      )
+                    }
                   }
                 }
               }
@@ -937,6 +947,7 @@ fun CappuccinoScreen(
                 val composerKey = agentSendKey(state.activeProfileId ?: "", selected)
                 if (state.offlineSavedAt == null)
                   composerState.SaveableStateProvider(composerKey) {
+                    state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                     PromptInputBar(
                       onSend = { text, confirmed -> mutate { it.submitPrompt(text, confirmed) } },
                       pending = sendState != null && sendState.outcome == null,
@@ -959,7 +970,6 @@ fun CappuccinoScreen(
                       draft = state.drafts[draftKey] ?: "",
                       onDraftChange = { text -> actions.setDraft(draftKey, text) },
                     )
-                    state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                   }
               }
             }

@@ -1,5 +1,6 @@
 package com.azusachino.cappuccino.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,6 +30,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -36,6 +38,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
@@ -72,7 +75,7 @@ import com.azusachino.cappuccino.core.toolKind
 // message is a filled row with a prompt mark, and work between words is one line that opens into
 // a timeline.
 
-/** A person's message: who and when over what they wrote, behind a `›` mark. */
+/** A person's message: right-aligned Telegram-style bubble with time at bottom-end. */
 @Composable
 internal fun UserPromptRow(
   body: @Composable () -> Unit,
@@ -81,38 +84,37 @@ internal fun UserPromptRow(
   modifier: Modifier = Modifier,
 ) {
   val colors = MaterialTheme.appColors
-  Row(
-    modifier
-      .fillMaxWidth()
-      .padding(start = 4.dp, end = 32.dp, bottom = 2.dp)
-      .background(colors.card, RoundedCornerShape(14.dp))
-      .padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 10.dp),
-    horizontalArrangement = Arrangement.spacedBy(10.dp),
+  val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+  Box(
+    modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+    contentAlignment = Alignment.CenterEnd,
   ) {
-    Text(
-      "›",
-      Modifier.clearAndSetSemantics {},
-      color = colors.accent,
-      fontWeight = FontWeight.Bold,
-      style = MaterialTheme.typography.bodyMedium,
-    )
-    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-      Text(
-        "You",
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = colors.accent,
-      )
-      body()
-      if (time != null)
-        Text(
-          time,
-          Modifier.align(Alignment.End).semantics {
-            if (timeDescription != null) contentDescription = timeDescription
-          },
-          style = MaterialTheme.typography.labelSmall,
-          color = colors.muted,
-        )
+    Surface(
+      shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
+      color = if (isDark) colors.accent.copy(alpha = 0.20f) else colors.accent.copy(alpha = 0.12f),
+      border =
+        BorderStroke(
+          1.dp,
+          if (isDark) colors.accent.copy(alpha = 0.35f) else colors.accent.copy(alpha = 0.22f),
+        ),
+      modifier = Modifier.widthIn(min = 60.dp, max = 340.dp).padding(start = 48.dp),
+    ) {
+      Column(
+        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+      ) {
+        body()
+        if (time != null) {
+          Text(
+            time,
+            Modifier.align(Alignment.End).semantics {
+              if (timeDescription != null) contentDescription = timeDescription
+            },
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+            color = colors.muted,
+          )
+        }
+      }
     }
   }
 }
@@ -141,6 +143,7 @@ internal fun ActivityGroup(
       },
       shape = RoundedCornerShape(50),
       color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+      border = BorderStroke(0.5.dp, colors.line.copy(alpha = 0.5f)),
       modifier =
         Modifier.semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
     ) {
@@ -243,7 +246,7 @@ private fun ActivityStep(part: ConversationPart, onInspect: () -> Unit) {
       Text(
         label,
         Modifier.widthIn(max = 120.dp),
-        style = MaterialTheme.typography.labelMedium,
+        style = MaterialTheme.typography.labelMedium.copy(fontFamily = JetBrainsMono),
         fontWeight = FontWeight.SemiBold,
         color = colors.text,
         maxLines = 1,
@@ -252,7 +255,7 @@ private fun ActivityStep(part: ConversationPart, onInspect: () -> Unit) {
       Text(
         subject,
         Modifier.weight(1f),
-        style = MaterialTheme.typography.labelMedium,
+        style = MaterialTheme.typography.labelMedium.copy(fontFamily = JetBrainsMono),
         color = colors.muted,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -283,24 +286,36 @@ private fun ActivityStep(part: ConversationPart, onInspect: () -> Unit) {
   }
 }
 
-/** The transcript's last line while something is happening: a colored square and what it is. */
+/** The transcript's last line while something is happening: a styled pill with square indicator. */
 @Composable
 internal fun LiveStatusLine(color: Color, detail: String? = null) {
-  Row(
-    Modifier.fillMaxWidth().padding(vertical = 4.dp).semantics(mergeDescendants = true) {},
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  Surface(
+    shape = RoundedCornerShape(16.dp),
+    color = color.copy(alpha = 0.10f),
+    border = BorderStroke(1.dp, color.copy(alpha = 0.25f)),
+    modifier = Modifier.padding(vertical = 4.dp).semantics(mergeDescendants = true) {},
   ) {
-    StatusSquare(color)
-    if (!detail.isNullOrBlank())
-      Text(
-        detail,
-        Modifier.weight(1f),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.appColors.muted,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-      )
+    Row(
+      Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      StatusSquare(color)
+      if (!detail.isNullOrBlank())
+        Text(
+          detail,
+          style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+          color = MaterialTheme.appColors.text,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      else
+        Text(
+          "Working…",
+          style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+          color = MaterialTheme.appColors.text,
+        )
+    }
   }
 }
 
@@ -354,14 +369,20 @@ private fun StepBlock(text: AnnotatedString) {
   Column(
     Modifier.fillMaxWidth()
       .heightIn(max = maxHeight)
-      .background(colors.codeBackground)
-      .border(1.dp, colors.line)
+      .background(colors.codeBackground, RoundedCornerShape(8.dp))
+      .border(1.dp, colors.line.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
+      .clip(RoundedCornerShape(8.dp))
       .verticalScroll(rememberScrollState())
-      .padding(horizontal = 10.dp, vertical = 8.dp)
+      .padding(horizontal = 12.dp, vertical = 10.dp)
   ) {
     Text(
       if (clipped) text.subSequence(0, STEP_TEXT_PREVIEW) else text,
-      style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, lineHeight = 16.sp),
+      style =
+        MaterialTheme.typography.bodySmall.copy(
+          fontFamily = JetBrainsMono,
+          fontSize = 11.sp,
+          lineHeight = 16.sp,
+        ),
     )
     if (clipped)
       Text(

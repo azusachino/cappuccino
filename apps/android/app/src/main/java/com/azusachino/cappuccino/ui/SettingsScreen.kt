@@ -3,12 +3,14 @@ package com.azusachino.cappuccino.ui
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -17,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -28,11 +31,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.azusachino.cappuccino.BuildConfig
@@ -111,7 +116,20 @@ internal fun SettingsScreen(
           ThemeMode.LIGHT -> "Light"
           ThemeMode.DARK -> "Dark"
         }
-      SettingRow("Theme", value = themeLabel) { showingThemePicker = true }
+      SettingRow(
+        "Theme",
+        value = themeLabel,
+        icon = {
+          Icon(
+            painterResource(R.drawable.ic_settings),
+            contentDescription = null,
+            tint = MaterialTheme.appColors.accent,
+            modifier = Modifier.size(20.dp),
+          )
+        },
+      ) {
+        showingThemePicker = true
+      }
     }
     SettingsCard("Notifications") { NotificationSettings() }
     SettingsCard("Connections") {
@@ -119,47 +137,115 @@ internal fun SettingsScreen(
       connections.forEachIndexed { index, connection ->
         if (index > 0) SettingsDivider()
         androidx.compose.runtime.key(connection.id) {
-          SettingRow(connection.label, value = connection.status) {
+          SettingRow(
+            connection.label,
+            value = connection.status,
+            icon = {
+              Icon(
+                painterResource(R.drawable.ic_machine),
+                contentDescription = null,
+                tint = MaterialTheme.appColors.accent,
+                modifier = Modifier.size(20.dp),
+              )
+            },
+          ) {
             onConnectionDetails(connection.id)
           }
         }
       }
     }
     SettingsCard("Help & About") {
-      SettingRow("Setup guide", value = "GitHub") {
+      SettingRow(
+        "Setup guide",
+        value = "GitHub",
+        icon = {
+          Icon(
+            painterResource(R.drawable.ic_grid),
+            contentDescription = null,
+            tint = MaterialTheme.appColors.accent,
+            modifier = Modifier.size(20.dp),
+          )
+        },
+      ) {
         helpError =
           runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
             .exceptionOrNull()
             ?.let { "Couldn't open the guide. Visit github.com/azusachino/cappuccino." }
       }
       SettingsDivider()
-      SettingRow("Herdr", value = "herdr.dev") {
+      SettingRow(
+        "Herdr",
+        value = "herdr.dev",
+        icon = {
+          Icon(
+            painterResource(R.drawable.ic_more),
+            contentDescription = null,
+            tint = MaterialTheme.appColors.accent,
+            modifier = Modifier.size(20.dp),
+          )
+        },
+      ) {
         helpError =
           runCatching { uriHandler.openUri("https://herdr.dev") }
             .exceptionOrNull()
             ?.let { "Couldn't open herdr.dev." }
       }
       SettingsDivider()
-      SettingRow("Source", value = "GitHub") {
+      SettingRow(
+        "Source",
+        value = "GitHub",
+        icon = {
+          Icon(
+            painterResource(R.drawable.ic_chat),
+            contentDescription = null,
+            tint = MaterialTheme.appColors.accent,
+            modifier = Modifier.size(20.dp),
+          )
+        },
+      ) {
         helpError =
           runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino") }
             .exceptionOrNull()
             ?.let { "Couldn't open github.com/azusachino/cappuccino." }
       }
       SettingsDivider()
-      SettingRow("License", value = "GPL-3.0", onClick = null)
+      SettingRow(
+        "License",
+        value = "GPL-3.0",
+        icon = {
+          Icon(
+            painterResource(R.drawable.ic_refresh),
+            contentDescription = null,
+            tint = MaterialTheme.appColors.muted,
+            modifier = Modifier.size(20.dp),
+          )
+        },
+        onClick = null,
+      )
       SettingsDivider()
-      SettingRow("Version", value = BuildConfig.VERSION_NAME, onClick = null)
+      SettingRow(
+        "Version",
+        value = BuildConfig.VERSION_NAME,
+        icon = {
+          Icon(
+            painterResource(R.drawable.ic_attention),
+            contentDescription = null,
+            tint = MaterialTheme.appColors.muted,
+            modifier = Modifier.size(20.dp),
+          )
+        },
+        onClick = null,
+      )
     }
     helpError?.let { SettingNote(it, warning = true) }
   }
 }
 
-/** 0.5dp hairline between rows inside a group card. */
+/** 0.5dp hairline between rows inside a group card, indented to match row text. */
 @Composable
-private fun SettingsDivider() {
+internal fun SettingsDivider(indented: Boolean = true) {
   HorizontalDivider(
-    Modifier.padding(horizontal = 16.dp),
+    Modifier.padding(start = if (indented) 58.dp else 16.dp, end = 16.dp),
     thickness = 0.5.dp,
     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
   )
@@ -210,22 +296,29 @@ internal fun SettingRow(
   value: String? = null,
   detail: String? = null,
   warning: Boolean = false,
+  icon: (@Composable () -> Unit)? = null,
   trailing: (@Composable () -> Unit)? = null,
   onClick: (() -> Unit)?,
 ) {
   val colors = MaterialTheme.appColors
-  androidx.compose.foundation.layout.Row(
+  Row(
     Modifier.fillMaxWidth()
       .heightIn(min = 48.dp)
       .then(
-        if (onClick != null)
-          Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
-        else Modifier
+        if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier
       )
       .padding(horizontal = 16.dp, vertical = 8.dp),
-    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(14.dp),
   ) {
+    if (icon != null) {
+      Box(
+        Modifier.size(28.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        icon()
+      }
+    }
     Column(Modifier.weight(1f)) {
       Text(title, style = MaterialTheme.typography.bodyMedium, color = colors.text)
       detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.muted) }
@@ -237,7 +330,7 @@ internal fun SettingRow(
         style = MaterialTheme.typography.bodySmall,
         color = if (warning) colors.warn else colors.muted,
         maxLines = 2,
-        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+        textAlign = TextAlign.End,
       )
     }
     trailing?.invoke()
