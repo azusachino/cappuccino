@@ -992,123 +992,128 @@ fun CappuccinoScreen(
                         shape = MaterialTheme.shapes.medium,
                         modifier = Modifier.fillMaxWidth(),
                       ) {
-                        ListItem(
-                          headlineContent = {
-                            Text(
-                              profile.label.takeUnless { it == profile.endpoint.base.host }
-                                ?: "Saved machine",
-                              fontWeight = FontWeight.SemiBold,
-                            )
-                          },
-                          supportingContent = {
-                            Text(
-                              listOfNotNull(
-                                  machine.connection.statusText(),
-                                  state.machineBadges[profile.id]?.label(),
-                                )
-                                .joinToString(" · "),
-                              maxLines = 1,
-                              overflow = TextOverflow.Ellipsis,
-                            )
-                          },
-                          leadingContent = {
-                            Icon(
-                              painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
-                              contentDescription = null,
-                            )
-                          },
-                          trailingContent = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                              // Retry is offered only where the row is in error; the banner it
-                              // replaced used to carry this.
-                              if (machine.connection is ConnectionState.Error) {
-                                IconButton(
-                                  onClick = { actions.refreshProfile(profile.id) },
-                                  enabled = !machine.busy,
-                                ) {
-                                  Icon(
-                                    painterResource(
-                                      com.azusachino.cappuccino.R.drawable.ic_refresh
-                                    ),
-                                    contentDescription = "Retry ${profile.label}",
-                                  )
-                                }
-                              }
-                              Box {
-                                IconButton(onClick = { machineMenuId = profile.id }) {
-                                  Icon(
-                                    painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
-                                    contentDescription = "Machine actions",
-                                  )
-                                }
-                                DropdownMenu(
-                                  expanded = machineMenuId == profile.id,
-                                  onDismissRequest = { machineMenuId = null },
-                                ) {
-                                  DropdownMenuItem(
-                                    text = { Text("Connection details") },
-                                    onClick = {
-                                      detailsProfileId = profile.id
-                                      showingConnection = true
-                                      machineMenuId = null
-                                    },
-                                  )
-                                  DropdownMenuItem(
-                                    text = { Text("Conversation history") },
-                                    onClick = {
-                                      historyMachineId = profile.machineId
-                                      showingHistory = true
-                                      machineMenuId = null
-                                    },
-                                  )
-                                  DropdownMenuItem(
-                                    text = { Text("Rename") },
-                                    onClick = {
-                                      namingProfileId = profile.id
-                                      machineNameDraft = profile.label
-                                      namingMachine = true
-                                      machineMenuId = null
-                                    },
-                                  )
-                                  if (profile.endpoint.iroh == null) {
-                                    DropdownMenuItem(
-                                      text = { Text("Pair over iroh") },
-                                      onClick = {
-                                        editingProfileId = profile.id
-                                        editingIroh = true
-                                        payload = ""
-                                        scanError = null
-                                        pendingEdit = false
-                                        machineMenuId = null
-                                      },
+                        Column {
+                          ListItem(
+                            headlineContent = {
+                              Text(
+                                profile.label.takeUnless { it == profile.endpoint.base.host }
+                                  ?: "Saved machine",
+                                fontWeight = FontWeight.SemiBold,
+                              )
+                            },
+                            leadingContent = {
+                              Icon(
+                                painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
+                                contentDescription = null,
+                              )
+                            },
+                            trailingContent = {
+                              Row(verticalAlignment = Alignment.CenterVertically) {
+                                // Retry is offered only where the row is in error; the banner it
+                                // replaced used to carry this.
+                                if (machine.connection is ConnectionState.Error) {
+                                  IconButton(
+                                    onClick = { actions.refreshProfile(profile.id) },
+                                    enabled = !machine.busy,
+                                  ) {
+                                    Icon(
+                                      painterResource(
+                                        com.azusachino.cappuccino.R.drawable.ic_refresh
+                                      ),
+                                      contentDescription = "Retry ${profile.label}",
                                     )
                                   }
-                                  if (
-                                    profile.endpoint.iroh != null && !profile.endpoint.hasTailnet
+                                }
+                                Box {
+                                  IconButton(onClick = { machineMenuId = profile.id }) {
+                                    Icon(
+                                      painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
+                                      contentDescription = "Machine actions",
+                                    )
+                                  }
+                                  DropdownMenu(
+                                    expanded = machineMenuId == profile.id,
+                                    onDismissRequest = { machineMenuId = null },
                                   ) {
                                     DropdownMenuItem(
-                                      text = { Text("Add tailnet URL") },
+                                      text = { Text("Connection details") },
                                       onClick = {
-                                        editingProfileId = profile.id
-                                        editingIroh = false
-                                        editingUrl = ""
-                                        pendingEdit = false
+                                        detailsProfileId = profile.id
+                                        showingConnection = true
+                                        machineMenuId = null
+                                      },
+                                    )
+                                    DropdownMenuItem(
+                                      text = { Text("Conversation history") },
+                                      onClick = {
+                                        historyMachineId = profile.machineId
+                                        showingHistory = true
+                                        machineMenuId = null
+                                      },
+                                    )
+                                    DropdownMenuItem(
+                                      text = { Text("Rename") },
+                                      onClick = {
+                                        namingProfileId = profile.id
+                                        machineNameDraft = profile.label
+                                        namingMachine = true
+                                        machineMenuId = null
+                                      },
+                                    )
+                                    if (profile.endpoint.iroh == null) {
+                                      DropdownMenuItem(
+                                        text = { Text("Pair over iroh") },
+                                        onClick = {
+                                          editingProfileId = profile.id
+                                          editingIroh = true
+                                          payload = ""
+                                          scanError = null
+                                          pendingEdit = false
+                                          machineMenuId = null
+                                        },
+                                      )
+                                    }
+                                    if (
+                                      profile.endpoint.iroh != null && !profile.endpoint.hasTailnet
+                                    ) {
+                                      DropdownMenuItem(
+                                        text = { Text("Add tailnet URL") },
+                                        onClick = {
+                                          editingProfileId = profile.id
+                                          editingIroh = false
+                                          editingUrl = ""
+                                          pendingEdit = false
+                                          machineMenuId = null
+                                        },
+                                      )
+                                    }
+                                    DropdownMenuItem(
+                                      text = { Text("Remove") },
+                                      onClick = {
+                                        actions.removeProfile(profile.id)
                                         machineMenuId = null
                                       },
                                     )
                                   }
-                                  DropdownMenuItem(
-                                    text = { Text("Remove") },
-                                    onClick = {
-                                      actions.removeProfile(profile.id)
-                                      machineMenuId = null
-                                    },
-                                  )
                                 }
                               }
-                            }
-                          },
-                        )
+                            },
+                          )
+                          // Full row width under the name: the trailing actions leave the status a
+                          // narrow column on ~280dp phones, so it wraps to a second line only then.
+                          Text(
+                            listOfNotNull(
+                                machine.connection.statusText(),
+                                state.machineBadges[profile.id]?.label(),
+                              )
+                              .joinToString(" · "),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
+                          )
+                        }
                       }
                       Column(Modifier.padding(start = 24.dp)) {
                         if (

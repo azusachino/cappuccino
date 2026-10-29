@@ -1,9 +1,12 @@
 package com.azusachino.cappuccino
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
@@ -17,6 +20,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.azusachino.cappuccino.core.AgentRow
 import com.azusachino.cappuccino.core.Endpoint
@@ -30,6 +35,7 @@ import com.azusachino.cappuccino.ui.CappuccinoScreen
 import com.azusachino.cappuccino.ui.CappuccinoTheme
 import java.util.UUID
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -38,6 +44,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class MachinesJourneyTest {
   @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+  private val STATUS_TEXT = "Connection error · iroh relayed"
 
   @Test
   fun failedAddStaysOpenAndSuccessfulVerificationDismissesDialog() {
@@ -141,6 +148,43 @@ class MachinesJourneyTest {
 
   @Test
   fun retryShowsOnlyOnErroredRowAndStatusStaysOneLine() {
+    setFailingAndHealthy()
+    openMachines()
+    compose.waitForIdle()
+    compose.onNodeWithContentDescription("Retry Failing bridge").assertIsDisplayed()
+    compose.onNodeWithContentDescription("Retry Healthy bridge").assertDoesNotExist()
+    compose.onNodeWithContentDescription("Disconnect Failing bridge").assertDoesNotExist()
+    // At default width the longest real status (error plus transport badge) fits on one line.
+    assertEquals(1, statusLayout().lineCount)
+  }
+
+  @Test
+  fun narrowMachineStatusWrapsWithoutTruncating() {
+    setFailingAndHealthy(width = 280.dp)
+    openMachines()
+    compose.waitForIdle()
+    // At ~280dp the status wraps under the name; the full text is laid out, not ellipsized.
+    val layout = statusLayout()
+    assertTrue("lines=${layout.lineCount}", layout.lineCount in 1..2)
+    assertFalse(layout.hasVisualOverflow)
+    assertEquals(STATUS_TEXT.length, layout.getLineEnd(layout.lineCount - 1))
+  }
+
+  private fun statusLayout(): TextLayoutResult {
+    // Match the status Text itself: the merged tree resolves to the clickable row, whose layout is
+    // not the status.
+    val lines = mutableListOf<TextLayoutResult>()
+    compose
+      .onNodeWithText(STATUS_TEXT, useUnmergedTree = true)
+      .assertIsDisplayed()
+      .fetchSemanticsNode()
+      .config[SemanticsActions.GetTextLayoutResult]
+      .action
+      ?.invoke(lines)
+    return lines.single()
+  }
+
+  private fun setFailingAndHealthy(width: Dp? = null) {
     val failing =
       MachineProfile(
         "failing",
@@ -169,23 +213,13 @@ class MachinesJourneyTest {
     compose.activity.setContent {
       CappuccinoTheme {
         val s by state
-        CappuccinoScreen(s, actions) { _, _ -> }
+        if (width == null) {
+          CappuccinoScreen(s, actions) { _, _ -> }
+        } else {
+          Box(Modifier.requiredWidth(width)) { CappuccinoScreen(s, actions) { _, _ -> } }
+        }
       }
     }
-    openMachines()
-    compose.waitForIdle()
-    compose.onNodeWithContentDescription("Retry Failing bridge").assertIsDisplayed()
-    compose.onNodeWithContentDescription("Retry Healthy bridge").assertDoesNotExist()
-    compose.onNodeWithContentDescription("Disconnect Failing bridge").assertDoesNotExist()
-    // The longest real status (error plus transport badge) lays out as one line. Match the status
-    // Text itself: the merged tree resolves to the clickable row, whose layout is not the status.
-    val status =
-      compose
-        .onNodeWithText("Connection error · iroh relayed", useUnmergedTree = true)
-        .assertIsDisplayed()
-    val lines = mutableListOf<TextLayoutResult>()
-    status.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action?.invoke(lines)
-    assertEquals(1, lines.single().lineCount)
   }
 
   @Test
