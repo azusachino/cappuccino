@@ -27,6 +27,20 @@ class MachineTransports private constructor(context: Context) {
   private val iroh: IrohTransport = IrohEndpointTransport.shared(context)
   private val irohClients = IrohHttpClients(iroh, BridgeClient.defaultClient())
   private val routers = ConcurrentHashMap<Endpoint, MachineRouter<BridgeTransport>>()
+  private val poller =
+    BackgroundPoller(
+      iroh,
+      clock,
+      { addr, open -> BridgeClient(Endpoint.iroh(addr), irohClients.pollClientFor(addr, open)) },
+      { BridgeClient(it) },
+    )
+
+  /**
+   * Runs one background poll of [endpoint] over its own iroh connection (see [BackgroundPoller]).
+   * Foreground calls keep using [bridgeFor].
+   */
+  suspend fun <T> backgroundPoll(endpoint: Endpoint, block: suspend (BridgeTransport) -> T): T =
+    poller.poll(endpoint, block)
 
   init {
     // One callback for the process. `watchNetworkChange` is not used (see IrohEndpointTransport).
@@ -84,7 +98,7 @@ class MachineTransports private constructor(context: Context) {
 }
 
 /** A [BridgeTransport] whose every call runs through [router]. */
-private class RoutedBridge(private val router: MachineRouter<BridgeTransport>) : BridgeTransport {
+internal class RoutedBridge(private val router: MachineRouter<BridgeTransport>) : BridgeTransport {
   // The client that last succeeded supplies the machine name and details the UI reads after verify.
   private val lastUsed = AtomicReference<BridgeTransport?>(null)
 

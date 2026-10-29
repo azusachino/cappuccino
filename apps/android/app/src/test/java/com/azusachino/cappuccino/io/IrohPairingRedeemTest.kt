@@ -36,6 +36,9 @@ class IrohPairingRedeemTest {
     }
 
     override fun pathKind(addr: IrohEndpointAddr): IrohPathKind = IrohPathKind.NONE
+
+    override fun dialPoll(addr: IrohEndpointAddr, alpn: String): IrohPollConnection =
+      error("not used by this test")
   }
 
   @Test

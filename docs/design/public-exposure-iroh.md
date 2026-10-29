@@ -151,10 +151,13 @@ the app falls back to tailnet.
 - OkHttp gets a custom `SocketFactory` whose sockets are iroh bi-streams; no
   localhost listener exists.
 - Background notifications follow the foreground order (iroh first) inside
-  the existing `AgentNotificationService` foreground service. Each poll opens
-  an iroh connection, makes its request and closes the connection, trading a
-  handshake per poll for no long-lived background connection. This lands as
-  its own slice after the foreground one, checked on a real device.
+  the existing `AgentNotificationService` foreground service. Each poll dials
+  its own iroh connection outside the shared connection cache, makes its
+  verify and agents requests over it, and closes it, trading a handshake per
+  poll for no long-lived background connection. Dual machines fall back to
+  tailnet in the same poll. The poll never reuses a foreground connection, so
+  it never closes one. The shared endpoint may stay bound; its 60 s idle close
+  waits for zero open streams, and the next poll re-binds it if it closed.
 - The iroh transport sits behind a Kotlin interface, so the fallback state
   machine, pairing parsing and key-storage tests run on the JVM without
   loading the native library.
@@ -218,7 +221,8 @@ the app falls back to tailnet.
    endpoint rebuild after repeated dial failures, iroh-first auto fallback,
    transport badge with hold-down, relayed-path poll back-off.
 4. App background: per-poll iroh connection in `AgentNotificationService`,
-   checked on a device.
+   checked on a device. Code done on `feat/iroh-background-notify` (JVM
+   tests); device check pending.
 5. Hardening batch: rate limits, body caps, audit log, `pair --revoke` (also
    closing live connections).
 6. Relay spike: measure direct-path rates on n0 versus `iroh-relay` on

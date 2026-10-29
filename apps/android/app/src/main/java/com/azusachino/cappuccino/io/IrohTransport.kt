@@ -62,4 +62,20 @@ interface IrohTransport {
 
   /** Reports the current path kind to [addr], without dialling. */
   fun pathKind(addr: IrohEndpointAddr): IrohPathKind
+
+  /**
+   * A connection for one background poll. It is not in the shared cache, so the foreground never
+   * reuses it and closing it never touches the foreground's connections. Nothing dials until the
+   * first [IrohPollConnection.openStream].
+   */
+  fun dialPoll(addr: IrohEndpointAddr, alpn: String = IROH_BRIDGE_ALPN): IrohPollConnection
+}
+
+/** The connection one background poll owns. The poll closes it when it ends. */
+interface IrohPollConnection {
+  /** Opens a bi-stream on this connection, dialling it first if it is not open. */
+  suspend fun openStream(): IrohBiStream
+
+  /** Closes the connection and every stream on it. Safe to call more than once. */
+  suspend fun close()
 }

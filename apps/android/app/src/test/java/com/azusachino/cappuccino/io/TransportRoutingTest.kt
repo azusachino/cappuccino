@@ -35,6 +35,9 @@ private class RecordingIroh(var path: IrohPathKind = IrohPathKind.NONE) : IrohTr
     error("routing tests never open a stream")
 
   override fun pathKind(addr: IrohEndpointAddr): IrohPathKind = path
+
+  override fun dialPoll(addr: IrohEndpointAddr, alpn: String): IrohPollConnection =
+    error("routing tests never poll")
 }
 
 /** Clients are plain strings; the block under test returns the client it was given. */
