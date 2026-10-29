@@ -1,6 +1,8 @@
 package com.azusachino.cappuccino.io
 
 import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketException
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -62,9 +64,9 @@ class MachineRouterTest {
       if (client == "iroh" && !irohUp) throw IOException("dial failed")
       client
     }
-    assertEquals("tailnet", router.request(block))
+    assertEquals("tailnet", router.request(block = block))
     irohUp = true
-    assertEquals("tailnet", router.request(block))
+    assertEquals("tailnet", router.request(block = block))
     // Sticky: the second request does not probe iroh while tailnet keeps working.
     assertEquals(listOf("iroh", "tailnet", "tailnet"), calls)
   }
@@ -79,9 +81,9 @@ class MachineRouterTest {
       if (client == "iroh" && !irohUp) throw IOException("dial failed")
       client
     }
-    assertEquals("iroh", router.request(block))
+    assertEquals("iroh", router.request(block = block))
     irohUp = false
-    assertEquals("tailnet", router.request(block))
+    assertEquals("tailnet", router.request(block = block))
     assertEquals(listOf("iroh", "iroh", "tailnet"), calls)
   }
 
@@ -95,10 +97,10 @@ class MachineRouterTest {
       if (client == "iroh" && !irohUp) throw IOException("dial failed")
       client
     }
-    assertEquals("tailnet", router.request(block))
+    assertEquals("tailnet", router.request(block = block))
     irohUp = true
     router.onNetworkChanged()
-    assertEquals("iroh", router.request(block))
+    assertEquals("iroh", router.request(block = block))
     assertEquals(listOf("iroh", "tailnet", "iroh"), calls)
   }
 
@@ -133,9 +135,9 @@ class MachineRouterTest {
     val iroh = RecordingIroh()
     val router = MachineRouter(mapOf(TransportKind.IROH to "iroh"), FakeClock(), iroh)
     val fail: suspend (String) -> String = { throw IOException("bridge unreachable") }
-    repeat(2) { runCatching { router.request(fail) } }
+    repeat(2) { runCatching { router.request(block = fail) } }
     assertEquals(0, iroh.stops)
-    runCatching { router.request(fail) }
+    runCatching { router.request(block = fail) }
     assertEquals(1, iroh.stops)
     assertEquals(0, iroh.drops)
   }
@@ -149,11 +151,11 @@ class MachineRouterTest {
       if (!up) throw IOException("dial failed")
       client
     }
-    repeat(2) { runCatching { router.request(block) } }
+    repeat(2) { runCatching { router.request(block = block) } }
     up = true
-    router.request(block)
+    router.request(block = block)
     up = false
-    repeat(2) { runCatching { router.request(block) } }
+    repeat(2) { runCatching { router.request(block = block) } }
     assertEquals(0, iroh.stops)
   }
 
@@ -167,7 +169,7 @@ class MachineRouterTest {
       throw BridgeHttpStatusException(500, "bridge error")
     }
     repeat(3) {
-      val error = runCatching { router.request(answered) }.exceptionOrNull()
+      val error = runCatching { router.request(block = answered) }.exceptionOrNull()
       assertEquals(BridgeHttpStatusException::class.java, error?.javaClass)
     }
     // Three answered errors never reach tailnet and never trigger an endpoint rebuild.
@@ -186,10 +188,10 @@ class MachineRouterTest {
       if (client == "tailnet") throw BridgeHttpRejectionException("conflict")
       client
     }
-    val error = runCatching { router.request(block) }.exceptionOrNull()
+    val error = runCatching { router.request(block = block) }.exceptionOrNull()
     assertEquals(BridgeHttpRejectionException::class.java, error?.javaClass)
     irohUp = true
-    runCatching { router.request(block) }
+    runCatching { router.request(block = block) }
     // Tailnet answered, so it stays sticky and iroh is not probed again.
     assertEquals(listOf("iroh", "tailnet", "tailnet"), calls)
   }
@@ -202,11 +204,58 @@ class MachineRouterTest {
       if (client == "iroh") throw SocketTimeoutException("iroh connect timed out")
       client
     }
-    assertEquals("tailnet", fallthrough.request(block))
+    assertEquals("tailnet", fallthrough.request(block = block))
 
     val irohOnly = MachineRouter(mapOf(TransportKind.IROH to "iroh"), FakeClock(), iroh)
-    repeat(IROH_REBUILD_AFTER_FAILURES) { runCatching { irohOnly.request(block) } }
+    repeat(IROH_REBUILD_AFTER_FAILURES) { runCatching { irohOnly.request(block = block) } }
     assertEquals(1, iroh.stops)
+  }
+
+  @Test
+  fun mutationWithMidRequestIoErrorOverIrohIsNeverResentAndSurfacesOutcomeUnknown() = runTest {
+    val iroh = RecordingIroh()
+    val calls = mutableListOf<String>()
+    val router = MachineRouter(both, FakeClock(), iroh)
+    val block: suspend (String) -> String = { client ->
+      calls += client
+      // The request left the phone before the reset, so the bridge may have applied it.
+      if (client == "iroh") throw SocketException("Connection reset")
+      client
+    }
+    repeat(IROH_REBUILD_AFTER_FAILURES) {
+      val error = runCatching { router.request(mutation = true, block = block) }.exceptionOrNull()
+      assertEquals(BridgeMutationOutcomeUnknownException::class.java, error?.javaClass)
+    }
+    // No tailnet call: the change is never sent twice. Each failure still counted toward rebuild.
+    assertEquals(listOf("iroh", "iroh", "iroh"), calls)
+    assertEquals(1, iroh.stops)
+  }
+
+  @Test
+  fun mutationWithConnectFailureOverIrohFallsThroughToTailnetOnce() = runTest {
+    val calls = mutableListOf<String>()
+    val router = MachineRouter(both, FakeClock(), RecordingIroh())
+    val block: suspend (String) -> String = { client ->
+      calls += client
+      // The dial failed before any byte was sent, so the change cannot have reached the bridge.
+      if (client == "iroh") throw ConnectException("iroh connect failed")
+      client
+    }
+    assertEquals("tailnet", router.request(mutation = true, block = block))
+    assertEquals(listOf("iroh", "tailnet"), calls)
+  }
+
+  @Test
+  fun readWithMidRequestIoErrorOverIrohFallsThroughToTailnet() = runTest {
+    val calls = mutableListOf<String>()
+    val router = MachineRouter(both, FakeClock(), RecordingIroh())
+    val block: suspend (String) -> String = { client ->
+      calls += client
+      if (client == "iroh") throw SocketException("Connection reset")
+      client
+    }
+    assertEquals("tailnet", router.request(block = block))
+    assertEquals(listOf("iroh", "tailnet"), calls)
   }
 
   @Test

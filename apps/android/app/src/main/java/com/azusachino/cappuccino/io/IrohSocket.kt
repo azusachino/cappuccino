@@ -26,6 +26,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 
+/** The iroh dial did not finish in time. Thrown before any request byte is sent. */
+class IrohConnectTimeoutException : SocketTimeoutException("iroh connect timed out")
+
 private const val READ_CHUNK = 16 * 1024
 private const val CLOSE_TIMEOUT_MS = 2_000L
 
@@ -68,7 +71,7 @@ class IrohSocket(
           if (timeout > 0) withTimeout(timeout.toLong()) { open(addr) } else open(addr)
         }
       } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
-        throw SocketTimeoutException("iroh connect timed out")
+        throw IrohConnectTimeoutException()
       } catch (error: Exception) {
         throw ConnectException(error.message ?: "iroh connect failed")
       }

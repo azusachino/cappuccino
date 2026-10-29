@@ -88,10 +88,10 @@ private class RoutedBridge(private val router: MachineRouter<BridgeTransport>) :
   // The client that last succeeded supplies the machine name and details the UI reads after verify.
   private val lastUsed = AtomicReference<BridgeTransport?>(null)
 
-  private suspend fun <T> call(block: suspend (BridgeTransport) -> T): T =
-    router.request { client ->
-      block(client).also { lastUsed.set(client) }
-    }
+  private suspend fun <T> call(
+    mutation: Boolean = false,
+    block: suspend (BridgeTransport) -> T,
+  ): T = router.request(mutation) { client -> block(client).also { lastUsed.set(client) } }
 
   override val bridgeDetails: BridgeDetails?
     get() = lastUsed.get()?.bridgeDetails
@@ -122,19 +122,17 @@ private class RoutedBridge(private val router: MachineRouter<BridgeTransport>) :
     text: String,
     confirmed: Boolean,
     binding: MutationBinding,
-  ) = call { it.submitPrompt(sessionId, text, confirmed, binding) }
+  ) = call(mutation = true) { it.submitPrompt(sessionId, text, confirmed, binding) }
 
   override suspend fun controlAgent(sessionId: String, action: String, binding: MutationBinding) =
-    call {
-      it.controlAgent(sessionId, action, binding)
-    }
+    call(mutation = true) { it.controlAgent(sessionId, action, binding) }
 
   override suspend fun answerQuestions(
     sessionId: String,
     promptId: String,
     answers: List<QuestionAnswer>,
     binding: MutationBinding,
-  ) = call { it.answerQuestions(sessionId, promptId, answers, binding) }
+  ) = call(mutation = true) { it.answerQuestions(sessionId, promptId, answers, binding) }
 
   override suspend fun answerPrompt(
     sessionId: String,
@@ -143,5 +141,8 @@ private class RoutedBridge(private val router: MachineRouter<BridgeTransport>) :
     optionId: String?,
     action: String?,
     binding: MutationBinding,
-  ) = call { it.answerPrompt(sessionId, promptId, optionIndex, optionId, action, binding) }
+  ) =
+    call(mutation = true) {
+      it.answerPrompt(sessionId, promptId, optionIndex, optionId, action, binding)
+    }
 }

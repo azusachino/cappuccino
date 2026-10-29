@@ -2,6 +2,8 @@ package com.azusachino.cappuccino.io
 
 import com.azusachino.cappuccino.core.BridgeAnswered
 import java.io.IOException
+import java.net.ConnectException
+import java.net.UnknownHostException
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
@@ -44,6 +46,13 @@ const val POLL_RELAYED_MS = 30_000L
  */
 fun pollIntervalMs(badge: TransportBadge): Long =
   if (badge == TransportBadge.IROH_RELAYED) POLL_RELAYED_MS else POLL_DIRECT_MS
+
+/**
+ * True when the failure happened before the request could reach the bridge: the dial or connect did
+ * not complete. An iroh open failure surfaces as [ConnectException] (IrohSocket.connect wraps it).
+ */
+fun isBeforeSend(error: Exception): Boolean =
+  error is ConnectException || error is UnknownHostException || error is IrohConnectTimeoutException
 
 /**
  * True when no answer came back from the transport: a dial or connect failure, a socket error or
@@ -123,8 +132,15 @@ class MachineRouter<C : Any>(
   private var redialRequested = false
   private val holdDown = BadgeHoldDown(clock)
 
-  /** Runs [block] on the first transport that works, probing the rest in order on failure. */
-  suspend fun <T> request(block: suspend (C) -> T): T {
+  /**
+   * Runs [block] on the first transport that works, probing the rest in order on failure.
+   *
+   * A [mutation] is never re-sent after the request may have reached the bridge: only a failure
+   * before any byte left (see [isBeforeSend]) moves on. Any other transport failure is still
+   * counted against that transport, then surfaces as [BridgeMutationOutcomeUnknownException] so the
+   * owner re-checks instead of the app resending the change.
+   */
+  suspend fun <T> request(mutation: Boolean = false, block: suspend (C) -> T): T {
     val tried = mutableSetOf<TransportKind>()
     var lastError: Exception? = null
     while (true) {
@@ -144,6 +160,11 @@ class MachineRouter<C : Any>(
           throw error
         }
         recordFailure(kind)
+        if (mutation && !isBeforeSend(error)) {
+          throw BridgeMutationOutcomeUnknownException(
+            "The connection failed after the change was sent; it may have been applied. Check before retrying."
+          )
+        }
         lastError = error
       }
     }
