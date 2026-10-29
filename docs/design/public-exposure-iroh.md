@@ -3,6 +3,9 @@
 Status: **proposed** (needs owner approval before implementation). Additive to
 the existing tailscale-serve path; nothing in this doc removes it.
 
+Operations guide (setup, pairing, relay, troubleshooting):
+[iroh setup](../iroh-setup.md).
+
 **Amends accepted decisions.** This supersedes "No public ingress or cloud
 relay" in the [intent](../intent.md) (owner, 2026-10-06) and the tailnet-only
 boundary in the [architecture](../architecture.md): iroh adds an
