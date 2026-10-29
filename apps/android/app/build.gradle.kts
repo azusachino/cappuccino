@@ -28,6 +28,9 @@ android {
     compose = true
     buildConfig = true
   }
+  // iroh-android depends on the desktop iroh JAR, which bundles JNA-style desktop natives
+  // (win32-*/, darwin-*/, linux-*/) as resources; Android loads only lib/<abi>/.
+  packaging { resources { excludes += listOf("win32-*/**", "darwin-*/**", "linux-*/**") } }
   lint {
     warningsAsErrors = true
     abortOnError = true
