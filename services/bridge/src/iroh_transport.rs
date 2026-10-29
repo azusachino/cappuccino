@@ -474,6 +474,11 @@ impl IrohHub {
 /// Pairing payload, format v1 (compact JSON, same text in the QR and the
 /// copy-paste line):
 /// `{"v":1,"endpoint_id":"<id>","relay":"<url>|null","addrs":["ip:port"...],"token":"<64 hex>"}`
+///
+/// With a relay the direct addresses are omitted: the phone dials through the
+/// relay and iroh finds the direct path after connecting, and the addresses
+/// would make the QR several times larger. Without a relay (endpoint not yet
+/// online) they are the only way in, so they stay.
 pub fn encode_payload(addr: &EndpointAddr, token: &str) -> String {
     let mut relay = None;
     let mut addrs = Vec::new();
@@ -483,6 +488,9 @@ pub fn encode_payload(addr: &EndpointAddr, token: &str) -> String {
             TransportAddr::Ip(socket) => addrs.push(socket.to_string()),
             _ => {}
         }
+    }
+    if relay.is_some() {
+        addrs.clear();
     }
     serde_json::json!({
         "v": 1,
@@ -825,14 +833,76 @@ pub fn qr_svg(payload: &str) -> Result<String, String> {
         .build())
 }
 
-/// Terminal rendering for `pair`.
+/// Quiet zone in modules on each side. One module keeps a 60-column terminal
+/// enough for the typical pairing payload; the ISO default of four is not
+/// needed for a high-contrast terminal rendering.
+const TERMINAL_QUIET_ZONE: usize = 1;
+
+/// Terminal rendering for `pair`. Error correction L: the code is shown once
+/// on a screen, not printed, so the smallest symbol wins over damage tolerance.
 pub fn qr_terminal(payload: &str) -> Result<String, String> {
-    let code =
-        qrcode::QrCode::new(payload.as_bytes()).map_err(|error| format!("qr encode: {error}"))?;
-    Ok(code
-        .render::<qrcode::render::unicode::Dense1x2>()
-        .quiet_zone(true)
-        .build())
+    let code = qrcode::QrCode::with_error_correction_level(payload.as_bytes(), qrcode::EcLevel::L)
+        .map_err(|error| format!("qr encode: {error}"))?;
+    Ok(render_half_blocks(&code, TERMINAL_QUIET_ZONE))
+}
+
+/// Half-block rendering: each text line covers two module rows.
+fn render_half_blocks(code: &qrcode::QrCode, quiet: usize) -> String {
+    let width = code.width();
+    let colors = code.to_colors();
+    let total = width + 2 * quiet;
+    let dark = |col: usize, row: usize| -> bool {
+        let (Some(x), Some(y)) = (col.checked_sub(quiet), row.checked_sub(quiet)) else {
+            return false;
+        };
+        x < width && y < width && colors[y * width + x] == qrcode::Color::Dark
+    };
+    let mut out = String::new();
+    for row in (0..total).step_by(2) {
+        for col in 0..total {
+            out.push(match (dark(col, row), dark(col, row + 1)) {
+                (true, true) => '█',
+                (true, false) => '▀',
+                (false, true) => '▄',
+                (false, false) => ' ',
+            });
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// Widest rendered line, in terminal columns (every glyph here is one column).
+pub fn display_width(text: &str) -> usize {
+    text.lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0)
+}
+
+/// Terminal width: the stdout TIOCGWINSZ size, else `COLUMNS`. None when
+/// neither is known, so the caller simply prints without a hint.
+fn terminal_columns() -> Option<usize> {
+    let mut size = std::mem::MaybeUninit::<libc::winsize>::zeroed();
+    // SAFETY: TIOCGWINSZ writes one winsize into the buffer on success.
+    let ok = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, size.as_mut_ptr()) };
+    if ok == 0 {
+        let columns = unsafe { size.assume_init() }.ws_col;
+        if columns > 0 {
+            return Some(columns as usize);
+        }
+    }
+    std::env::var("COLUMNS").ok()?.trim().parse().ok()
+}
+
+/// The one-line hint printed before a QR that will not fit the terminal.
+pub fn narrow_terminal_hint(qr_width: usize, columns: Option<usize>) -> Option<&'static str> {
+    match columns {
+        Some(columns) if qr_width > columns => {
+            Some("Terminal is narrower than the QR; widen it or open /pair on a tailnet device.")
+        }
+        _ => None,
+    }
 }
 
 /// Client side of the admin protocol, used by the `pair` subcommand.
@@ -936,7 +1006,12 @@ pub fn run_pair_command(args: &[String]) -> Result<(), String> {
             let seconds = view["seconds_left"].as_u64().unwrap_or_default();
             match view["payload"].as_str() {
                 Some(payload) => {
-                    println!("{}\n", qr_terminal(payload)?);
+                    let qr = qr_terminal(payload)?;
+                    if let Some(hint) = narrow_terminal_hint(display_width(&qr), terminal_columns())
+                    {
+                        println!("{hint}\n");
+                    }
+                    println!("{qr}");
                     println!("{payload}\n");
                     println!(
                         "valid for about {seconds} s (rotates every {PAIR_WINDOW_SECS} s; \
@@ -1851,6 +1926,109 @@ mod tests {
             "burned countdown animates"
         );
         assert!(!page.contains("<script"));
+    }
+}
+
+#[cfg(test)]
+mod pairing_payload_tests {
+    use super::*;
+
+    const RELAY: &str = "https://aps1-1.relay.n0.iroh-canary.iroh.link./";
+
+    /// Deterministic endpoint: a fixed seed keeps the QR assertions stable.
+    fn addr_for_seed(seed: u8, with_relay: bool) -> EndpointAddr {
+        let mut addr = EndpointAddr::new(SecretKey::from_bytes(&[seed; 32]).public());
+        if with_relay {
+            addr = addr.with_relay_url(RELAY.parse().unwrap());
+        }
+        // Six direct addresses, including long IPv6 ones, as a real bridge
+        // reports. The relay-present payload must drop all of them.
+        for socket in [
+            "192.168.1.23:52345",
+            "10.0.0.4:52345",
+            "[2408:8207:1234:5678:abcd:ef01:2345:6789]:52345",
+            "[2408:8207:1234:5678:abcd:ef01:2345:6790]:52345",
+            "[fd7a:115c:a1e0::1234:5678]:52345",
+            "[fd7a:115c:a1e0::9abc:def0]:52345",
+        ] {
+            addr = addr.with_ip_addr(socket.parse().unwrap());
+        }
+        addr
+    }
+
+    fn payload_json(addr: &EndpointAddr) -> serde_json::Value {
+        serde_json::from_str(&encode_payload(addr, &"c".repeat(64))).unwrap()
+    }
+
+    #[test]
+    fn payload_omits_direct_addresses_when_a_relay_is_present() {
+        let json = payload_json(&addr_for_seed(7, true));
+        assert_eq!(json["v"], 1);
+        assert_eq!(json["relay"], RELAY);
+        assert_eq!(json["addrs"], serde_json::json!([]));
+        assert_eq!(json["token"], "c".repeat(64));
+        assert_eq!(json["endpoint_id"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn payload_keeps_direct_addresses_when_no_relay_is_known() {
+        let json = payload_json(&addr_for_seed(7, false));
+        assert!(json["relay"].is_null());
+        assert_eq!(json["addrs"].as_array().unwrap().len(), 6);
+    }
+
+    #[test]
+    fn terminal_qr_for_realistic_payloads_fits_sixty_columns() {
+        // The crate picks the smallest version per payload; digit runs in a
+        // hex id can save bits, so widths vary by key. Sweep several keys.
+        for seed in 0..64 {
+            let payload = encode_payload(&addr_for_seed(seed, true), &"c".repeat(64));
+            let qr = qr_terminal(&payload).unwrap();
+            let code =
+                qrcode::QrCode::with_error_correction_level(payload.as_bytes(), qrcode::EcLevel::L)
+                    .unwrap();
+            let total = code.width() + 2 * TERMINAL_QUIET_ZONE;
+            assert_eq!(display_width(&qr), total, "seed {seed}");
+            assert!(total <= 60, "seed {seed}: QR is {total} columns wide");
+            assert_eq!(qr.lines().count(), total.div_ceil(2), "seed {seed}");
+        }
+    }
+
+    #[test]
+    fn narrow_terminal_hint_only_when_the_qr_does_not_fit() {
+        assert!(narrow_terminal_hint(59, Some(80)).is_none());
+        assert!(narrow_terminal_hint(59, Some(59)).is_none());
+        assert!(narrow_terminal_hint(59, Some(58)).is_some());
+        assert!(narrow_terminal_hint(59, None).is_none());
+    }
+
+    #[test]
+    fn terminal_qr_carries_the_level_l_modules_of_the_payload() {
+        let payload = encode_payload(&addr_for_seed(7, true), &"c".repeat(64));
+        let code =
+            qrcode::QrCode::with_error_correction_level(payload.as_bytes(), qrcode::EcLevel::L)
+                .unwrap();
+        let width = code.width();
+        // Parse the half-block text back into a module grid and compare.
+        let qr = render_half_blocks(&code, TERMINAL_QUIET_ZONE);
+        let lines: Vec<Vec<char>> = qr.lines().map(|line| line.chars().collect()).collect();
+        let colors = code.to_colors();
+        for y in 0..width {
+            for x in 0..width {
+                let padded_y = y + TERMINAL_QUIET_ZONE;
+                let glyph = lines[padded_y / 2][x + TERMINAL_QUIET_ZONE];
+                let dark = if padded_y % 2 == 0 {
+                    matches!(glyph, '█' | '▀')
+                } else {
+                    matches!(glyph, '█' | '▄')
+                };
+                assert_eq!(
+                    dark,
+                    colors[y * width + x] == qrcode::Color::Dark,
+                    "module ({x}, {y})"
+                );
+            }
+        }
     }
 }
 
