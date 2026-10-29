@@ -109,6 +109,9 @@ class MachinesJourneyTest {
     openMachines()
     compose.waitForIdle()
     compose.onNodeWithText("Retry").assertIsDisplayed().performClick()
+    // The injected click is delivered after waitForIdle can return; wait for its effect, then
+    // require exactly one call so a double-fire still fails.
+    compose.waitUntil { actions.retryCalls > 0 }
     compose.waitForIdle()
     assertEquals(1, actions.retryCalls)
     compose.onNodeWithContentDescription("Machine actions").performClick()

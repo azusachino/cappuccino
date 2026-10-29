@@ -8,6 +8,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -17,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
@@ -206,7 +208,9 @@ class ConversationPreviewScreenshotTest {
     list.performScrollToNode(hasText(summary))
     compose.onNodeWithText(summary).performClick()
     list.performScrollToNode(hasText("Thought"))
-    compose.onNodeWithText("Thought").performClick()
+    // Invoke the row's OnClick directly: an injected touch hit-tests the row's position, which can
+    // still be animating while the group opens.
+    compose.onNodeWithText("Thought").performSemanticsAction(SemanticsActions.OnClick)
     // The opened step composes after the click lands; wait for it rather than scrolling blind.
     compose.waitUntil(timeoutMillis = 5_000) {
       compose
