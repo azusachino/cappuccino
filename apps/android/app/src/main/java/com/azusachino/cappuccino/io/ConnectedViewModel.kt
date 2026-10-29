@@ -813,6 +813,10 @@ internal constructor(
     if (!actionsLive()) return
     val profile = activeProfile() ?: return
     val agent = mutableState.value.selectedAgent ?: return
+    // /new waits for an idle agent; the composer refuses it too, this keeps it off the bridge.
+    val agentStatus = mutableState.value.stream.agentStatus ?: agent.status
+    if (busyAgentCommandReason(text, agentStatus.equals("working", ignoreCase = true)) != null)
+      return
     val binding = MutationBinding.from(agent) ?: return
     val requestEpoch = epoch
     val key = agentSendKey(profile.id, agent)

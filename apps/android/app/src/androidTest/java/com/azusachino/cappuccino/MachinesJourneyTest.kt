@@ -6,13 +6,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.azusachino.cappuccino.core.AgentRow
 import com.azusachino.cappuccino.core.Endpoint
@@ -69,7 +71,7 @@ class MachinesJourneyTest {
     }
     openMachines()
     compose.onNodeWithContentDescription("Add machine").performClick()
-    compose.onNodeWithText("Label (optional)").performTextInput("Synthetic bridge")
+    compose.onNodeWithText("Label").performTextInput("Synthetic bridge")
     compose.onNodeWithText("Bridge address").performTextInput("https://bridge.example")
     compose.onNodeWithText("Connect").performClick()
     assertTrue(
@@ -108,7 +110,26 @@ class MachinesJourneyTest {
     }
     openMachines()
     compose.waitForIdle()
-    compose.onNodeWithText("Retry").assertIsDisplayed().performClick()
+    // Retry must be hit-testable below the floating header, not under it.
+    val header = compose.onNodeWithText("Machines").fetchSemanticsNode().boundsInRoot
+    val retry =
+      compose.onNodeWithText("Retry").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    assertTrue(
+      "Retry sits under the header: retry=$retry header=$header",
+      retry.top > header.bottom,
+    )
+    // The first machine row follows the banner closely: one inset, not the header inset twice.
+    val banner = compose.onNodeWithTag("machinesConnectionBanner").fetchSemanticsNode().boundsInRoot
+    val row = compose.onNodeWithText("Synthetic bridge").fetchSemanticsNode().boundsInRoot
+    val gap = row.top - banner.bottom
+    assertTrue(
+      "Machine row sits ${gap}px below the banner: row=$row banner=$banner",
+      gap >= 0f && gap <= with(compose.density) { 32.dp.toPx() },
+    )
+    compose.onNodeWithText("Retry").performClick()
+    // The injected click is delivered after waitForIdle can return; wait for its effect, then
+    // require exactly one call so a double-fire still fails.
+    compose.waitUntil(timeoutMillis = 5_000) { actions.retryCalls > 0 }
     compose.waitForIdle()
     assertEquals(1, actions.retryCalls)
     compose.onNodeWithContentDescription("Machine actions").performClick()
@@ -240,7 +261,7 @@ class MachinesJourneyTest {
   }
 
   private fun openMachines() {
-    compose.onNode(hasText("Machines") and hasClickAction()).performClick()
+    compose.onNode(hasContentDescription("Machines") and hasClickAction()).performClick()
   }
 
   private class TestActions(private val state: MutableState<ConnectedUiState>) : ConnectedActions {

@@ -45,4 +45,13 @@ class SlashCommandTest {
     assertNull(disallowedSlashCommandReason("/clear"))
     assertNull(disallowedSlashCommandReason("/exit"))
   }
+
+  @Test
+  fun newSessionWaitsUntilTheAgentIsIdle() {
+    assertTrue(busyAgentCommandReason("/new", agentWorking = true)?.contains("Stop") == true)
+    assertTrue(busyAgentCommandReason(" /NEW  ", agentWorking = true) != null)
+    assertNull(busyAgentCommandReason("/new", agentWorking = false))
+    assertNull(busyAgentCommandReason("/compact", agentWorking = true))
+    assertNull(busyAgentCommandReason("please run /new", agentWorking = true))
+  }
 }

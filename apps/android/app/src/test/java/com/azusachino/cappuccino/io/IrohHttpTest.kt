@@ -59,12 +59,13 @@ class IrohHttpTest {
               override fun onMessage(webSocket: WebSocket, text: String) {
                 message = text
                 received.countDown()
-                webSocket.close(1000, "done")
               }
             },
           )
       assertEquals(true, received.await(5, TimeUnit.SECONDS))
       assertEquals("from-bridge", message)
+      // Cancel without a close handshake: under load MockWebServer.close() can stall waiting on the
+      // server side of one, and the test fails at this `use` (#63).
       socket.cancel()
     }
   }
