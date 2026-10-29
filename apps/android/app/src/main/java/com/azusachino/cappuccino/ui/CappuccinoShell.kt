@@ -690,7 +690,7 @@ fun CappuccinoScreen(
               when (val connection = state.connection) {
                 ConnectionState.Connecting ->
                   Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    Modifier.fillMaxWidth().padding(top = chromeTop).padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                   ) {
                     Text(
@@ -701,8 +701,12 @@ fun CappuccinoScreen(
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                   }
                 ConnectionState.Recovering ->
-                  WarningBanner("Reconnecting; earlier output may be missing")
-                is ConnectionState.Error -> ErrorBanner(connection.message)
+                  WarningBanner(
+                    "Reconnecting; earlier output may be missing",
+                    Modifier.padding(top = chromeTop),
+                  )
+                is ConnectionState.Error ->
+                  ErrorBanner(connection.message, Modifier.padding(top = chromeTop))
                 else -> Unit
               }
 
@@ -943,7 +947,8 @@ fun CappuccinoScreen(
               val connection = state.connection
               if (connection is ConnectionState.Error) {
                 Surface(
-                  modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                  modifier =
+                    Modifier.fillMaxWidth().padding(top = chromeTop).padding(horizontal = 16.dp),
                   shape = RoundedCornerShape(8.dp),
                   color = MaterialTheme.colorScheme.errorContainer,
                 ) {
