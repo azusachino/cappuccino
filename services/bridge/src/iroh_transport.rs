@@ -24,10 +24,10 @@ use sha2::Sha256;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
-    fs::{self, OpenOptions, Permissions},
+    fs::{self, DirBuilder, OpenOptions, Permissions},
     future::Future,
     io::Write as _,
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -497,8 +497,7 @@ pub fn encode_payload(addr: &EndpointAddr, token: &str) -> String {
 /// Starts the endpoint with the persisted key, the allowlist hook and the
 /// accept loop, and serves the admin socket. Errors stop the bridge.
 pub async fn start(data_dir: &Path, target: Target) -> Result<Arc<IrohHub>, String> {
-    fs::create_dir_all(data_dir)
-        .map_err(|error| format!("create data dir {}: {error}", data_dir.display()))?;
+    ensure_private_dir(data_dir)?;
     let key = load_or_create_secret_key(&data_dir.join(SECRET_KEY_FILE))?;
     let pairing = Arc::new(Pairing::load(data_dir)?);
     let endpoint = configure(Endpoint::builder(presets::N0), key, &pairing)
@@ -643,7 +642,32 @@ async fn serve_pair(conn: Connection, pairing: Arc<Pairing>) {
     conn.close(VarInt::from_u32(CLOSE_PAIR_DONE), b"");
 }
 
+/// Creates the data dir owner-only (0700) when it is missing. An existing dir
+/// keeps its mode; only missing ancestors take the default umask.
+fn ensure_private_dir(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("create data dir {}: {error}", path.display()))?;
+    }
+    match DirBuilder::new().mode(0o700).create(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(format!("create data dir {}: {error}", path.display())),
+    }
+}
+
+/// Unix socket path limit: macOS `sun_path` is 104 bytes including the NUL.
+/// Checked explicitly so a long configured data dir fails with a clear error.
+const UNIX_SOCKET_PATH_MAX: usize = 104;
+
 fn bind_admin_socket(path: &Path) -> Result<UnixListener, String> {
+    if path.as_os_str().len() >= UNIX_SOCKET_PATH_MAX {
+        return Err(format!(
+            "admin socket path {} is {} bytes; Unix socket paths must be under {UNIX_SOCKET_PATH_MAX} bytes, so set data_dir to a shorter path",
+            path.display(),
+            path.as_os_str().len()
+        ));
+    }
     // A live socket belongs to another bridge; only a dead one is replaced.
     if path.exists() {
         if std::os::unix::net::UnixStream::connect(path).is_ok() {
@@ -1827,5 +1851,54 @@ mod tests {
             "burned countdown animates"
         );
         assert!(!page.contains("<script"));
+    }
+}
+
+#[cfg(test)]
+mod data_dir_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn fresh_parent(name: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "cap-datadir-{name}-{}-{unique}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn missing_data_dir_is_created_owner_only() {
+        let parent = fresh_parent("missing");
+        let data_dir = parent.join("cappuccino-bridge");
+        ensure_private_dir(&data_dir).unwrap();
+        let mode = fs::metadata(&data_dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[test]
+    fn existing_data_dir_keeps_its_mode() {
+        let parent = fresh_parent("existing");
+        let data_dir = parent.join("cappuccino-bridge");
+        fs::create_dir(&data_dir).unwrap();
+        fs::set_permissions(&data_dir, Permissions::from_mode(0o755)).unwrap();
+        ensure_private_dir(&data_dir).unwrap();
+        let mode = fs::metadata(&data_dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o755);
+    }
+
+    #[test]
+    fn overlong_admin_socket_path_fails_with_a_clear_error() {
+        let long = format!("/{}/iroh-admin.sock", "d".repeat(100));
+        let error = bind_admin_socket(Path::new(&long)).unwrap_err();
+        assert!(
+            error.contains("Unix socket paths must be under 104 bytes"),
+            "{error}"
+        );
+        assert!(error.contains("set data_dir to a shorter path"), "{error}");
     }
 }
