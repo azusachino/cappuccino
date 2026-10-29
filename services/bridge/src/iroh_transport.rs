@@ -17,7 +17,7 @@ use iroh::{
         presets, AfterHandshakeOutcome, Connection, EndpointHooks, QuicTransportConfig, RecvStream,
         SendStream, VarInt, WeakConnectionHandle,
     },
-    Endpoint, EndpointAddr, EndpointId, SecretKey, TransportAddr,
+    Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, TransportAddr,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -502,13 +502,30 @@ pub fn encode_payload(addr: &EndpointAddr, token: &str) -> String {
     .to_string()
 }
 
+/// Relay mode override for `iroh.relay_url`. Unset (`None`) keeps the N0
+/// preset's relays. Set, the endpoint uses exactly that relay (iroh
+/// `RelayMode::Custom`, which replaces the preset's relay transport). The
+/// preset's address lookup is kept. The relay URL then appears in the
+/// EndpointAddr and the pairing payload.
+pub fn relay_mode_override(relay_url: Option<&RelayUrl>) -> Option<RelayMode> {
+    relay_url.map(|url| RelayMode::custom([url.clone()]))
+}
+
 /// Starts the endpoint with the persisted key, the allowlist hook and the
 /// accept loop, and serves the admin socket. Errors stop the bridge.
-pub async fn start(data_dir: &Path, target: Target) -> Result<Arc<IrohHub>, String> {
+pub async fn start(
+    data_dir: &Path,
+    target: Target,
+    relay_url: Option<RelayUrl>,
+) -> Result<Arc<IrohHub>, String> {
     ensure_private_dir(data_dir)?;
     let key = load_or_create_secret_key(&data_dir.join(SECRET_KEY_FILE))?;
     let pairing = Arc::new(Pairing::load(data_dir)?);
-    let endpoint = configure(Endpoint::builder(presets::N0), key, &pairing)
+    let mut builder = Endpoint::builder(presets::N0);
+    if let Some(mode) = relay_mode_override(relay_url.as_ref()) {
+        builder = builder.relay_mode(mode);
+    }
+    let endpoint = configure(builder, key, &pairing)
         .bind()
         .await
         .map_err(|error| format!("bind iroh endpoint: {error}"))?;
@@ -1968,6 +1985,43 @@ mod pairing_payload_tests {
         assert_eq!(json["addrs"], serde_json::json!([]));
         assert_eq!(json["token"], "c".repeat(64));
         assert_eq!(json["endpoint_id"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn payload_carries_the_configured_relay_url() {
+        let url: RelayUrl = "https://relay.example.test".parse().unwrap();
+        let addr =
+            EndpointAddr::new(SecretKey::from_bytes(&[9; 32]).public()).with_relay_url(url.clone());
+        let json = payload_json(&addr);
+        assert_eq!(json["relay"], url.to_string());
+        assert_eq!(json["addrs"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn relay_override_is_only_the_configured_relay() {
+        let url: RelayUrl = "https://relay.example.test".parse().unwrap();
+        let mode = relay_mode_override(Some(&url)).expect("override for a set relay");
+        assert_eq!(mode.relay_map().urls::<Vec<RelayUrl>>(), vec![url.clone()]);
+        assert!(
+            relay_mode_override(None).is_none(),
+            "unset keeps the N0 preset"
+        );
+    }
+
+    #[tokio::test]
+    async fn endpoint_binds_with_the_configured_relay_mode() {
+        // Binding needs no relay reachable: the home-relay connect runs in the
+        // background. This exercises the builder call `start` makes.
+        let url: RelayUrl = "https://relay.example.test".parse().unwrap();
+        let mode = relay_mode_override(Some(&url)).unwrap();
+        let endpoint = Endpoint::builder(presets::Minimal)
+            .relay_mode(mode)
+            .bind_addr("127.0.0.1:0")
+            .unwrap()
+            .bind()
+            .await
+            .expect("bind with custom relay");
+        endpoint.close().await;
     }
 
     #[test]

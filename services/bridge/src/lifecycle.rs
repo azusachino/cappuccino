@@ -739,6 +739,7 @@ mod tests {
                 auth: crate::config::AuthConfig::default(),
                 serve_auto_apply: false,
                 iroh_enabled: false,
+                iroh_relay_url: None,
             },
             Duration::from_millis(100),
         );
