@@ -84,6 +84,7 @@ import com.azusachino.cappuccino.io.ConnectionState
 import com.azusachino.cappuccino.io.agentDraftKey
 import com.azusachino.cappuccino.io.agentSendKey
 import com.azusachino.cappuccino.io.canMutate
+import com.azusachino.cappuccino.io.label
 import com.azusachino.cappuccino.io.machineConnection
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
@@ -1014,7 +1015,15 @@ fun CappuccinoScreen(
                               fontWeight = FontWeight.SemiBold,
                             )
                           },
-                          supportingContent = { Text(machine.connection.statusText()) },
+                          supportingContent = {
+                            Text(
+                              listOfNotNull(
+                                  machine.connection.statusText(),
+                                  state.machineBadges[profile.id]?.label(),
+                                )
+                                .joinToString(" · ")
+                            )
+                          },
                           leadingContent = {
                             Icon(
                               painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),

@@ -41,6 +41,8 @@ class TcpTunnelTransport(private val port: Int) : IrohTransport {
 
   override suspend fun stop() = Unit
 
+  override suspend fun dropConnections() = Unit
+
   override suspend fun openStream(addr: IrohEndpointAddr, alpn: String): IrohBiStream =
     withContext(Dispatchers.IO) { TcpBackedStream(java.net.Socket("127.0.0.1", port)) }
 

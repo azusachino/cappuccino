@@ -70,6 +70,7 @@ data class ConnectedUiState(
   val profiles: List<MachineProfile> = emptyList(),
   val bridgeDetails: Map<String, BridgeDetails> = emptyMap(),
   val machines: Map<String, MachineConnection> = emptyMap(),
+  val machineBadges: Map<String, TransportBadge> = emptyMap(),
   val addError: String? = null,
   val addedProfileIds: Set<String> = emptySet(),
   val activeProfileId: String? = null,
@@ -109,6 +110,12 @@ interface ConnectedActions {
 
   /** Pairs over iroh with a payload from the QR scan or paste, then adds the machine. */
   fun addIrohMachine(label: String, payload: String) = Unit
+
+  /** Adds an iroh pairing to an existing machine; its tailnet URL, if any, is kept. */
+  fun addIrohPairing(profileId: String, payload: String) = Unit
+
+  /** Adds a tailnet URL to an existing machine; its iroh pairing, if any, is kept. */
+  fun addTailnetUrl(profileId: String, url: String) = Unit
 
   fun renameProfile(id: String, label: String)
 
@@ -165,6 +172,8 @@ internal constructor(
   private val offlineDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
   private val onMonitorPause: ((String, Boolean) -> Unit)? = null,
   private val irohPairing: (suspend (IrohPairing) -> Unit)? = null,
+  private val transportBadge: (Endpoint) -> TransportBadge = { TransportBadge.NONE },
+  private val clock: () -> Long = { System.currentTimeMillis() },
 ) : ViewModel(), ConnectedActions {
   private val mutableState =
     MutableStateFlow(
@@ -176,6 +185,7 @@ internal constructor(
   val state: StateFlow<ConnectedUiState> = mutableState.asStateFlow()
   private val machineJobs = mutableMapOf<String, Job>()
   private val machineEpochs = mutableMapOf<String, Long>()
+  private val lastRefreshAt = mutableMapOf<String, Long>()
   private val disconnectedMachines = mutableSetOf<String>()
   private var addJob: Job? = null
   private var addEpoch = 0L
@@ -359,6 +369,47 @@ internal constructor(
       Endpoint.iroh(pairing.endpoint)
     }
 
+  override fun addIrohPairing(profileId: String, payload: String) =
+    updateEndpoint(profileId) { endpoint ->
+      val pairing = parseIrohPairing(payload)
+      val redeem = irohPairing ?: throw IllegalStateException("iroh is unavailable")
+      redeem(pairing)
+      endpoint.withIroh(pairing.endpoint)
+    }
+
+  override fun addTailnetUrl(profileId: String, url: String) =
+    updateEndpoint(profileId) { endpoint ->
+      endpoint.withTailnet(Endpoint.parse(url, allowLocalHttp = BuildConfig.DEBUG))
+    }
+
+  /**
+   * Replaces a saved machine's endpoint once the new route verifies as the same machine. The change
+   * runs before anything is saved, so a failed pairing leaves the stored profile untouched.
+   */
+  private fun updateEndpoint(profileId: String, change: suspend (Endpoint) -> Endpoint) {
+    val profile = mutableState.value.profiles.firstOrNull { it.id == profileId } ?: return
+    addEpoch++
+    val token = addEpoch
+    addJob?.cancel()
+    mutableState.value = mutableState.value.copy(busy = true, addError = null)
+    addJob = viewModelScope.launch {
+      try {
+        val endpoint = change(profile.endpoint)
+        bridgeFor(endpoint).verify(profile.machineId)
+        if (token != addEpoch) return@launch
+        store.save(profile.copy(endpoint = endpoint))
+        mutableState.value =
+          mutableState.value.copy(profiles = store.read(), addError = null, busy = false)
+        refreshProfile(profile.id)
+      } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        if (token == addEpoch)
+          mutableState.value =
+            mutableState.value.copy(addError = error.message ?: "Connection failed", busy = false)
+      }
+    }
+  }
+
   private fun startAdd(label: String, endpointFor: suspend () -> Endpoint) {
     addEpoch++
     val token = addEpoch
@@ -472,10 +523,23 @@ internal constructor(
   }
 
   override fun refreshAll() {
+    val now = clock()
     mutableState.value.profiles
       .filter { it.id !in disconnectedMachines }
       .forEach { profile ->
-        if (machineJobs[profile.id]?.isActive != true) refreshProfile(profile.id, background = true)
+        if (machineJobs[profile.id]?.isActive == true) return@forEach
+        val badge = transportBadge(profile.endpoint)
+        if (mutableState.value.machineBadges[profile.id] != badge) {
+          mutableState.value =
+            mutableState.value.copy(
+              machineBadges = mutableState.value.machineBadges + (profile.id to badge)
+            )
+        }
+        // A relayed machine polls at the slower cadence; every other machine refreshes each tick.
+        val due =
+          badge != TransportBadge.IROH_RELAYED ||
+            now - (lastRefreshAt[profile.id] ?: 0L) >= pollIntervalMs(badge)
+        if (due) refreshProfile(profile.id, background = true)
       }
   }
 
@@ -484,6 +548,7 @@ internal constructor(
   private fun refreshProfile(id: String, background: Boolean) {
     val profile = mutableState.value.profiles.firstOrNull { it.id == id } ?: return
     onMonitorPause?.invoke(id, false)
+    lastRefreshAt[id] = clock()
     disconnectedMachines.remove(id)
     machineJobs.remove(id)?.cancel()
     val token = (machineEpochs[id] ?: 0L) + 1

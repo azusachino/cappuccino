@@ -28,6 +28,8 @@ class IrohPairingRedeemTest {
 
     override suspend fun stop() = Unit
 
+    override suspend fun dropConnections() = Unit
+
     override suspend fun openStream(addr: IrohEndpointAddr, alpn: String): IrohBiStream {
       dialledAlpn = alpn
       return stream
