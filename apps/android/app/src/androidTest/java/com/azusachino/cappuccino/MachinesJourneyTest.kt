@@ -6,7 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -69,7 +69,7 @@ class MachinesJourneyTest {
     }
     openMachines()
     compose.onNodeWithContentDescription("Add machine").performClick()
-    compose.onNodeWithText("Label (optional)").performTextInput("Synthetic bridge")
+    compose.onNodeWithText("Label").performTextInput("Synthetic bridge")
     compose.onNodeWithText("Bridge address").performTextInput("https://bridge.example")
     compose.onNodeWithText("Connect").performClick()
     assertTrue(
@@ -240,7 +240,7 @@ class MachinesJourneyTest {
   }
 
   private fun openMachines() {
-    compose.onNode(hasText("Machines") and hasClickAction()).performClick()
+    compose.onNode(hasContentDescription("Machines") and hasClickAction()).performClick()
   }
 
   private class TestActions(private val state: MutableState<ConnectedUiState>) : ConnectedActions {

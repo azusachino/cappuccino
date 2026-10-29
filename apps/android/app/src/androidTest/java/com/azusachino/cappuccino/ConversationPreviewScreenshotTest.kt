@@ -207,6 +207,13 @@ class ConversationPreviewScreenshotTest {
     compose.onNodeWithText(summary).performClick()
     list.performScrollToNode(hasText("Thought"))
     compose.onNodeWithText("Thought").performClick()
+    // The opened step composes after the click lands; wait for it rather than scrolling blind.
+    compose.waitUntil(timeoutMillis = 5_000) {
+      compose
+        .onAllNodesWithText("Hidden thought details", substring = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
     list.performScrollToNode(hasText("Hidden thought details", substring = true))
     compose.onNodeWithText("Hidden thought details", substring = true).assertIsDisplayed()
     val results = { compose.onAllNodesWithText("63 passed · 0 failed").fetchSemanticsNodes().size }

@@ -4,7 +4,7 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -73,7 +73,7 @@ class SystemBarThemeSyncTest {
   }
 
   private fun selectTheme(label: String) {
-    compose.onNode(hasText("Settings") and hasClickAction()).performClick()
+    compose.onNode(hasContentDescription("Settings") and hasClickAction()).performClick()
     compose.waitForIdle()
     compose.onNodeWithText("Theme").performClick()
     compose.waitForIdle()

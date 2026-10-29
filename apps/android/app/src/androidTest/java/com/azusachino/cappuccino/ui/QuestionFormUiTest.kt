@@ -1,6 +1,7 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
@@ -83,10 +84,16 @@ class QuestionFormUiTest {
 
     compose.runOnUiThread { pending.value = true }
     compose.waitForIdle()
-    compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
-    compose.onNodeWithText("Continue").assertIsNotEnabled()
+    // While pending, Send is replaced by a labelled, non-clickable "Sending" indicator.
+    compose.onNodeWithContentDescription("Send").assertDoesNotExist()
+    compose.onNodeWithContentDescription("Sending").assertIsDisplayed()
+    // The command list offers no one-tap Continue while a send is pending.
+    compose.onNodeWithContentDescription("Commands").performClick()
+    compose.onNodeWithText("Continue").assertDoesNotExist()
     compose.runOnUiThread { pending.value = false }
     compose.waitForIdle()
+    compose.onNodeWithText("Continue").performClick()
+    assertEquals(listOf("hello" to false, "continue" to false), submissions)
 
     compose.onNodeWithContentDescription("Clear draft").performClick()
     compose.onNodeWithTag("promptInput").performTextInput("/compact")

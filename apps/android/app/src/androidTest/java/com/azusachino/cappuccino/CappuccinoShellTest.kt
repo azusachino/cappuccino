@@ -2,6 +2,7 @@ package com.azusachino.cappuccino
 
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
+import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -76,10 +78,10 @@ class CappuccinoShellTest {
     compose.waitForIdle()
     compose.onNodeWithText("No machines configured").assertIsDisplayed()
 
-    compose.onNode(hasText("Settings") and hasClickAction()).performClick()
+    compose.onNode(hasContentDescription("Settings") and hasClickAction()).performClick()
     compose.onNodeWithText("Theme").assertIsDisplayed()
     capture("Settings")
-    compose.onNode(hasText("Machines") and hasClickAction()).performClick()
+    compose.onNode(hasContentDescription("Machines") and hasClickAction()).performClick()
     compose.onNodeWithText("No machines configured").assertIsDisplayed()
   }
 
@@ -156,10 +158,21 @@ class CappuccinoShellTest {
     assertSendAndStopSitAtTheEnd()
     compose.onNodeWithText("38% · 76K / 200K").assertIsDisplayed()
     compose.onNodeWithText("cache 90%").assertIsDisplayed()
-    compose.onNodeWithContentDescription("Stop").performClick()
+    // While working, /new is refused before it reaches the bridge: the command is disabled with a
+    // hint, and a typed /new gets a refusal instead of a send.
     compose.onNodeWithContentDescription("Commands").performClick()
-    compose.onNodeWithText("New session").assertIsNotEnabled()
-    compose.onNodeWithText("New session").performClick()
+    compose.onNodeWithText("/new").assertIsNotEnabled()
+    compose.onNodeWithText("Stop the agent first").assertIsDisplayed()
+    InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+    compose.waitForIdle()
+    compose.onNodeWithTag("promptInput").performTextInput("/new")
+    compose.onNodeWithContentDescription("Send").performClick()
+    compose.onNodeWithText("Command Not Supported").assertIsDisplayed()
+    compose.onNodeWithText("OK").performClick()
+    compose.onNodeWithContentDescription("Clear draft").performClick()
+    assertTrue(actions.prompts.isEmpty())
+
+    compose.onNodeWithContentDescription("Stop").performClick()
     assertEquals(listOf("interrupt"), actions.controls)
 
     compose.activity.runOnUiThread {
@@ -171,11 +184,14 @@ class CappuccinoShellTest {
     }
     compose.waitForIdle()
     compose.onNodeWithContentDescription("Stop").assertDoesNotExist()
-    // The menu stayed open; the same item is now enabled.
-    compose.onNodeWithText("New session").performClick()
-    compose.onNodeWithText("Start a new session?").assertIsDisplayed()
-    compose.onNode(hasText("New session") and hasClickAction()).performClick()
-    assertEquals(listOf("interrupt", "new_session"), actions.controls)
+    // New session is the /new agent command, confirmed before it is sent as a prompt.
+    compose.onNodeWithContentDescription("Commands").performClick()
+    compose.onNode(hasText("/new") and hasClickAction()).performClick()
+    compose.onNodeWithContentDescription("Send").performClick()
+    compose.onNodeWithText("Run /new?").assertIsDisplayed()
+    compose.onNodeWithText("Run /new").performClick()
+    assertEquals(listOf("/new "), actions.prompts)
+    assertEquals(listOf("interrupt"), actions.controls)
   }
 
   @Test
@@ -739,10 +755,12 @@ class CappuccinoShellTest {
       current.value = current.value.copy(selectedAgent = agent.copy(nativeSessionRef = "native-B"))
     }
     compose.onNodeWithContentDescription("Send").performClick()
+    // New session is the /new agent command; the stale binding must refuse it.
     compose.onNodeWithContentDescription("Commands").performClick()
-    compose.onNodeWithText("New session").performClick()
-    compose.onNodeWithText("Start a new session?").assertIsDisplayed()
-    compose.onNode(hasText("New session") and hasClickAction()).performClick()
+    compose.onNodeWithText("/new").performClick()
+    compose.onNodeWithContentDescription("Send").performClick()
+    compose.onNodeWithText("Run /new?").assertIsDisplayed()
+    compose.onNodeWithText("Run /new").performClick()
     assertTrue(actions.prompts.isEmpty())
     assertTrue(actions.controls.isEmpty())
     assertEquals("Old draft", current.value.drafts[agentDraftKey(agent)])
