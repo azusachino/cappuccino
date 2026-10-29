@@ -14,14 +14,14 @@ use axum::{
 };
 use iroh::{
     endpoint::{
-        presets, AfterHandshakeOutcome, Connection, EndpointHooks, RecvStream, SendStream, VarInt,
-        WeakConnectionHandle,
+        presets, AfterHandshakeOutcome, Connection, EndpointHooks, QuicTransportConfig, RecvStream,
+        SendStream, VarInt, WeakConnectionHandle,
     },
     Endpoint, EndpointAddr, EndpointId, SecretKey, TransportAddr,
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
     fs::{self, OpenOptions, Permissions},
     future::Future,
@@ -42,7 +42,28 @@ pub const ALPN_PAIR: &[u8] = b"cappuccino-pair/1";
 
 const CLOSE_NOT_PAIRED: u32 = 1;
 const CLOSE_REVOKED: u32 = 2;
+const CLOSE_LIMIT: u32 = 3;
+const CLOSE_PAIR_BUSY: u32 = 4;
 const CLOSE_PAIR_DONE: u32 = 0;
+
+/// Limits. Named constants rather than config: they bound resource use for a
+/// single-owner bridge and are not per-machine tuning knobs. Design:
+/// docs/design/public-exposure-iroh.md ("Limits").
+/// Concurrent bi-streams per tunnel connection, enforced by QUIC flow control:
+/// the phone's extra opens wait for a stream to finish.
+pub const MAX_TUNNEL_STREAMS: u32 = 32;
+/// Live tunnel connections per paired EndpointId; the excess is closed.
+pub const MAX_TUNNEL_CONNECTIONS_PER_ID: usize = 4;
+/// Live tunnel connections across all paired EndpointIds.
+pub const MAX_TUNNEL_CONNECTIONS: usize = 16;
+/// Unpaired `cappuccino-pair/1` connections served at once; the excess is closed.
+pub const MAX_PAIR_CONNECTIONS: usize = 4;
+/// Pairing attempts allowed per remote EndpointId in any PAIR_ATTEMPT_WINDOW.
+pub const PAIR_ATTEMPTS_PER_WINDOW: usize = 5;
+pub const PAIR_ATTEMPT_WINDOW: Duration = Duration::from_secs(60);
+/// Connections still in the QUIC/TLS handshake; the accept loop waits when full,
+/// so a flood of half-open handshakes cannot pin unbounded tasks.
+pub const MAX_PENDING_HANDSHAKES: usize = 32;
 /// A token is 64 hex characters; anything longer is refused before comparison.
 const PAIR_REQUEST_MAX: usize = 128;
 const PAIR_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -69,12 +90,47 @@ pub struct Pairing {
     /// Live tunnel connections by remote id, held weakly so the connection
     /// still closes on drop; revocation upgrades them and closes them.
     live: Mutex<Vec<(EndpointId, WeakConnectionHandle)>>,
+    /// Bounds concurrent unpaired `cappuccino-pair/1` exchanges.
+    pair_slots: tokio::sync::Semaphore,
+    audit: AuditSink,
 }
 
 #[derive(Default)]
 struct PairingState {
     allowed: BTreeSet<EndpointId>,
     pending: Option<PendingToken>,
+    /// Admitted pairing attempts per remote id within PAIR_ATTEMPT_WINDOW.
+    pair_attempts: BTreeMap<EndpointId, Vec<Instant>>,
+}
+
+/// Why a pairing exchange was refused. Only the variant name reaches the
+/// audit log; the presented token never does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairFailure {
+    None,
+    Expired,
+    Mismatch,
+    RateLimited,
+    Persist,
+}
+
+/// Where audit lines go: stdout, which the managed lifecycle writes to
+/// `bridge.log`. Test builds capture into memory so tests can read them back.
+enum AuditSink {
+    #[cfg(not(test))]
+    Stdout,
+    #[cfg(test)]
+    Captured(Mutex<Vec<String>>),
+}
+
+#[cfg(not(test))]
+fn default_audit_sink() -> AuditSink {
+    AuditSink::Stdout
+}
+
+#[cfg(test)]
+fn default_audit_sink() -> AuditSink {
+    AuditSink::Captured(Mutex::new(Vec::new()))
 }
 
 struct PendingToken {
@@ -135,8 +191,11 @@ impl Pairing {
             state: Mutex::new(PairingState {
                 allowed,
                 pending: None,
+                pair_attempts: BTreeMap::new(),
             }),
             live: Mutex::new(Vec::new()),
+            pair_slots: tokio::sync::Semaphore::new(MAX_PAIR_CONNECTIONS),
+            audit: default_audit_sink(),
         })
     }
 
@@ -145,36 +204,67 @@ impl Pairing {
     }
 
     /// Replaces any outstanding token with a fresh 32-byte random one.
-    pub fn issue_token(&self) -> String {
+    /// `source` names the issuing surface (`cli` or `page`) for the audit log.
+    pub fn issue_token(&self, source: &str) -> String {
         let token = hex(&rand::random::<[u8; 32]>());
         self.state.lock().unwrap().pending = Some(PendingToken {
             value: token.clone(),
             expires_at: Instant::now() + self.ttl,
         });
+        self.audit(format!(
+            "token_issued source={source} ttl_secs={}",
+            self.ttl.as_secs()
+        ));
         token
     }
 
     /// Consumes the outstanding token on a constant-time match and persists
     /// the redeeming EndpointId. A wrong guess leaves the token in place; an
-    /// expired one is discarded.
-    pub fn redeem(&self, presented: &[u8], id: EndpointId) -> Result<(), String> {
+    /// expired one is discarded. Every attempt counts against the per-id rate
+    /// limit, whether or not the token matches.
+    pub fn redeem(&self, presented: &[u8], id: EndpointId) -> Result<(), PairFailure> {
         let mut state = self.state.lock().unwrap();
+        if !admit_attempt(&mut state.pair_attempts, id, Instant::now()) {
+            drop(state);
+            self.audit(format!("limit_hit limit=pair_attempts endpoint={id}"));
+            return Err(PairFailure::RateLimited);
+        }
+        let outcome = self.check_token(&mut state, presented);
+        if let Err(failure) = outcome {
+            drop(state);
+            self.audit(format!(
+                "pair_failed endpoint={id} reason={}",
+                failure.label()
+            ));
+            return Err(failure);
+        }
+        let mut next = state.allowed.clone();
+        next.insert(id);
+        if let Err(error) = persist_allowlist(&self.allowlist_path, &next) {
+            drop(state);
+            self.audit(format!("pair_failed endpoint={id} reason=persist_failed"));
+            eprintln!("cappuccino-bridge: {error}");
+            return Err(PairFailure::Persist);
+        }
+        state.allowed = next;
+        drop(state);
+        self.audit(format!("pair_ok endpoint={id}"));
+        Ok(())
+    }
+
+    fn check_token(&self, state: &mut PairingState, presented: &[u8]) -> Result<(), PairFailure> {
         let Some(pending) = state.pending.as_ref() else {
-            return Err("no outstanding pairing token".into());
+            return Err(PairFailure::None);
         };
         if Instant::now() >= pending.expires_at {
             state.pending = None;
-            return Err("pairing token expired".into());
+            return Err(PairFailure::Expired);
         }
         let matches: bool = pending.value.as_bytes().ct_eq(presented).into();
         if !matches {
-            return Err("pairing token mismatch".into());
+            return Err(PairFailure::Mismatch);
         }
         state.pending = None;
-        let mut next = state.allowed.clone();
-        next.insert(id);
-        persist_allowlist(&self.allowlist_path, &next)?;
-        state.allowed = next;
         Ok(())
     }
 
@@ -187,31 +277,98 @@ impl Pairing {
         let mut next = state.allowed.clone();
         next.remove(id);
         state.allowed = next.clone();
-        self.close_live(id);
+        let closed = self.close_live(id);
+        self.audit(format!(
+            "revoked endpoint={id} was_paired={was_paired} closed={closed}"
+        ));
         if was_paired {
             persist_allowlist(&self.allowlist_path, &next)?;
         }
         Ok(was_paired)
     }
 
-    fn track(&self, id: EndpointId, handle: WeakConnectionHandle) {
+    /// Registers a tunnel connection for revocation. Refuses (without tracking)
+    /// when the global or per-id connection cap is already reached.
+    fn track(&self, id: EndpointId, handle: WeakConnectionHandle) -> Result<(), &'static str> {
         let mut live = self.live.lock().unwrap();
         live.retain(|(_, weak)| weak.upgrade().is_some());
+        if live.len() >= MAX_TUNNEL_CONNECTIONS {
+            return Err("tunnel_connections");
+        }
+        if live.iter().filter(|(tracked, _)| *tracked == id).count()
+            >= MAX_TUNNEL_CONNECTIONS_PER_ID
+        {
+            return Err("tunnel_connections_per_id");
+        }
         live.push((id, handle));
+        Ok(())
     }
 
-    fn close_live(&self, id: &EndpointId) {
+    /// Closes this id's live connections and returns how many were closed.
+    fn close_live(&self, id: &EndpointId) -> usize {
         let mut live = self.live.lock().unwrap();
+        let mut closed = 0;
         live.retain(|(tracked, weak)| {
             if tracked != id {
                 return weak.upgrade().is_some();
             }
             if let Some(connection) = weak.upgrade() {
                 connection.close(VarInt::from_u32(CLOSE_REVOKED), b"revoked");
+                closed += 1;
             }
             false
         });
+        closed
     }
+
+    fn audit(&self, line: String) {
+        match &self.audit {
+            #[cfg(not(test))]
+            AuditSink::Stdout => println!("cappuccino-bridge: audit {line}"),
+            #[cfg(test)]
+            AuditSink::Captured(lines) => lines.lock().unwrap().push(line),
+        }
+    }
+
+    /// Audit lines captured by this pairing (test builds only).
+    #[cfg(test)]
+    fn audit_lines(&self) -> Vec<String> {
+        match &self.audit {
+            AuditSink::Captured(lines) => lines.lock().unwrap().clone(),
+        }
+    }
+}
+
+impl PairFailure {
+    fn label(self) -> &'static str {
+        match self {
+            PairFailure::None => "none",
+            PairFailure::Expired => "expired",
+            PairFailure::Mismatch => "mismatch",
+            PairFailure::RateLimited => "rate_limited",
+            PairFailure::Persist => "persist_failed",
+        }
+    }
+}
+
+/// Records one attempt for `id` unless it already used its window budget.
+/// Attempts older than the window are dropped first, and ids with no recent
+/// attempts are removed, so the map stays small.
+fn admit_attempt(
+    attempts: &mut BTreeMap<EndpointId, Vec<Instant>>,
+    id: EndpointId,
+    now: Instant,
+) -> bool {
+    attempts.retain(|_, times| {
+        times.retain(|at| now.duration_since(*at) < PAIR_ATTEMPT_WINDOW);
+        !times.is_empty()
+    });
+    let times = attempts.entry(id).or_default();
+    if times.len() >= PAIR_ATTEMPTS_PER_WINDOW {
+        return false;
+    }
+    times.push(now);
+    true
 }
 
 /// The endpoint hook runs once per handshake, for incoming and outgoing
@@ -227,6 +384,10 @@ impl EndpointHooks for AllowlistHook {
     ) -> impl Future<Output = AfterHandshakeOutcome> + Send + 'a {
         async move {
             if conn.alpn() == ALPN_TUNNEL && !self.0.is_allowed(&conn.remote_id()) {
+                self.0.audit(format!(
+                    "tunnel_rejected endpoint={} reason=not_paired",
+                    conn.remote_id()
+                ));
                 return AfterHandshakeOutcome::Reject {
                     error_code: VarInt::from_u32(CLOSE_NOT_PAIRED),
                     reason: b"not paired".to_vec(),
@@ -250,9 +411,9 @@ impl IrohHub {
     /// token is issued after the endpoint is online so the payload carries the
     /// relay URL; if that takes too long the payload is still emitted with
     /// whatever addresses are known.
-    pub async fn pairing_payload(&self) -> String {
+    pub async fn pairing_payload(&self, source: &str) -> String {
         let _ = tokio::time::timeout(self.online_wait, self.endpoint.online()).await;
-        let token = self.pairing.issue_token();
+        let token = self.pairing.issue_token(source);
         encode_payload(&self.endpoint.addr(), &token)
     }
 }
@@ -310,20 +471,31 @@ fn configure(
     key: SecretKey,
     pairing: &Arc<Pairing>,
 ) -> iroh::endpoint::Builder {
+    let transport = QuicTransportConfig::builder()
+        .max_concurrent_bidi_streams(VarInt::from_u32(MAX_TUNNEL_STREAMS))
+        .build();
     builder
         .secret_key(key)
         .alpns(vec![ALPN_TUNNEL.to_vec(), ALPN_PAIR.to_vec()])
+        .transport_config(transport)
         .hooks(AllowlistHook(Arc::clone(pairing)))
 }
 
 fn spawn_accept_loop(endpoint: Endpoint, pairing: Arc<Pairing>, target: Target) {
+    let handshakes = Arc::new(tokio::sync::Semaphore::new(MAX_PENDING_HANDSHAKES));
     tokio::spawn(async move {
         while let Some(incoming) = endpoint.accept().await {
+            // Waits (rather than spawning) while the handshake pool is full.
+            let Ok(permit) = Arc::clone(&handshakes).acquire_owned().await else {
+                return;
+            };
             let pairing = Arc::clone(&pairing);
             let target = target.clone();
             tokio::spawn(async move {
                 // A hook rejection surfaces here as an error; nothing else runs.
-                let Ok(conn) = incoming.await else { return };
+                let conn = incoming.await;
+                drop(permit);
+                let Ok(conn) = conn else { return };
                 if conn.alpn() == ALPN_TUNNEL {
                     serve_tunnel(conn, pairing, target).await;
                 } else if conn.alpn() == ALPN_PAIR {
@@ -341,8 +513,13 @@ async fn serve_tunnel(conn: Connection, pairing: Arc<Pairing>, target: Target) {
     // Track before checking: revoke clears the allowlist before it closes
     // tracked connections, so either revoke sees this entry or this check
     // sees the cleared allowlist.
-    pairing.track(id, conn.weak_handle());
+    if let Err(limit) = pairing.track(id, conn.weak_handle()) {
+        pairing.audit(format!("limit_hit limit={limit} endpoint={id}"));
+        conn.close(VarInt::from_u32(CLOSE_LIMIT), b"limit");
+        return;
+    }
     if !pairing.is_allowed(&id) {
+        pairing.audit(format!("tunnel_rejected endpoint={id} reason=revoked"));
         conn.close(VarInt::from_u32(CLOSE_REVOKED), b"revoked");
         return;
     }
@@ -389,6 +566,15 @@ async fn pipe(mut send: SendStream, mut recv: RecvStream, target: Target) {
 /// Serves exactly one token exchange: read the token, reply `OK` or `ERR`,
 /// then wait for the dialer to close. Other streams are never accepted.
 async fn serve_pair(conn: Connection, pairing: Arc<Pairing>) {
+    // Held until this function returns, so the slot covers the whole exchange.
+    let Ok(_slot) = pairing.pair_slots.try_acquire() else {
+        pairing.audit(format!(
+            "limit_hit limit=pair_connections endpoint={}",
+            conn.remote_id()
+        ));
+        conn.close(VarInt::from_u32(CLOSE_PAIR_BUSY), b"busy");
+        return;
+    };
     let exchange = async {
         let (mut send, mut recv) = conn.accept_bi().await.ok()?;
         let presented = recv.read_to_end(PAIR_REQUEST_MAX).await.ok()?;
@@ -445,7 +631,7 @@ async fn handle_admin(stream: UnixStream, hub: Arc<IrohHub>) {
     }
     let request = line.trim_end();
     let reply = match request.split_once(' ') {
-        None if request == "ISSUE" => format!("OK {}\n", hub.pairing_payload().await),
+        None if request == "ISSUE" => format!("OK {}\n", hub.pairing_payload("cli").await),
         Some(("REVOKE", id)) => match id.parse::<EndpointId>() {
             Ok(id) => match hub.pairing.revoke(&id) {
                 Ok(true) => "OK revoked\n".to_string(),
@@ -472,7 +658,7 @@ pub fn with_routes<S: Clone + Send + Sync + 'static>(
 }
 
 async fn pair_page(Extension(hub): Extension<Arc<IrohHub>>) -> Response {
-    let payload = hub.pairing_payload().await;
+    let payload = hub.pairing_payload("page").await;
     let svg = match qr_svg(&payload) {
         Ok(svg) => svg,
         Err(error) => {
@@ -686,9 +872,13 @@ mod tests {
     /// A bridge endpoint with direct-address dialing only (no relays, no
     /// discovery), tunnelling into `port` on loopback.
     async fn spawn_bridge(port: u16, ttl: Duration) -> TestBridge {
+        spawn_bridge_with_key(port, ttl, SecretKey::generate()).await
+    }
+
+    async fn spawn_bridge_with_key(port: u16, ttl: Duration, key: SecretKey) -> TestBridge {
         let dir = scratch_dir("bridge");
         let pairing = Arc::new(Pairing::load(&dir, ttl).unwrap());
-        let endpoint = test_endpoint(SecretKey::generate(), &pairing).await;
+        let endpoint = test_endpoint(key, &pairing).await;
         let addr = EndpointAddr::new(endpoint.id()).with_ip_addr(endpoint.bound_sockets()[0]);
         spawn_accept_loop(
             endpoint,
@@ -768,7 +958,7 @@ mod tests {
         let server = test_endpoint(SecretKey::generate(), &pairing).await;
         let server_addr = EndpointAddr::new(server.id()).with_ip_addr(server.bound_sockets()[0]);
         let client = client_endpoint().await;
-        let token = pairing.issue_token();
+        let token = pairing.issue_token("test");
         pairing.redeem(token.as_bytes(), client.id()).unwrap();
 
         let (client_conn, server_conn) = tokio::time::timeout(SHORT, async {
@@ -816,7 +1006,7 @@ mod tests {
         let echo = spawn_echo().await;
         let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
         let client = client_endpoint().await;
-        let token = bridge.pairing.issue_token();
+        let token = bridge.pairing.issue_token("test");
         assert_eq!(pair(&client, &bridge.addr, &token).await, "OK\n");
         assert!(bridge.pairing.is_allowed(&client.id()));
 
@@ -835,7 +1025,7 @@ mod tests {
         let echo = spawn_echo().await;
         let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
         let client = client_endpoint().await;
-        let token = bridge.pairing.issue_token();
+        let token = bridge.pairing.issue_token("test");
         assert_eq!(pair(&client, &bridge.addr, &token).await, "OK\n");
 
         let conn = client
@@ -860,7 +1050,7 @@ mod tests {
     async fn wrong_token_is_rejected_and_does_not_pair() {
         let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
         let client = client_endpoint().await;
-        let token = bridge.pairing.issue_token();
+        let token = bridge.pairing.issue_token("test");
         let wrong_same_len = format!(
             "{}{}",
             &token[..63],
@@ -875,7 +1065,7 @@ mod tests {
     #[tokio::test]
     async fn token_is_single_use() {
         let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
-        let token = bridge.pairing.issue_token();
+        let token = bridge.pairing.issue_token("test");
         let first = client_endpoint().await;
         let second = client_endpoint().await;
         assert_eq!(pair(&first, &bridge.addr, &token).await, "OK\n");
@@ -886,7 +1076,7 @@ mod tests {
     #[tokio::test]
     async fn expired_token_is_rejected() {
         let bridge = spawn_bridge(1, Duration::ZERO).await;
-        let token = bridge.pairing.issue_token();
+        let token = bridge.pairing.issue_token("test");
         let client = client_endpoint().await;
         assert_eq!(pair(&client, &bridge.addr, &token).await, "ERR\n");
         assert!(!bridge.pairing.is_allowed(&client.id()));
@@ -895,8 +1085,8 @@ mod tests {
     #[tokio::test]
     async fn issuing_a_new_token_replaces_the_outstanding_one() {
         let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
-        let old = bridge.pairing.issue_token();
-        let new = bridge.pairing.issue_token();
+        let old = bridge.pairing.issue_token("test");
+        let new = bridge.pairing.issue_token("test");
         let client = client_endpoint().await;
         assert_eq!(pair(&client, &bridge.addr, &old).await, "ERR\n");
         assert_eq!(pair(&client, &bridge.addr, &new).await, "OK\n");
@@ -907,7 +1097,7 @@ mod tests {
         let echo = spawn_echo().await;
         let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
         let client = client_endpoint().await;
-        let token = bridge.pairing.issue_token();
+        let token = bridge.pairing.issue_token("test");
         assert_eq!(pair(&client, &bridge.addr, &token).await, "OK\n");
 
         let conn = client
@@ -938,7 +1128,7 @@ mod tests {
     #[tokio::test]
     async fn pairing_survives_restart_and_key_file_is_owner_only() {
         let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
-        let token = bridge.pairing.issue_token();
+        let token = bridge.pairing.issue_token("test");
         let client = client_endpoint().await;
         assert_eq!(pair(&client, &bridge.addr, &token).await, "OK\n");
         let reloaded = Pairing::load(&bridge.dir, Duration::from_secs(600)).unwrap();
@@ -1034,5 +1224,274 @@ mod tests {
             !html.contains("<script") && !html.contains("src="),
             "no scripts or external assets"
         );
+    }
+
+    /// Pairs `client` with `bridge` using a fresh token.
+    async fn pair_client(bridge: &TestBridge, client: &Endpoint) {
+        let token = bridge.pairing.issue_token("test");
+        assert_eq!(pair(client, &bridge.addr, &token).await, "OK\n");
+    }
+
+    /// One echo round trip on a fresh stream. Returning proves the server's
+    /// connection handler is running, which is where connections are tracked.
+    async fn ping(conn: &Connection) {
+        let (mut send, mut recv) = timeout_io(conn.open_bi()).await;
+        send.write_all(b"ping").await.unwrap();
+        send.finish().unwrap();
+        assert_eq!(timeout_io(recv.read_to_end(64)).await, b"ping");
+    }
+
+    /// A dial the bridge refuses either fails outright or is closed with `code`.
+    async fn assert_refused_with<E: std::fmt::Debug>(dial: Result<Connection, E>, code: u32) {
+        let Ok(conn) = dial else { return };
+        let closed = tokio::time::timeout(SHORT, conn.closed())
+            .await
+            .expect("refused connection closed in time");
+        assert!(
+            matches!(
+                &closed,
+                ConnectionError::ApplicationClosed(close)
+                    if close.error_code == VarInt::from_u32(code)
+            ),
+            "unexpected close: {closed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn tunnel_streams_are_capped_per_connection() {
+        let echo = spawn_echo().await;
+        let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
+        let client = client_endpoint().await;
+        pair_client(&bridge, &client).await;
+        let conn = client
+            .connect(bridge.addr.clone(), ALPN_TUNNEL)
+            .await
+            .unwrap();
+
+        // The echo stub replies only after EOF, so every stream stays open.
+        let mut held = Vec::new();
+        for _ in 0..MAX_TUNNEL_STREAMS {
+            let (mut send, recv) = timeout_io(conn.open_bi()).await;
+            send.write_all(b"held").await.unwrap();
+            held.push((send, recv));
+        }
+        // The waiting open lives in its own task: dropping a pending open_bi
+        // would leave the stream-credit queue in an unspecified state.
+        let waiting = {
+            let conn = conn.clone();
+            tokio::spawn(async move { conn.open_bi().await })
+        };
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            !waiting.is_finished(),
+            "stream {} opened beyond the cap",
+            MAX_TUNNEL_STREAMS + 1
+        );
+
+        // QUIC returns stream credit in batches: one finished stream is not
+        // enough to admit the waiting open, but a batch of them is.
+        for (mut send, mut recv) in held.drain(..MAX_TUNNEL_STREAMS as usize / 2) {
+            send.finish().unwrap();
+            assert_eq!(timeout_io(recv.read_to_end(64)).await, b"held");
+        }
+        let (mut send, mut recv) = tokio::time::timeout(Duration::from_secs(10), waiting)
+            .await
+            .expect("waiting open admitted after a batch of streams finished")
+            .expect("waiting open task")
+            .expect("open_bi");
+        send.write_all(b"after").await.unwrap();
+        send.finish().unwrap();
+        assert_eq!(timeout_io(recv.read_to_end(64)).await, b"after");
+    }
+
+    #[tokio::test]
+    async fn tunnel_connections_are_capped_per_paired_id() {
+        let echo = spawn_echo().await;
+        let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
+        let client = client_endpoint().await;
+        pair_client(&bridge, &client).await;
+
+        let mut live = Vec::new();
+        for _ in 0..MAX_TUNNEL_CONNECTIONS_PER_ID {
+            let conn = client
+                .connect(bridge.addr.clone(), ALPN_TUNNEL)
+                .await
+                .unwrap();
+            ping(&conn).await;
+            live.push(conn);
+        }
+        let excess = client.connect(bridge.addr.clone(), ALPN_TUNNEL).await;
+        assert_refused_with(excess, CLOSE_LIMIT).await;
+        // The admitted connections are unaffected by the refused one.
+        ping(&live[0]).await;
+    }
+
+    #[tokio::test]
+    async fn tunnel_connections_are_capped_overall() {
+        let echo = spawn_echo().await;
+        let bridge = spawn_bridge(echo, Duration::from_secs(600)).await;
+        let mut live = Vec::new();
+        let mut clients = Vec::new();
+        while live.len() < MAX_TUNNEL_CONNECTIONS {
+            let client = client_endpoint().await;
+            pair_client(&bridge, &client).await;
+            for _ in 0..MAX_TUNNEL_CONNECTIONS_PER_ID.min(MAX_TUNNEL_CONNECTIONS - live.len()) {
+                let conn = client
+                    .connect(bridge.addr.clone(), ALPN_TUNNEL)
+                    .await
+                    .unwrap();
+                ping(&conn).await;
+                live.push(conn);
+            }
+            clients.push(client);
+        }
+        // Another paired id is refused once the bridge-wide cap is reached.
+        let client = client_endpoint().await;
+        pair_client(&bridge, &client).await;
+        let excess = client.connect(bridge.addr.clone(), ALPN_TUNNEL).await;
+        assert_refused_with(excess, CLOSE_LIMIT).await;
+    }
+
+    #[tokio::test]
+    async fn pair_connections_are_capped_and_excess_is_refused() {
+        let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
+        // Hold each pair connection without opening its exchange stream, so the
+        // exchange waits and keeps its slot until the timeout.
+        let mut held = Vec::new();
+        for _ in 0..MAX_PAIR_CONNECTIONS {
+            let client = client_endpoint().await;
+            let conn = client
+                .connect(bridge.addr.clone(), ALPN_PAIR)
+                .await
+                .unwrap();
+            held.push((client, conn));
+        }
+        tokio::time::timeout(SHORT, async {
+            while bridge.pairing.pair_slots.available_permits() > 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("all pair slots are taken");
+
+        let excess_client = client_endpoint().await;
+        let excess = excess_client.connect(bridge.addr.clone(), ALPN_PAIR).await;
+        assert_refused_with(excess, CLOSE_PAIR_BUSY).await;
+        let expected = format!(
+            "limit_hit limit=pair_connections endpoint={}",
+            excess_client.id()
+        );
+        assert!(bridge
+            .pairing
+            .audit_lines()
+            .iter()
+            .any(|line| *line == expected));
+    }
+
+    #[tokio::test]
+    async fn pair_attempts_are_rate_limited_and_wrong_guesses_keep_the_token() {
+        let bridge = spawn_bridge(1, Duration::from_secs(600)).await;
+        let token = bridge.pairing.issue_token("test");
+        let abuser = client_endpoint().await;
+        for _ in 0..PAIR_ATTEMPTS_PER_WINDOW {
+            assert_eq!(pair(&abuser, &bridge.addr, "wrong").await, "ERR\n");
+        }
+        // Over budget for this id: even the right token is refused.
+        assert_eq!(pair(&abuser, &bridge.addr, &token).await, "ERR\n");
+        assert!(!bridge.pairing.is_allowed(&abuser.id()));
+
+        // The outstanding token survived every wrong guess and the refusal.
+        let other = client_endpoint().await;
+        assert_eq!(pair(&other, &bridge.addr, &token).await, "OK\n");
+        assert!(bridge
+            .pairing
+            .audit_lines()
+            .iter()
+            .any(|line| line.contains(&format!(
+                "limit_hit limit=pair_attempts endpoint={}",
+                abuser.id()
+            ))));
+    }
+
+    #[test]
+    fn pair_attempt_budget_resets_after_the_window() {
+        let id = EndpointId::from(SecretKey::generate().public());
+        let mut attempts = BTreeMap::new();
+        let start = Instant::now();
+        for _ in 0..PAIR_ATTEMPTS_PER_WINDOW {
+            assert!(admit_attempt(&mut attempts, id, start));
+        }
+        assert!(!admit_attempt(
+            &mut attempts,
+            id,
+            start + Duration::from_secs(1)
+        ));
+        assert!(admit_attempt(
+            &mut attempts,
+            id,
+            start + PAIR_ATTEMPT_WINDOW
+        ));
+    }
+
+    #[tokio::test]
+    async fn audit_log_records_events_and_never_contains_token_or_secret_key() {
+        let key = SecretKey::generate();
+        let key_bytes = key.to_bytes();
+        let echo = spawn_echo().await;
+        let bridge = spawn_bridge_with_key(echo, Duration::from_secs(600), key).await;
+
+        let token = bridge.pairing.issue_token("cli");
+        let mistaken = client_endpoint().await;
+        assert_eq!(
+            pair(&mistaken, &bridge.addr, "not-the-token").await,
+            "ERR\n"
+        );
+        let paired = client_endpoint().await;
+        assert_eq!(pair(&paired, &bridge.addr, &token).await, "OK\n");
+        let conn = paired
+            .connect(bridge.addr.clone(), ALPN_TUNNEL)
+            .await
+            .unwrap();
+        ping(&conn).await;
+        let stranger = client_endpoint().await;
+        assert_tunnel_refused(&stranger, &bridge.addr).await;
+        assert!(bridge.pairing.revoke(&paired.id()).unwrap());
+
+        let lines = bridge.pairing.audit_lines();
+        let expect = [
+            "token_issued source=cli".to_string(),
+            format!("pair_failed endpoint={} reason=mismatch", mistaken.id()),
+            format!("pair_ok endpoint={}", paired.id()),
+            format!(
+                "tunnel_rejected endpoint={} reason=not_paired",
+                stranger.id()
+            ),
+            format!("revoked endpoint={} was_paired=true closed=1", paired.id()),
+        ];
+        for event in &expect {
+            assert!(
+                lines.iter().any(|line| line.contains(event.as_str())),
+                "missing audit event {event}: {lines:#?}"
+            );
+        }
+
+        let secret_forms = [
+            token.clone(),
+            token.to_uppercase(),
+            hex(&key_bytes),
+            hex(&key_bytes).to_uppercase(),
+            data_encoding::BASE32_NOPAD.encode(&key_bytes),
+            data_encoding::BASE32_NOPAD
+                .encode(&key_bytes)
+                .to_lowercase(),
+        ];
+        for line in &lines {
+            for secret in &secret_forms {
+                assert!(
+                    !line.contains(secret.as_str()),
+                    "secret in audit line: {line}"
+                );
+            }
+        }
     }
 }

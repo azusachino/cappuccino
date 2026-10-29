@@ -26,6 +26,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use tower_http::limit::RequestBodyLimitLayer;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -91,15 +92,7 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
         None
     };
 
-    let mut app = Router::new().route("/api/session", get(routes::session));
-    for module in modules::all() {
-        app = app.merge((module.router)());
-    }
-    let app = iroh_transport::with_routes(app, iroh_hub);
-    let app = app
-        .layer(compression::json_layer())
-        .layer(axum::middleware::from_fn(auth_middleware))
-        .with_state(state);
+    let app = build_app(state, iroh_hub);
 
     let listener = tokio::net::TcpListener::bind((bind.as_str(), port))
         .await
@@ -135,9 +128,101 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
     }
 }
 
+/// Largest request body the bridge reads. Equal to the apps' own ceiling for
+/// any HTTP body (`MAX_HTTP_BODY_BYTES` on Android, `maxHTTPBodyBytes` on
+/// Apple), so a client never sends a body the bridge would refuse for a
+/// reason the client cannot see. Prompts are the only large request body.
+const MAX_REQUEST_BODY_BYTES: usize = 2 * 1024 * 1024;
+
+fn build_app(
+    state: Arc<routes::BridgeState>,
+    iroh_hub: Option<Arc<iroh_transport::IrohHub>>,
+) -> Router {
+    let mut app = Router::new().route("/api/session", get(routes::session));
+    for module in modules::all() {
+        app = app.merge((module.router)());
+    }
+    let app = iroh_transport::with_routes(app, iroh_hub);
+    app.layer(compression::json_layer())
+        .layer(axum::middleware::from_fn(auth_middleware))
+        .layer(axum::middleware::from_fn(log_body_limit))
+        .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BODY_BYTES))
+        .with_state(state)
+}
+
 async fn auth_middleware(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     next.run(request).await
+}
+
+/// The HTTP listener has no transport identity, so this line carries no
+/// EndpointId; it records that a body hit the cap.
+async fn log_body_limit(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let response = next.run(request).await;
+    if response.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
+        println!(
+            "cappuccino-bridge: audit limit_hit limit=request_body max_bytes={MAX_REQUEST_BODY_BYTES}"
+        );
+    }
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    fn app() -> Router {
+        let state = Arc::new(routes::BridgeState::new("test-machine".into()));
+        build_app(state, None)
+    }
+
+    fn prompt_request(body: Body, content_length: Option<usize>) -> Request<Body> {
+        let mut builder = Request::post("/api/agents/session-1/prompt")
+            .header("content-type", "application/json");
+        if let Some(length) = content_length {
+            builder = builder.header("content-length", length.to_string());
+        }
+        builder.body(body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn declared_oversized_body_is_413_without_being_read() {
+        let oversized = MAX_REQUEST_BODY_BYTES + 1;
+        let response = app()
+            .oneshot(prompt_request(Body::empty(), Some(oversized)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn streamed_oversized_body_is_413_not_400() {
+        let chunk = bytes::Bytes::from(vec![b'a'; 64 * 1024]);
+        let chunks = (0..=(MAX_REQUEST_BODY_BYTES / chunk.len()))
+            .map(|_| Ok::<_, std::io::Error>(chunk.clone()))
+            .collect::<Vec<_>>();
+        let body = Body::from_stream(futures_util::stream::iter(chunks));
+        let response = app().oneshot(prompt_request(body, None)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn body_at_the_limit_is_not_refused_as_too_large() {
+        // Not valid JSON, so the handler answers 400; the point is that the cap
+        // does not fire at or below the limit.
+        let body = Body::from(vec![b'{'; MAX_REQUEST_BODY_BYTES]);
+        let response = app()
+            .oneshot(prompt_request(body, Some(MAX_REQUEST_BODY_BYTES)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
 }

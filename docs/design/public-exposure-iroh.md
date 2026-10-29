@@ -108,10 +108,44 @@ In order of enforcement:
    authenticator the reserved `auth` section in `services/bridge/src/config.rs`
    was kept for, and its settings live there.
 
-Remaining hardening checklist (applies regardless of transport, tracked as
-bridge issues): per-connection rate limit and body-size caps at the axum
-layer, structured audit log of pairing and rejected dials, no tokens or keys
-in logs.
+**Limits (slice 5).** Named constants in `services/bridge/src/iroh_transport.rs`
+and `main.rs`, not config: they bound resource use, and nothing here is
+per-machine tuning.
+
+| Limit | Value | Enforced by | Justification |
+| --- | --- | --- | --- |
+| Request body | 2 MiB (`MAX_REQUEST_BODY_BYTES`) | `RequestBodyLimitLayer` on every route; over-limit is 413 | Equal to the apps' own ceiling for any HTTP body (`MAX_HTTP_BODY_BYTES` on Android, `maxHTTPBodyBytes` on Apple): a client never sends a body the bridge refuses for a reason it cannot see. Prompt text is the only large request body. Declared length is refused unread; streamed bodies stop at the cap. |
+| Streams per tunnel connection | 32 (`MAX_TUNNEL_STREAMS`) | QUIC `max_concurrent_bidi_streams` | Above the phone's normal request concurrency. Extra opens wait. QUIC returns credit in batches, so a waiting open resumes after a batch of streams finish, not after one. |
+| Tunnel connections per EndpointId | 4 (`MAX_TUNNEL_CONNECTIONS_PER_ID`) | Tracking in `serve_tunnel`; excess closed | A paired phone uses one or two connections. |
+| Tunnel connections overall | 16 (`MAX_TUNNEL_CONNECTIONS`) | Same | Caps the total for one bridge. |
+| Unpaired pair exchanges at once | 4 (`MAX_PAIR_CONNECTIONS`) | Semaphore in `serve_pair`; excess closed at once | A pair exchange can hold a task up to about 20 s, so this caps pinned tasks. |
+| Pair attempts per EndpointId | 5 per 60 s (`PAIR_ATTEMPTS_PER_WINDOW`, `PAIR_ATTEMPT_WINDOW`) | Per-id window in `redeem`; every attempt counts, match or not | A wrong guess never consumes the outstanding token, so the rate limit protects resources, not the 256-bit token. |
+| Handshakes in flight | 32 (`MAX_PENDING_HANDSHAKES`) | Accept loop waits before spawning | Bounds tasks that exist before the ALPN is known. |
+
+**Audit log.** Each security event is one line on stdout, which the managed
+lifecycle writes to `bridge.log` (`cappuccino-bridge logs`). Format:
+`cappuccino-bridge: audit <event> key=value...`. Lines never contain a token,
+the secret key, or a request body, and a test asserts this
+(`audit_log_records_events_and_never_contains_token_or_secret_key`).
+
+```text
+cappuccino-bridge: audit token_issued source=cli ttl_secs=600
+cappuccino-bridge: audit token_issued source=page ttl_secs=600
+cappuccino-bridge: audit pair_ok endpoint=<64-hex EndpointId>
+cappuccino-bridge: audit pair_failed endpoint=<id> reason=none|expired|mismatch|persist_failed
+cappuccino-bridge: audit tunnel_rejected endpoint=<id> reason=not_paired|revoked
+cappuccino-bridge: audit revoked endpoint=<id> was_paired=true|false closed=<n>
+cappuccino-bridge: audit limit_hit limit=tunnel_connections_per_id|tunnel_connections endpoint=<id>
+cappuccino-bridge: audit limit_hit limit=pair_connections endpoint=<id>
+cappuccino-bridge: audit limit_hit limit=pair_attempts endpoint=<id>
+cappuccino-bridge: audit limit_hit limit=request_body max_bytes=2097152
+```
+
+The stream cap is not logged: QUIC holds the phone's extra opens without a
+bridge-side event. A `request_body` line has no EndpointId, because the
+loopback HTTP listener does not know which transport a request arrived on.
+Pre-handshake connections are bounded by `MAX_PENDING_HANDSHAKES` but are not
+logged.
 
 **Revocation.** `cappuccino-bridge pair --revoke <EndpointId>` removes a phone
 from the allowlist and closes that phone's live connections; every revocation
@@ -224,7 +258,9 @@ the app falls back to tailnet.
    checked on a device. Code done on `feat/iroh-background-notify` (JVM
    tests); device check pending.
 5. Hardening batch: rate limits, body caps, audit log, `pair --revoke` (also
-   closing live connections).
+   closing live connections). **Done** (issue #55): the limits and audit
+   events are listed in the security model under "Limits (slice 5)" and
+   "Audit log"; `pair --revoke` shipped with slice 1.
 6. Relay spike: measure direct-path rates on n0 versus `iroh-relay` on
    harus-k3s behind a Cloudflare Tunnel; adopt only if the numbers hold
    (cross-repo with harus-k3s).

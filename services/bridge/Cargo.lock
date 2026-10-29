@@ -277,6 +277,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "bytes",
+ "data-encoding",
  "flate2",
  "futures-util",
  "http",
@@ -3296,6 +3297,7 @@ dependencies = [
  "futures-util",
  "http",
  "http-body",
+ "http-body-util",
  "pin-project-lite",
  "tokio",
  "tokio-util",
