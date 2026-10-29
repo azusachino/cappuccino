@@ -108,10 +108,18 @@ class MachinesJourneyTest {
     }
     openMachines()
     compose.waitForIdle()
-    compose.onNodeWithText("Retry").assertIsDisplayed().performClick()
+    // Retry must be hit-testable below the floating header, not under it.
+    val header = compose.onNodeWithText("Machines").fetchSemanticsNode().boundsInRoot
+    val retry =
+      compose.onNodeWithText("Retry").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    assertTrue(
+      "Retry sits under the header: retry=$retry header=$header",
+      retry.top > header.bottom,
+    )
+    compose.onNodeWithText("Retry").performClick()
     // The injected click is delivered after waitForIdle can return; wait for its effect, then
     // require exactly one call so a double-fire still fails.
-    compose.waitUntil { actions.retryCalls > 0 }
+    compose.waitUntil(timeoutMillis = 5_000) { actions.retryCalls > 0 }
     compose.waitForIdle()
     assertEquals(1, actions.retryCalls)
     compose.onNodeWithContentDescription("Machine actions").performClick()
