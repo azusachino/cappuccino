@@ -1,6 +1,10 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -45,8 +50,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -62,6 +65,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -169,9 +173,11 @@ fun CappuccinoScreen(
     }
   }
   val machineTreeState = rememberLazyListState()
+  val historyListState = rememberLazyListState()
+  val settingsScrollState = rememberScrollState()
   val hazeState = rememberHazeState()
   // Floating islands: lists scroll beneath them, so their content padding clears both.
-  val chromeTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 76.dp
+  val chromeTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 44.dp
   val dockBottom = 116.dp
   val mainScreenState = rememberSaveableStateHolder()
   val composerState = rememberSaveableStateHolder()
@@ -199,6 +205,29 @@ fun CappuccinoScreen(
   var pendingEdit by rememberSaveable { mutableStateOf(false) }
   val context = LocalContext.current
   val selected = state.selectedAgent
+  val isCollapsed by
+    remember(
+      selected,
+      destination,
+      machineTreeState,
+      historyListState,
+      settingsScrollState,
+    ) {
+      derivedStateOf {
+        if (selected != null) true
+        else
+          when (destination) {
+            Destination.MACHINES ->
+              machineTreeState.firstVisibleItemIndex > 0 ||
+                machineTreeState.firstVisibleItemScrollOffset > 24
+            Destination.HISTORY ->
+              historyListState.firstVisibleItemIndex > 0 ||
+                historyListState.firstVisibleItemScrollOffset > 24
+            Destination.SETTINGS -> settingsScrollState.value > 24
+            else -> false
+          }
+      }
+    }
   fun mutate(send: (ConnectedActions) -> Unit) {
     if (selected != null && actions.acceptsMutation(state.activeProfileId, selected)) send(actions)
   }
@@ -462,119 +491,88 @@ fun CappuccinoScreen(
   mainScreenState.SaveableStateProvider("main-screen") {
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { contentPadding ->
       Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        Column(
+        Box(
           Modifier.align(Alignment.TopCenter)
             .fillMaxWidth()
             .zIndex(2f)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .statusBarsPadding()
-            .glassBackdrop(
-              hazeState = hazeState,
-              backgroundColor = MaterialTheme.colorScheme.background,
-              shape = RoundedCornerShape(28.dp),
-            )
-        ) {
-          TopAppBar(
-            colors =
-              TopAppBarDefaults.topAppBarColors(
-                containerColor = androidx.compose.ui.graphics.Color.Transparent
-              ),
-            title = {
-              if (selected != null) {
-                val status =
-                  agentStatusStyle(
-                    selectedStatus ?: "unknown",
-                    MaterialTheme.colorScheme.background.luminance() < 0.5f,
-                  )
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                  Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                  ) {
-                    AgentAvatar(selected.agent, 24.dp)
-                    Text(
-                      selected.label,
-                      style = MaterialTheme.typography.titleSmall,
-                      maxLines = 1,
-                      overflow = TextOverflow.Ellipsis,
-                    )
-                  }
-                  // Status keeps its color as a square beside its word, never color alone.
-                  Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                  ) {
-                    if (state.offlineSavedAt != null) {
-                      StatusSquare(MaterialTheme.appColors.muted)
-                      Text(
-                        "Saved history · Read-only",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.appColors.muted,
-                      )
-                    } else {
-                      StatusSquare(status.background)
-                      Text(
-                        status.label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.appColors.muted,
-                      )
-                    }
-                  }
-                }
+            .then(
+              if (isCollapsed || selected != null) {
+                Modifier.glassBackdrop(
+                  hazeState = hazeState,
+                  backgroundColor = MaterialTheme.colorScheme.background,
+                  shape = RectangleShape,
+                )
               } else {
-                Text(
-                  stringResource(destination.title),
-                  fontWeight = FontWeight.Bold,
+                Modifier
+              }
+            )
+            .statusBarsPadding()
+        ) {
+          if (selected != null) {
+            Row(
+              Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 4.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              IconButton(
+                onClick = {
+                  if (state.offlineSavedAt != null) actions.closeSavedConversation()
+                  else actions.selectAgent(null)
+                },
+                modifier = Modifier.pressScale().size(40.dp),
+              ) {
+                Icon(
+                  painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
+                  contentDescription =
+                    if (state.offlineSavedAt != null) "Back to history" else "Back",
                 )
               }
-            },
-            navigationIcon = {
-              if (selected != null) {
-                IconButton(
-                  onClick = {
-                    if (state.offlineSavedAt != null) actions.closeSavedConversation()
-                    else actions.selectAgent(null)
-                  },
-                  modifier = Modifier.pressScale(),
-                ) {
-                  Icon(
-                    painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
-                    contentDescription =
-                      if (state.offlineSavedAt != null) "Back to history" else "Back",
-                  )
-                }
-              }
-            },
-            // Liquid glass chrome: transcript blurs behind the bar (owner decision
-            // 2026-10-27, superseding the no-colors-override note in android-material3.md).
-            actions = {
-              if (
-                destination == Destination.HISTORY &&
-                  selected == null &&
-                  state.savedConversations.isNotEmpty()
+              val status =
+                agentStatusStyle(
+                  selectedStatus ?: "unknown",
+                  MaterialTheme.colorScheme.background.luminance() < 0.5f,
+                )
+              Column(
+                Modifier.weight(1f).padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
               ) {
-                IconButton(
-                  onClick = { confirmingClearAll = true },
-                  modifier = Modifier.pressScale().testTag("clearAllHistory"),
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                  Icon(
-                    painterResource(com.azusachino.cappuccino.R.drawable.ic_trash),
-                    contentDescription = "Clear all saved conversations",
+                  AgentAvatar(selected.agent, 20.dp)
+                  Text(
+                    selected.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                   )
                 }
-              }
-              if (destination == Destination.MACHINES && selected == null) {
-                IconButton(onClick = { adding = true }, modifier = Modifier.pressScale()) {
-                  Icon(
-                    painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
-                    contentDescription = "Add machine",
-                  )
+                // Status keeps its color as a square beside its word, never color alone.
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                  if (state.offlineSavedAt != null) {
+                    StatusSquare(MaterialTheme.appColors.muted)
+                    Text(
+                      "Saved history · Read-only",
+                      style = MaterialTheme.typography.labelSmall,
+                      color = MaterialTheme.appColors.muted,
+                    )
+                  } else {
+                    StatusSquare(status.background)
+                    Text(
+                      status.label,
+                      style = MaterialTheme.typography.labelSmall,
+                      color = MaterialTheme.appColors.muted,
+                    )
+                  }
                 }
               }
-              if (selectedProfile != null && selected != null) {
+              if (selectedProfile != null) {
                 IconButton(
                   onClick = { showingHistory = true },
-                  modifier = Modifier.testTag("conversationHistoryButton"),
+                  modifier = Modifier.testTag("conversationHistoryButton").size(40.dp),
                 ) {
                   Icon(
                     painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
@@ -585,7 +583,8 @@ fun CappuccinoScreen(
                   onClick = {
                     detailsProfileId = selectedProfile.id
                     showingConnection = true
-                  }
+                  },
+                  modifier = Modifier.size(40.dp),
                 ) {
                   Icon(
                     painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
@@ -593,8 +592,54 @@ fun CappuccinoScreen(
                   )
                 }
               }
-            },
-          )
+            }
+          } else {
+            Box(
+              Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 4.dp),
+              contentAlignment = Alignment.Center,
+            ) {
+              AnimatedVisibility(
+                visible = isCollapsed,
+                enter = fadeIn(animationSpec = tween(150)),
+                exit = fadeOut(animationSpec = tween(150)),
+                modifier = Modifier.align(Alignment.Center),
+              ) {
+                Text(
+                  stringResource(destination.title),
+                  style = MaterialTheme.typography.titleMedium,
+                  fontWeight = FontWeight.SemiBold,
+                  modifier = Modifier.testTag("slimBarTitle"),
+                )
+              }
+              Row(
+                Modifier.align(Alignment.CenterEnd),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                if (destination == Destination.HISTORY && state.savedConversations.isNotEmpty()) {
+                  IconButton(
+                    onClick = { confirmingClearAll = true },
+                    modifier = Modifier.pressScale().testTag("clearAllHistory").size(40.dp),
+                  ) {
+                    Icon(
+                      painterResource(com.azusachino.cappuccino.R.drawable.ic_trash),
+                      contentDescription = "Clear all saved conversations",
+                    )
+                  }
+                }
+                if (destination == Destination.MACHINES) {
+                  IconButton(
+                    onClick = { adding = true },
+                    modifier = Modifier.pressScale().size(40.dp),
+                  ) {
+                    Icon(
+                      painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
+                      contentDescription = "Add machine",
+                    )
+                  }
+                }
+              }
+            }
+          }
         }
         if (selected == null) {
           BottomDock(
@@ -748,6 +793,7 @@ fun CappuccinoScreen(
                               Modifier.fillMaxSize()
                                 .padding(horizontal = 16.dp)
                                 .testTag("recentOutputList"),
+                            contentPadding = PaddingValues(top = bannerInset, bottom = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(14.dp),
                           ) {
                             items(
@@ -928,6 +974,7 @@ fun CappuccinoScreen(
                 },
                 onDeleteSaved = actions::deleteSavedConversation,
                 contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
+                lazyListState = historyListState,
               )
             }
             destination == Destination.SETTINGS -> {
@@ -948,30 +995,39 @@ fun CappuccinoScreen(
                   detailsProfileId = profileId
                   showingConnection = true
                 },
+                scrollState = settingsScrollState,
               )
             }
             else -> {
               // Destination.MACHINES
               if (state.profiles.isEmpty()) {
-                Box(
-                  modifier =
-                    Modifier.fillMaxWidth().weight(1f).padding(top = chromeTop).padding(24.dp),
-                  contentAlignment = Alignment.Center,
-                ) {
-                  Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                Column(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = chromeTop)) {
+                  Text(
+                    stringResource(com.azusachino.cappuccino.R.string.machines),
+                    Modifier.padding(start = 24.dp, top = 8.dp, bottom = 4.dp),
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.appColors.text,
+                  )
+                  Box(
+                    modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 24.dp),
+                    contentAlignment = Alignment.Center,
                   ) {
-                    Text(
-                      "No machines configured",
-                      style = MaterialTheme.typography.titleMedium,
-                      fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                      "Tap the + button below to connect to a private Herdr bridge.",
-                      color = MaterialTheme.colorScheme.onSurfaceVariant,
-                      style = MaterialTheme.typography.bodySmall,
-                    )
+                    Column(
+                      horizontalAlignment = Alignment.CenterHorizontally,
+                      verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                      Text(
+                        "No machines configured",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                      )
+                      Text(
+                        "Tap the + button below to connect to a private Herdr bridge.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                      )
+                    }
                   }
                 }
               } else {
@@ -981,6 +1037,15 @@ fun CappuccinoScreen(
                   contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
                   verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                  item(key = "machines_large_title") {
+                    Text(
+                      stringResource(com.azusachino.cappuccino.R.string.machines),
+                      Modifier.padding(start = 8.dp, top = 8.dp, bottom = 4.dp),
+                      style = MaterialTheme.typography.headlineLarge,
+                      fontWeight = FontWeight.Bold,
+                      color = MaterialTheme.appColors.text,
+                    )
+                  }
                   items(state.profiles, key = { it.id }) { profile ->
                     val machine = state.machineConnection(profile)
                     Column {
