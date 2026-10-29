@@ -111,6 +111,7 @@ final class CappuccinoUITests: XCTestCase {
     agent.tap()
   }
 
+  @MainActor
   private func capture(_ name: String, app: XCUIApplication) {
     let attachment = XCTAttachment(screenshot: app.screenshot())
     attachment.name = name
