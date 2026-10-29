@@ -114,6 +114,25 @@ In order of enforcement:
    carries no UDP, so the relay loses QUIC address discovery, and mobile
    paths may stay relayed. The spike compares direct-path rates on n0 versus
    a tunnelled relay before anything is committed.
+
+   **Custom relay option (`iroh.relay_url`, slice 6).** The bridge can be set
+   to use one self-hosted relay instead of n0's (`RelayMode::Custom` with a
+   single-URL map, iroh 1.4.1 `endpoint.rs`, `RelayMode::custom`; the N0
+   preset's address lookup is kept). The relay should be one whose access
+   allowlist admits the bridge's EndpointId. Behind a Cloudflare Tunnel the
+   relay has no UDP, so QUIC address discovery is lost and the bridge's
+   address is relay-only. The phone needs no change to reach that bridge:
+   iroh's dialer connects to the relay URL carried in the EndpointAddr even
+   when it is absent from the phone's own relay map (iroh 1.2.0,
+   `socket/transports/relay/actor.rs`, `active_relay_handle_for_endpoint` and
+   `start_active_relay`; the map is consulted only for auth tokens), and
+   replies return on the relay the datagram arrived on
+   (`RelayRecvDatagram { url: self.url }`). The phone's own n0 home relay is
+   only needed for inbound dials and address publication. Device proof with n0
+   blocked is still pending. Because the N0 preset's address lookup is kept,
+   the bridge still publishes its EndpointAddr, including the custom relay
+   URL, to n0's DNS discovery: n0 learns that this EndpointId uses that relay,
+   though no traffic passes through n0.
 5. **Loopback only.** The axum server keeps binding 127.0.0.1. The iroh
    tunnel is the only path in; disabling iroh (`iroh.enabled = false`, the
    default) returns the system to today's boundary — the kill switch. It sits

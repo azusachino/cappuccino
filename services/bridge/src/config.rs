@@ -4,6 +4,7 @@
 //! `enabled: true` is rejected until an authenticator exists, so the config
 //! format never has to change when one lands.
 
+use iroh::RelayUrl;
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -20,6 +21,10 @@ pub struct BridgeConfig {
     /// Opt-in iroh transport (`iroh.enabled`, default false). When false no
     /// iroh endpoint is created and `GET /pair` is not served.
     pub iroh_enabled: bool,
+    /// Self-hosted iroh relay (`iroh.relay_url`, absolute https). `None` keeps
+    /// n0's relays. Set, the endpoint uses only this relay. Design:
+    /// docs/design/public-exposure-iroh.md ("Relays").
+    pub iroh_relay_url: Option<RelayUrl>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -99,6 +104,24 @@ struct ConfigFile {
 #[derive(Debug, Default, Deserialize)]
 struct IrohFileConfig {
     enabled: Option<StrictBool>,
+    relay_url: Option<String>,
+}
+
+/// Strict: an absolute https URL with a host and no surrounding whitespace.
+/// Anything else is a startup error, never a silent fall back to n0.
+pub fn parse_iroh_relay_url(text: &str) -> Result<RelayUrl, String> {
+    let invalid = |reason: &str| format!("invalid iroh.relay_url '{text}': {reason}");
+    if text.trim() != text {
+        return Err(invalid("surrounding whitespace"));
+    }
+    let url: RelayUrl = text.parse().map_err(|error| invalid(&format!("{error}")))?;
+    if url.scheme() != "https" {
+        return Err(invalid("must be an https URL"));
+    }
+    if url.host_str().is_none() {
+        return Err(invalid("must include a host"));
+    }
+    Ok(url)
 }
 
 /// Resolves an XDG base directory: the variable's value when it is an absolute
@@ -147,6 +170,7 @@ impl BridgeConfig {
             auth: AuthConfig::default(),
             serve_auto_apply: true,
             iroh_enabled: false,
+            iroh_relay_url: None,
         }
     }
 
@@ -217,6 +241,11 @@ impl BridgeConfig {
                 }
                 if let Some(iroh) = file.iroh {
                     config.iroh_enabled = iroh.enabled.unwrap_or(StrictBool(false)).0;
+                    config.iroh_relay_url = iroh
+                        .relay_url
+                        .as_deref()
+                        .map(parse_iroh_relay_url)
+                        .transpose()?;
                 }
             }
         }
@@ -423,6 +452,53 @@ mod iroh_config_tests {
     #[test]
     fn retired_pair_token_ttl_is_a_parse_error() {
         assert!(load(r#"{"auth": {"pair_token_ttl_secs": 120}}"#).is_err());
+    }
+
+    #[test]
+    fn relay_url_is_unset_by_default() {
+        assert!(BridgeConfig::defaults().iroh_relay_url.is_none());
+        assert!(load("{}").unwrap().iroh_relay_url.is_none());
+        assert!(load(r#"{"iroh": {"enabled": true}}"#)
+            .unwrap()
+            .iroh_relay_url
+            .is_none());
+    }
+
+    #[test]
+    fn valid_relay_url_is_kept() {
+        let config = load(r#"{"iroh": {"relay_url": "https://relay.example.test"}}"#).unwrap();
+        let url = config.iroh_relay_url.expect("relay_url set");
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("relay.example.test"));
+    }
+
+    #[test]
+    fn invalid_relay_urls_are_startup_errors() {
+        for text in [
+            "",
+            "relay.example.test",
+            "/relative/path",
+            "http://relay.example.test",
+            "ftp://relay.example.test",
+            "https://",
+            " https://relay.example.test",
+            "https://relay.example.test ",
+        ] {
+            let content = format!(
+                r#"{{"iroh": {{"relay_url": {}}}}}"#,
+                serde_json::json!(text)
+            );
+            let error = load(&content).unwrap_err();
+            assert!(
+                error.starts_with("invalid iroh.relay_url"),
+                "{text:?} must be rejected, got {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_string_relay_url_is_a_parse_error() {
+        assert!(load(r#"{"iroh": {"relay_url": 3}}"#).is_err());
     }
 }
 
