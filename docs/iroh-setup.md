@@ -25,16 +25,15 @@ The bridge reads one configuration file (`config.toml`). Its path is `CAPP_BRIDG
 ```toml
 [iroh]
 enabled = true
-relay_url = "https://relay.azusachino.com"
 
 [serve]
 auto_apply = false
 ```
 
 - `iroh.enabled`: strict boolean (`true`/`false`). Any other value stops startup.
-- `iroh.relay_url`: optional absolute `https` URL with a host and no surrounding
-  whitespace. Omit it to use n0's public relays. See
-  [Self-hosted relay](#self-hosted-relay).
+- `iroh.relay_url`: optional absolute `https` URL for a custom relay. Omit it to use
+  n0's default public relays (such as `aps1` in Tokyo), which provide full UDP NAT
+  traversal and require no manual allowlists. See [Custom relay](#custom-relay).
 - `serve.auto_apply`: `false` stops the bridge from touching Tailscale Serve.
   Use it when you do not want `start` or `status` to change Serve.
 
@@ -164,51 +163,27 @@ the bridge before saving either.
 
 A plain bridge restart does not require a new pairing.
 
-## Self-hosted relay
+## Custom relay
 
-By default the bridge and phone use n0's public relays. `iroh.relay_url` makes the
-bridge use only the relay you name. The motivating case was an office network
-that blocks n0's relays.
+By default, the bridge and phone use n0's public relays (automatically selecting
+the nearest node, e.g. Tokyo `aps1`). Because iroh traffic is end-to-end encrypted
+with ed25519 keys and TLS 1.3 / QUIC, public relays only forward opaque ciphertexts
+and never have access to session data, tokens, or agent payloads.
 
-The owner's relay is `https://relay.azusachino.com`. It runs iroh-relay 1.4.1 in
-the k3s cluster, behind a Cloudflare Tunnel. TLS ends at Cloudflare; the in-cluster
-service is plain HTTP. Deployment and manifests:
-`vendor/harus-k3s/05-tools/iroh-relay/README.md`, harus-k3s PR
-[#136](https://github.com/azusachino/harus-k3s/pull/136) and issue
-[#137](https://github.com/azusachino/harus-k3s/issues/137).
+`iroh.relay_url` configures the bridge to use a custom relay instead. Note that
+setting `relay_url` completely clears n0's default relay pool.
 
-Behaviour to know:
+Important considerations for self-hosted relays:
 
-- The relay's allowlist admits only listed EndpointIds. Every endpoint that
-  connects through it needs an entry. The bridge's ID is in the `endpoint_id`
-  field of `cappuccino-bridge pair` output. The app does not display the phone's
-  EndpointId. This guide does not yet say how to read a phone's EndpointId, so
-  confirm it before editing the relay.
-- Behind the tunnel the relay carries no UDP. It has QUIC address discovery off,
-  so the bridge's address is relay-only. Paths can stay relayed. The pairing
-  payload then carries the relay URL and no direct addresses, which keeps the QR
-  small.
-- Phone-side, the app dials the relay URL from the bridge's EndpointAddr even when
-  that relay is not in the phone's own relay map, so no phone change is needed.
-  Device proof with n0 blocked is still pending.
-- n0 DNS still learns. The bridge keeps n0's address lookup, so its EndpointAddr,
-  including the custom relay URL, is published to n0's DNS discovery. No traffic
-  passes through n0, but n0 learns which relay this EndpointId uses.
-
-### Adding a device to the relay
-
-1. Get the device's EndpointId (64 lowercase hex characters).
-2. Add a line to `allowlist` in `05-tools/iroh-relay/configmap.yaml` with a
-   comment naming the device.
-3. Apply and restart. A ConfigMap edit does not restart the pod.
-
-```sh
-kubectl apply -f 05-tools/iroh-relay/configmap.yaml
-kubectl -n harus-tools rollout restart deploy/iroh-relay
-```
-
-Revoking on the bridge does not edit the relay allowlist. Remove the line from
-the ConfigMap too if the relay should also refuse that device.
+- **Avoid HTTP tunnels / reverse proxies**: Running an iroh relay behind Cloudflare
+  Tunnel or standard HTTP reverse proxies drops UDP traffic. This disables STUN
+  and direct QUIC hole-punching (`enable_quic_addr_discovery = false`), forcing
+  all traffic into high-latency WebSocket relay streams.
+- **Avoid restrictive allowlists**: Restricting access with an EndpointId allowlist
+  breaks mobile clients because the app generates a new keypair whenever
+  reinstalled or state is cleared.
+- A self-hosted relay should be deployed with native dual-stack UDP and direct
+  network exposure.
 
 ## Transports and badges
 
@@ -260,8 +235,8 @@ phone again, run `cappuccino-bridge pair` and scan a new code.
 
 ## Troubleshooting
 
-**Office or network blocks n0.** Set `iroh.relay_url` to the self-hosted relay
-(see [Self-hosted relay](#self-hosted-relay)), restart the bridge, and pair again.
+**Office or network blocks n0.** Set `iroh.relay_url` to a custom relay
+(see [Custom relay](#custom-relay)), restart the bridge, and pair again.
 Without that, the app falls back to the tailnet URL when the machine has one.
 
 **The QR is stretched or wrapped.** Widen the terminal. If it still stretches,
@@ -285,10 +260,10 @@ the key or allowlist cannot be read. The bridge never falls back to
 `~/Library/Application Support/cappuccino-bridge`. Fix the permissions, or point
 `data_dir` at a readable directory and accept re-pairing.
 
-**Relay checks.** The health endpoint is `GET /healthz`:
+**Relay checks.** For custom relays, the health endpoint is `GET /healthz`:
 
 ```sh
-curl -s https://relay.azusachino.com/healthz
+curl -s https://relay.example.com/healthz
 ```
 
 Expect `{"status":"ok",...}`. The relay's WebSocket endpoint is `/relay`. Clients
@@ -302,7 +277,7 @@ curl -si \
   -H 'Sec-WebSocket-Version: 13' \
   -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
   -H 'Sec-WebSocket-Protocol: iroh-relay-v2' \
-  https://relay.azusachino.com/relay
+  https://relay.example.com/relay
 ```
 
 A `101 Switching Protocols` reply means the upgrade worked. Without the

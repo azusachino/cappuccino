@@ -436,7 +436,7 @@ auto_apply = false
 
 [iroh]
 enabled = true
-relay_url = "https://relay.azusachino.com"
+relay_url = "https://relay.example.com"
 "#;
         let path = std::env::temp_dir().join(format!("cap-test-{}.toml", std::process::id()));
         std::fs::write(&path, toml).unwrap();
@@ -448,7 +448,7 @@ relay_url = "https://relay.azusachino.com"
         assert!(cfg.iroh_enabled);
         assert_eq!(
             cfg.iroh_relay_url.unwrap().as_str(),
-            "https://relay.azusachino.com/"
+            "https://relay.example.com/"
         );
         let _ = std::fs::remove_file(path);
     }
