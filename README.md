@@ -18,7 +18,8 @@ running in [Herdr](https://github.com/herdrdev/herdr) panes on your own machines
 those agents, shows their conversations, and lets you send a prompt, stop a
 run, start a new session, or answer an approval. It does not start, stop or
 replace the agents. A small Rust bridge, installed as a Herdr plugin, serves
-the apps over your private tailnet.
+the apps using an **iroh-first peer-to-peer transport** (paired directly via
+terminal QR code over QUIC and TLS 1.3), with your private Tailnet as a fallback.
 
 ## Contents
 
@@ -43,9 +44,9 @@ phone disconnects, and reconnecting shows the same session.
 
 ## What you can do
 
-- **Machines:** add each Herdr machine by its bridge URL. Each machine lists
-  its agents. An unreachable machine shows its own error and does not block
-  the others.
+- **Machines:** pair each Herdr machine by scanning its QR code (`cappuccino-bridge pair`)
+  over iroh, or add its Tailnet bridge URL. Each machine lists its agents. An unreachable
+  machine shows its own error and does not block the others.
 - **Agents and status:** see each agent's name, working directory, branch (where
   the repository is known) and state (idle, working or blocked), as Herdr reports them.
 - **Conversations:** read the canonical transcript for Pi, Claude Code and
@@ -80,9 +81,12 @@ phone disconnects, and reconnecting shows the same session.
 
 ```text
 phone (iPhone or Android)
-  │  HTTPS / WebSocket over the tailnet
-  ▼
-tailscale serve   https://<machine>.<tailnet>.ts.net  ->  127.0.0.1:7392
+  │
+  ├── [Primary] iroh peer-to-peer (QUIC / TLS 1.3, N0 Tokyo relay fallback)
+  │      └── paired via terminal QR code (`cappuccino-bridge pair`)
+  │
+  └── [Fallback] Tailnet HTTPS / WebSocket
+         └── tailscale serve  https://<machine>.<tailnet>.ts.net  ->  127.0.0.1:7392
   │
   ▼
 cappuccino-bridge (loopback 127.0.0.1:7392)
@@ -92,20 +96,26 @@ Herdr  ->  agent panes (Pi, Claude Code, Agy)
 ```
 
 The bridge is a Rust program that Herdr starts through its plugin manifest.
-It runs its own loopback HTTP and WebSocket server and keeps that server
-running after startup. For each request it asks Herdr, over Herdr's local
-socket, for the agent list, pane text or a prompt operation. For a
-conversation it reads the agent's session file, after checking that the path Herdr
-reports is inside that agent's session store. `tailscale serve` maps the loopback port
-to an HTTPS address on your tailnet, and nothing else is exposed. Stop and New
-session only type into the existing pane, so neither starts nor ends a process.
+It runs a loopback HTTP and WebSocket server alongside an iroh peer-to-peer endpoint.
+For each request it asks Herdr, over Herdr's local socket, for the agent list,
+pane text or a prompt operation. For a conversation it reads the agent's session
+file, after checking that the path Herdr reports is inside that agent's session
+store.
+
+The mobile app connects **iroh-first**: it dials the bridge directly over QUIC
+using ed25519 public keys, negotiating direct UDP hole punching with fallback to N0's
+public relay network (Tokyo `aps1`). If iroh is unavailable, the app falls back to the machine's
+Tailnet URL (`tailscale serve`). Stop and New session only type into the existing
+pane, so neither starts nor ends a process.
 
 ## Design and trade-offs
 
-- **No app-level authentication.** The tailnet is the boundary: anyone on
-  your tailnet who has the URL can use the bridge. The bridge refuses any
-  non-loopback bind, and `tailscale serve` is the only supported way to expose
-  it. Do not expose it to public ingress.
+- **iroh-first peer authentication, tailnet as fallback.** iroh connections are
+  end-to-end encrypted with ed25519 endpoint keys (`EndpointId`) and require an
+  explicit cryptographic pairing handshake (`cappuccino-bridge pair`) with
+  rotating single-use tokens. For tailnet fallback, the tailnet remains the boundary:
+  the bridge binds strictly to loopback and relies on `tailscale serve` for tailnet
+  ingress. Public HTTP ingress is never supported.
 - **A Herdr plugin, not a separate daemon.** Herdr's plugin system starts the
   bridge and provides its status, stop and log actions. The bridge is not
   loaded into Herdr or into an agent. Herdr and the agent own process lifetime,
@@ -178,23 +188,19 @@ Install the binary first. Linking the plugin does not build it. Cargo's bin
 directory (normally `~/.cargo/bin`) must be on the `PATH` that Herdr passes to
 plugin commands. The `status` action confirms this.
 
-### 3. Expose the bridge to your tailnet
+### 3. Start the bridge and pair over iroh
 
-On `start` and `status`, the bridge checks Tailscale Serve and adds the entry
-if it is missing. The entry maps `https://<machine>.<tailnet>.ts.net` to the
-loopback port. The bridge prints the URL. Check it from any device on the tailnet:
+Ensure `[iroh] enabled = true` in `~/.config/cappuccino-bridge/config.toml`, then start
+the bridge. Run the pairing command to print the pairing QR code in your terminal:
 
 ```sh
-curl https://<machine>.<tailnet>.ts.net/api/session
+cappuccino-bridge pair
 ```
 
-If you want to run the Serve command yourself, set `serve.auto_apply` to
-`false` in `~/.config/cappuccino-bridge/config.toml`, or set
-`CAPP_BRIDGE_SERVE_AUTO_APPLY=0`, before you start the bridge. The bridge then prints the command instead
-of running it. The
-[bridge setup guide](services/bridge/README.md#install-and-lifecycle) covers
-the one-time Tailscale operator setup, the config file and the other bridge
-actions.
+If you also want Tailscale Serve fallback, `start` and `status` automatically check
+Tailscale Serve and add the entry if it is missing. The entry maps
+`https://<machine>.<tailnet>.ts.net` to the loopback port. The
+[iroh setup guide](docs/iroh-setup.md) covers iroh transports, relays, and pairing.
 
 ### 4. Build and install the iPhone app
 
@@ -216,17 +222,30 @@ the debug APK without Android Studio, run `make build-android`. The APK is
 written to `apps/android/app/build/outputs/apk/debug/app-debug.apk`. Only debug
 builds are provided.
 
-### 6. Add a machine
+### 6. Pair or add a machine
 
-In the app, open Machines and add the bridge URL: the `https://…ts.net`
-address from step 3. A loopback address such as `http://127.0.0.1:7392` reaches
-the bridge only from the same machine, for example the iOS Simulator. Each
-saved machine is bound to the machine ID the bridge reports.
+In the app, tap `+` on the top bar (or "Pair Machine" on the empty state), point your
+phone camera at the terminal QR code from step 3, and tap **Scan QR Code**. The app
+pairs and connects immediately over iroh.
+
+If connecting via Tailnet instead, tap "Connect via Tailnet URL instead" and provide
+the `https://…ts.net` address from step 3. Each saved machine is bound to the
+machine ID the bridge reports.
 
 ## Limitations
 
-- The bridge has no authentication. Its safety depends on the tailnet and on
-  loopback-only binding.
+- **iroh reconnectivity after long network loss or sleep.** In iroh, peer connections
+  rely on active QUIC sessions and UDP NAT hole-punch states. If a mobile device loses
+  network connectivity for an extended period (prolonged backgrounding, deep OS sleep / Doze,
+  airplane mode, or switching cellular/Wi-Fi interfaces), NAT traversal mappings expire
+  and the QUIC session drops. When returning online, re-establishing direct peer
+  connectivity can take several seconds to over a minute while iroh detects the dead path,
+  queries relay nodes, and renegotiates a direct punch or performs an endpoint rebuild.
+  The app automatically redials and falls back to Tailnet when configured, but pure-iroh
+  setups must wait for the peer dial cycle to complete.
+- The Tailnet fallback transport relies on the tailnet boundary and loopback-only
+  binding (no app-level authentication). iroh transport enforces cryptographic mutual
+  authentication via ed25519 EndpointIds.
 - Prompts are terminal input. Nudge and Follow-up queue selection and delivery
   receipts are not implemented.
 - Approvals are answered from the screen. There is no typed approval gate, no

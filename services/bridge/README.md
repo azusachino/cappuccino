@@ -2,7 +2,7 @@
 
 The bridge is Cappuccino's phone-reachable transport facade over selected machine-local Herdr APIs. It is a Rust/Tokio/axum executable linked through a Herdr plugin manifest; Herdr starts and controls it, but does not load it into the Herdr server or an agent. Herdr and Pi continue to own agent/session lifetime.
 
-This standalone process serves a loopback HTTP/WebSocket API to native clients over the private tailnet. It has no auth by owner decision; public ingress is out of scope. The bridge is not an agent runtime.
+This standalone process serves a loopback HTTP/WebSocket API over an iroh-first peer-to-peer transport (with private tailnet fallback) to native clients. Tailnet fallback has no auth by owner decision; iroh transport requires cryptographic pairing with EndpointId allowlists; public ingress is out of scope. The bridge is not an agent runtime.
 
 ## Layout
 
@@ -99,7 +99,7 @@ Setup, pairing and relay operations: [docs/iroh-setup.md](../../docs/iroh-setup.
 
 `iroh.enabled` (default `false`, strict boolean) starts an iroh endpoint beside the loopback listener. When false no endpoint is created. The phone reaches the same routes through iroh ALPN `cappuccino/1`, admitted only for EndpointIds on the allowlist. ALPN `cappuccino-pair/1` admits unknown ids for one token exchange. Pairing uses a code that rotates every 60 s and is single-use per window; `cappuccino-bridge pair` prints the current code. The secret key (`iroh-secret.key`) and allowlist (`iroh-allowlist.json`) live in the data dir with mode 0600.
 
-`iroh.relay_url` (optional, absolute `https` URL, strict: a bad value stops startup) makes the endpoint use only that relay instead of n0's. Unset keeps n0. Point it at a relay whose access allowlist admits the bridge's EndpointId; a relay that admits everyone is a relay that will carry anyone's traffic. A relay behind a Cloudflare Tunnel carries no UDP, so the endpoint gets no QUIC address discovery and its address is relay-only; paths can stay relayed. The pairing payload then carries that relay URL and no direct addresses.
+`iroh.relay_url` (optional, absolute `https` URL, strict: a bad value stops startup) makes the endpoint use only that relay instead of n0's. Unset keeps n0. Point it at a relay whose access allowlist admits the bridge's EndpointId. Custom relays should provide native UDP and direct exposure; running an iroh relay behind an HTTP tunnel (such as Cloudflare Tunnel) drops UDP, disabling QUIC address discovery and forcing all traffic over relayed streams.
 
 - `cappuccino-bridge pair` prints a QR and the payload. It asks the running bridge over the owner-only admin socket `iroh-admin.sock` in the data dir. Start the bridge first, or the command reports that it is not running.
 - The payload carries direct addresses only when no relay is known yet (`relay` null). With a relay, `addrs` is empty and the phone finds the direct path after connecting, which keeps the QR about 55 to 59 columns and 28 to 30 rows (error level L, one-module quiet zone). If the terminal is narrower, the command prints a hint; widen it or open `/pair` on a tailnet device, which shows the same payload as a QR.
