@@ -477,7 +477,7 @@ internal fun MachineInformation(
           MachineDivider()
           val host =
             profile.endpoint.base.host ?: profile.endpoint.base.toString().removeSuffix("/")
-          MachineDetailRow(
+          MachineDetailField(
             "Tailnet address",
             host,
             isMono = true,
@@ -518,7 +518,7 @@ internal fun MachineInformation(
           MachineDivider()
           val host =
             profile.endpoint.base.host ?: profile.endpoint.base.toString().removeSuffix("/")
-          MachineDetailRow(
+          MachineDetailField(
             "Tailnet address",
             host,
             isMono = true,

@@ -5,7 +5,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -132,6 +131,14 @@ private enum class ShellScreen {
   HISTORY,
   SETTINGS,
 }
+
+private fun screenOrder(screen: ShellScreen): Int =
+  when (screen) {
+    ShellScreen.MACHINES -> 0
+    ShellScreen.HISTORY -> 1
+    ShellScreen.SETTINGS -> 2
+    ShellScreen.CONVERSATION -> 3
+  }
 
 @Composable
 fun StatusBadge(status: String, modifier: Modifier = Modifier) {
@@ -737,34 +744,40 @@ fun CappuccinoScreen(
             if (
               initialState != ShellScreen.CONVERSATION && targetState == ShellScreen.CONVERSATION
             ) {
-              slideInHorizontally(
+              (slideInHorizontally(
                 initialOffsetX = { it },
-                animationSpec = tween(300, easing = FastOutSlowInEasing),
-              ) + fadeIn(animationSpec = tween(220)) togetherWith
-                slideOutHorizontally(
+                animationSpec = tween(280, easing = FastOutSlowInEasing),
+              ) + fadeIn(animationSpec = tween(200))) togetherWith
+                (slideOutHorizontally(
                   targetOffsetX = { -it / 3 },
-                  animationSpec = tween(300, easing = FastOutSlowInEasing),
-                ) + fadeOut(animationSpec = tween(180))
+                  animationSpec = tween(280, easing = FastOutSlowInEasing),
+                ) + fadeOut(animationSpec = tween(120)))
             } else if (
               initialState == ShellScreen.CONVERSATION && targetState != ShellScreen.CONVERSATION
             ) {
-              slideInHorizontally(
+              (slideInHorizontally(
                 initialOffsetX = { -it / 3 },
                 animationSpec = tween(260, easing = FastOutSlowInEasing),
-              ) + fadeIn(animationSpec = tween(200)) togetherWith
-                slideOutHorizontally(
+              ) + fadeIn(animationSpec = tween(200))) togetherWith
+                (slideOutHorizontally(
                   targetOffsetX = { it },
                   animationSpec = tween(260, easing = FastOutSlowInEasing),
-                ) + fadeOut(animationSpec = tween(180))
+                ) + fadeOut(animationSpec = tween(120)))
             } else {
-              fadeIn(animationSpec = tween(200, easing = LinearOutSlowInEasing)) togetherWith
-                fadeOut(animationSpec = tween(150, easing = FastOutLinearInEasing))
+              val forward = screenOrder(targetState) > screenOrder(initialState)
+              val slideDirection = if (forward) 1 else -1
+              (slideInHorizontally(animationSpec = tween(240, easing = FastOutSlowInEasing)) {
+                (it * 0.15f * slideDirection).toInt()
+              } + fadeIn(animationSpec = tween(180, delayMillis = 40))) togetherWith
+                (slideOutHorizontally(animationSpec = tween(200, easing = FastOutSlowInEasing)) {
+                  (-it * 0.15f * slideDirection).toInt()
+                } + fadeOut(animationSpec = tween(80, easing = FastOutLinearInEasing)))
             }
           },
           label = "mainScreenTransition",
         ) { screen ->
           Column(
-            Modifier.fillMaxSize(),
+            Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
             verticalArrangement =
               Arrangement.spacedBy(if (screen == ShellScreen.CONVERSATION) 4.dp else 12.dp),
           ) {

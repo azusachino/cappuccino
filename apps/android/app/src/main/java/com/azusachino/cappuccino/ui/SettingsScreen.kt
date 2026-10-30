@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.azusachino.cappuccino.BuildConfig
 import com.azusachino.cappuccino.R
+import com.azusachino.cappuccino.core.BRIDGE_PROTOCOL_VERSION
 
 internal data class SettingsConnection(
   val id: String,
@@ -199,25 +200,15 @@ internal fun SettingsScreen(
         onClick = { showingAboutGuide = true },
       )
       SettingsDivider(indented = false)
+      val appVersion = "${BuildConfig.VERSION_NAME}(v$BRIDGE_PROTOCOL_VERSION)"
       SettingRow(
         title = "Version",
-        value = BuildConfig.VERSION_NAME,
+        value = appVersion,
         showChevron = false,
         onClick = {
           val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-          cm.setPrimaryClip(ClipData.newPlainText("Version", BuildConfig.VERSION_NAME))
+          cm.setPrimaryClip(ClipData.newPlainText("Version", appVersion))
           Toast.makeText(context, "Copied version", Toast.LENGTH_SHORT).show()
-        },
-      )
-      SettingsDivider(indented = false)
-      SettingRow(
-        title = "Bridge API",
-        value = "v1",
-        showChevron = false,
-        onClick = {
-          val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-          cm.setPrimaryClip(ClipData.newPlainText("Bridge API", "v1"))
-          Toast.makeText(context, "Copied Bridge API version", Toast.LENGTH_SHORT).show()
         },
       )
       SettingsDivider(indented = false)
