@@ -45,7 +45,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -121,18 +120,23 @@ private enum class Destination(val title: Int, val icon: Int) {
 @Composable
 fun StatusBadge(status: String, modifier: Modifier = Modifier) {
   val badge = agentStatusStyle(status, MaterialTheme.colorScheme.background.luminance() < 0.5f)
-  Surface(modifier = modifier, shape = CircleShape, color = badge.background) {
+  Surface(
+    modifier = modifier,
+    shape = RoundedCornerShape(12.dp),
+    color = badge.background.copy(alpha = 0.14f),
+    border = BorderStroke(0.5.dp, badge.background.copy(alpha = 0.35f)),
+  ) {
     Row(
-      modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+      modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-      Box(modifier = Modifier.size(6.dp).background(badge.foreground, CircleShape))
+      Box(modifier = Modifier.size(6.dp).background(badge.background, CircleShape))
       Text(
         text = badge.label,
         style = MaterialTheme.typography.labelSmall,
-        color = badge.foreground,
-        fontWeight = FontWeight.SemiBold,
+        color = badge.background,
+        fontWeight = FontWeight.Medium,
       )
     }
   }
@@ -1079,126 +1083,48 @@ fun CappuccinoScreen(
                   }
                   items(state.profiles, key = { it.id }) { profile ->
                     val machine = state.machineConnection(profile)
-                    Column {
-                      Surface(
-                        onClick = {
-                          detailsProfileId = profile.id
-                          showingConnection = true
-                        },
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth(),
+                    Column(
+                      Modifier.fillMaxWidth()
+                        .glassSurface(shape = RoundedCornerShape(16.dp), isElevated = true)
+                        .padding(vertical = 4.dp)
+                    ) {
+                      Row(
+                        Modifier.fillMaxWidth()
+                          .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                            detailsProfileId = profile.id
+                            showingConnection = true
+                          }
+                          .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                       ) {
-                        Column {
-                          ListItem(
-                            headlineContent = {
-                              Text(
-                                profile.label.takeUnless {
-                                  it == profile.endpoint.base.host || it == "iroh.invalid"
-                                } ?: "Machine",
-                                fontWeight = FontWeight.SemiBold,
-                              )
-                            },
-                            leadingContent = {
-                              Icon(
-                                painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
-                                contentDescription = null,
-                              )
-                            },
-                            trailingContent = {
-                              Row(verticalAlignment = Alignment.CenterVertically) {
-                                // Retry is offered only where the row is in error; the banner it
-                                // replaced used to carry this.
-                                if (machine.connection is ConnectionState.Error) {
-                                  IconButton(
-                                    onClick = { actions.refreshProfile(profile.id) },
-                                    enabled = !machine.busy,
-                                  ) {
-                                    Icon(
-                                      painterResource(
-                                        com.azusachino.cappuccino.R.drawable.ic_refresh
-                                      ),
-                                      contentDescription = "Retry ${profile.label}",
-                                    )
-                                  }
-                                }
-                                Box {
-                                  IconButton(onClick = { machineMenuId = profile.id }) {
-                                    Icon(
-                                      painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
-                                      contentDescription = "Machine actions",
-                                    )
-                                  }
-                                  DropdownMenu(
-                                    expanded = machineMenuId == profile.id,
-                                    onDismissRequest = { machineMenuId = null },
-                                  ) {
-                                    DropdownMenuItem(
-                                      text = { Text("Connection details") },
-                                      onClick = {
-                                        detailsProfileId = profile.id
-                                        showingConnection = true
-                                        machineMenuId = null
-                                      },
-                                    )
-                                    DropdownMenuItem(
-                                      text = { Text("Conversation history") },
-                                      onClick = {
-                                        historyMachineId = profile.machineId
-                                        showingHistory = true
-                                        machineMenuId = null
-                                      },
-                                    )
-                                    DropdownMenuItem(
-                                      text = { Text("Rename") },
-                                      onClick = {
-                                        namingProfileId = profile.id
-                                        machineNameDraft = profile.label
-                                        namingMachine = true
-                                        machineMenuId = null
-                                      },
-                                    )
-                                    if (profile.endpoint.iroh == null) {
-                                      DropdownMenuItem(
-                                        text = { Text("Pair over iroh") },
-                                        onClick = {
-                                          editingProfileId = profile.id
-                                          editingIroh = true
-                                          payload = ""
-                                          scanError = null
-                                          pendingEdit = false
-                                          machineMenuId = null
-                                        },
-                                      )
-                                    }
-                                    if (
-                                      profile.endpoint.iroh != null && !profile.endpoint.hasTailnet
-                                    ) {
-                                      DropdownMenuItem(
-                                        text = { Text("Add tailnet URL") },
-                                        onClick = {
-                                          editingProfileId = profile.id
-                                          editingIroh = false
-                                          editingUrl = ""
-                                          pendingEdit = false
-                                          machineMenuId = null
-                                        },
-                                      )
-                                    }
-                                    DropdownMenuItem(
-                                      text = { Text("Remove") },
-                                      onClick = {
-                                        actions.removeProfile(profile.id)
-                                        machineMenuId = null
-                                      },
-                                    )
-                                  }
-                                }
-                              }
-                            },
+                        Box(
+                          Modifier.size(36.dp)
+                            .background(MaterialTheme.appColors.card2, RoundedCornerShape(10.dp)),
+                          contentAlignment = Alignment.Center,
+                        ) {
+                          Icon(
+                            painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.appColors.accent,
                           )
-                          // Full row width under the name: the trailing actions leave the status a
-                          // narrow column on ~280dp phones, so it wraps to a second line only then.
+                        }
+                        Column(
+                          Modifier.weight(1f),
+                          verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
                           Text(
+                            profile.label.takeUnless {
+                              it == profile.endpoint.base.host || it == "iroh.invalid"
+                            } ?: "Machine",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.appColors.text,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                          )
+                          val statusSubtitle =
                             listOfNotNull(
                                 machine.connection.statusText(),
                                 when (state.machineBadges[profile.id]) {
@@ -1212,37 +1138,143 @@ fun CappuccinoScreen(
                                   else -> null
                                 },
                               )
-                              .joinToString(" · "),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                              .joinToString(" · ")
+                          Text(
+                            statusSubtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.appColors.muted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
                           )
                         }
-                      }
-                      Column(Modifier.padding(start = 24.dp)) {
-                        if (
-                          machine.busy && machine.agents.isEmpty() ||
-                            machine.connection == ConnectionState.Connecting
-                        ) {
-                          LinearProgressIndicator(Modifier.fillMaxWidth())
-                        } else if (machine.connection != ConnectionState.Connected) {
-                          // The row's status line carries the error; details live in the sheet.
-                        } else {
-                          val agents = machine.agents.filter { it.machineId == profile.machineId }
-                          if (agents.isEmpty()) Text("No active agents", Modifier.padding(16.dp))
-                          agents.forEach { agent ->
-                            key(profile.id, agent.sessionId) {
-                              AgentItemCard(
-                                agent,
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                          if (machine.connection is ConnectionState.Error) {
+                            IconButton(
+                              onClick = { actions.refreshProfile(profile.id) },
+                              enabled = !machine.busy,
+                              modifier = Modifier.size(36.dp),
+                            ) {
+                              Icon(
+                                painterResource(com.azusachino.cappuccino.R.drawable.ic_refresh),
+                                contentDescription = "Retry ${profile.label}",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.appColors.warn,
+                              )
+                            }
+                          }
+                          Box {
+                            IconButton(
+                              onClick = { machineMenuId = profile.id },
+                              modifier = Modifier.size(36.dp),
+                            ) {
+                              Icon(
+                                painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
+                                contentDescription = "Machine actions",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.appColors.faint,
+                              )
+                            }
+                            DropdownMenu(
+                              expanded = machineMenuId == profile.id,
+                              onDismissRequest = { machineMenuId = null },
+                            ) {
+                              DropdownMenuItem(
+                                text = { Text("Connection details") },
                                 onClick = {
-                                  actions.selectProfile(profile.id)
-                                  actions.selectAgent(agent)
+                                  detailsProfileId = profile.id
+                                  showingConnection = true
+                                  machineMenuId = null
+                                },
+                              )
+                              DropdownMenuItem(
+                                text = { Text("Conversation history") },
+                                onClick = {
+                                  historyMachineId = profile.machineId
+                                  showingHistory = true
+                                  machineMenuId = null
+                                },
+                              )
+                              DropdownMenuItem(
+                                text = { Text("Rename") },
+                                onClick = {
+                                  namingProfileId = profile.id
+                                  machineNameDraft = profile.label
+                                  namingMachine = true
+                                  machineMenuId = null
+                                },
+                              )
+                              if (profile.endpoint.iroh == null) {
+                                DropdownMenuItem(
+                                  text = { Text("Pair over iroh") },
+                                  onClick = {
+                                    editingProfileId = profile.id
+                                    editingIroh = true
+                                    payload = ""
+                                    scanError = null
+                                    pendingEdit = false
+                                    machineMenuId = null
+                                  },
+                                )
+                              }
+                              if (profile.endpoint.iroh != null && !profile.endpoint.hasTailnet) {
+                                DropdownMenuItem(
+                                  text = { Text("Add tailnet URL") },
+                                  onClick = {
+                                    editingProfileId = profile.id
+                                    editingIroh = false
+                                    editingUrl = ""
+                                    pendingEdit = false
+                                    machineMenuId = null
+                                  },
+                                )
+                              }
+                              DropdownMenuItem(
+                                text = { Text("Remove") },
+                                onClick = {
+                                  actions.removeProfile(profile.id)
+                                  machineMenuId = null
                                 },
                               )
                             }
                           }
+                        }
+                      }
+                      if (
+                        machine.busy && machine.agents.isEmpty() ||
+                          machine.connection == ConnectionState.Connecting
+                      ) {
+                        LinearProgressIndicator(
+                          Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                      }
+                      val agents = machine.agents.filter { it.machineId == profile.machineId }
+                      if (machine.connection == ConnectionState.Connected) {
+                        if (agents.isNotEmpty()) {
+                          MachineDivider()
+                          Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                          ) {
+                            agents.forEach { agent ->
+                              key(profile.id, agent.sessionId) {
+                                AgentItemCard(
+                                  agent,
+                                  onClick = {
+                                    actions.selectProfile(profile.id)
+                                    actions.selectAgent(agent)
+                                  },
+                                )
+                              }
+                            }
+                          }
+                        } else {
+                          MachineDivider()
+                          Text(
+                            "No active agents",
+                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.appColors.faint,
+                          )
                         }
                       }
                     }

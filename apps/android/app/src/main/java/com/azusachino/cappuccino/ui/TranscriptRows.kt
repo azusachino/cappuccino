@@ -321,7 +321,7 @@ internal fun LiveStatusLine(color: Color, detail: String? = null) {
 
 @Composable
 internal fun StatusSquare(color: Color, modifier: Modifier = Modifier) {
-  Box(modifier.size(8.dp).background(color).clearAndSetSemantics {})
+  Box(modifier.size(6.dp).background(color, CircleShape).clearAndSetSemantics {})
 }
 
 /** The way back to the newest output, shown only away from the bottom (pi-pocket's `.jump`). */
