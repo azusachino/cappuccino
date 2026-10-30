@@ -1003,12 +1003,21 @@ fun CappuccinoScreen(
                   state.profiles.map { profile ->
                     val details =
                       state.bridgeDetails[profile.id]?.takeIf { it.machineId == profile.machineId }
+                    val conn = state.machineConnection(profile).connection
+                    val conflictProto =
+                      if (conn is ConnectionState.Error) {
+                        Regex("""protocol (\d+)""")
+                          .find(conn.message)
+                          ?.groupValues
+                          ?.get(1)
+                          ?.toLongOrNull()
+                      } else null
                     SettingsConnection(
                       id = profile.id,
                       label = profile.label,
-                      status = state.machineConnection(profile).connection.statusText(),
+                      status = conn.statusText(),
                       bridgeVersion = details?.version,
-                      protocol = details?.protocol,
+                      protocol = details?.protocol ?: conflictProto,
                     )
                   },
                 onConnectionDetails = { profileId ->

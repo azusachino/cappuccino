@@ -293,10 +293,19 @@ internal fun MachineInformation(
       }
 
       if (connection is ConnectionState.Error) {
+        val bannerText =
+          if (status == "Protocol conflict") {
+            val bridgeProto =
+              Regex("""bridge protocol (\d+)""").find(connection.message)?.groupValues?.get(1)
+            val num = bridgeProto?.toIntOrNull() ?: 1
+            if (num > 1) {
+              "Protocol conflict: this bridge uses v$bridgeProto (newer than app v1). Please update Cappuccino to the latest version."
+            } else {
+              "Protocol conflict: this bridge uses v$bridgeProto (older than app v1). Please update cappuccino-bridge on your machine."
+            }
+          } else connection.message
         ErrorBanner(
-          if (status == "Protocol conflict")
-            "The app and bridge use incompatible protocols. Update to compatible builds."
-          else connection.message,
+          bannerText,
           modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
       }

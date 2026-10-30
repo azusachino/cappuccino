@@ -148,9 +148,13 @@ internal fun SettingsScreen(
           val isConflict = connection.status == "Protocol conflict"
           val detailText =
             when {
-              isConflict -> "Incompatible protocol; app requires bridge protocol 1"
-              connection.bridgeVersion != null ->
-                "Bridge v${connection.bridgeVersion} · Protocol ${connection.protocol ?: 1}"
+              isConflict ->
+                if (connection.protocol != null && connection.protocol > 1)
+                  "Bridge uses v${connection.protocol}; app requires v1. Update Cappuccino."
+                else if (connection.protocol != null && connection.protocol < 1)
+                  "Bridge uses v${connection.protocol}; app requires v1. Update cappuccino-bridge."
+                else "App requires bridge API v1. Update required."
+              connection.bridgeVersion != null -> "Bridge v${connection.bridgeVersion}"
               else -> null
             }
           SettingRow(
@@ -247,9 +251,9 @@ internal fun SettingsScreen(
       )
       SettingsDivider()
       SettingRow(
-        "Bridge protocol",
-        value = "Protocol 1",
-        detail = "Supported wire format version",
+        "Bridge API",
+        value = "v1 (compatible)",
+        detail = "Communication protocol between app and bridge",
         icon = {
           Icon(
             painterResource(R.drawable.ic_more),
@@ -265,7 +269,6 @@ internal fun SettingsScreen(
         SettingRow(
           "Connected bridge",
           value = "v$activeBridgeVersion",
-          detail = activeBridgeProtocol?.let { "Protocol $it (compatible)" },
           icon = {
             Icon(
               painterResource(R.drawable.ic_machine),
