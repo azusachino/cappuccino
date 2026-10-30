@@ -1,9 +1,15 @@
 package com.azusachino.cappuccino.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -29,12 +36,18 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -150,37 +163,45 @@ internal fun MachineDivider() {
   )
 }
 
-/** Single row for keys and values with balanced column weights and no squashing. */
+/** Single row for keys and values with rock-solid right alignment. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun MachineDetailRow(
   label: String,
   value: String? = null,
   valueColor: Color? = null,
   isMono: Boolean = false,
+  showChevron: Boolean = false,
   trailing: (@Composable () -> Unit)? = null,
   onClick: (() -> Unit)? = null,
+  onLongClick: (() -> Unit)? = null,
 ) {
   val colors = MaterialTheme.appColors
-  val hasValue = value != null
   Row(
     Modifier.fillMaxWidth()
       .heightIn(min = 46.dp)
       .then(
-        if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier
+        if (onClick != null || onLongClick != null) {
+          Modifier.combinedClickable(
+            role = Role.Button,
+            onClick = { onClick?.invoke() },
+            onLongClick = { onLongClick?.invoke() },
+          )
+        } else Modifier
       )
       .padding(horizontal = 16.dp, vertical = 11.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(
       text = label,
-      modifier = Modifier.weight(if (hasValue) 0.42f else 1f, fill = false),
       style = MaterialTheme.typography.bodyMedium,
       color = colors.text,
       maxLines = 1,
       overflow = TextOverflow.Ellipsis,
     )
+    Spacer(Modifier.width(12.dp))
     Row(
-      modifier = Modifier.weight(if (hasValue) 0.58f else 1f),
+      modifier = Modifier.weight(1f),
       horizontalArrangement = Arrangement.End,
       verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -194,7 +215,7 @@ internal fun MachineDetailRow(
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Normal,
               )
-            else MaterialTheme.typography.bodySmall,
+            else MaterialTheme.typography.bodyMedium,
           color = valueColor ?: colors.muted,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
@@ -202,7 +223,7 @@ internal fun MachineDetailRow(
         )
       }
       trailing?.invoke()
-      if (onClick != null && trailing == null) {
+      if (showChevron) {
         Text(
           "›",
           modifier = Modifier.padding(start = 6.dp),
@@ -215,16 +236,29 @@ internal fun MachineDetailRow(
 }
 
 /** Dedicated field for longer values (URLs, hashes, errors) to prevent line wrap artifacts. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun MachineDetailField(
   label: String,
   value: String,
   isMono: Boolean = false,
   isError: Boolean = false,
+  onClick: (() -> Unit)? = null,
+  onLongClick: (() -> Unit)? = null,
 ) {
   val colors = MaterialTheme.appColors
   Column(
-    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+    Modifier.fillMaxWidth()
+      .then(
+        if (onClick != null || onLongClick != null) {
+          Modifier.combinedClickable(
+            role = Role.Button,
+            onClick = { onClick?.invoke() },
+            onLongClick = { onLongClick?.invoke() },
+          )
+        } else Modifier
+      )
+      .padding(horizontal = 16.dp, vertical = 10.dp),
     verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
     Text(
@@ -248,6 +282,71 @@ internal fun MachineDetailField(
   }
 }
 
+/** Full-screen tap-to-preview dialog for truncated or long text with full copy support. */
+@Composable
+internal fun ValuePreviewDialog(
+  title: String,
+  value: String,
+  isMono: Boolean = true,
+  onDismiss: () -> Unit,
+) {
+  val context = LocalContext.current
+  val colors = MaterialTheme.appColors
+  var copied by remember { mutableStateOf(false) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = colors.text,
+      )
+    },
+    text = {
+      Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+        Surface(
+          shape = RoundedCornerShape(8.dp),
+          color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          SelectionContainer {
+            Text(
+              text = value,
+              modifier = Modifier.padding(12.dp),
+              style =
+                if (isMono)
+                  TextStyle(
+                    fontFamily = JetBrainsMono,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    fontWeight = FontWeight.Normal,
+                  )
+                else MaterialTheme.typography.bodyMedium,
+              color = colors.text,
+            )
+          }
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(
+        onClick = {
+          val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+          cm.setPrimaryClip(ClipData.newPlainText(title, value))
+          copied = true
+          Toast.makeText(context, "Copied $title to clipboard", Toast.LENGTH_SHORT).show()
+        }
+      ) {
+        Text(if (copied) "Copied" else "Copy")
+      }
+    },
+    dismissButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    containerColor = MaterialTheme.colorScheme.surface,
+  )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MachineInformation(
@@ -258,11 +357,20 @@ internal fun MachineInformation(
   onRename: () -> Unit,
 ) {
   val colors = MaterialTheme.appColors
+  val context = LocalContext.current
   val details = state.bridgeDetails[profile.id]?.takeIf { it.machineId == profile.machineId }
   val connection = state.machineConnection(profile).connection
   val current = connection == ConnectionState.Connected
   val status = machineInformationStatus(profile, state)
   val statusColor = connectionStatusColor(status, colors)
+
+  var previewItem by remember { mutableStateOf<Pair<String, String>?>(null) }
+  val onPreview = { label: String, value: String -> previewItem = Pair(label, value) }
+  val onCopy = { label: String, value: String ->
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cm.setPrimaryClip(ClipData.newPlainText(label, value))
+    Toast.makeText(context, "Copied $label to clipboard", Toast.LENGTH_SHORT).show()
+  }
 
   ModalBottomSheet(
     onDismissRequest = onDismiss,
@@ -296,7 +404,7 @@ internal fun MachineInformation(
         val bannerText =
           if (status == "Protocol conflict") {
             val bridgeProto =
-              Regex("""bridge protocol (\d+)""").find(connection.message)?.groupValues?.get(1)
+              Regex("""bridge protocol v?(\d+)""").find(connection.message)?.groupValues?.get(1)
             val num = bridgeProto?.toIntOrNull() ?: 1
             if (num > 1) {
               "Protocol conflict: this bridge uses v$bridgeProto (newer than app v1). Please update Cappuccino to the latest version."
@@ -306,19 +414,40 @@ internal fun MachineInformation(
           } else connection.message
         ErrorBanner(
           bannerText,
-          modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+          modifier =
+            Modifier.padding(horizontal = 16.dp, vertical = 4.dp).clickable {
+              onPreview("Error details", bannerText)
+            },
         )
       }
       machineInformationWarnings(profile, state).forEach { warning ->
-        ErrorBanner(warning, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
+        ErrorBanner(
+          warning,
+          modifier =
+            Modifier.padding(horizontal = 16.dp, vertical = 2.dp).clickable {
+              onPreview("Warning details", warning)
+            },
+        )
       }
 
       // Card 1: Routing & Transport
       MachineCard("Routing & Transport") {
         if (profile.endpoint.iroh != null && profile.endpoint.hasTailnet) {
-          MachineDetailRow("Primary route", "iroh P2P (default)")
+          val primary = "iroh P2P (default)"
+          MachineDetailRow(
+            "Primary route",
+            primary,
+            onClick = { onPreview("Primary route", primary) },
+            onLongClick = { onCopy("Primary route", primary) },
+          )
           MachineDivider()
-          MachineDetailRow("Fallback route", "Tailnet (automatic)")
+          val fallback = "Tailnet (automatic)"
+          MachineDetailRow(
+            "Fallback route",
+            fallback,
+            onClick = { onPreview("Fallback route", fallback) },
+            onLongClick = { onCopy("Fallback route", fallback) },
+          )
           MachineDivider()
           val currentBadge = state.machineBadges[profile.id]
           val (activeText, activeColor) =
@@ -328,46 +457,97 @@ internal fun MachineInformation(
               TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
               else -> if (current) "Connected" to colors.ok else status to colors.muted
             }
-          MachineDetailRow("Active route", activeText, valueColor = activeColor)
+          MachineDetailRow(
+            "Active route",
+            activeText,
+            valueColor = activeColor,
+            onClick = { onPreview("Active route", activeText) },
+            onLongClick = { onCopy("Active route", activeText) },
+          )
           MachineDivider()
-          MachineDetailField(
+          val host =
+            profile.endpoint.base.host ?: profile.endpoint.base.toString().removeSuffix("/")
+          MachineDetailRow(
             "Tailnet address",
-            profile.endpoint.base.toString().removeSuffix("/"),
+            host,
             isMono = true,
+            onClick = { onPreview("Tailnet address", host) },
+            onLongClick = { onCopy("Tailnet address", host) },
           )
         } else if (profile.endpoint.iroh != null) {
-          MachineDetailRow("Primary route", "iroh P2P (default)")
+          val primary = "iroh P2P (default)"
+          MachineDetailRow(
+            "Primary route",
+            primary,
+            onClick = { onPreview("Primary route", primary) },
+            onLongClick = { onCopy("Primary route", primary) },
+          )
           MachineDivider()
           val currentBadge = state.machineBadges[profile.id]
           val (activeText, activeColor) =
             when (currentBadge) {
               TransportBadge.IROH_DIRECT -> "iroh direct (default)" to colors.ok
-              TransportBadge.IROH_RELAYED -> "iroh relayed (default)" to colors.ok
+              TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
               else -> if (current) "Connected" to colors.ok else status to colors.muted
             }
-          MachineDetailRow("Active route", activeText, valueColor = activeColor)
+          MachineDetailRow(
+            "Active route",
+            activeText,
+            valueColor = activeColor,
+            onClick = { onPreview("Active route", activeText) },
+            onLongClick = { onCopy("Active route", activeText) },
+          )
         } else {
-          MachineDetailRow("Transport", "Tailnet")
+          val primary = "Tailnet"
+          MachineDetailRow(
+            "Primary route",
+            primary,
+            onClick = { onPreview("Primary route", primary) },
+            onLongClick = { onCopy("Primary route", primary) },
+          )
           MachineDivider()
-          MachineDetailField(
+          val host =
+            profile.endpoint.base.host ?: profile.endpoint.base.toString().removeSuffix("/")
+          MachineDetailRow(
             "Tailnet address",
-            profile.endpoint.base.toString().removeSuffix("/"),
+            host,
             isMono = true,
+            onClick = { onPreview("Tailnet address", host) },
+            onLongClick = { onCopy("Tailnet address", host) },
           )
         }
       }
 
       // Card 2: System & Runtime
       MachineCard("System & Runtime") {
-        MachineDetailRow("Bridge version", details?.version ?: "0.1.0", isMono = true)
+        val bridgeVer = details?.version ?: "0.1.0"
+        MachineDetailRow(
+          "Bridge version",
+          bridgeVer,
+          isMono = true,
+          onClick = { onPreview("Bridge version", bridgeVer) },
+          onLongClick = { onCopy("Bridge version", bridgeVer) },
+        )
         MachineDivider()
-        MachineDetailRow("App version", BuildConfig.VERSION_NAME, isMono = true)
+        MachineDetailRow(
+          "App version",
+          BuildConfig.VERSION_NAME,
+          isMono = true,
+          onClick = { onPreview("App version", BuildConfig.VERSION_NAME) },
+          onLongClick = { onCopy("App version", BuildConfig.VERSION_NAME) },
+        )
         if (
           state.activeProfileId == profile.id && state.selectedAgent?.machineId == profile.machineId
         ) {
           state.selectedAgent.branch?.let { branch ->
             MachineDivider()
-            MachineDetailRow("Branch", branch, isMono = true)
+            MachineDetailRow(
+              "Branch",
+              branch,
+              isMono = true,
+              onClick = { onPreview("Branch", branch) },
+              onLongClick = { onCopy("Branch", branch) },
+            )
           }
         }
       }
@@ -376,15 +556,25 @@ internal fun MachineInformation(
       MachineCard("Actions") {
         MachineDetailRow(
           "Technical details",
+          showChevron = true,
           onClick = onTechnicalDetails,
         )
         MachineDivider()
         MachineDetailRow(
           "Rename machine",
+          showChevron = true,
           onClick = onRename,
         )
       }
     }
+  }
+
+  previewItem?.let { (label, value) ->
+    ValuePreviewDialog(
+      title = label,
+      value = value,
+      onDismiss = { previewItem = null },
+    )
   }
 }
 
@@ -423,6 +613,6 @@ internal fun TechnicalConnectionScreen(
     },
     containerColor = MaterialTheme.colorScheme.background,
   ) { padding ->
-    SelectionContainer(Modifier.padding(padding)) { ConnectionDiagnostics(profile, state) }
+    Box(Modifier.padding(padding)) { ConnectionDiagnostics(profile, state) }
   }
 }

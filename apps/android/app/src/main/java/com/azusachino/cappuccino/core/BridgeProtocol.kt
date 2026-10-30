@@ -270,7 +270,7 @@ fun parsePaired(json: JsonObject): UUID {
     throw ProtocolException("Unsupported bridge session response")
   val protocol = json.long("protocol")
   if (protocol != 1L)
-    throw ProtocolException("Incompatible bridge protocol $protocol; app requires 1")
+    throw ProtocolException("Incompatible bridge protocol v$protocol; app requires v1")
   return uuid(json.string("machine_id"))
 }
 

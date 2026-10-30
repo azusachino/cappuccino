@@ -61,7 +61,7 @@ class MachineInformationTest {
       machineInformationStatus(
         profile,
         connected.copy(
-          connection = ConnectionState.Error("Incompatible bridge protocol 2; app requires 1")
+          connection = ConnectionState.Error("Incompatible bridge protocol v2; app requires v1")
         ),
       ),
     )

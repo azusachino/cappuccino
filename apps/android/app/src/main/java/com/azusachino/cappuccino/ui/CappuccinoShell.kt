@@ -990,10 +990,6 @@ fun CappuccinoScreen(
               )
             }
             destination == Destination.SETTINGS -> {
-              val activeProfile = state.profiles.find { it.id == state.activeProfileId }
-              val activeDetails = activeProfile?.let {
-                state.bridgeDetails[it.id]?.takeIf { b -> b.machineId == activeProfile.machineId }
-              }
               SettingsScreen(
                 themeMode = state.themeMode,
                 onSelectTheme = actions::setThemeMode,
@@ -1006,7 +1002,7 @@ fun CappuccinoScreen(
                     val conn = state.machineConnection(profile).connection
                     val conflictProto =
                       if (conn is ConnectionState.Error) {
-                        Regex("""protocol (\d+)""")
+                        Regex("""protocol v?(\d+)""")
                           .find(conn.message)
                           ?.groupValues
                           ?.get(1)
@@ -1024,8 +1020,6 @@ fun CappuccinoScreen(
                   detailsProfileId = profileId
                   showingConnection = true
                 },
-                activeBridgeVersion = activeDetails?.version,
-                activeBridgeProtocol = activeDetails?.protocol,
                 scrollState = settingsScrollState,
               )
             }
@@ -1055,17 +1049,11 @@ fun CappuccinoScreen(
                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
                       )
                       Text(
-                        "No machines configured",
+                        "No machines",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                       )
-                      Text(
-                        "Pair with cappuccino-bridge via QR code to connect.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                      )
-                      Spacer(Modifier.height(4.dp))
+                      Spacer(Modifier.height(8.dp))
                       Button(
                         onClick = {
                           irohMode = true
@@ -1079,7 +1067,7 @@ fun CappuccinoScreen(
                           modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("Pair Machine")
+                        Text("Add Machine")
                       }
                     }
                   }
@@ -1342,11 +1330,6 @@ fun CappuccinoScreen(
                 )
               }
             } else {
-              Text(
-                "Run 'cappuccino-bridge pair' to show QR code.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
               Button(
                 onClick = {
                   scanError = null
@@ -1447,7 +1430,7 @@ fun CappuccinoScreen(
           irohMode = true
         }
       },
-      title = { Text(if (irohMode) "Pair Machine" else "Add Bridge URL") },
+      title = { Text("Add Machine") },
       text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
           if (state.busy) {
@@ -1464,11 +1447,6 @@ fun CappuccinoScreen(
               )
             }
           } else if (irohMode) {
-            Text(
-              "Run 'cappuccino-bridge pair' to show QR code.",
-              style = MaterialTheme.typography.bodyMedium,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Button(
               onClick = {
                 scanError = null
@@ -1498,17 +1476,12 @@ fun CappuccinoScreen(
               modifier = Modifier.align(Alignment.CenterHorizontally),
             ) {
               Text(
-                "Tailnet URL",
+                "Enter bridge address instead",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
           } else {
-            Text(
-              "Enter the bridge address on your Tailnet.",
-              style = MaterialTheme.typography.bodyMedium,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             OutlinedTextField(
               value = endpoint,
               onValueChange = { endpoint = it },
@@ -1557,8 +1530,9 @@ fun CappuccinoScreen(
               modifier = Modifier.align(Alignment.CenterHorizontally),
             ) {
               Text(
-                "Back to QR code pairing",
+                "Scan QR code instead",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
           }

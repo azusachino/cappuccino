@@ -1,5 +1,9 @@
 package com.azusachino.cappuccino.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -7,23 +11,31 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +43,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -38,6 +52,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.azusachino.cappuccino.BuildConfig
@@ -58,14 +73,14 @@ internal fun SettingsScreen(
   onReloadMachines: () -> Unit,
   connections: List<SettingsConnection>,
   onConnectionDetails: (String) -> Unit,
-  activeBridgeVersion: String? = null,
-  activeBridgeProtocol: Long? = null,
   contentPadding: PaddingValues = PaddingValues(0.dp),
   scrollState: ScrollState = rememberScrollState(),
 ) {
-  val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+  val context = LocalContext.current
+  val uriHandler = LocalUriHandler.current
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }
   var showingThemePicker by rememberSaveable { mutableStateOf(false) }
+  var showingAboutGuide by rememberSaveable { mutableStateOf(false) }
 
   if (showingThemePicker) {
     AlertDialog(
@@ -177,111 +192,77 @@ internal fun SettingsScreen(
         }
       }
     }
-    SettingsCard("Help & About") {
+    SettingsCard("About") {
       SettingRow(
-        "Documentation",
-        value = "GitHub",
-        icon = {
-          Icon(
-            painterResource(R.drawable.ic_grid),
-            contentDescription = null,
-            tint = MaterialTheme.appColors.accent,
-            modifier = Modifier.size(20.dp),
-          )
-        },
-      ) {
-        helpError =
-          runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
-            .exceptionOrNull()
-            ?.let { "Couldn't open documentation." }
-      }
-      SettingsDivider()
+        title = "About Cappuccino",
+        detail = "Overview and basic guide",
+        onClick = { showingAboutGuide = true },
+      )
+      SettingsDivider(indented = false)
       SettingRow(
-        "Iroh setup",
-        value = "Docs",
-        icon = {
-          Icon(
-            painterResource(R.drawable.ic_refresh),
-            contentDescription = null,
-            tint = MaterialTheme.appColors.accent,
-            modifier = Modifier.size(20.dp),
-          )
-        },
-      ) {
-        helpError =
-          runCatching {
-            uriHandler.openUri(
-              "https://github.com/azusachino/cappuccino/blob/main/docs/iroh-setup.md"
-            )
-          }
-            .exceptionOrNull()
-            ?.let { "Couldn't open iroh setup guide." }
-      }
-      SettingsDivider()
-      SettingRow(
-        "Source",
-        value = "GitHub",
-        icon = {
-          Icon(
-            painterResource(R.drawable.ic_chat),
-            contentDescription = null,
-            tint = MaterialTheme.appColors.accent,
-            modifier = Modifier.size(20.dp),
-          )
-        },
-      ) {
-        helpError =
-          runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino") }
-            .exceptionOrNull()
-            ?.let { "Couldn't open GitHub." }
-      }
-      SettingsDivider()
-      SettingRow(
-        "Client version",
+        title = "Version",
         value = BuildConfig.VERSION_NAME,
-        icon = {
-          Icon(
-            painterResource(R.drawable.ic_settings),
-            contentDescription = null,
-            tint = MaterialTheme.appColors.muted,
-            modifier = Modifier.size(20.dp),
-          )
+        showChevron = false,
+        onClick = {
+          val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+          cm.setPrimaryClip(ClipData.newPlainText("Version", BuildConfig.VERSION_NAME))
+          Toast.makeText(context, "Copied version", Toast.LENGTH_SHORT).show()
         },
-        onClick = null,
       )
-      SettingsDivider()
+      SettingsDivider(indented = false)
       SettingRow(
-        "Bridge API",
-        value = "v1 (compatible)",
-        detail = "Communication protocol between app and bridge",
-        icon = {
-          Icon(
-            painterResource(R.drawable.ic_more),
-            contentDescription = null,
-            tint = MaterialTheme.appColors.muted,
-            modifier = Modifier.size(20.dp),
-          )
+        title = "Bridge API",
+        value = "v1",
+        showChevron = false,
+        onClick = {
+          val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+          cm.setPrimaryClip(ClipData.newPlainText("Bridge API", "v1"))
+          Toast.makeText(context, "Copied Bridge API version", Toast.LENGTH_SHORT).show()
         },
-        onClick = null,
       )
-      if (activeBridgeVersion != null) {
-        SettingsDivider()
-        SettingRow(
-          "Connected bridge",
-          value = "v$activeBridgeVersion",
-          icon = {
-            Icon(
-              painterResource(R.drawable.ic_machine),
-              contentDescription = null,
-              tint = MaterialTheme.appColors.ok,
-              modifier = Modifier.size(20.dp),
-            )
-          },
-          onClick = null,
-        )
-      }
+      SettingsDivider(indented = false)
+      SettingRow(
+        title = "Documentation",
+        value = "GitHub",
+        onClick = {
+          helpError =
+            runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
+              .exceptionOrNull()
+              ?.let { "Couldn't open documentation." }
+        },
+      )
+      SettingsDivider(indented = false)
+      SettingRow(
+        title = "Iroh setup",
+        value = "Docs",
+        onClick = {
+          helpError =
+            runCatching {
+              uriHandler.openUri(
+                "https://github.com/azusachino/cappuccino/blob/main/docs/iroh-setup.md"
+              )
+            }
+              .exceptionOrNull()
+              ?.let { "Couldn't open iroh setup guide." }
+        },
+      )
+      SettingsDivider(indented = false)
+      SettingRow(
+        title = "Source",
+        value = "GitHub",
+        onClick = {
+          helpError =
+            runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino") }
+              .exceptionOrNull()
+              ?.let { "Couldn't open GitHub." }
+        },
+      )
     }
     helpError?.let { SettingNote(it, warning = true) }
+  }
+
+  if (showingAboutGuide) {
+    AboutCappuccinoSheet(onDismiss = { showingAboutGuide = false })
   }
 }
 
@@ -340,6 +321,7 @@ internal fun SettingRow(
   value: String? = null,
   detail: String? = null,
   warning: Boolean = false,
+  showChevron: Boolean = true,
   icon: (@Composable () -> Unit)? = null,
   trailing: (@Composable () -> Unit)? = null,
   onClick: (() -> Unit)?,
@@ -351,9 +333,8 @@ internal fun SettingRow(
       .then(
         if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier
       )
-      .padding(horizontal = 16.dp, vertical = 8.dp),
+      .padding(horizontal = 16.dp, vertical = 9.dp),
     verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(14.dp),
   ) {
     if (icon != null) {
       Box(
@@ -362,23 +343,197 @@ internal fun SettingRow(
       ) {
         icon()
       }
+      Spacer(Modifier.width(14.dp))
     }
     Column(Modifier.weight(1f)) {
       Text(title, style = MaterialTheme.typography.bodyMedium, color = colors.text)
       detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.muted) }
     }
-    value?.let {
+    Spacer(Modifier.width(12.dp))
+    Row(
+      horizontalArrangement = Arrangement.End,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      if (value != null) {
+        Text(
+          value,
+          Modifier.widthIn(max = 200.dp),
+          style = MaterialTheme.typography.bodySmall,
+          color = if (warning) colors.warn else colors.muted,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          textAlign = TextAlign.End,
+        )
+      }
+      trailing?.invoke()
+      if (onClick != null && trailing == null && showChevron) {
+        Text(
+          "›",
+          modifier = Modifier.padding(start = 6.dp),
+          style = MaterialTheme.typography.bodyMedium,
+          color = colors.faint,
+        )
+      }
+    }
+  }
+}
+
+/** Bottom sheet explaining the app, basic instructions, and resources. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun AboutCappuccinoSheet(onDismiss: () -> Unit) {
+  val colors = MaterialTheme.appColors
+  val uriHandler = LocalUriHandler.current
+
+  ModalBottomSheet(
+    onDismissRequest = onDismiss,
+    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    containerColor = MaterialTheme.colorScheme.surface,
+  ) {
+    Column(
+      Modifier.fillMaxWidth()
+        .verticalScroll(rememberScrollState())
+        .padding(horizontal = 24.dp)
+        .padding(bottom = 36.dp),
+      verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+          "Cappuccino",
+          style = MaterialTheme.typography.headlineSmall,
+          fontWeight = FontWeight.Bold,
+          color = colors.text,
+        )
+        Text(
+          "Version ${BuildConfig.VERSION_NAME} • Bridge API v1",
+          style = MaterialTheme.typography.bodySmall,
+          color = colors.muted,
+        )
+      }
+
       Text(
-        it,
-        Modifier.widthIn(max = 200.dp),
+        "Cappuccino is a companion app for coding agents running in Herdr terminal panes on your development machines.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = colors.text,
+        lineHeight = 20.sp,
+      )
+
+      HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+
+      Text(
+        "BASIC INSTRUCTIONS",
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        letterSpacing = 0.5.sp,
+      )
+
+      AboutGuideItem(
+        step = "1",
+        title = "Pair your machine",
+        description =
+          "Run 'cappuccino-bridge pair' on your computer to show a pairing QR code, then tap + on the Machines tab to scan it. Or connect via your Tailnet address.",
+      )
+      AboutGuideItem(
+        step = "2",
+        title = "Monitor running agents",
+        description =
+          "See active agents across all paired machines. Tap any session to read live output, reasoning, and tool executions in real time.",
+      )
+      AboutGuideItem(
+        step = "3",
+        title = "Steer & approve",
+        description =
+          "Confirm pending tool approvals, reply to questions, or prompt your agent while away from your desk.",
+      )
+      AboutGuideItem(
+        step = "4",
+        title = "Always running",
+        description =
+          "Agents run inside Herdr on your host machine. Disconnecting or quitting Cappuccino never terminates your agents or loses session state.",
+      )
+
+      HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+
+      Text(
+        "RESOURCES",
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        letterSpacing = 0.5.sp,
+      )
+
+      Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        OutlinedButton(
+          modifier = Modifier.weight(1f),
+          onClick = {
+            runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
+          },
+        ) {
+          Text("Docs")
+        }
+        OutlinedButton(
+          modifier = Modifier.weight(1f),
+          onClick = {
+            runCatching {
+              uriHandler.openUri(
+                "https://github.com/azusachino/cappuccino/blob/main/docs/iroh-setup.md"
+              )
+            }
+          },
+        ) {
+          Text("Iroh")
+        }
+        OutlinedButton(
+          modifier = Modifier.weight(1f),
+          onClick = {
+            runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino") }
+          },
+        ) {
+          Text("GitHub")
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AboutGuideItem(step: String, title: String, description: String) {
+  val colors = MaterialTheme.appColors
+  Row(
+    Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(14.dp),
+  ) {
+    Surface(
+      shape = CircleShape,
+      color = MaterialTheme.colorScheme.primaryContainer,
+      modifier = Modifier.size(24.dp),
+    ) {
+      Box(contentAlignment = Alignment.Center) {
+        Text(
+          step,
+          style = MaterialTheme.typography.labelSmall,
+          fontWeight = FontWeight.Bold,
+          color = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+      }
+    }
+    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+      Text(
+        title,
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = colors.text,
+      )
+      Text(
+        description,
         style = MaterialTheme.typography.bodySmall,
-        color = if (warning) colors.warn else colors.muted,
-        maxLines = 2,
-        textAlign = TextAlign.End,
+        color = colors.muted,
+        lineHeight = 18.sp,
       )
     }
-    trailing?.invoke()
-    if (onClick != null && trailing == null)
-      Text("›", style = MaterialTheme.typography.bodyMedium, color = colors.faint)
   }
 }
