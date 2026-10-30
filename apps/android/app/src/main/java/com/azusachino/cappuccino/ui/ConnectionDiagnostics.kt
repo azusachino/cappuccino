@@ -28,81 +28,58 @@ internal fun ConnectionDiagnostics(profile: MachineProfile, state: ConnectedUiSt
     Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
     verticalArrangement = Arrangement.spacedBy(16.dp),
   ) {
-    DetailGroup("Machine") {
-      DetailRow("Name", profile.label)
-      DetailRow("Address", profile.endpoint.base.toString(), true)
-      DetailRow("Connection", machineInformationStatus(profile, state))
-      if (connection is ConnectionState.Error)
-        DetailRow("Connection problem", connection.message, true)
+    DetailGroup("Machine & Transport") {
+      DetailRow("Name", profile.label.takeUnless { it == "iroh.invalid" } ?: "Machine")
+      if (profile.endpoint.iroh != null && profile.endpoint.hasTailnet) {
+        DetailRow("Primary transport", "iroh P2P (default)")
+        DetailRow("Fallback transport", "Tailnet (automatic fallback)")
+        DetailRow("Tailnet URL", profile.endpoint.base.toString().removeSuffix("/"), true)
+        val active =
+          when (state.machineBadges[profile.id]) {
+            com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
+              "iroh P2P (direct QUIC) — default active"
+            com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
+              "iroh P2P (relayed) — default active"
+            com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
+              "Tailnet — automatic fallback active"
+            else ->
+              if (connection == com.azusachino.cappuccino.io.ConnectionState.Connected) "Connected"
+              else "Connecting..."
+          }
+        DetailRow("Active connection", active)
+      } else if (profile.endpoint.iroh != null) {
+        DetailRow("Primary transport", "iroh P2P (default)")
+        val active =
+          when (state.machineBadges[profile.id]) {
+            com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT -> "iroh P2P (direct QUIC)"
+            com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED -> "iroh P2P (relayed)"
+            else ->
+              if (connection == com.azusachino.cappuccino.io.ConnectionState.Connected) "Connected"
+              else "Connecting..."
+          }
+        DetailRow("Active connection", active)
+      } else {
+        DetailRow("Transport", "Tailnet only")
+        DetailRow("Tailnet URL", profile.endpoint.base.toString().removeSuffix("/"), true)
+      }
+      DetailRow("Status", machineInformationStatus(profile, state))
+      if (connection is ConnectionState.Error) DetailRow("Problem", connection.message, true)
     }
     DetailGroup("Versions") {
-      DetailRow("App version", BuildConfig.VERSION_NAME)
-      DetailRow("Bridge version", details?.version ?: "Not reported")
-      DetailRow("Protocol version", details?.protocol?.toString() ?: "Not checked")
-    }
-    DetailGroup("Bridge support") {
-      for ((key, label) in
-        listOf(
-          "agent_discovery" to "Agent discovery",
-          "live_output" to "Live output",
-          "conversation_history" to "Conversation history",
-          "prompt_input" to "Send messages",
-          "prompt_answers" to "Answer questions and approvals",
-        )) {
-        DetailRow(
-          label,
-          when (details?.capabilities?.get(key)) {
-            true -> "Supported"
-            false -> "Unsupported"
-            null -> "Not reported"
-          },
-        )
-      }
+      DetailRow("App", BuildConfig.VERSION_NAME)
+      DetailRow("Bridge", details?.version ?: "Not reported")
     }
     if (
       state.activeProfileId == profile.id && state.selectedAgent?.machineId == profile.machineId
     ) {
       DetailGroup("Current agent") {
-        if (state.omittedConversationTurns > 0 || state.omittedToolOperations > 0) {
-          DetailRow("History window", "Up to 200 recent messages and 100 tool calls", true)
-        }
-        state.conversationTurns
-          .flatMap { it.parts }
-          .filterIsInstance<com.azusachino.cappuccino.core.ConversationPart.ResponseStatus>()
-          .lastOrNull { it.status == "failed" }
-          ?.let { issue ->
-            DetailRow(
-              "Last response issue",
-              issue.detail ?: "Failure reported without details",
-              true,
-            )
-          }
         state.selectedAgent.cwd?.let { DetailRow("Working directory", it, true) }
         state.selectedAgent.branch?.let { DetailRow("Branch", it) }
-        state.conversationSource?.let {
-          DetailRow(
-            "History",
-            when (it) {
-              "canonical_log" -> "Canonical session"
-              "scrollback",
-              "terminal_scrollback" -> "Scrollback fallback"
-              else -> "Not recognized"
-            },
-          )
-        }
         state.stream.error?.let { DetailRow("Runtime problem", it, true) }
         if (state.connection is ConnectionState.Error)
-          DetailRow("Action / stream problem", state.connection.message, true)
+          DetailRow("Stream problem", state.connection.message, true)
       }
     }
-    Text(
-      if (connection == ConnectionState.Connected)
-        "Metadata from the verified connection. Advertised support does not establish per-agent readiness or health."
-      else
-        "Last verified metadata, if available. Advertised support does not establish per-agent readiness or health.",
-      style = MaterialTheme.typography.bodySmall,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
   }
 }
 

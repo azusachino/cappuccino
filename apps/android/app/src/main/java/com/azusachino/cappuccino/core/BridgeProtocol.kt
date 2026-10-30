@@ -81,6 +81,26 @@ class Endpoint private constructor(val base: URI, val iroh: IrohEndpointAddr? = 
   val hasTailnet: Boolean
     get() = base.toString() != IROH_PLACEHOLDER_URL
 
+  /** Clean user-facing address description; never leaks internal placeholder URIs. */
+  val displayAddress: String
+    get() =
+      when {
+        hasTailnet && iroh != null -> "${base.toString().removeSuffix("/")} (iroh P2P)"
+        hasTailnet -> base.toString().removeSuffix("/")
+        else -> "iroh peer-to-peer"
+      }
+
+  val transportSummary: String
+    get() =
+      when {
+        hasTailnet && iroh != null -> "iroh P2P + Tailnet"
+        hasTailnet -> "Tailnet"
+        else -> "iroh P2P"
+      }
+
+  val defaultLabel: String
+    get() = if (hasTailnet) base.host else "Machine"
+
   /** The same machine with its iroh pairing set (or replaced). */
   fun withIroh(addr: IrohEndpointAddr): Endpoint = Endpoint(base, addr)
 

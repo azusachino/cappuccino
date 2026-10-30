@@ -58,61 +58,6 @@ internal fun SettingsScreen(
   val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }
   var showingThemePicker by rememberSaveable { mutableStateOf(false) }
-  var showingIrohDoc by rememberSaveable { mutableStateOf(false) }
-
-  if (showingIrohDoc) {
-    AlertDialog(
-      onDismissRequest = { showingIrohDoc = false },
-      title = { Text("Iroh P2P Transport") },
-      text = {
-        Column(
-          Modifier.verticalScroll(rememberScrollState()),
-          verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-          Text(
-            "Iroh provides zero-configuration P2P direct connectivity over QUIC with TLS 1.3 encryption. Machines dial each other by EndpointId with automatic NAT hole-punching.",
-            style = MaterialTheme.typography.bodyMedium,
-          )
-          Text(
-            "Relay Support",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-          )
-          Text(
-            "• Official N0 relays (including aps1 in Asia) are supported by default when relay_url is unset.\n• Self-hosted relays or custom relay URLs can be set on the bridge in config.toml via \"relay_url\".",
-            style = MaterialTheme.typography.bodySmall,
-          )
-          Text(
-            "Pairing a Machine",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-          )
-          Text(
-            "Run 'cappuccino-bridge pair' on the host machine, then scan the QR code or enter the endpoint address in Cappuccino.",
-            style = MaterialTheme.typography.bodySmall,
-          )
-        }
-      },
-      confirmButton = {
-        TextButton(
-          onClick = {
-            showingIrohDoc = false
-            helpError =
-              runCatching {
-                uriHandler.openUri(
-                  "https://github.com/azusachino/cappuccino/blob/main/docs/iroh-setup.md"
-                )
-              }
-                .exceptionOrNull()
-                ?.let { "Couldn't open docs/iroh-setup.md." }
-          }
-        ) {
-          Text("Open Full Docs")
-        }
-      },
-      dismissButton = { TextButton(onClick = { showingIrohDoc = false }) { Text("Close") } },
-    )
-  }
 
   if (showingThemePicker) {
     AlertDialog(
@@ -193,7 +138,7 @@ internal fun SettingsScreen(
         if (index > 0) SettingsDivider()
         androidx.compose.runtime.key(connection.id) {
           SettingRow(
-            connection.label,
+            connection.label.takeUnless { it == "iroh.invalid" } ?: "Machine",
             value = connection.status,
             icon = {
               Icon(
@@ -211,7 +156,7 @@ internal fun SettingsScreen(
     }
     SettingsCard("Help & About") {
       SettingRow(
-        "Setup guide",
+        "Documentation",
         value = "GitHub",
         icon = {
           Icon(
@@ -225,13 +170,12 @@ internal fun SettingsScreen(
         helpError =
           runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
             .exceptionOrNull()
-            ?.let { "Couldn't open the guide. Visit github.com/azusachino/cappuccino." }
+            ?.let { "Couldn't open documentation." }
       }
       SettingsDivider()
       SettingRow(
         "Iroh setup",
         value = "Docs",
-        detail = "QUIC P2P & relay configuration",
         icon = {
           Icon(
             painterResource(R.drawable.ic_refresh),
@@ -241,25 +185,14 @@ internal fun SettingsScreen(
           )
         },
       ) {
-        showingIrohDoc = true
-      }
-      SettingsDivider()
-      SettingRow(
-        "Herdr",
-        value = "herdr.dev",
-        icon = {
-          Icon(
-            painterResource(R.drawable.ic_more),
-            contentDescription = null,
-            tint = MaterialTheme.appColors.accent,
-            modifier = Modifier.size(20.dp),
-          )
-        },
-      ) {
         helpError =
-          runCatching { uriHandler.openUri("https://herdr.dev") }
+          runCatching {
+            uriHandler.openUri(
+              "https://github.com/azusachino/cappuccino/blob/main/docs/iroh-setup.md"
+            )
+          }
             .exceptionOrNull()
-            ?.let { "Couldn't open herdr.dev." }
+            ?.let { "Couldn't open iroh setup guide." }
       }
       SettingsDivider()
       SettingRow(
@@ -277,29 +210,15 @@ internal fun SettingsScreen(
         helpError =
           runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino") }
             .exceptionOrNull()
-            ?.let { "Couldn't open github.com/azusachino/cappuccino." }
+            ?.let { "Couldn't open GitHub." }
       }
-      SettingsDivider()
-      SettingRow(
-        "License",
-        value = "GPL-3.0",
-        icon = {
-          Icon(
-            painterResource(R.drawable.ic_refresh),
-            contentDescription = null,
-            tint = MaterialTheme.appColors.muted,
-            modifier = Modifier.size(20.dp),
-          )
-        },
-        onClick = null,
-      )
       SettingsDivider()
       SettingRow(
         "Version",
         value = BuildConfig.VERSION_NAME,
         icon = {
           Icon(
-            painterResource(R.drawable.ic_attention),
+            painterResource(R.drawable.ic_settings),
             contentDescription = null,
             tint = MaterialTheme.appColors.muted,
             modifier = Modifier.size(20.dp),

@@ -75,7 +75,7 @@ internal fun MachineInformation(
   ) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
       Text(
-        profile.label,
+        profile.label.takeUnless { it == "iroh.invalid" } ?: "Machine",
         Modifier.padding(horizontal = 24.dp),
         style = MaterialTheme.typography.headlineSmall,
       )
@@ -95,6 +95,63 @@ internal fun MachineInformation(
       }
       machineInformationWarnings(profile, state).forEach { warning ->
         ErrorBanner(warning, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+      }
+      if (profile.endpoint.iroh != null && profile.endpoint.hasTailnet) {
+        val currentBadge = state.machineBadges[profile.id]
+        val activeRoute =
+          when (currentBadge) {
+            com.azusachino.cappuccino.io.TransportBadge.TAILNET -> "Tailnet (fallback active)"
+            com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT -> "iroh direct (default)"
+            com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED -> "iroh relayed (default)"
+            else -> "iroh default · Tailnet fallback"
+          }
+        ListItem(
+          headlineContent = { Text("Transport") },
+          trailingContent = {
+            Text(
+              activeRoute,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          },
+        )
+        ListItem(
+          headlineContent = { Text("Tailnet URL") },
+          trailingContent = {
+            Text(
+              profile.endpoint.base.toString().removeSuffix("/"),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          },
+        )
+      } else if (profile.endpoint.iroh != null) {
+        ListItem(
+          headlineContent = { Text("Transport") },
+          trailingContent = {
+            Text(
+              "iroh P2P",
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          },
+        )
+      } else {
+        ListItem(
+          headlineContent = { Text("Transport") },
+          trailingContent = {
+            Text(
+              "Tailnet",
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          },
+        )
+        ListItem(
+          headlineContent = { Text("Tailnet URL") },
+          trailingContent = {
+            Text(
+              profile.endpoint.base.toString().removeSuffix("/"),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          },
+        )
       }
       ListItem(
         headlineContent = { Text("Bridge version") },

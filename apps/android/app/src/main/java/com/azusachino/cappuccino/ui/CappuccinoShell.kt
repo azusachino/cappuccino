@@ -1056,7 +1056,7 @@ fun CappuccinoScreen(
                           modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("Pair Machine (Scan QR)")
+                        Text("Pair Machine")
                       }
                     }
                   }
@@ -1092,8 +1092,9 @@ fun CappuccinoScreen(
                           ListItem(
                             headlineContent = {
                               Text(
-                                profile.label.takeUnless { it == profile.endpoint.base.host }
-                                  ?: "Saved machine",
+                                profile.label.takeUnless {
+                                  it == profile.endpoint.base.host || it == "iroh.invalid"
+                                } ?: "Machine",
                                 fontWeight = FontWeight.SemiBold,
                               )
                             },
@@ -1200,12 +1201,21 @@ fun CappuccinoScreen(
                           Text(
                             listOfNotNull(
                                 machine.connection.statusText(),
-                                state.machineBadges[profile.id]?.label(),
+                                when (state.machineBadges[profile.id]) {
+                                  com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
+                                    "iroh direct"
+                                  com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
+                                    "iroh relayed"
+                                  com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
+                                    if (profile.endpoint.iroh != null) "tailnet (fallback)"
+                                    else "tailnet"
+                                  else -> null
+                                },
                               )
                               .joinToString(" · "),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
                           )
@@ -1282,7 +1292,7 @@ fun CappuccinoScreen(
               }
             } else {
               Text(
-                "Run 'cappuccino-bridge pair' on the host machine to display the pairing QR code.",
+                "Run 'cappuccino-bridge pair' to show QR code.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
@@ -1397,19 +1407,14 @@ fun CappuccinoScreen(
             ) {
               CircularProgressIndicator(modifier = Modifier.size(36.dp))
               Text(
-                "Connecting to machine...",
+                "Connecting...",
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
-              )
-              Text(
-                "Securing peer-to-peer connection via iroh",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
           } else if (irohMode) {
             Text(
-              "Run 'cappuccino-bridge pair' on your machine to display the pairing QR code.",
+              "Run 'cappuccino-bridge pair' to show QR code.",
               style = MaterialTheme.typography.bodyMedium,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1442,7 +1447,7 @@ fun CappuccinoScreen(
               modifier = Modifier.align(Alignment.CenterHorizontally),
             ) {
               Text(
-                "Connect via Tailnet URL instead",
+                "Tailnet URL",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )

@@ -1038,10 +1038,10 @@ pub fn run_pair_command(args: &[String]) -> Result<(), String> {
                     let qr = qr_terminal(payload)?;
                     if let Some(hint) = narrow_terminal_hint(display_width(&qr), terminal_columns())
                     {
-                        println!("{hint}\n");
+                        println!("{hint}");
                     }
                     println!("{qr}");
-                    println!("{payload}\n");
+                    println!("{payload}");
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) {
                         if let Some(tailnet) = parsed["tailnet_url"].as_str() {
                             println!("tailnet fallback: {tailnet}");

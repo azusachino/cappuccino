@@ -353,7 +353,12 @@ internal constructor(
     val name = reportedName?.trim()?.takeIf { it.isNotEmpty() } ?: return
     val current = store.read().firstOrNull { it.id == profile.id } ?: return
     // Migrate only old URL-derived defaults; never overwrite an owner-given name.
-    if (current.label != current.endpoint.base.host) return
+    if (
+      current.label != current.endpoint.base.host &&
+        current.label != "iroh.invalid" &&
+        current.label != "Machine"
+    )
+      return
     store.save(current.copy(label = name))
     mutableState.value = mutableState.value.copy(profiles = store.read())
   }
@@ -436,7 +441,7 @@ internal constructor(
         val profile =
           MachineProfile(
             UUID.randomUUID().toString(),
-            label.ifBlank { client.machineName ?: endpoint.base.host },
+            label.ifBlank { client.machineName ?: endpoint.defaultLabel },
             endpoint,
             machineId,
           )
