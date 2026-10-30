@@ -43,7 +43,13 @@ import androidx.compose.ui.unit.sp
 import com.azusachino.cappuccino.BuildConfig
 import com.azusachino.cappuccino.R
 
-internal data class SettingsConnection(val id: String, val label: String, val status: String)
+internal data class SettingsConnection(
+  val id: String,
+  val label: String,
+  val status: String,
+  val bridgeVersion: String? = null,
+  val protocol: Long? = null,
+)
 
 @Composable
 internal fun SettingsScreen(
@@ -52,6 +58,8 @@ internal fun SettingsScreen(
   onReloadMachines: () -> Unit,
   connections: List<SettingsConnection>,
   onConnectionDetails: (String) -> Unit,
+  activeBridgeVersion: String? = null,
+  activeBridgeProtocol: Long? = null,
   contentPadding: PaddingValues = PaddingValues(0.dp),
   scrollState: ScrollState = rememberScrollState(),
 ) {
@@ -137,14 +145,25 @@ internal fun SettingsScreen(
       connections.forEachIndexed { index, connection ->
         if (index > 0) SettingsDivider()
         androidx.compose.runtime.key(connection.id) {
+          val isConflict = connection.status == "Protocol conflict"
+          val detailText =
+            when {
+              isConflict -> "Incompatible protocol; app requires bridge protocol 1"
+              connection.bridgeVersion != null ->
+                "Bridge v${connection.bridgeVersion} · Protocol ${connection.protocol ?: 1}"
+              else -> null
+            }
           SettingRow(
-            connection.label.takeUnless { it == "iroh.invalid" } ?: "Machine",
+            title = connection.label.takeUnless { it == "iroh.invalid" } ?: "Machine",
             value = connection.status,
+            detail = detailText,
+            warning = isConflict,
             icon = {
               Icon(
                 painterResource(R.drawable.ic_machine),
                 contentDescription = null,
-                tint = MaterialTheme.appColors.accent,
+                tint =
+                  if (isConflict) MaterialTheme.appColors.err else MaterialTheme.appColors.accent,
                 modifier = Modifier.size(20.dp),
               )
             },
@@ -214,7 +233,7 @@ internal fun SettingsScreen(
       }
       SettingsDivider()
       SettingRow(
-        "Version",
+        "Client version",
         value = BuildConfig.VERSION_NAME,
         icon = {
           Icon(
@@ -226,6 +245,38 @@ internal fun SettingsScreen(
         },
         onClick = null,
       )
+      SettingsDivider()
+      SettingRow(
+        "Bridge protocol",
+        value = "Protocol 1",
+        detail = "Supported wire format version",
+        icon = {
+          Icon(
+            painterResource(R.drawable.ic_more),
+            contentDescription = null,
+            tint = MaterialTheme.appColors.muted,
+            modifier = Modifier.size(20.dp),
+          )
+        },
+        onClick = null,
+      )
+      if (activeBridgeVersion != null) {
+        SettingsDivider()
+        SettingRow(
+          "Connected bridge",
+          value = "v$activeBridgeVersion",
+          detail = activeBridgeProtocol?.let { "Protocol $it (compatible)" },
+          icon = {
+            Icon(
+              painterResource(R.drawable.ic_machine),
+              contentDescription = null,
+              tint = MaterialTheme.appColors.ok,
+              modifier = Modifier.size(20.dp),
+            )
+          },
+          onClick = null,
+        )
+      }
     }
     helpError?.let { SettingNote(it, warning = true) }
   }

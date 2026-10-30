@@ -990,6 +990,10 @@ fun CappuccinoScreen(
               )
             }
             destination == Destination.SETTINGS -> {
+              val activeProfile = state.profiles.find { it.id == state.activeProfileId }
+              val activeDetails = activeProfile?.let {
+                state.bridgeDetails[it.id]?.takeIf { b -> b.machineId == activeProfile.machineId }
+              }
               SettingsScreen(
                 themeMode = state.themeMode,
                 onSelectTheme = actions::setThemeMode,
@@ -997,16 +1001,22 @@ fun CappuccinoScreen(
                 contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
                 connections =
                   state.profiles.map { profile ->
+                    val details =
+                      state.bridgeDetails[profile.id]?.takeIf { it.machineId == profile.machineId }
                     SettingsConnection(
-                      profile.id,
-                      profile.label,
-                      state.machineConnection(profile).connection.statusText(),
+                      id = profile.id,
+                      label = profile.label,
+                      status = state.machineConnection(profile).connection.statusText(),
+                      bridgeVersion = details?.version,
+                      protocol = details?.protocol,
                     )
                   },
                 onConnectionDetails = { profileId ->
                   detailsProfileId = profileId
                   showingConnection = true
                 },
+                activeBridgeVersion = activeDetails?.version,
+                activeBridgeProtocol = activeDetails?.protocol,
                 scrollState = settingsScrollState,
               )
             }
