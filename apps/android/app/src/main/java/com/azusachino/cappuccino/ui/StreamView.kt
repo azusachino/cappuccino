@@ -3,6 +3,7 @@ package com.azusachino.cappuccino.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -94,18 +95,20 @@ internal fun OutputItemRow(row: OutputRow, onInspect: () -> Unit = {}) {
 
   when (parsed.role) {
     TranscriptRole.USER -> {
+      val colors = MaterialTheme.appColors
       Box(
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         contentAlignment = Alignment.CenterEnd,
       ) {
         Surface(
-          shape = MaterialTheme.shapes.large,
-          color = MaterialTheme.colorScheme.primaryContainer,
+          shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
+          color = colors.card2,
+          border = androidx.compose.foundation.BorderStroke(0.6.dp, colors.line.copy(alpha = 0.5f)),
         ) {
           Text(
             parsed.text,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            color = colors.text,
             style = MaterialTheme.typography.bodyMedium,
           )
         }
@@ -165,13 +168,8 @@ internal fun OutputItemRow(row: OutputRow, onInspect: () -> Unit = {}) {
     }
     TranscriptRole.AGENT -> {
       if (parsed.text.isNotBlank()) {
-        Surface(
-          shape = MaterialTheme.shapes.large,
-          color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-          Column(Modifier.padding(12.dp)) {
-            MessageBody(parsed.text, markdown = false, onInspect = onInspect)
-          }
+        Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)) {
+          MessageBody(parsed.text, markdown = false, onInspect = onInspect)
         }
       }
     }

@@ -885,12 +885,32 @@ fun CappuccinoScreen(
                       )
                   }
                 }
-                if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty())
-                  Text(
-                    "No recent output received.",
-                    Modifier.padding(16.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
+                if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty()) {
+                  Box(
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                  ) {
+                    Column(
+                      horizontalAlignment = Alignment.CenterHorizontally,
+                      verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                      AgentAvatar(selected.agent, 56.dp)
+                      Text(
+                        "Let's make progress",
+                        style =
+                          MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                          ),
+                        color = MaterialTheme.appColors.text,
+                      )
+                      Text(
+                        "/${selected.agent} · ${selected.label}",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
+                        color = MaterialTheme.appColors.muted,
+                      )
+                    }
+                  }
+                }
 
                 // A waiting prompt sits by the composer, after the output that asked it, so the
                 // transcript keeps the top of the screen and the answer is within thumb reach.
@@ -949,7 +969,6 @@ fun CappuccinoScreen(
                 val composerKey = agentSendKey(state.activeProfileId ?: "", selected)
                 if (state.offlineSavedAt == null)
                   composerState.SaveableStateProvider(composerKey) {
-                    state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
                     PromptInputBar(
                       onSend = { text, confirmed -> mutate { it.submitPrompt(text, confirmed) } },
                       pending = sendState != null && sendState.outcome == null,
@@ -961,6 +980,7 @@ fun CappuccinoScreen(
                         } else null,
                       model = state.sessionStats?.model,
                       thinkingLevel = state.sessionStats?.thinkingLevel,
+                      stats = state.sessionStats,
                       placeholder =
                         "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
                       enabled =

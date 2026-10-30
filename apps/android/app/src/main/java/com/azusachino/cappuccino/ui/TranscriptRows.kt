@@ -8,11 +8,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -31,14 +31,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
@@ -52,14 +47,12 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.azusachino.cappuccino.R
 import com.azusachino.cappuccino.core.ConversationPart
-import com.azusachino.cappuccino.core.StepOutcome
 import com.azusachino.cappuccino.core.Tone
 import com.azusachino.cappuccino.core.ToolActivityState
 import com.azusachino.cappuccino.core.ToolKind
@@ -84,23 +77,18 @@ internal fun UserPromptRow(
   modifier: Modifier = Modifier,
 ) {
   val colors = MaterialTheme.appColors
-  val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
   Box(
-    modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+    modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 3.dp),
     contentAlignment = Alignment.CenterEnd,
   ) {
     Surface(
       shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
-      color = if (isDark) colors.accent.copy(alpha = 0.20f) else colors.accent.copy(alpha = 0.12f),
-      border =
-        BorderStroke(
-          1.dp,
-          if (isDark) colors.accent.copy(alpha = 0.35f) else colors.accent.copy(alpha = 0.22f),
-        ),
+      color = colors.card2,
+      border = BorderStroke(0.6.dp, colors.line.copy(alpha = 0.5f)),
       modifier = Modifier.widthIn(min = 60.dp, max = 340.dp).padding(start = 48.dp),
     ) {
       Column(
-        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
       ) {
         body()
@@ -120,9 +108,8 @@ internal fun UserPromptRow(
 }
 
 /**
- * Pi's thinking and tool calls between its words as one line: what they did, and for how long. It
- * opens into a timeline, a line per call. Open in the newest turn and closed before, unless opened
- * or closed by hand (pi-pocket's `ActivityGroup`).
+ * Pi's thinking and tool calls between its words as a clean collapsible header. Open in the newest
+ * turn and closed before, unless toggled manually.
  */
 @Composable
 internal fun ActivityGroup(
@@ -135,22 +122,24 @@ internal fun ActivityGroup(
   val expanded = chosen ?: newest
   val summary = remember(parts) { activitySummary(parts) }
   val duration = remember(parts) { activityDuration(parts)?.let(::compactDuration) }
-  Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+  Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
     Surface(
       onClick = {
         if (!expanded) onInspect()
         chosen = !expanded
       },
-      shape = RoundedCornerShape(50),
-      color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
-      border = BorderStroke(0.5.dp, colors.line.copy(alpha = 0.5f)),
+      shape = RoundedCornerShape(8.dp),
+      color = colors.card2.copy(alpha = 0.6f),
+      border = BorderStroke(0.5.dp, colors.line.copy(alpha = 0.4f)),
       modifier =
-        Modifier.semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
+        Modifier.padding(horizontal = 4.dp, vertical = 2.dp).semantics {
+          stateDescription = if (expanded) "Expanded" else "Collapsed"
+        },
     ) {
       Row(
-        Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+        Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
       ) {
         Icon(
           painterResource(R.drawable.ic_expand_more),
@@ -166,16 +155,13 @@ internal fun ActivityGroup(
           overflow = TextOverflow.Ellipsis,
         )
         if (duration != null)
-          Text(duration, style = MaterialTheme.typography.labelSmall, color = colors.muted)
+          Text(duration, style = MaterialTheme.typography.labelSmall, color = colors.faint)
       }
     }
     if (expanded) {
-      val rule = colors.line
       Column(
-        Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp).drawBehind {
-          drawLine(rule, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 1.dp.toPx())
-        },
-        verticalArrangement = Arrangement.spacedBy(1.dp),
+        Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         parts.forEach { ActivityStep(it, onInspect) }
       }
@@ -183,138 +169,157 @@ internal fun ActivityGroup(
   }
 }
 
-/** One timeline line: its node on the rule, glyph, tool, what it touched, and what it came to. */
+/** One timeline step: formatted cleanly in Pico collapsible tool/thinking style. */
 @Composable
 private fun ActivityStep(part: ConversationPart, onInspect: () -> Unit) {
   val colors = MaterialTheme.appColors
   var open by rememberSaveable { mutableStateOf(false) }
-  val glyph: String
-  val glyphColor: Color
-  val label: String
-  val subject: String
-  val outcome: StepOutcome?
-  val failed: Boolean
   when (part) {
     is ConversationPart.Thinking -> {
-      glyph = "✦"
-      glyphColor = MaterialTheme.colorScheme.tertiary
-      label = "Thought"
-      subject = ""
-      outcome = null
-      failed = false
+      Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(
+          Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .clickable {
+              if (!open) onInspect()
+              open = !open
+            }
+            .padding(vertical = 3.dp, horizontal = 4.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Text("✦", style = MaterialTheme.typography.labelSmall, color = colors.accent)
+          Text(
+            "Thinking",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+            color = colors.muted,
+          )
+          Icon(
+            painterResource(R.drawable.ic_expand_more),
+            contentDescription = null,
+            modifier = Modifier.size(12.dp).rotate(if (open) 0f else -90f),
+            tint = colors.muted,
+          )
+        }
+        if (open) {
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = colors.card2,
+            border = BorderStroke(0.6.dp, colors.line.copy(alpha = 0.4f)),
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 6.dp),
+          ) {
+            Box(Modifier.padding(10.dp)) { StepBody(part) }
+          }
+        }
+      }
     }
     is ConversationPart.ToolCall -> {
-      glyph = toolKind(part.name).glyph
-      glyphColor = colors.muted
       val words = remember(part) { stepWords(part) }
-      label = words.first
-      subject = words.second
-      outcome = remember(part) { stepOutcome(part) }
-      failed = part.activityState == ToolActivityState.FAILED
+      val label = words.first
+      val subject = words.second
+      val outcome = remember(part) { stepOutcome(part) }
+      val failed = part.activityState == ToolActivityState.FAILED
+      Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(
+          Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(role = Role.Button) {
+              if (!open) onInspect()
+              open = !open
+            }
+            .padding(vertical = 3.dp, horizontal = 4.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          Box(
+            Modifier.size(6.dp)
+              .background(
+                if (failed) colors.err else colors.ok.copy(alpha = 0.7f),
+                CircleShape,
+              )
+          )
+          Text(
+            label,
+            style = MaterialTheme.typography.labelMedium.copy(fontFamily = JetBrainsMono),
+            fontWeight = FontWeight.SemiBold,
+            color = colors.text,
+            maxLines = 1,
+          )
+          if (subject.isNotBlank()) {
+            Text(
+              subject,
+              Modifier.weight(1f),
+              style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMono),
+              color = colors.muted,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+          } else {
+            Spacer(Modifier.weight(1f))
+          }
+          outcome?.let {
+            Text(
+              it.text,
+              style = MaterialTheme.typography.labelSmall,
+              color =
+                when (it.tone) {
+                  Tone.OK -> colors.ok
+                  Tone.ERR -> colors.err
+                  Tone.PLAIN -> colors.muted
+                },
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+          }
+          Icon(
+            painterResource(R.drawable.ic_expand_more),
+            contentDescription = null,
+            modifier = Modifier.size(12.dp).rotate(if (open) 0f else -90f),
+            tint = colors.muted,
+          )
+        }
+        if (open) {
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = colors.codeBackground,
+            border = BorderStroke(0.6.dp, colors.line.copy(alpha = 0.4f)),
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 6.dp),
+          ) {
+            Box(Modifier.padding(10.dp)) { StepBody(part) }
+          }
+        }
+      }
     }
     is ConversationPart.Text,
-    is ConversationPart.ResponseStatus -> return
-  }
-  // Done is a muted success color on the rule; only a recorded error is red.
-  val node = if (failed) colors.err else colors.ok.copy(alpha = 0.4f).compositeOver(colors.card)
-  Column(
-    Modifier.fillMaxWidth().drawBehind {
-      val side = 5.dp.toPx()
-      drawRect(node, Offset(-3.dp.toPx(), 13.dp.toPx()), Size(side, side))
-    }
-  ) {
-    Row(
-      Modifier.fillMaxWidth()
-        .padding(start = 14.dp)
-        .heightIn(min = 30.dp)
-        .clickable(role = Role.Button) {
-          if (!open) onInspect()
-          open = !open
-        }
-        .padding(horizontal = 8.dp, vertical = 3.dp)
-        .semantics { stateDescription = if (open) "Expanded" else "Collapsed" },
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-      Text(
-        glyph,
-        Modifier.width(14.dp).clearAndSetSemantics {},
-        style = MaterialTheme.typography.labelSmall,
-        color = glyphColor,
-        textAlign = TextAlign.Center,
-      )
-      Text(
-        label,
-        Modifier.widthIn(max = 120.dp),
-        style = MaterialTheme.typography.labelMedium.copy(fontFamily = JetBrainsMono),
-        fontWeight = FontWeight.SemiBold,
-        color = colors.text,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-      )
-      Text(
-        subject,
-        Modifier.weight(1f),
-        style = MaterialTheme.typography.labelMedium.copy(fontFamily = JetBrainsMono),
-        color = colors.muted,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-      )
-      outcome?.let {
-        Text(
-          it.text,
-          Modifier.widthIn(max = 140.dp),
-          style = MaterialTheme.typography.labelSmall,
-          color =
-            when (it.tone) {
-              Tone.OK -> colors.ok
-              Tone.ERR -> colors.err
-              Tone.PLAIN -> colors.muted
-            },
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-      }
-    }
-    if (open)
-      Column(
-        Modifier.fillMaxWidth().padding(start = 44.dp, end = 8.dp, top = 2.dp, bottom = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-      ) {
-        StepBody(part)
-      }
+    is ConversationPart.ResponseStatus -> Unit
   }
 }
 
 /** The transcript's last line while something is happening: a styled pill with square indicator. */
 @Composable
 internal fun LiveStatusLine(color: Color, detail: String? = null) {
-  Surface(
-    shape = RoundedCornerShape(16.dp),
-    color = color.copy(alpha = 0.10f),
-    border = BorderStroke(1.dp, color.copy(alpha = 0.25f)),
-    modifier = Modifier.padding(vertical = 4.dp).semantics(mergeDescendants = true) {},
-  ) {
-    Row(
-      Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+  val colors = MaterialTheme.appColors
+  Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+    Surface(
+      shape = CircleShape,
+      color = colors.card2.copy(alpha = 0.85f),
+      border = BorderStroke(0.6.dp, colors.line.copy(alpha = 0.45f)),
+      modifier = Modifier.semantics(mergeDescendants = true) {},
     ) {
-      StatusSquare(color)
-      if (!detail.isNullOrBlank())
+      Row(
+        Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        StatusSquare(color)
         Text(
-          detail,
+          detail ?: "Working…",
           style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-          color = MaterialTheme.appColors.text,
+          color = colors.text,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
-      else
-        Text(
-          "Working…",
-          style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-          color = MaterialTheme.appColors.text,
-        )
+      }
     }
   }
 }
