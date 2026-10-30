@@ -170,6 +170,7 @@ fun PromptInputBar(
   placeholder: String = "Message agent…",
   onStop: (() -> Unit)? = null,
   model: String? = null,
+  agent: String? = null,
   thinkingLevel: String? = null,
   draft: String = "",
   onDraftChange: ((String) -> Unit)? = null,
@@ -233,7 +234,8 @@ fun PromptInputBar(
 
   // Context token metrics for toolbar
   val tokens = stats?.contextTokens
-  val window = stats?.contextWindow ?: defaultContextWindow(stats?.model, null)
+  val effectiveModel = stats?.model ?: model
+  val window = stats?.contextWindow ?: defaultContextWindow(effectiveModel, agent)
   val percent =
     when {
       tokens != null -> (tokens * 100 / window).coerceIn(0, 100).toInt()

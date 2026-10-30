@@ -469,10 +469,30 @@ pub async fn agent_conversation(
                                 found.thinking_level = stats::pi_thinking_level(resolved.path());
                             }
                         }
+                        if found.context_window.is_none() {
+                            found.context_window = stats::default_context_window(
+                                found.model.as_deref(),
+                                match kind {
+                                    stats::Kind::Pi => Some("pi"),
+                                    stats::Kind::Claude => Some("claude"),
+                                    stats::Kind::Agy => Some("agy"),
+                                },
+                                found.context_tokens,
+                            );
+                        }
                     } else if rate_limits.is_some() || inferred_model.is_some() {
                         let mut found = stats::SessionStats::default();
                         found.model = inferred_model;
                         found.rate_limits = rate_limits;
+                        found.context_window = stats::default_context_window(
+                            found.model.as_deref(),
+                            match kind {
+                                stats::Kind::Pi => Some("pi"),
+                                stats::Kind::Claude => Some("claude"),
+                                stats::Kind::Agy => Some("agy"),
+                            },
+                            found.context_tokens,
+                        );
                         session_stats = Some(found);
                     }
                     let payload = conversation::ConversationResponse {

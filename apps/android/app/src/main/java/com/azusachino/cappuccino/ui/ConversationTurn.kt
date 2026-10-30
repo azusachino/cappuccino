@@ -220,12 +220,13 @@ fun ConversationTurnRow(
 }
 
 internal fun defaultContextWindow(model: String?, agent: String? = null): Long {
-  val m = model?.lowercase()
-  val a = agent?.lowercase()
+  val m = model?.trim()?.lowercase()
+  val a = agent?.trim()?.lowercase()
   return when {
-    m != null && "gemini" in m -> 1_000_000L
+    m != null && ("terra" in m || "gpt-5" in m || "gpt-6" in m) -> 500_000L
+    m != null && ("gemini" in m || "glm" in m) -> 1_000_000L
     m != null && "deepseek" in m -> 64_000L
-    m != null && ("gpt-4" in m || "o1" in m || "o3" in m) -> 128_000L
+    m != null && ("gpt-4" in m || "o1" in m || "o3" in m || "qwen" in m) -> 128_000L
     a in setOf("agy", "antigravity", "antigravity-cli") -> 1_000_000L
     else -> 200_000L
   }

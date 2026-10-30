@@ -26,12 +26,37 @@ public func formatTokens(_ count: Int64) -> String {
   return text.replacingOccurrences(of: ".0", with: "")
 }
 
+/// Context window inference based on known models and agents when not explicitly reported.
+public func defaultContextWindow(model: String?, agent: String? = nil) -> Int64 {
+  let m = model?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  let a = agent?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  if let m, m.contains("terra") || m.contains("gpt-5") || m.contains("gpt-6") {
+    return 500_000
+  }
+  if let m, m.contains("gemini") || m.contains("glm") {
+    return 1_000_000
+  }
+  if let a, a == "agy" || a == "antigravity" || a == "antigravity-cli" {
+    return 1_000_000
+  }
+  if let m, m.contains("deepseek") {
+    return 64_000
+  }
+  if let m, m.contains("gpt-4") || m.contains("o1") || m.contains("o3") || m.contains("qwen") {
+    return 128_000
+  }
+  return 200_000
+}
+
 /// The context meter under the composer: percent and `tokens / window` when the window is known,
 /// tokens alone otherwise. Nil when the bridge reported no token count.
 public func contextSummary(_ stats: SessionStats) -> String? {
   guard let tokens = stats.contextTokens else { return nil }
   var pieces: [String] = []
-  if let window = stats.contextWindow, window > 0 {
+  let window =
+    stats.contextWindow
+    ?? (stats.model != nil ? defaultContextWindow(model: stats.model) : nil)
+  if let window, window > 0 {
     let percent = min(max(tokens * 100 / window, 0), 100)
     pieces.append("\(percent)%")
     pieces.append("\(formatTokens(tokens)) / \(formatTokens(window))")

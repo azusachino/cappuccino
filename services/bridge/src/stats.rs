@@ -184,6 +184,41 @@ fn claude_window(model: Option<&str>, tokens: Option<u64>) -> Option<u64> {
     })
 }
 
+/// Context window inference based on known models and agents when not explicitly reported.
+pub fn default_context_window(
+    model: Option<&str>,
+    agent: Option<&str>,
+    context_tokens: Option<u64>,
+) -> Option<u64> {
+    let m = model.map(|s| s.trim().to_ascii_lowercase());
+    let a = agent.map(|s| s.trim().to_ascii_lowercase());
+    let m_str = m.as_deref().unwrap_or("");
+    let a_str = a.as_deref().unwrap_or("");
+
+    if m_str.contains("terra") || m_str.contains("gpt-5") || m_str.contains("gpt-6") {
+        Some(500_000)
+    } else if m_str.contains("gemini")
+        || m_str.contains("glm")
+        || a_str == "agy"
+        || a_str == "antigravity"
+        || a_str == "antigravity-cli"
+    {
+        Some(1_000_000)
+    } else if m_str.contains("deepseek") {
+        Some(64_000)
+    } else if m_str.contains("gpt-4")
+        || m_str.contains("o1")
+        || m_str.contains("o3")
+        || m_str.contains("qwen")
+    {
+        Some(128_000)
+    } else if m_str.starts_with("claude-") || a_str == "claude" {
+        claude_window(model, context_tokens)
+    } else {
+        None
+    }
+}
+
 /// The latest thinking level anywhere in a Pi session. A long session may set it well before the
 /// tail the conversation reads, so the file is scanned once and afterwards only what it grew by.
 pub fn pi_thinking_level(transcript: &Path) -> Option<String> {
@@ -596,5 +631,65 @@ mod tests {
         assert_eq!(pi_stats.status.as_deref(), Some("exhausted"));
         assert_eq!(pi_stats.windows[0].used_percent, 95);
         assert_eq!(pi_stats.windows[0].resets_in.as_deref(), Some("6d15h"));
+    }
+
+    #[test]
+    fn default_context_window_infers_known_models_accurately() {
+        assert_eq!(
+            default_context_window(Some("gpt-6.1-terra"), Some("pi"), None),
+            Some(500_000)
+        );
+        assert_eq!(
+            default_context_window(Some("gpt-5.6-terra"), Some("pi"), None),
+            Some(500_000)
+        );
+        assert_eq!(
+            default_context_window(Some("terra"), None, None),
+            Some(500_000)
+        );
+        assert_eq!(
+            default_context_window(Some("gemini-2.5-pro"), None, None),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            default_context_window(Some("glm-5.3-flash"), None, None),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            default_context_window(None, Some("agy"), None),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            default_context_window(Some("deepseek-chat"), None, None),
+            Some(64_000)
+        );
+        assert_eq!(
+            default_context_window(Some("gpt-4o"), None, None),
+            Some(128_000)
+        );
+        assert_eq!(
+            default_context_window(Some("o1-preview"), None, None),
+            Some(128_000)
+        );
+        assert_eq!(
+            default_context_window(Some("o3-mini"), None, None),
+            Some(128_000)
+        );
+        assert_eq!(
+            default_context_window(Some("qwen-2.5-coder"), None, None),
+            Some(128_000)
+        );
+        assert_eq!(
+            default_context_window(Some("claude-opus-5-5"), None, None),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            default_context_window(Some("claude-haiku-4-5"), None, Some(10)),
+            Some(200_000)
+        );
+        assert_eq!(
+            default_context_window(Some("unknown-model"), None, None),
+            None
+        );
     }
 }

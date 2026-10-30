@@ -1065,6 +1065,7 @@ fun CappuccinoScreen(
                             if (agentControl && selectedStatus == "working") {
                               { mutate { it.controlAgent("interrupt") } }
                             } else null,
+                          agent = currentSelected.agent,
                           model = state.sessionStats?.model,
                           thinkingLevel = state.sessionStats?.thinkingLevel,
                           stats = state.sessionStats,

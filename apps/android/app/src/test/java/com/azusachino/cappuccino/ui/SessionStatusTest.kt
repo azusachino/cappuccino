@@ -29,5 +29,10 @@ class SessionStatusTest {
     assertEquals(1_000_000L, defaultContextWindow(null, "antigravity-cli"))
     assertEquals(64_000L, defaultContextWindow("deepseek-chat"))
     assertEquals(128_000L, defaultContextWindow("gpt-4o"))
+    assertEquals(500_000L, defaultContextWindow("gpt-6.1-terra"))
+    assertEquals(500_000L, defaultContextWindow("gpt-5.6-terra"))
+    assertEquals(500_000L, defaultContextWindow("terra"))
+    assertEquals(1_000_000L, defaultContextWindow("glm-5.3-flash"))
+    assertEquals(128_000L, defaultContextWindow("qwen-2.5-coder"))
   }
 }
