@@ -46,12 +46,12 @@ internal fun ConnectionDiagnostics(profile: MachineProfile, state: ConnectedUiSt
         val currentBadge = state.machineBadges[profile.id]
         val (activeRoute, activeColor) =
           when (currentBadge) {
-            TransportBadge.IROH_DIRECT -> "iroh P2P (direct QUIC) — default active" to colors.ok
-            TransportBadge.IROH_RELAYED -> "iroh P2P (relayed) — default active" to colors.ok
-            TransportBadge.TAILNET -> "Tailnet — automatic fallback active" to colors.warn
+            TransportBadge.IROH_DIRECT -> "iroh direct (default)" to colors.ok
+            TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
+            TransportBadge.TAILNET -> "Tailnet fallback" to colors.warn
             else -> if (current) "Connected" to colors.ok else status to colors.muted
           }
-        MachineDetailField("Active connection", activeRoute)
+        MachineDetailRow("Active connection", activeRoute, valueColor = activeColor)
         MachineDivider()
         MachineDetailField(
           "Tailnet endpoint",
@@ -83,9 +83,9 @@ internal fun ConnectionDiagnostics(profile: MachineProfile, state: ConnectedUiSt
         MachineDivider()
         MachineDetailField("iroh Node ID", iroh.endpointId, isMono = true)
         MachineDivider()
-        MachineDetailRow(
-          "iroh Relay",
-          iroh.relayUrl ?: "Default relay",
+        MachineDetailField(
+          "iroh relay",
+          iroh.relayUrl ?: "Default N0 relay (aps1 Tokyo)",
           isMono = true,
         )
         if (iroh.directAddrs.isNotEmpty()) {

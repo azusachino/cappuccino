@@ -49,19 +49,12 @@ internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
         stats.rateLimits?.windows?.firstOrNull { it.window == "session" }?.usedPercent?.toInt()
     }
 
-  val modelLabel =
-    stats.model?.let { shortModel(it) }
-      ?: agent?.let {
-        if (it.lowercase() in setOf("agy", "antigravity", "antigravity-cli")) "gemini" else null
-      }
-  val modelParts = listOfNotNull(modelLabel, stats.thinkingLevel, stats.rateLimits?.planTier)
-
   val rateLimitWindows =
     stats.rateLimits?.windows?.filterNot {
       it.window == "session" && percent != null && tokens == null
     } ?: emptyList()
 
-  if (percent == null && modelParts.isEmpty() && rateLimitWindows.isEmpty()) return
+  if (percent == null && rateLimitWindows.isEmpty()) return
 
   Row(
     Modifier.fillMaxWidth()
@@ -98,25 +91,6 @@ internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
             percent >= 70 -> colors.warn
             else -> colors.text
           },
-      )
-    }
-
-    stats.cachePercent?.let { cache ->
-      Text(
-        "cache $cache%",
-        style = MaterialTheme.typography.labelSmall,
-        color = colors.muted,
-      )
-    }
-
-    if (modelParts.isNotEmpty()) {
-      if (percent != null || tokens != null) {
-        Text("·", style = MaterialTheme.typography.labelSmall, color = colors.faint)
-      }
-      Text(
-        modelParts.joinToString(" · "),
-        style = MaterialTheme.typography.labelSmall,
-        color = colors.muted,
       )
     }
 

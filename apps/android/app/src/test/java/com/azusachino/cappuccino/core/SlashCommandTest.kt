@@ -43,7 +43,8 @@ class SlashCommandTest {
     assertTrue(disallowedSlashCommandReason(" /STATUS ")?.contains("Esc") == true)
     assertNull(disallowedSlashCommandReason("/model"))
     assertNull(disallowedSlashCommandReason("/clear"))
-    assertNull(disallowedSlashCommandReason("/exit"))
+    assertTrue(disallowedSlashCommandReason("/exit")?.contains("disabled") == true)
+    assertTrue(disallowedSlashCommandReason("/quit")?.contains("disabled") == true)
   }
 
   @Test

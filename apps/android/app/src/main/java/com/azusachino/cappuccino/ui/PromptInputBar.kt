@@ -363,13 +363,6 @@ fun PromptInputBar(
                   onSend("continue", false)
                 },
               )
-              DropdownMenuItem(
-                text = { Text("Compact context") },
-                onClick = {
-                  commandsOpen = false
-                  confirmingCommand = "/compact"
-                },
-              )
             }
             COMMON_SLASH_COMMANDS.forEach { item ->
               DropdownMenuItem(
@@ -394,7 +387,11 @@ fun PromptInputBar(
                 },
                 onClick = {
                   commandsOpen = false
-                  input = "${item.command} "
+                  if (item.command == "/compact") {
+                    confirmingCommand = "/compact"
+                  } else {
+                    input = "${item.command} "
+                  }
                 },
               )
             }

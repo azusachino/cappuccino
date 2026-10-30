@@ -150,7 +150,7 @@ internal fun MachineDivider() {
   )
 }
 
-/** Single row for keys and values with no jagged line breaks. */
+/** Single row for keys and values with balanced column weights and no squashing. */
 @Composable
 internal fun MachineDetailRow(
   label: String,
@@ -161,43 +161,55 @@ internal fun MachineDetailRow(
   onClick: (() -> Unit)? = null,
 ) {
   val colors = MaterialTheme.appColors
+  val hasValue = value != null
   Row(
     Modifier.fillMaxWidth()
       .heightIn(min = 46.dp)
       .then(
         if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier
       )
-      .padding(horizontal = 16.dp, vertical = 10.dp),
+      .padding(horizontal = 16.dp, vertical = 11.dp),
     verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(12.dp),
   ) {
     Text(
-      label,
-      Modifier.weight(1f, fill = false),
+      text = label,
+      modifier = Modifier.weight(if (hasValue) 0.42f else 1f, fill = false),
       style = MaterialTheme.typography.bodyMedium,
       color = colors.text,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
     )
-    Spacer(Modifier.weight(1f))
-    if (value != null) {
-      Text(
-        value,
-        style =
-          if (isMono)
-            TextStyle(
-              fontFamily = JetBrainsMono,
-              fontSize = 12.sp,
-              fontWeight = FontWeight.Normal,
-            )
-          else MaterialTheme.typography.bodySmall,
-        color = valueColor ?: colors.muted,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        textAlign = TextAlign.End,
-      )
-    }
-    trailing?.invoke()
-    if (onClick != null && trailing == null) {
-      Text("›", style = MaterialTheme.typography.bodyMedium, color = colors.faint)
+    Row(
+      modifier = Modifier.weight(if (hasValue) 0.58f else 1f),
+      horizontalArrangement = Arrangement.End,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      if (value != null) {
+        Text(
+          text = value,
+          style =
+            if (isMono)
+              TextStyle(
+                fontFamily = JetBrainsMono,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Normal,
+              )
+            else MaterialTheme.typography.bodySmall,
+          color = valueColor ?: colors.muted,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          textAlign = TextAlign.End,
+        )
+      }
+      trailing?.invoke()
+      if (onClick != null && trailing == null) {
+        Text(
+          "›",
+          modifier = Modifier.padding(start = 6.dp),
+          style = MaterialTheme.typography.bodyMedium,
+          color = colors.faint,
+        )
+      }
     }
   }
 }
@@ -302,12 +314,10 @@ internal fun MachineInformation(
           val currentBadge = state.machineBadges[profile.id]
           val (activeText, activeColor) =
             when (currentBadge) {
-              TransportBadge.TAILNET -> "Tailnet fallback active" to colors.warn
+              TransportBadge.TAILNET -> "Tailnet fallback" to colors.warn
               TransportBadge.IROH_DIRECT -> "iroh direct (default)" to colors.ok
-              TransportBadge.IROH_RELAYED -> "iroh relayed (default)" to colors.ok
-              else ->
-                if (current) "iroh default · Tailnet fallback" to colors.ok
-                else status to colors.muted
+              TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
+              else -> if (current) "Connected" to colors.ok else status to colors.muted
             }
           MachineDetailRow("Active route", activeText, valueColor = activeColor)
           MachineDivider()
