@@ -5,14 +5,21 @@ import com.azusachino.cappuccino.core.JsonValue
 import com.azusachino.cappuccino.core.ProtocolException
 import com.azusachino.cappuccino.core.parseJsonObject
 
-/** A parsed pairing payload v1: where the bridge endpoint is and the token to present. */
-data class IrohPairing(val endpoint: IrohEndpointAddr, val token: String)
+/**
+ * A parsed pairing payload v1: where the bridge endpoint is, the token to present, and optional
+ * tailnet fallback.
+ */
+data class IrohPairing(
+  val endpoint: IrohEndpointAddr,
+  val token: String,
+  val tailnetUrl: String? = null,
+)
 
 private const val IROH_PAIRING_VERSION = 1L
 
 /**
  * Parses `{"v":1,"endpoint_id","relay","addrs","token"}`. Any other version is rejected so an old
- * app never guesses at a newer payload's meaning.
+ * app never guesses at a newer payload's meaning. Optional `tailnet_url` is parsed when present.
  */
 fun parseIrohPairing(text: String): IrohPairing {
   val json = parseJsonObject(text)
@@ -24,9 +31,17 @@ fun parseIrohPairing(text: String): IrohPairing {
     (json.fields["addrs"] as? JsonValue.Array)?.value?.map {
       (it as? JsonValue.StringValue)?.value ?: throw ProtocolException("Invalid pairing addr")
     } ?: throw ProtocolException("Invalid addrs")
+  val tailnetUrl =
+    when (val value = json.fields["tailnet_url"]) {
+      null,
+      JsonValue.Null -> null
+      is JsonValue.StringValue -> value.value.ifEmpty { null }
+      else -> null
+    }
   return IrohPairing(
     endpoint = IrohEndpointAddr(endpointId, relayUrl(json), addrs),
     token = token,
+    tailnetUrl = tailnetUrl,
   )
 }
 

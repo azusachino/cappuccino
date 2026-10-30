@@ -24,6 +24,9 @@ pub struct BridgeConfig {
     /// n0's relays. Set, the endpoint uses only this relay. Design:
     /// docs/design/public-exposure-iroh.md ("Relays").
     pub iroh_relay_url: Option<RelayUrl>,
+    /// Optional Tailnet address (`tailnet.url` in config, or auto-detected).
+    /// Included in pairing payloads for dual-transport fallback.
+    pub tailnet_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -98,6 +101,12 @@ struct ConfigFile {
     auth: Option<AuthConfig>,
     serve: Option<ServeConfig>,
     iroh: Option<IrohFileConfig>,
+    tailnet: Option<TailnetFileConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct TailnetFileConfig {
+    url: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -174,6 +183,7 @@ impl BridgeConfig {
             serve_auto_apply: true,
             iroh_enabled: false,
             iroh_relay_url: None,
+            tailnet_url: None,
         }
     }
 
@@ -248,6 +258,9 @@ impl BridgeConfig {
                         .as_deref()
                         .map(parse_iroh_relay_url)
                         .transpose()?;
+                }
+                if let Some(tailnet) = file.tailnet {
+                    config.tailnet_url = tailnet.url;
                 }
             }
         }

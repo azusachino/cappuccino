@@ -104,7 +104,7 @@ Setup, pairing and relay operations: [docs/iroh-setup.md](../../docs/iroh-setup.
 - `cappuccino-bridge pair` prints a QR and the payload. It asks the running bridge over the owner-only admin socket `iroh-admin.sock` in the data dir. Start the bridge first, or the command reports that it is not running.
 - The payload carries direct addresses only when no relay is known yet (`relay` null). With a relay, `addrs` is empty and the phone finds the direct path after connecting, which keeps the QR about 55 to 59 columns and 28 to 30 rows (error level L, one-module quiet zone). If the terminal is narrower, the command prints a hint; widen it or open `/pair` on a tailnet device, which shows the same payload as a QR.
 - `cappuccino-bridge pair --revoke <EndpointId>` removes the id and closes its live tunnel connections.
-- Payload format v1, compact JSON: `{"v":1,"endpoint_id":"<id>","relay":"<url>|null","addrs":["ip:port"],"token":"<64 hex>"}`. Unknown `v` values must be rejected by clients.
+- Payload format v1, compact JSON: `{"v":1,"endpoint_id":"<id>","relay":"<url>|null","addrs":["ip:port"],"token":"<64 hex>","tailnet_url":"<url>"}` (`tailnet_url` is optional, included when detected or configured under `[tailnet] url`). Unknown `v` values must be rejected by clients.
 - Pairing tokens and secret keys are never logged.
 
 ## Agent integration prerequisite

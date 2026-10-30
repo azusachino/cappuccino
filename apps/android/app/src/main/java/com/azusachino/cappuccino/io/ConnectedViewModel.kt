@@ -366,7 +366,13 @@ internal constructor(
       val pairing = parseIrohPairing(payload)
       val redeem = irohPairing ?: throw IllegalStateException("iroh is unavailable")
       redeem(pairing)
-      Endpoint.iroh(pairing.endpoint)
+      val irohEndpoint = Endpoint.iroh(pairing.endpoint)
+      val tailnetUrl = pairing.tailnetUrl?.takeIf { it.isNotBlank() }
+      if (tailnetUrl != null) {
+        irohEndpoint.withTailnet(Endpoint.parse(tailnetUrl, allowLocalHttp = BuildConfig.DEBUG))
+      } else {
+        irohEndpoint
+      }
     }
 
   override fun addIrohPairing(profileId: String, payload: String) =
@@ -374,7 +380,13 @@ internal constructor(
       val pairing = parseIrohPairing(payload)
       val redeem = irohPairing ?: throw IllegalStateException("iroh is unavailable")
       redeem(pairing)
-      endpoint.withIroh(pairing.endpoint)
+      val withIroh = endpoint.withIroh(pairing.endpoint)
+      val tailnetUrl = pairing.tailnetUrl?.takeIf { it.isNotBlank() }
+      if (!withIroh.hasTailnet && tailnetUrl != null) {
+        withIroh.withTailnet(Endpoint.parse(tailnetUrl, allowLocalHttp = BuildConfig.DEBUG))
+      } else {
+        withIroh
+      }
     }
 
   override fun addTailnetUrl(profileId: String, url: String) =

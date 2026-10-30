@@ -35,6 +35,22 @@ class IrohPairingTest {
     assertEquals("https://relay.example/", pairing.endpoint.relayUrl)
     assertEquals(listOf("10.0.0.2:4433", "[fd00::2]:4433"), pairing.endpoint.directAddrs)
     assertEquals("tok", pairing.token)
+    assertNull(pairing.tailnetUrl)
+  }
+
+  @Test
+  fun parsesTailnetUrlWhenPresent() {
+    val withTailnet = valid.replace("\"tok\"}", "\"tok\",\"tailnet_url\":\"https://mac.example\"}")
+    val pairing = parseIrohPairing(withTailnet)
+    assertEquals("https://mac.example", pairing.tailnetUrl)
+  }
+
+  @Test
+  fun nullOrEmptyTailnetUrlParsesToNull() {
+    val withNull = valid.replace("\"tok\"}", "\"tok\",\"tailnet_url\":null}")
+    assertNull(parseIrohPairing(withNull).tailnetUrl)
+    val withEmpty = valid.replace("\"tok\"}", "\"tok\",\"tailnet_url\":\"\"}")
+    assertNull(parseIrohPairing(withEmpty).tailnetUrl)
   }
 
   @Test

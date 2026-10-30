@@ -84,7 +84,19 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
             host: bind.clone(),
             port,
         };
-        Some(iroh_transport::start(&config.data_dir, target, config.iroh_relay_url.clone()).await?)
+        let tailnet_url = config
+            .tailnet_url
+            .clone()
+            .or_else(|| lifecycle::detect_tailnet_url(port));
+        Some(
+            iroh_transport::start(
+                &config.data_dir,
+                target,
+                config.iroh_relay_url.clone(),
+                tailnet_url,
+            )
+            .await?,
+        )
     } else {
         None
     };

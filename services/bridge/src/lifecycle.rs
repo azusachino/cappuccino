@@ -569,6 +569,38 @@ fn healthy(bind: &str, port: u16) -> bool {
     matches!(BufReader::new(stream).read_line(&mut response), Ok(_) if response.starts_with("HTTP/1.1 200 ") || response.starts_with("HTTP/1.0 200 "))
 }
 
+pub fn parse_tailscale_serve_url(output: &str, port: u16) -> Option<String> {
+    let target = format!(":{port}");
+    let mut current_url = None;
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("https://") {
+            current_url = trimmed.split_whitespace().next().map(|s| s.to_string());
+        } else if trimmed.contains(&target)
+            && (trimmed.contains("proxy")
+                || trimmed.contains("127.0.0.1")
+                || trimmed.contains("localhost"))
+        {
+            if let Some(url) = current_url.clone() {
+                return Some(url);
+            }
+        }
+    }
+    None
+}
+
+pub fn detect_tailnet_url(port: u16) -> Option<String> {
+    let status = Command::new("tailscale")
+        .args(["serve", "status"])
+        .output()
+        .ok()?;
+    if !status.status.success() {
+        return None;
+    }
+    let output = String::from_utf8_lossy(&status.stdout);
+    parse_tailscale_serve_url(&output, port)
+}
+
 fn ensure_serve(config: &BridgeConfig) {
     let manual = format!(
         "tailscale serve --bg --https=443 http://127.0.0.1:{}",
@@ -584,18 +616,14 @@ fn ensure_serve(config: &BridgeConfig) {
         return;
     };
     let output = String::from_utf8_lossy(&status.stdout);
-    if output.contains(&format!("127.0.0.1:{}", config.port)) {
-        if let Some(url) = output
-            .split_whitespace()
-            .find(|part| part.starts_with("https://"))
-        {
-            println!(
-                "tailscale serve already exposes port {}; tailnet URL: {url}",
-                config.port
-            );
-        } else {
-            println!("tailscale serve already exposes port {}", config.port);
-        }
+    if let Some(url) = parse_tailscale_serve_url(&output, config.port) {
+        println!(
+            "tailscale serve already exposes port {}; tailnet URL: {url}",
+            config.port
+        );
+        return;
+    } else if output.contains(&format!("127.0.0.1:{}", config.port)) {
+        println!("tailscale serve already exposes port {}", config.port);
         return;
     }
     let target = format!("http://127.0.0.1:{}", config.port);
@@ -740,6 +768,7 @@ mod tests {
                 serve_auto_apply: false,
                 iroh_enabled: false,
                 iroh_relay_url: None,
+                tailnet_url: None,
             },
             Duration::from_millis(100),
         );
@@ -755,5 +784,19 @@ mod tests {
         assert_eq!(current.dev(), root_identity.dev());
         assert_eq!(current.ino(), root_identity.ino());
         fs::remove_dir_all(state_root).unwrap();
+    }
+
+    #[test]
+    fn parses_tailscale_serve_url_for_matching_port() {
+        let sample = "https://harus-macmini.talpidae-beta.ts.net (tailnet only)\n|-- / proxy http://127.0.0.1:7392\n\nhttps://harus-macmini.talpidae-beta.ts.net:9441 (tailnet only)\n|-- / proxy http://127.0.0.1:9090\n";
+        assert_eq!(
+            parse_tailscale_serve_url(sample, 7392),
+            Some("https://harus-macmini.talpidae-beta.ts.net".into())
+        );
+        assert_eq!(
+            parse_tailscale_serve_url(sample, 9090),
+            Some("https://harus-macmini.talpidae-beta.ts.net:9441".into())
+        );
+        assert_eq!(parse_tailscale_serve_url(sample, 8080), None);
     }
 }

@@ -18,6 +18,7 @@ Initial release of Cappuccino: a companion client for remote coding agents, pair
   - Direct camera QR scanning via Google Code Scanner (`GmsBarcodeScanning`) with zero extra permissions required.
   - Instant pairing handshake directly from terminal output (`cappuccino-bridge pair`).
   - Dual-transport support: attempts secure iroh peer-to-peer first, with automatic fallback to Tailnet bridge URL.
+  - QR code pairing payloads include the auto-detected Tailnet URL (`tailnet_url`) alongside iroh credentials, configuring both peer-to-peer and fallback transport in a single scan.
   - Default connection to N0's Tokyo relay (`aps1`) with full UDP NAT traversal and QUIC hole punching.
 - **cappuccino-bridge Daemon**:
   - Thin-client WebSocket and HTTP server fronting Herdr agent panes and processes.
