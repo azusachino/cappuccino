@@ -189,7 +189,7 @@ curl https://<machine>.<tailnet>.ts.net/api/session
 ```
 
 If you want to run the Serve command yourself, set `serve.auto_apply` to
-`false` in `~/.config/cappuccino-bridge/config.json`, or set
+`false` in `~/.config/cappuccino-bridge/config.toml` (or `config.json`), or set
 `CAPP_BRIDGE_SERVE_AUTO_APPLY=0`, before you start the bridge. The bridge then prints the command instead
 of running it. The
 [bridge setup guide](services/bridge/README.md#install-and-lifecycle) covers

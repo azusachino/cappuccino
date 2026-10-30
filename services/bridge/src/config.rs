@@ -141,8 +141,8 @@ pub fn default_data_dir(xdg_state_home: Option<&str>, home: &str) -> PathBuf {
 }
 
 /// Config file path: `CAPP_BRIDGE_CONFIG` when set, else
-/// `$XDG_CONFIG_HOME/cappuccino-bridge/config.json`, else
-/// `$HOME/.config/cappuccino-bridge/config.json`.
+/// `$XDG_CONFIG_HOME/cappuccino-bridge/config.toml` (if it exists), else
+/// `$XDG_CONFIG_HOME/cappuccino-bridge/config.json`.
 pub fn resolve_config_path(
     capp_bridge_config: Option<&str>,
     xdg_config_home: Option<&str>,
@@ -150,10 +150,31 @@ pub fn resolve_config_path(
 ) -> String {
     match capp_bridge_config {
         Some(path) => path.to_string(),
-        None => xdg_base(xdg_config_home, home, ".config")
-            .join("cappuccino-bridge/config.json")
-            .to_string_lossy()
-            .into_owned(),
+        None => {
+            let base = xdg_base(xdg_config_home, home, ".config").join("cappuccino-bridge");
+            let toml = base.join("config.toml");
+            if toml.exists() {
+                toml.to_string_lossy().into_owned()
+            } else {
+                base.join("config.json").to_string_lossy().into_owned()
+            }
+        }
+    }
+}
+
+fn parse_config_file(contents: &str, path: &str) -> Result<ConfigFile, String> {
+    if path.ends_with(".toml") {
+        toml::from_str(contents)
+            .map_err(|error| format!("config {path} is not valid TOML: {error}"))
+    } else if path.ends_with(".json") {
+        serde_json::from_str(contents)
+            .map_err(|error| format!("config {path} is not valid JSON: {error}"))
+    } else if contents.trim_start().starts_with('{') {
+        serde_json::from_str(contents)
+            .map_err(|error| format!("config {path} is not valid JSON: {error}"))
+    } else {
+        toml::from_str(contents)
+            .map_err(|error| format!("config {path} is not valid TOML: {error}"))
     }
 }
 
@@ -222,8 +243,7 @@ impl BridgeConfig {
         let mut config = Self::defaults();
         if let Some(path) = config_path {
             if let Ok(contents) = std::fs::read_to_string(path) {
-                let file: ConfigFile = serde_json::from_str(&contents)
-                    .map_err(|error| format!("config {path} is not valid JSON: {error}"))?;
+                let file = parse_config_file(&contents, path)?;
                 if let Some(bind) = file.bind {
                     config.bind = bind;
                 }
@@ -419,6 +439,53 @@ mod knob_tests {
         let path = config_file(r#"{"serve": {"auto_apply": 3}}"#);
         let error = BridgeConfig::load_from(Some(&path), None, None, None).unwrap_err();
         assert!(error.contains("invalid serve.auto_apply"));
+    }
+}
+
+#[cfg(test)]
+mod toml_config_tests {
+    use super::*;
+
+    #[test]
+    fn toml_config_parses_all_sections() {
+        let toml = r#"
+bind = "127.0.0.1"
+port = 7392
+data_dir = "/tmp/cappuccino-test"
+
+[serve]
+auto_apply = false
+
+[iroh]
+enabled = true
+relay_url = "https://relay.azusachino.com"
+"#;
+        let path = std::env::temp_dir().join(format!("cap-test-{}.toml", std::process::id()));
+        std::fs::write(&path, toml).unwrap();
+        let cfg = BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None).unwrap();
+        assert_eq!(cfg.bind, "127.0.0.1");
+        assert_eq!(cfg.port, 7392);
+        assert_eq!(cfg.data_dir, PathBuf::from("/tmp/cappuccino-test"));
+        assert!(!cfg.serve_auto_apply);
+        assert!(cfg.iroh_enabled);
+        assert_eq!(
+            cfg.iroh_relay_url.unwrap().as_str(),
+            "https://relay.azusachino.com/"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn toml_file_takes_precedence_over_json_when_both_exist() {
+        let dir = std::env::temp_dir().join(format!("cap-xdg-test-{}", std::process::id()));
+        let bridge_dir = dir.join("cappuccino-bridge");
+        std::fs::create_dir_all(&bridge_dir).unwrap();
+        std::fs::write(bridge_dir.join("config.json"), r#"{"port": 7392}"#).unwrap();
+        std::fs::write(bridge_dir.join("config.toml"), "port = 8443\n").unwrap();
+
+        let resolved = resolve_config_path(None, Some(dir.to_str().unwrap()), "/home/u");
+        assert!(resolved.ends_with("config.toml"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
 
