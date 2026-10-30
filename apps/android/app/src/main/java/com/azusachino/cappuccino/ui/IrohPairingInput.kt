@@ -10,11 +10,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -32,10 +30,15 @@ fun scanPairingPayload(context: Context, onPayload: (String) -> Unit, onFailure:
       val payload = barcode.rawValue
       if (payload.isNullOrBlank()) onFailure("No pairing QR code found") else onPayload(payload)
     }
-    .addOnFailureListener { onFailure("Could not scan the pairing QR code") }
+    .addOnFailureListener { e ->
+      onFailure(
+        e.localizedMessage
+          ?: "Could not scan the pairing QR code. You can copy & paste the payload JSON directly."
+      )
+    }
 }
 
-/** Reads the clipboard once and clears it, so a pairing payload does not linger there. */
+/** Reads the clipboard. The payload is never logged. */
 fun takePairingPayloadFromClipboard(context: Context): String? {
   val clipboard = context.getSystemService(ClipboardManager::class.java)
   val text =
@@ -44,7 +47,6 @@ fun takePairingPayloadFromClipboard(context: Context): String? {
       ?.getItemAt(0)
       ?.coerceToText(context)
       ?.toString()
-  clipboard.clearPrimaryClip()
   return text?.trim()?.takeIf { it.isNotEmpty() }
 }
 
@@ -61,24 +63,11 @@ fun PairingPayloadInput(
   busy: Boolean,
 ) {
   val context = LocalContext.current
-  OutlinedTextField(
-    value = payload,
-    onValueChange = onPayload,
-    label = { Text("Pairing payload") },
-    visualTransformation = PasswordVisualTransformation(),
-    singleLine = true,
-    enabled = !busy,
+  Row(
     modifier = Modifier.fillMaxWidth(),
-    colors =
-      OutlinedTextFieldDefaults.colors(
-        focusedContainerColor = MaterialTheme.colorScheme.surface,
-        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-        focusedBorderColor = MaterialTheme.colorScheme.primary,
-        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-      ),
-  )
-  Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-    TextButton(
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    androidx.compose.material3.Button(
       onClick = {
         scanPairingPayload(
           context,
@@ -90,10 +79,11 @@ fun PairingPayloadInput(
         )
       },
       enabled = !busy,
+      modifier = Modifier.weight(1f),
     ) {
       Text("Scan QR")
     }
-    TextButton(
+    androidx.compose.material3.OutlinedButton(
       onClick = {
         val pasted = takePairingPayloadFromClipboard(context)
         if (pasted == null) {
@@ -104,9 +94,26 @@ fun PairingPayloadInput(
         }
       },
       enabled = !busy,
+      modifier = Modifier.weight(1f),
     ) {
       Text("Paste")
     }
   }
+  OutlinedTextField(
+    value = payload,
+    onValueChange = onPayload,
+    label = { Text("Pairing payload") },
+    placeholder = { Text("Scan QR or paste payload JSON") },
+    maxLines = 3,
+    enabled = !busy,
+    modifier = Modifier.fillMaxWidth(),
+    colors =
+      OutlinedTextFieldDefaults.colors(
+        focusedContainerColor = MaterialTheme.colorScheme.surface,
+        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+      ),
+  )
   scanError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
 }

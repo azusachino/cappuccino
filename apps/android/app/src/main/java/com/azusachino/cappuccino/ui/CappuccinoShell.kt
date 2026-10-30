@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -35,11 +36,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -197,7 +200,7 @@ fun CappuccinoScreen(
   var endpoint by rememberSaveable { mutableStateOf("") }
   var pendingAdd by rememberSaveable { mutableStateOf(false) }
   var previousProfileIds by rememberSaveable { mutableStateOf("") }
-  var irohMode by rememberSaveable { mutableStateOf(false) }
+  var irohMode by rememberSaveable { mutableStateOf(true) }
   var payload by rememberSaveable { mutableStateOf("") }
   var scanError by rememberSaveable { mutableStateOf<String?>(null) }
   // Existing-machine pairing: iroh pairing for a tailnet machine, or a tailnet URL for iroh-only.
@@ -1021,18 +1024,41 @@ fun CappuccinoScreen(
                   ) {
                     Column(
                       horizontalAlignment = Alignment.CenterHorizontally,
-                      verticalArrangement = Arrangement.spacedBy(8.dp),
+                      verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                      Icon(
+                        painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
+                        contentDescription = null,
+                        modifier = Modifier.size(56.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                      )
                       Text(
                         "No machines configured",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                       )
                       Text(
-                        "Tap the + button below to connect to a private Herdr bridge.",
+                        "Pair with cappuccino-bridge via QR code to connect.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                       )
+                      Spacer(Modifier.height(4.dp))
+                      Button(
+                        onClick = {
+                          irohMode = true
+                          adding = true
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                      ) {
+                        Icon(
+                          painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
+                          contentDescription = null,
+                          modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Pair Machine (Scan QR)")
+                      }
                     }
                   }
                 }
@@ -1302,30 +1328,40 @@ fun CappuccinoScreen(
           pendingAdd = false
         }
       },
-      title = { Text("Add machine") },
+      title = { Text(if (irohMode) "Pair machine" else "Add bridge URL") },
       text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          OutlinedTextField(
-            value = label,
-            onValueChange = { label = it },
-            label = { Text("Label") },
-            singleLine = true,
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Row(
             modifier = Modifier.fillMaxWidth(),
-            colors =
-              OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-              ),
-          )
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { irohMode = false }, enabled = irohMode) { Text("Bridge URL") }
-            TextButton(onClick = { irohMode = true }, enabled = !irohMode) {
-              Text("Pair over iroh")
-            }
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            FilterChip(
+              selected = irohMode,
+              onClick = { irohMode = true },
+              label = { Text("Pair over iroh") },
+              modifier = Modifier.weight(1f),
+            )
+            FilterChip(
+              selected = !irohMode,
+              onClick = { irohMode = false },
+              label = { Text("Bridge URL") },
+              modifier = Modifier.weight(1f),
+            )
           }
-          if (!irohMode)
+          if (irohMode) {
+            Text(
+              "Run 'cappuccino-bridge pair' on the host machine to scan or paste the pairing code.",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            PairingPayloadInput(
+              payload = payload,
+              onPayload = { payload = it },
+              scanError = scanError,
+              onScanError = { scanError = it },
+              busy = state.busy,
+            )
+          } else {
             OutlinedTextField(
               value = endpoint,
               onValueChange = { endpoint = it },
@@ -1347,21 +1383,28 @@ fun CappuccinoScreen(
                   unfocusedBorderColor = MaterialTheme.colorScheme.outline,
                 ),
             )
-          if (irohMode) {
-            PairingPayloadInput(
-              payload = payload,
-              onPayload = { payload = it },
-              scanError = scanError,
-              onScanError = { scanError = it },
-              busy = state.busy,
-            )
           }
+          OutlinedTextField(
+            value = label,
+            onValueChange = { label = it },
+            label = { Text("Label (optional)") },
+            placeholder = { Text("Defaults to machine name") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            colors =
+              OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+              ),
+          )
           state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
           if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }
       },
       confirmButton = {
-        TextButton(
+        Button(
           onClick = {
             previousProfileIds = state.addedProfileIds.joinToString("|")
             pendingAdd = true
@@ -1369,7 +1412,7 @@ fun CappuccinoScreen(
           },
           enabled = !state.busy && (if (irohMode) payload.isNotBlank() else endpoint.isNotBlank()),
         ) {
-          Text("Connect")
+          Text(if (irohMode) "Pair & Connect" else "Connect")
         }
       },
       dismissButton = {

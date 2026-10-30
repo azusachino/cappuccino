@@ -82,7 +82,8 @@ class MachinesJourneyTest {
     }
     openMachines()
     compose.onNodeWithContentDescription("Add machine").performClick()
-    compose.onNodeWithText("Label").performTextInput("Synthetic bridge")
+    compose.onNodeWithText("Bridge URL").performClick()
+    compose.onNodeWithText("Label (optional)").performTextInput("Synthetic bridge")
     compose.onNodeWithText("Bridge address").performTextInput("https://bridge.example")
     compose.onNodeWithText("Connect").performClick()
     assertTrue(
