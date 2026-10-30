@@ -1,10 +1,19 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -117,6 +126,13 @@ private enum class Destination(val title: Int, val icon: Int) {
   ),
 }
 
+private enum class ShellScreen {
+  CONVERSATION,
+  MACHINES,
+  HISTORY,
+  SETTINGS,
+}
+
 @Composable
 fun StatusBadge(status: String, modifier: Modifier = Modifier) {
   val badge = agentStatusStyle(status, MaterialTheme.colorScheme.background.luminance() < 0.5f)
@@ -195,7 +211,6 @@ fun CappuccinoScreen(
   var showingHistory by rememberSaveable { mutableStateOf(false) }
   var confirmingClearAll by rememberSaveable { mutableStateOf(false) }
   var historyMachineId by rememberSaveable { mutableStateOf<java.util.UUID?>(null) }
-  var showingTechnical by rememberSaveable { mutableStateOf(false) }
   var detailsProfileId by rememberSaveable { mutableStateOf<String?>(null) }
   var namingProfileId by rememberSaveable { mutableStateOf<String?>(null) }
   var adding by rememberSaveable { mutableStateOf(false) }
@@ -213,6 +228,15 @@ fun CappuccinoScreen(
   var pendingEdit by rememberSaveable { mutableStateOf(false) }
   val context = LocalContext.current
   val selected = state.selectedAgent
+  var lastSelectedAgent by remember { mutableStateOf(selected) }
+  var lastSelectedProfileId by remember { mutableStateOf(state.activeProfileId) }
+  androidx.compose.runtime.LaunchedEffect(selected) {
+    if (selected != null) {
+      lastSelectedAgent = selected
+      lastSelectedProfileId = state.activeProfileId
+    }
+  }
+  val lastSelectedProfile = state.profiles.firstOrNull { it.id == lastSelectedProfileId }
   val isCollapsed by
     remember(
       selected,
@@ -399,18 +423,10 @@ fun CappuccinoScreen(
     }
   }
   if (showingConnection && detailsProfile != null) {
-    if (showingTechnical) {
-      TechnicalConnectionScreen(detailsProfile, state, onBack = { showingTechnical = false })
-      return
-    }
     MachineInformation(
       profile = detailsProfile,
       state = state,
-      onDismiss = {
-        showingConnection = false
-        showingTechnical = false
-      },
-      onTechnicalDetails = { showingTechnical = true },
+      onDismiss = { showingConnection = false },
       onRename = {
         showingConnection = false
         namingProfileId = detailsProfile.id
@@ -516,148 +532,175 @@ fun CappuccinoScreen(
             )
             .statusBarsPadding()
         ) {
-          if (selected != null) {
-            Row(
-              Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
-              verticalAlignment = Alignment.CenterVertically,
-            ) {
-              IconButton(
-                onClick = {
-                  if (state.offlineSavedAt != null) actions.closeSavedConversation()
-                  else actions.selectAgent(null)
-                },
-                modifier = Modifier.pressScale().size(40.dp),
-              ) {
-                Icon(
-                  painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
-                  contentDescription =
-                    if (state.offlineSavedAt != null) "Back to history" else "Back",
-                )
-              }
-              val status =
-                agentStatusStyle(
-                  selectedStatus ?: "unknown",
-                  MaterialTheme.colorScheme.background.luminance() < 0.5f,
-                )
-              Row(
-                Modifier.weight(1f)
-                  .clip(RoundedCornerShape(8.dp))
-                  .clickable(enabled = selectedProfile != null) {
-                    detailsProfileId = selectedProfile?.id
-                    showingConnection = true
-                  }
-                  .padding(horizontal = 6.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-              ) {
-                AgentAvatar(selected.agent, 32.dp)
-                Column(
-                  Modifier.weight(1f),
-                  verticalArrangement = Arrangement.spacedBy(1.dp),
+          AnimatedContent(
+            targetState = selected != null,
+            transitionSpec = {
+              fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
+            },
+            label = "appBarContent",
+          ) { inConversation ->
+            if (inConversation) {
+              val currentAgent = selected ?: lastSelectedAgent
+              val currentProfile = selectedProfile ?: lastSelectedProfile
+              if (currentAgent != null) {
+                Row(
+                  Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
+                  verticalAlignment = Alignment.CenterVertically,
                 ) {
-                  Text(
-                    selected.label,
-                    style =
-                      MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                  )
-                  // Status keeps its color as a square beside its word, never color alone.
-                  Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                  IconButton(
+                    onClick = {
+                      if (state.offlineSavedAt != null) actions.closeSavedConversation()
+                      else actions.selectAgent(null)
+                    },
+                    modifier = Modifier.pressScale().size(40.dp),
                   ) {
-                    if (state.offlineSavedAt != null) {
-                      StatusSquare(MaterialTheme.appColors.muted)
+                    Icon(
+                      painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
+                      contentDescription =
+                        if (state.offlineSavedAt != null) "Back to history" else "Back",
+                    )
+                  }
+                  val status =
+                    agentStatusStyle(
+                      selectedStatus ?: "unknown",
+                      MaterialTheme.colorScheme.background.luminance() < 0.5f,
+                    )
+                  Row(
+                    Modifier.weight(1f)
+                      .clip(RoundedCornerShape(8.dp))
+                      .clickable(enabled = currentProfile != null) {
+                        detailsProfileId = currentProfile?.id
+                        showingConnection = true
+                      }
+                      .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                  ) {
+                    AgentAvatar(currentAgent.agent, 32.dp)
+                    Column(
+                      Modifier.weight(1f),
+                      verticalArrangement = Arrangement.spacedBy(1.dp),
+                    ) {
                       Text(
-                        "Saved history · Read-only",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.appColors.muted,
+                        currentAgent.label,
+                        style =
+                          MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.SemiBold
+                          ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                       )
-                    } else {
-                      StatusSquare(status.background)
-                      Text(
-                        status.label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.appColors.muted,
+                      // Status keeps its color as a square beside its word, never color alone.
+                      Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                      ) {
+                        if (state.offlineSavedAt != null) {
+                          StatusSquare(MaterialTheme.appColors.muted)
+                          Text(
+                            "Saved history · Read-only",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.appColors.muted,
+                          )
+                        } else {
+                          StatusSquare(status.background)
+                          Text(
+                            status.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.appColors.muted,
+                          )
+                        }
+                      }
+                    }
+                  }
+                  if (currentProfile != null) {
+                    IconButton(
+                      onClick = { showingHistory = true },
+                      modifier = Modifier.testTag("conversationHistoryButton").size(40.dp),
+                    ) {
+                      Icon(
+                        painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
+                        contentDescription = "Conversation history",
+                      )
+                    }
+                    IconButton(
+                      onClick = {
+                        detailsProfileId = currentProfile.id
+                        showingConnection = true
+                      },
+                      modifier = Modifier.size(40.dp),
+                    ) {
+                      Icon(
+                        painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
+                        contentDescription = "Connection details",
                       )
                     }
                   }
                 }
               }
-              if (selectedProfile != null) {
-                IconButton(
-                  onClick = { showingHistory = true },
-                  modifier = Modifier.testTag("conversationHistoryButton").size(40.dp),
+            } else {
+              Box(
+                Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 4.dp),
+                contentAlignment = Alignment.Center,
+              ) {
+                AnimatedVisibility(
+                  visible = isCollapsed,
+                  enter = fadeIn(animationSpec = tween(150)),
+                  exit = fadeOut(animationSpec = tween(150)),
+                  modifier = Modifier.align(Alignment.Center),
                 ) {
-                  Icon(
-                    painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
-                    contentDescription = "Conversation history",
+                  Text(
+                    stringResource(destination.title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.testTag("slimBarTitle"),
                   )
                 }
-                IconButton(
-                  onClick = {
-                    detailsProfileId = selectedProfile.id
-                    showingConnection = true
-                  },
-                  modifier = Modifier.size(40.dp),
+                Row(
+                  Modifier.align(Alignment.CenterEnd),
+                  verticalAlignment = Alignment.CenterVertically,
                 ) {
-                  Icon(
-                    painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
-                    contentDescription = "Connection details",
-                  )
-                }
-              }
-            }
-          } else {
-            Box(
-              Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 4.dp),
-              contentAlignment = Alignment.Center,
-            ) {
-              AnimatedVisibility(
-                visible = isCollapsed,
-                enter = fadeIn(animationSpec = tween(150)),
-                exit = fadeOut(animationSpec = tween(150)),
-                modifier = Modifier.align(Alignment.Center),
-              ) {
-                Text(
-                  stringResource(destination.title),
-                  style = MaterialTheme.typography.titleMedium,
-                  fontWeight = FontWeight.SemiBold,
-                  modifier = Modifier.testTag("slimBarTitle"),
-                )
-              }
-              Row(
-                Modifier.align(Alignment.CenterEnd),
-                verticalAlignment = Alignment.CenterVertically,
-              ) {
-                if (destination == Destination.HISTORY && state.savedConversations.isNotEmpty()) {
-                  IconButton(
-                    onClick = { confirmingClearAll = true },
-                    modifier = Modifier.pressScale().testTag("clearAllHistory").size(40.dp),
-                  ) {
-                    Icon(
-                      painterResource(com.azusachino.cappuccino.R.drawable.ic_trash),
-                      contentDescription = "Clear all saved conversations",
-                    )
+                  if (destination == Destination.HISTORY && state.savedConversations.isNotEmpty()) {
+                    IconButton(
+                      onClick = { confirmingClearAll = true },
+                      modifier = Modifier.pressScale().testTag("clearAllHistory").size(40.dp),
+                    ) {
+                      Icon(
+                        painterResource(com.azusachino.cappuccino.R.drawable.ic_trash),
+                        contentDescription = "Clear all saved conversations",
+                      )
+                    }
                   }
-                }
-                if (destination == Destination.MACHINES) {
-                  IconButton(
-                    onClick = { adding = true },
-                    modifier = Modifier.pressScale().size(40.dp),
-                  ) {
-                    Icon(
-                      painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
-                      contentDescription = "Add machine",
-                    )
+                  if (destination == Destination.MACHINES) {
+                    IconButton(
+                      onClick = { adding = true },
+                      modifier = Modifier.pressScale().size(40.dp),
+                    ) {
+                      Icon(
+                        painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
+                        contentDescription = "Add machine",
+                      )
+                    }
                   }
                 }
               }
             }
           }
         }
-        if (selected == null) {
+        AnimatedVisibility(
+          visible = selected == null,
+          enter =
+            slideInVertically(
+              initialOffsetY = { it },
+              animationSpec = tween(260, easing = FastOutSlowInEasing),
+            ) + fadeIn(animationSpec = tween(200)),
+          exit =
+            slideOutVertically(
+              targetOffsetY = { it },
+              animationSpec = tween(200, easing = FastOutSlowInEasing),
+            ) + fadeOut(animationSpec = tween(160)),
+          modifier = Modifier.align(Alignment.BottomCenter).zIndex(2f).navigationBarsPadding(),
+        ) {
           BottomDock(
             items =
               listOf(Destination.MACHINES, Destination.HISTORY, Destination.SETTINGS).map {
@@ -676,641 +719,690 @@ fun CappuccinoScreen(
             },
             hazeState = hazeState,
             backgroundColor = MaterialTheme.colorScheme.background,
-            modifier = Modifier.align(Alignment.BottomCenter).zIndex(2f).navigationBarsPadding(),
           )
         }
-        Column(
-          Modifier.fillMaxSize().hazeSource(hazeState).navigationBarsPadding().imePadding(),
-          verticalArrangement = Arrangement.spacedBy(if (selected == null) 12.dp else 4.dp),
-        ) {
+        val currentScreen =
           when {
-            selected != null -> {
-              state.offlineSavedAt?.let { savedAt ->
-                val colors = MaterialTheme.appColors
-                Surface(
-                  shape = RoundedCornerShape(8.dp),
-                  color = colors.card2,
-                  border = BorderStroke(1.dp, colors.line),
-                  modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                ) {
-                  Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                  ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                      Text(
-                        "Viewing saved conversation",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.text,
-                      )
-                      Text(
-                        "Saved ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(savedAt).toString(), timeZone) ?: "earlier"} · Read-only",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.muted,
-                      )
-                    }
-                    FilledTonalButton(
-                      onClick = {
-                        selectedProfile?.let { profile ->
-                          actions.selectProfile(profile.id)
-                          actions.selectAgent(selected)
-                        }
-                      },
-                      contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    ) {
-                      Text("Live session")
-                    }
-                  }
-                }
-              }
-              // Transcript metadata as plain text lines under the app bar; cardless
-              // (android-material3.md region 2).
-              Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-              ) {
-                if (state.conversationSource in setOf("scrollback", "terminal_scrollback"))
-                  Text(
-                    "Recent output · Scrollback fallback",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
-                else if (turns.isEmpty() && rows.isNotEmpty() && state.conversationSource == null)
-                  Text(
-                    "Recent output · History not verified",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
-              }
-              val bannerInset =
-                if (
-                  state.connection is ConnectionState.Connecting ||
-                    state.connection is ConnectionState.Recovering ||
-                    state.connection is ConnectionState.Error
-                )
-                  12.dp
-                else chromeTop
-              when (val connection = state.connection) {
-                ConnectionState.Connecting ->
-                  Column(
-                    Modifier.fillMaxWidth().padding(top = chromeTop).padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                  ) {
-                    Text(
-                      "Connecting…",
-                      style = MaterialTheme.typography.bodyMedium,
-                      color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                  }
-                ConnectionState.Recovering ->
-                  WarningBanner(
-                    "Reconnecting; earlier output may be missing",
-                    Modifier.padding(top = chromeTop),
-                  )
-                is ConnectionState.Error ->
-                  ErrorBanner(connection.message, Modifier.padding(top = chromeTop))
-                else -> Unit
-              }
+            selected != null -> ShellScreen.CONVERSATION
+            destination == Destination.HISTORY -> ShellScreen.HISTORY
+            destination == Destination.SETTINGS -> ShellScreen.SETTINGS
+            else -> ShellScreen.MACHINES
+          }
 
-              if (state.conversationSource == "scrollback") {
-                Text(
-                  "Live terminal output · canonical session unavailable",
-                  Modifier.padding(horizontal = 16.dp),
-                  style = MaterialTheme.typography.labelSmall,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-              }
-              Column(Modifier.weight(1f).fillMaxWidth()) {
-                readerState.SaveableStateProvider(conversationKey) {
-                  val historyOmitted =
-                    state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
-                  Box(Modifier.weight(1f).fillMaxWidth()) {
-                    SelectionContainer(Modifier.fillMaxSize()) {
-                      if (
-                        turns.isEmpty() &&
-                          state.conversationSource == null &&
-                          restoringReadingPosition
+        AnimatedContent(
+          targetState = currentScreen,
+          modifier =
+            Modifier.fillMaxSize().hazeSource(hazeState).navigationBarsPadding().imePadding(),
+          transitionSpec = {
+            if (
+              initialState != ShellScreen.CONVERSATION && targetState == ShellScreen.CONVERSATION
+            ) {
+              slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = tween(300, easing = FastOutSlowInEasing),
+              ) + fadeIn(animationSpec = tween(220)) togetherWith
+                slideOutHorizontally(
+                  targetOffsetX = { -it / 3 },
+                  animationSpec = tween(300, easing = FastOutSlowInEasing),
+                ) + fadeOut(animationSpec = tween(180))
+            } else if (
+              initialState == ShellScreen.CONVERSATION && targetState != ShellScreen.CONVERSATION
+            ) {
+              slideInHorizontally(
+                initialOffsetX = { -it / 3 },
+                animationSpec = tween(260, easing = FastOutSlowInEasing),
+              ) + fadeIn(animationSpec = tween(200)) togetherWith
+                slideOutHorizontally(
+                  targetOffsetX = { it },
+                  animationSpec = tween(260, easing = FastOutSlowInEasing),
+                ) + fadeOut(animationSpec = tween(180))
+            } else {
+              fadeIn(animationSpec = tween(200, easing = LinearOutSlowInEasing)) togetherWith
+                fadeOut(animationSpec = tween(150, easing = FastOutLinearInEasing))
+            }
+          },
+          label = "mainScreenTransition",
+        ) { screen ->
+          Column(
+            Modifier.fillMaxSize(),
+            verticalArrangement =
+              Arrangement.spacedBy(if (screen == ShellScreen.CONVERSATION) 4.dp else 12.dp),
+          ) {
+            when (screen) {
+              ShellScreen.CONVERSATION -> {
+                val currentSelected = selected ?: lastSelectedAgent
+                val currentProfile = selectedProfile ?: lastSelectedProfile
+                val currentProfileId = state.activeProfileId ?: lastSelectedProfileId
+                if (currentSelected != null) {
+                  state.offlineSavedAt?.let { savedAt ->
+                    val colors = MaterialTheme.appColors
+                    Surface(
+                      shape = RoundedCornerShape(8.dp),
+                      color = colors.card2,
+                      border = BorderStroke(1.dp, colors.line),
+                      modifier =
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    ) {
+                      Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                       ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                          Text("Loading history…", Modifier.padding(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                          Text(
+                            "Viewing saved conversation",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.text,
+                          )
+                          Text(
+                            "Saved ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(savedAt).toString(), timeZone) ?: "earlier"} · Read-only",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.muted,
+                          )
                         }
-                      } else if (turns.isNotEmpty()) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                          LazyColumn(
-                            state = outputListState,
-                            modifier =
-                              Modifier.fillMaxSize()
-                                .padding(horizontal = 16.dp)
-                                .testTag("recentOutputList"),
-                            contentPadding = PaddingValues(top = bannerInset, bottom = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                          ) {
-                            items(
-                              chatTurns,
-                              key = {
-                                "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
-                              },
-                            ) { turn ->
-                              if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
-                                Text(
-                                  "Older messages aren't loaded.",
-                                  Modifier.padding(vertical = 12.dp),
-                                  style = MaterialTheme.typography.bodySmall,
-                                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                              }
-                              ConversationTurnRow(
-                                turn,
-                                timeZone = timeZone,
-                                assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
-                                onInspect = { followingOutput = false },
-                                showToolsInline = true,
-                                onTextSizeChanged = onTextLayoutChanged,
-                                newest = turn.id in newestTurnIds,
-                              )
+                        FilledTonalButton(
+                          onClick = {
+                            currentProfile?.let { profile ->
+                              actions.selectProfile(profile.id)
+                              actions.selectAgent(currentSelected)
                             }
-                            // The live line lives in the bottom marker so follow targets stay put.
-                            item(key = "conversation-bottom") {
-                              Column {
-                                val liveStatus = selectedStatus
-                                if (
-                                  state.offlineSavedAt == null &&
-                                    liveStatus in setOf("working", "blocked")
-                                )
-                                  LiveStatusLine(
-                                    MaterialTheme.appColors.working,
-                                    state.stream.agentStatusDetail,
-                                  )
-                                Spacer(Modifier.height(8.dp))
-                              }
-                            }
-                          }
-                        }
-                      } else {
-                        LazyColumn(
-                          state = outputListState,
-                          modifier =
-                            Modifier.fillMaxSize()
-                              .padding(horizontal = 16.dp)
-                              .testTag("recentOutputList"),
-                          contentPadding = PaddingValues(top = bannerInset, bottom = 12.dp),
-                          verticalArrangement = Arrangement.spacedBy(6.dp),
+                          },
+                          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                         ) {
-                          items(collapsedRows, key = { "row:${it.key}" }) { row ->
-                            OutputItemRow(row, onInspect = { followingOutput = false })
-                          }
-                          item(key = "stream-bottom") { Spacer(Modifier.height(8.dp)) }
+                          Text("Live session")
                         }
                       }
                     }
-                    if (!nearBottom && displayedContent.isNotEmpty())
-                      JumpToLatest(
-                        newOutput = hasNewOutput,
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
-                        onClick = {
-                          outputScope.launch {
-                            followingOutput = true
-                            automaticScroll = true
-                            try {
-                              outputListState.scrollToItem(displayedContent.size, 10000)
-                              hasNewOutput = false
-                            } finally {
-                              automaticScroll = false
+                  }
+                  // Transcript metadata as plain text lines under the app bar; cardless
+                  // (android-material3.md region 2).
+                  Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                  ) {
+                    if (state.conversationSource in setOf("scrollback", "terminal_scrollback"))
+                      Text(
+                        "Recent output · Scrollback fallback",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                    else if (
+                      turns.isEmpty() && rows.isNotEmpty() && state.conversationSource == null
+                    )
+                      Text(
+                        "Recent output · History not verified",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                  }
+                  val bannerInset =
+                    if (
+                      state.connection is ConnectionState.Connecting ||
+                        state.connection is ConnectionState.Recovering ||
+                        state.connection is ConnectionState.Error
+                    )
+                      12.dp
+                    else chromeTop
+                  when (val connection = state.connection) {
+                    ConnectionState.Connecting ->
+                      Column(
+                        Modifier.fillMaxWidth()
+                          .padding(top = chromeTop)
+                          .padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                      ) {
+                        Text(
+                          "Connecting…",
+                          style = MaterialTheme.typography.bodyMedium,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                      }
+                    ConnectionState.Recovering ->
+                      WarningBanner(
+                        "Reconnecting; earlier output may be missing",
+                        Modifier.padding(top = chromeTop),
+                      )
+                    is ConnectionState.Error ->
+                      ErrorBanner(connection.message, Modifier.padding(top = chromeTop))
+                    else -> Unit
+                  }
+
+                  if (state.conversationSource == "scrollback") {
+                    Text(
+                      "Live terminal output · canonical session unavailable",
+                      Modifier.padding(horizontal = 16.dp),
+                      style = MaterialTheme.typography.labelSmall,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                  }
+                  Column(Modifier.weight(1f).fillMaxWidth()) {
+                    readerState.SaveableStateProvider(conversationKey) {
+                      val historyOmitted =
+                        state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
+                      Box(Modifier.weight(1f).fillMaxWidth()) {
+                        SelectionContainer(Modifier.fillMaxSize()) {
+                          if (
+                            turns.isEmpty() &&
+                              state.conversationSource == null &&
+                              restoringReadingPosition
+                          ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                              Text("Loading history…", Modifier.padding(16.dp))
+                            }
+                          } else if (turns.isNotEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                              LazyColumn(
+                                state = outputListState,
+                                modifier =
+                                  Modifier.fillMaxSize()
+                                    .padding(horizontal = 16.dp)
+                                    .testTag("recentOutputList"),
+                                contentPadding = PaddingValues(top = bannerInset, bottom = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                              ) {
+                                items(
+                                  chatTurns,
+                                  key = { ":::${it.id}" },
+                                ) { turn ->
+                                  if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
+                                    Text(
+                                      "Older messages aren't loaded.",
+                                      Modifier.padding(vertical = 12.dp),
+                                      style = MaterialTheme.typography.bodySmall,
+                                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                  }
+                                  ConversationTurnRow(
+                                    turn,
+                                    timeZone = timeZone,
+                                    assistantLabel =
+                                      currentSelected.agent.replaceFirstChar { it.uppercase() },
+                                    onInspect = { followingOutput = false },
+                                    showToolsInline = true,
+                                    onTextSizeChanged = onTextLayoutChanged,
+                                    newest = turn.id in newestTurnIds,
+                                  )
+                                }
+                                // The bottom spacer keeps follow targets clean.
+                                item(key = "conversation-bottom") { Spacer(Modifier.height(8.dp)) }
+                              }
+                            }
+                          } else {
+                            LazyColumn(
+                              state = outputListState,
+                              modifier =
+                                Modifier.fillMaxSize()
+                                  .padding(horizontal = 16.dp)
+                                  .testTag("recentOutputList"),
+                              contentPadding = PaddingValues(top = bannerInset, bottom = 12.dp),
+                              verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                              items(collapsedRows, key = { "row:${it.key}" }) { row ->
+                                OutputItemRow(row, onInspect = { followingOutput = false })
+                              }
+                              item(key = "stream-bottom") { Spacer(Modifier.height(8.dp)) }
                             }
                           }
-                        },
-                      )
-                  }
-                }
-                if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty()) {
-                  Box(
-                    modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
-                    contentAlignment = Alignment.Center,
-                  ) {
-                    Column(
-                      horizontalAlignment = Alignment.CenterHorizontally,
-                      verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                      AgentAvatar(selected.agent, 56.dp)
-                      Text(
-                        "Let's make progress",
-                        style =
-                          MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.SemiBold
-                          ),
-                        color = MaterialTheme.appColors.text,
-                      )
-                      Text(
-                        "/${selected.agent} · ${selected.label}",
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
-                        color = MaterialTheme.appColors.muted,
-                      )
+                        }
+                        if (!nearBottom && displayedContent.isNotEmpty())
+                          JumpToLatest(
+                            newOutput = hasNewOutput,
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                            onClick = {
+                              outputScope.launch {
+                                followingOutput = true
+                                automaticScroll = true
+                                try {
+                                  outputListState.scrollToItem(displayedContent.size, 10000)
+                                  hasNewOutput = false
+                                } finally {
+                                  automaticScroll = false
+                                }
+                              }
+                            },
+                          )
+                      }
                     }
-                  }
-                }
+                    if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty()) {
+                      Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center,
+                      ) {
+                        Column(
+                          horizontalAlignment = Alignment.CenterHorizontally,
+                          verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                          AgentAvatar(currentSelected.agent, 56.dp)
+                          Text(
+                            "Let's make progress",
+                            style =
+                              MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.SemiBold
+                              ),
+                            color = MaterialTheme.appColors.text,
+                          )
+                          Text(
+                            "/ · ",
+                            style =
+                              MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
+                            color = MaterialTheme.appColors.muted,
+                          )
+                        }
+                      }
+                    }
 
-                // A waiting prompt sits by the composer, after the output that asked it, so the
-                // transcript keeps the top of the screen and the answer is within thumb reach.
-                state.actionError?.let { ErrorBanner(it) }
-                state.stream.pendingPrompt?.let { card ->
-                  val answersEnabled =
-                    state.connection == ConnectionState.Connected &&
-                      state.canMutate &&
-                      state.bridgeDetails[state.activeProfileId]
-                        ?.capabilities
-                        ?.get("prompt_answers") != false
-                  Box(
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("pendingPrompt")
-                  ) {
-                    if (card.questions.isNotEmpty())
-                      QuestionFormCard(
-                        prompt = card,
-                        enabled = answersEnabled,
-                        onSubmit = { answers ->
-                          mutate { it.answerQuestions(card.promptId, answers) }
-                        },
-                        onCancel = {
-                          mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
-                        },
-                      )
-                    else
-                      PromptCardView(
-                        prompt = card,
-                        enabled = answersEnabled,
-                        onSelectOption = { idx, optId ->
-                          mutate { it.answerPrompt(card.promptId, idx, optId, "select_option") }
-                        },
-                        onCancel = {
-                          mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
-                        },
-                      )
-                  }
-                }
-
-                if (state.streamLive && !state.canMutate) {
-                  Text(
-                    "Session-bound actions unavailable. Update the bridge or reselect a session with native identity.",
-                    Modifier.padding(horizontal = 16.dp),
-                  )
-                }
-                // Existing live prompt route; saved readers remain read-only.
-                if (
-                  state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") ==
-                    false
-                ) {
-                  Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
-                }
-                val draftKey = agentDraftKey(selected)
-                val sendState =
-                  state.promptSends[agentSendKey(state.activeProfileId ?: "", selected)]
-                val composerKey = agentSendKey(state.activeProfileId ?: "", selected)
-                if (state.offlineSavedAt == null)
-                  composerState.SaveableStateProvider(composerKey) {
-                    PromptInputBar(
-                      onSend = { text, confirmed -> mutate { it.submitPrompt(text, confirmed) } },
-                      pending = sendState != null && sendState.outcome == null,
-                      agentWorking = selectedStatus == "working",
-                      outcome = sendState?.outcome,
-                      onStop =
-                        if (agentControl && selectedStatus == "working") {
-                          { mutate { it.controlAgent("interrupt") } }
-                        } else null,
-                      model = state.sessionStats?.model,
-                      thinkingLevel = state.sessionStats?.thinkingLevel,
-                      stats = state.sessionStats,
-                      placeholder =
-                        "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
-                      enabled =
+                    // A waiting prompt sits by the composer, after the output that asked it, so the
+                    // transcript keeps the top of the screen and the answer is within thumb reach.
+                    state.actionError?.let { ErrorBanner(it) }
+                    state.stream.pendingPrompt?.let { card ->
+                      val answersEnabled =
                         state.connection == ConnectionState.Connected &&
                           state.canMutate &&
                           state.bridgeDetails[state.activeProfileId]
                             ?.capabilities
-                            ?.get("prompt_input") != false,
-                      draft = state.drafts[draftKey] ?: "",
-                      onDraftChange = { text -> actions.setDraft(draftKey, text) },
-                    )
-                  }
-              }
-            }
-            destination == Destination.HISTORY -> {
-              HistoryScreen(
-                conversations = state.savedConversations,
-                savedMachineNames = state.profiles.associate { it.machineId to it.label },
-                currentConversationId = state.conversationId,
-                timeZone = timeZone,
-                onOpenSaved = { machineId, convoId ->
-                  savedHistoryAction?.invoke(machineId, convoId)
-                },
-                onDeleteSaved = actions::deleteSavedConversation,
-                contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
-                lazyListState = historyListState,
-              )
-            }
-            destination == Destination.SETTINGS -> {
-              SettingsScreen(
-                themeMode = state.themeMode,
-                onSelectTheme = actions::setThemeMode,
-                onReloadMachines = actions::refreshAll,
-                contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
-                connections =
-                  state.profiles.map { profile ->
-                    val details =
-                      state.bridgeDetails[profile.id]?.takeIf { it.machineId == profile.machineId }
-                    val conn = state.machineConnection(profile).connection
-                    val conflictProto =
-                      if (conn is ConnectionState.Error) {
-                        Regex("""protocol v?(\d+)""")
-                          .find(conn.message)
-                          ?.groupValues
-                          ?.get(1)
-                          ?.toLongOrNull()
-                      } else null
-                    SettingsConnection(
-                      id = profile.id,
-                      label = profile.label,
-                      status = conn.statusText(),
-                      bridgeVersion = details?.version,
-                      protocol = details?.protocol ?: conflictProto,
-                    )
-                  },
-                onConnectionDetails = { profileId ->
-                  detailsProfileId = profileId
-                  showingConnection = true
-                },
-                scrollState = settingsScrollState,
-              )
-            }
-            else -> {
-              // Destination.MACHINES
-              if (state.profiles.isEmpty()) {
-                Column(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = chromeTop)) {
-                  Text(
-                    stringResource(com.azusachino.cappuccino.R.string.machines),
-                    Modifier.padding(start = 24.dp, top = 8.dp, bottom = 4.dp),
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.appColors.text,
-                  )
-                  Box(
-                    modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 24.dp),
-                    contentAlignment = Alignment.Center,
-                  ) {
-                    Column(
-                      horizontalAlignment = Alignment.CenterHorizontally,
-                      verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                      Icon(
-                        painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
-                        contentDescription = null,
-                        modifier = Modifier.size(56.dp),
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                      )
-                      Text(
-                        "No machines",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                      )
-                      Spacer(Modifier.height(8.dp))
-                      Button(
-                        onClick = {
-                          irohMode = true
-                          adding = true
-                        },
-                        shape = RoundedCornerShape(12.dp),
+                            ?.get("prompt_answers") != false
+                      Box(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                          .testTag("pendingPrompt")
                       ) {
-                        Icon(
-                          painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
-                          contentDescription = null,
-                          modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Add Machine")
+                        if (card.questions.isNotEmpty())
+                          QuestionFormCard(
+                            prompt = card,
+                            enabled = answersEnabled,
+                            onSubmit = { answers ->
+                              mutate { it.answerQuestions(card.promptId, answers) }
+                            },
+                            onCancel = {
+                              mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                            },
+                          )
+                        else
+                          PromptCardView(
+                            prompt = card,
+                            enabled = answersEnabled,
+                            onSelectOption = { idx, optId ->
+                              mutate { it.answerPrompt(card.promptId, idx, optId, "select_option") }
+                            },
+                            onCancel = {
+                              mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                            },
+                          )
                       }
                     }
+
+                    if (state.streamLive && !state.canMutate) {
+                      Text(
+                        "Session-bound actions unavailable. Update the bridge or reselect a session with native identity.",
+                        Modifier.padding(horizontal = 16.dp),
+                      )
+                    }
+                    // Existing live prompt route; saved readers remain read-only.
+                    if (
+                      state.bridgeDetails[currentProfileId]?.capabilities?.get("prompt_input") ==
+                        false
+                    ) {
+                      Text(
+                        "This bridge can't receive messages.",
+                        Modifier.padding(horizontal = 16.dp),
+                      )
+                    }
+                    val draftKey = agentDraftKey(currentSelected)
+                    val sendState =
+                      state.promptSends[agentSendKey(currentProfileId ?: "", currentSelected)]
+                    val composerKey = agentSendKey(currentProfileId ?: "", currentSelected)
+                    if (state.offlineSavedAt == null)
+                      composerState.SaveableStateProvider(composerKey) {
+                        PromptInputBar(
+                          onSend = { text, confirmed ->
+                            mutate { it.submitPrompt(text, confirmed) }
+                          },
+                          pending = sendState != null && sendState.outcome == null,
+                          agentWorking = selectedStatus == "working",
+                          outcome = sendState?.outcome,
+                          onStop =
+                            if (agentControl && selectedStatus == "working") {
+                              { mutate { it.controlAgent("interrupt") } }
+                            } else null,
+                          model = state.sessionStats?.model,
+                          thinkingLevel = state.sessionStats?.thinkingLevel,
+                          stats = state.sessionStats,
+                          placeholder =
+                            "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…",
+                          enabled =
+                            state.connection == ConnectionState.Connected &&
+                              state.canMutate &&
+                              state.bridgeDetails[currentProfileId]
+                                ?.capabilities
+                                ?.get("prompt_input") != false,
+                          draft = state.drafts[draftKey] ?: "",
+                          onDraftChange = { text -> actions.setDraft(draftKey, text) },
+                        )
+                      }
                   }
                 }
-              } else {
-                LazyColumn(
-                  state = machineTreeState,
-                  modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+              }
+              ShellScreen.HISTORY -> {
+                HistoryScreen(
+                  conversations = state.savedConversations,
+                  savedMachineNames = state.profiles.associate { it.machineId to it.label },
+                  currentConversationId = state.conversationId,
+                  timeZone = timeZone,
+                  onOpenSaved = { machineId, convoId ->
+                    savedHistoryAction?.invoke(machineId, convoId)
+                  },
+                  onDeleteSaved = actions::deleteSavedConversation,
                   contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
-                  verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                  item(key = "machines_large_title") {
+                  lazyListState = historyListState,
+                )
+              }
+              ShellScreen.SETTINGS -> {
+                SettingsScreen(
+                  themeMode = state.themeMode,
+                  onSelectTheme = actions::setThemeMode,
+                  onReloadMachines = actions::refreshAll,
+                  contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
+                  connections =
+                    state.profiles.map { profile ->
+                      val details =
+                        state.bridgeDetails[profile.id]?.takeIf {
+                          it.machineId == profile.machineId
+                        }
+                      val conn = state.machineConnection(profile).connection
+                      val conflictProto =
+                        if (conn is ConnectionState.Error) {
+                          Regex("""protocol v?(\d+)""")
+                            .find(conn.message)
+                            ?.groupValues
+                            ?.get(1)
+                            ?.toLongOrNull()
+                        } else null
+                      SettingsConnection(
+                        id = profile.id,
+                        label = profile.label,
+                        status = conn.statusText(),
+                        bridgeVersion = details?.version,
+                        protocol = details?.protocol ?: conflictProto,
+                      )
+                    },
+                  onConnectionDetails = { profileId ->
+                    detailsProfileId = profileId
+                    showingConnection = true
+                  },
+                  scrollState = settingsScrollState,
+                )
+              }
+              ShellScreen.MACHINES -> {
+                // Destination.MACHINES
+                if (state.profiles.isEmpty()) {
+                  Column(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = chromeTop)) {
                     Text(
                       stringResource(com.azusachino.cappuccino.R.string.machines),
-                      Modifier.padding(start = 8.dp, top = 8.dp, bottom = 4.dp),
+                      Modifier.padding(start = 24.dp, top = 8.dp, bottom = 4.dp),
                       style = MaterialTheme.typography.headlineLarge,
                       fontWeight = FontWeight.Bold,
                       color = MaterialTheme.appColors.text,
                     )
-                  }
-                  items(state.profiles, key = { it.id }) { profile ->
-                    val machine = state.machineConnection(profile)
-                    Column(
-                      Modifier.fillMaxWidth()
-                        .glassSurface(shape = RoundedCornerShape(16.dp), isElevated = true)
-                        .padding(vertical = 4.dp)
+                    Box(
+                      modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 24.dp),
+                      contentAlignment = Alignment.Center,
                     ) {
-                      Row(
-                        Modifier.fillMaxWidth()
-                          .clickable(role = androidx.compose.ui.semantics.Role.Button) {
-                            detailsProfileId = profile.id
-                            showingConnection = true
-                          }
-                          .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                      Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                       ) {
-                        Box(
-                          Modifier.size(36.dp)
-                            .background(MaterialTheme.appColors.card2, RoundedCornerShape(10.dp)),
-                          contentAlignment = Alignment.Center,
+                        Icon(
+                          painter =
+                            painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
+                          contentDescription = null,
+                          modifier = Modifier.size(56.dp),
+                          tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                        )
+                        Text(
+                          "No machines",
+                          style = MaterialTheme.typography.titleMedium,
+                          fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                          onClick = {
+                            irohMode = true
+                            adding = true
+                          },
+                          shape = RoundedCornerShape(12.dp),
                         ) {
                           Icon(
-                            painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
+                            painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
                             contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.appColors.accent,
+                            modifier = Modifier.size(18.dp),
                           )
-                        }
-                        Column(
-                          Modifier.weight(1f),
-                          verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                          Text(
-                            profile.label.takeUnless {
-                              it == profile.endpoint.base.host || it == "iroh.invalid"
-                            } ?: "Machine",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.appColors.text,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                          )
-                          val statusSubtitle =
-                            listOfNotNull(
-                                machine.connection.statusText(),
-                                when (state.machineBadges[profile.id]) {
-                                  com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
-                                    "iroh direct"
-                                  com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
-                                    "iroh relayed"
-                                  com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
-                                    if (profile.endpoint.iroh != null) "tailnet (fallback)"
-                                    else "tailnet"
-                                  else -> null
-                                },
-                              )
-                              .joinToString(" · ")
-                          Text(
-                            statusSubtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.appColors.muted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                          )
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                          if (machine.connection is ConnectionState.Error) {
-                            IconButton(
-                              onClick = { actions.refreshProfile(profile.id) },
-                              enabled = !machine.busy,
-                              modifier = Modifier.size(36.dp),
-                            ) {
-                              Icon(
-                                painterResource(com.azusachino.cappuccino.R.drawable.ic_refresh),
-                                contentDescription = "Retry ${profile.label}",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.appColors.warn,
-                              )
-                            }
-                          }
-                          Box {
-                            IconButton(
-                              onClick = { machineMenuId = profile.id },
-                              modifier = Modifier.size(36.dp),
-                            ) {
-                              Icon(
-                                painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
-                                contentDescription = "Machine actions",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.appColors.faint,
-                              )
-                            }
-                            DropdownMenu(
-                              expanded = machineMenuId == profile.id,
-                              onDismissRequest = { machineMenuId = null },
-                            ) {
-                              DropdownMenuItem(
-                                text = { Text("Connection details") },
-                                onClick = {
-                                  detailsProfileId = profile.id
-                                  showingConnection = true
-                                  machineMenuId = null
-                                },
-                              )
-                              DropdownMenuItem(
-                                text = { Text("Conversation history") },
-                                onClick = {
-                                  historyMachineId = profile.machineId
-                                  showingHistory = true
-                                  machineMenuId = null
-                                },
-                              )
-                              DropdownMenuItem(
-                                text = { Text("Rename") },
-                                onClick = {
-                                  namingProfileId = profile.id
-                                  machineNameDraft = profile.label
-                                  namingMachine = true
-                                  machineMenuId = null
-                                },
-                              )
-                              if (profile.endpoint.iroh == null) {
-                                DropdownMenuItem(
-                                  text = { Text("Pair over iroh") },
-                                  onClick = {
-                                    editingProfileId = profile.id
-                                    editingIroh = true
-                                    payload = ""
-                                    scanError = null
-                                    pendingEdit = false
-                                    machineMenuId = null
-                                  },
-                                )
-                              }
-                              if (profile.endpoint.iroh != null && !profile.endpoint.hasTailnet) {
-                                DropdownMenuItem(
-                                  text = { Text("Add tailnet URL") },
-                                  onClick = {
-                                    editingProfileId = profile.id
-                                    editingIroh = false
-                                    editingUrl = ""
-                                    pendingEdit = false
-                                    machineMenuId = null
-                                  },
-                                )
-                              }
-                              DropdownMenuItem(
-                                text = { Text("Remove") },
-                                onClick = {
-                                  actions.removeProfile(profile.id)
-                                  machineMenuId = null
-                                },
-                              )
-                            }
-                          }
+                          Spacer(Modifier.width(8.dp))
+                          Text("Add Machine")
                         }
                       }
-                      if (
-                        machine.busy && machine.agents.isEmpty() ||
-                          machine.connection == ConnectionState.Connecting
+                    }
+                  }
+                } else {
+                  LazyColumn(
+                    state = machineTreeState,
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                  ) {
+                    item(key = "machines_large_title") {
+                      Text(
+                        stringResource(com.azusachino.cappuccino.R.string.machines),
+                        Modifier.padding(start = 8.dp, top = 8.dp, bottom = 4.dp),
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.appColors.text,
+                      )
+                    }
+                    items(state.profiles, key = { it.id }) { profile ->
+                      val machine = state.machineConnection(profile)
+                      Column(
+                        Modifier.fillMaxWidth()
+                          .glassSurface(shape = RoundedCornerShape(16.dp), isElevated = true)
+                          .padding(vertical = 4.dp)
                       ) {
-                        LinearProgressIndicator(
-                          Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-                        )
-                      }
-                      val agents = machine.agents.filter { it.machineId == profile.machineId }
-                      if (machine.connection == ConnectionState.Connected) {
-                        if (agents.isNotEmpty()) {
-                          MachineDivider()
+                        Row(
+                          Modifier.fillMaxWidth()
+                            .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                              detailsProfileId = profile.id
+                              showingConnection = true
+                            }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                          verticalAlignment = Alignment.CenterVertically,
+                          horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                          Box(
+                            Modifier.size(36.dp)
+                              .background(MaterialTheme.appColors.card2, RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center,
+                          ) {
+                            Icon(
+                              painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
+                              contentDescription = null,
+                              modifier = Modifier.size(20.dp),
+                              tint = MaterialTheme.appColors.accent,
+                            )
+                          }
                           Column(
-                            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+                            Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                           ) {
-                            agents.forEach { agent ->
-                              key(profile.id, agent.sessionId) {
-                                AgentItemCard(
-                                  agent,
+                            Text(
+                              profile.label.takeUnless {
+                                it == profile.endpoint.base.host || it == "iroh.invalid"
+                              } ?: "Machine",
+                              style = MaterialTheme.typography.bodyMedium,
+                              fontWeight = FontWeight.SemiBold,
+                              color = MaterialTheme.appColors.text,
+                              maxLines = 1,
+                              overflow = TextOverflow.Ellipsis,
+                            )
+                            val statusSubtitle =
+                              listOfNotNull(
+                                  machine.connection.statusText(),
+                                  when (state.machineBadges[profile.id]) {
+                                    com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
+                                      "iroh direct"
+                                    com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
+                                      "iroh relayed"
+                                    com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
+                                      if (profile.endpoint.iroh != null) "tailnet (fallback)"
+                                      else "tailnet"
+                                    else -> null
+                                  },
+                                )
+                                .joinToString(" · ")
+                            Text(
+                              statusSubtitle,
+                              style = MaterialTheme.typography.bodySmall,
+                              color = MaterialTheme.appColors.muted,
+                              maxLines = 1,
+                              overflow = TextOverflow.Ellipsis,
+                            )
+                          }
+                          Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (machine.connection is ConnectionState.Error) {
+                              IconButton(
+                                onClick = { actions.refreshProfile(profile.id) },
+                                enabled = !machine.busy,
+                                modifier = Modifier.size(36.dp),
+                              ) {
+                                Icon(
+                                  painterResource(com.azusachino.cappuccino.R.drawable.ic_refresh),
+                                  contentDescription = "Retry ${profile.label}",
+                                  modifier = Modifier.size(18.dp),
+                                  tint = MaterialTheme.appColors.warn,
+                                )
+                              }
+                            }
+                            Box {
+                              IconButton(
+                                onClick = { machineMenuId = profile.id },
+                                modifier = Modifier.size(36.dp),
+                              ) {
+                                Icon(
+                                  painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
+                                  contentDescription = "Machine actions",
+                                  modifier = Modifier.size(18.dp),
+                                  tint = MaterialTheme.appColors.faint,
+                                )
+                              }
+                              DropdownMenu(
+                                expanded = machineMenuId == profile.id,
+                                onDismissRequest = { machineMenuId = null },
+                              ) {
+                                DropdownMenuItem(
+                                  text = { Text("Connection details") },
                                   onClick = {
-                                    actions.selectProfile(profile.id)
-                                    actions.selectAgent(agent)
+                                    detailsProfileId = profile.id
+                                    showingConnection = true
+                                    machineMenuId = null
+                                  },
+                                )
+                                DropdownMenuItem(
+                                  text = { Text("Conversation history") },
+                                  onClick = {
+                                    historyMachineId = profile.machineId
+                                    showingHistory = true
+                                    machineMenuId = null
+                                  },
+                                )
+                                DropdownMenuItem(
+                                  text = { Text("Rename") },
+                                  onClick = {
+                                    namingProfileId = profile.id
+                                    machineNameDraft = profile.label
+                                    namingMachine = true
+                                    machineMenuId = null
+                                  },
+                                )
+                                if (profile.endpoint.iroh == null) {
+                                  DropdownMenuItem(
+                                    text = { Text("Pair over iroh") },
+                                    onClick = {
+                                      editingProfileId = profile.id
+                                      editingIroh = true
+                                      payload = ""
+                                      scanError = null
+                                      pendingEdit = false
+                                      machineMenuId = null
+                                    },
+                                  )
+                                }
+                                if (profile.endpoint.iroh != null && !profile.endpoint.hasTailnet) {
+                                  DropdownMenuItem(
+                                    text = { Text("Add tailnet URL") },
+                                    onClick = {
+                                      editingProfileId = profile.id
+                                      editingIroh = false
+                                      editingUrl = ""
+                                      pendingEdit = false
+                                      machineMenuId = null
+                                    },
+                                  )
+                                }
+                                DropdownMenuItem(
+                                  text = { Text("Remove") },
+                                  onClick = {
+                                    actions.removeProfile(profile.id)
+                                    machineMenuId = null
                                   },
                                 )
                               }
                             }
                           }
-                        } else {
-                          MachineDivider()
-                          Text(
-                            "No active agents",
-                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.appColors.faint,
+                        }
+                        if (
+                          machine.busy && machine.agents.isEmpty() ||
+                            machine.connection == ConnectionState.Connecting
+                        ) {
+                          LinearProgressIndicator(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
                           )
+                        }
+                        val agents = machine.agents.filter { it.machineId == profile.machineId }
+                        if (machine.connection == ConnectionState.Connected) {
+                          if (agents.isNotEmpty()) {
+                            MachineDivider()
+                            Column(
+                              Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+                              verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                              agents.forEach { agent ->
+                                key(profile.id, agent.sessionId) {
+                                  AgentItemCard(
+                                    agent,
+                                    onClick = {
+                                      actions.selectProfile(profile.id)
+                                      actions.selectAgent(agent)
+                                    },
+                                  )
+                                }
+                              }
+                            }
+                          } else {
+                            MachineDivider()
+                            Text(
+                              "No active agents",
+                              Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                              style = MaterialTheme.typography.bodySmall,
+                              color = MaterialTheme.appColors.faint,
+                            )
+                          }
                         }
                       }
                     }
                   }
                 }
-              }
 
-              if (state.busy)
-                CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+                if (state.busy)
+                  CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+              }
             }
           }
         }

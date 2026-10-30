@@ -42,6 +42,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
@@ -53,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import com.azusachino.cappuccino.R
 import com.azusachino.cappuccino.core.COMMON_SLASH_COMMANDS
 import com.azusachino.cappuccino.core.PromptCard
@@ -182,6 +185,7 @@ fun PromptInputBar(
   var modelMenuOpen by remember { mutableStateOf(false) }
   var effortMenuOpen by remember { mutableStateOf(false) }
   var isFocused by remember { mutableStateOf(false) }
+  val focusRequester = remember { FocusRequester() }
   var promptHistory by rememberSaveable { mutableStateOf(listOf<String>()) }
   var confirmingCommand by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -318,6 +322,7 @@ fun PromptInputBar(
             },
             modifier =
               Modifier.weight(1f)
+                .focusRequester(focusRequester)
                 .onFocusChanged { isFocused = it.isFocused }
                 .testTag("promptInput"),
             enabled = enabled,
@@ -373,7 +378,11 @@ fun PromptInputBar(
                 tint = colors.muted,
               )
             }
-            DropdownMenu(expanded = commandsOpen, onDismissRequest = { commandsOpen = false }) {
+            DropdownMenu(
+              expanded = commandsOpen,
+              onDismissRequest = { commandsOpen = false },
+              properties = PopupProperties(focusable = false),
+            ) {
               if (enabled && !pending) {
                 DropdownMenuItem(
                   text = { Text("Continue") },
@@ -410,6 +419,8 @@ fun PromptInputBar(
                       confirmingCommand = "/compact"
                     } else {
                       input = "${item.command} "
+                      onDraftChange?.invoke(input)
+                      focusRequester.requestFocus()
                     }
                   },
                 )
@@ -431,7 +442,11 @@ fun PromptInputBar(
                   tint = colors.muted,
                 )
               }
-              DropdownMenu(expanded = historyOpen, onDismissRequest = { historyOpen = false }) {
+              DropdownMenu(
+                expanded = historyOpen,
+                onDismissRequest = { historyOpen = false },
+                properties = PopupProperties(focusable = false),
+              ) {
                 Text(
                   "Recent prompts",
                   modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -452,6 +467,7 @@ fun PromptInputBar(
                       historyOpen = false
                       input = item
                       onDraftChange?.invoke(item)
+                      focusRequester.requestFocus()
                     },
                   )
                 }
@@ -564,7 +580,11 @@ fun PromptInputBar(
                 )
               }
             }
-            DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
+            DropdownMenu(
+              expanded = modelMenuOpen,
+              onDismissRequest = { modelMenuOpen = false },
+              properties = PopupProperties(focusable = false),
+            ) {
               DropdownMenuItem(
                 text = {
                   Text(model ?: "Default model", style = MaterialTheme.typography.bodySmall)
@@ -602,7 +622,11 @@ fun PromptInputBar(
                 )
               }
             }
-            DropdownMenu(expanded = effortMenuOpen, onDismissRequest = { effortMenuOpen = false }) {
+            DropdownMenu(
+              expanded = effortMenuOpen,
+              onDismissRequest = { effortMenuOpen = false },
+              properties = PopupProperties(focusable = false),
+            ) {
               listOf("Off", "Low", "Medium", "High").forEach { level ->
                 DropdownMenuItem(
                   text = { Text(level, style = MaterialTheme.typography.bodySmall) },

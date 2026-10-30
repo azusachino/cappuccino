@@ -12,25 +12,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.azusachino.cappuccino.R
 import com.azusachino.cappuccino.core.ConversationPart
 import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.TranscriptSegment
@@ -206,51 +200,16 @@ fun ConversationTurnRow(
                 timeDescription = turn.timestamp?.let { formatConversationTimestamp(it, timeZone) },
               )
             else {
-              val colors = MaterialTheme.appColors
-              val context = androidx.compose.ui.platform.LocalContext.current
               Box(
                 Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
                 contentAlignment = Alignment.CenterStart,
               ) {
-                Column(Modifier.fillMaxWidth()) {
-                  MessageBody(
-                    part.text,
-                    onInspect = onInspect,
-                    modifier = textModifier,
-                    transcript = true,
-                  )
-                  // Pico-style message action bar
-                  Row(
-                    modifier = Modifier.padding(top = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                  ) {
-                    IconButton(
-                      onClick = {
-                        val cm =
-                          context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                            as android.content.ClipboardManager
-                        cm.setPrimaryClip(
-                          android.content.ClipData.newPlainText("Assistant message", part.text)
-                        )
-                        android.widget.Toast.makeText(
-                            context,
-                            "Copied to clipboard",
-                            android.widget.Toast.LENGTH_SHORT,
-                          )
-                          .show()
-                      },
-                      modifier = Modifier.size(28.dp),
-                    ) {
-                      Icon(
-                        painterResource(R.drawable.ic_copy),
-                        contentDescription = "Copy message",
-                        modifier = Modifier.size(15.dp),
-                        tint = colors.muted.copy(alpha = 0.7f),
-                      )
-                    }
-                  }
-                }
+                MessageBody(
+                  part.text,
+                  onInspect = onInspect,
+                  modifier = textModifier,
+                  transcript = true,
+                )
               }
             }
           }

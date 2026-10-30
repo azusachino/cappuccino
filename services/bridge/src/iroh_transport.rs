@@ -54,9 +54,9 @@ const CLOSE_PAIR_DONE: u32 = 0;
 /// the phone's extra opens wait for a stream to finish.
 pub const MAX_TUNNEL_STREAMS: u32 = 32;
 /// Live tunnel connections per paired EndpointId; the excess is closed.
-pub const MAX_TUNNEL_CONNECTIONS_PER_ID: usize = 4;
+pub const MAX_TUNNEL_CONNECTIONS_PER_ID: usize = 16;
 /// Live tunnel connections across all paired EndpointIds.
-pub const MAX_TUNNEL_CONNECTIONS: usize = 16;
+pub const MAX_TUNNEL_CONNECTIONS: usize = 64;
 /// Unpaired `cappuccino-pair/1` connections served at once; the excess is closed.
 pub const MAX_PAIR_CONNECTIONS: usize = 4;
 /// Pairing attempts allowed per remote EndpointId in any PAIR_ATTEMPT_WINDOW.

@@ -15,3 +15,7 @@ local.properties
 .env.local
 .env.local.*
 apps/ios/xtool/
+target/
+**/target/
+**/target-*/**
+*.stub-key

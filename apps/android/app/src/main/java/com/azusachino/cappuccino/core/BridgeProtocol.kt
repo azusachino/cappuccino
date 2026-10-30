@@ -24,6 +24,8 @@ class StreamRetryBudget(private val maximumRetries: Int = 4) {
 
 class ProtocolException(message: String) : Exception(message), BridgeAnswered
 
+const val BRIDGE_PROTOCOL_VERSION: Long = 1L
+
 /**
  * Marks an error raised after the bridge answered (a status, a rejection or a response that failed
  * to parse). Only errors without this marker count as transport failures; the router uses that to

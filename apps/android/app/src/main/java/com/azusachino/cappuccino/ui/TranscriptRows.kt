@@ -1,5 +1,13 @@
 package com.azusachino.cappuccino.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -141,10 +149,16 @@ internal fun ActivityGroup(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
       ) {
+        val chevronRotation by
+          animateFloatAsState(
+            targetValue = if (expanded) 0f else -90f,
+            animationSpec = tween(200, easing = FastOutSlowInEasing),
+            label = "activityGroupChevron",
+          )
         Icon(
           painterResource(R.drawable.ic_expand_more),
           contentDescription = null,
-          modifier = Modifier.size(14.dp).rotate(if (expanded) 0f else -90f),
+          modifier = Modifier.size(14.dp).rotate(chevronRotation),
           tint = colors.muted,
         )
         Text(
@@ -158,7 +172,15 @@ internal fun ActivityGroup(
           Text(duration, style = MaterialTheme.typography.labelSmall, color = colors.faint)
       }
     }
-    if (expanded) {
+    AnimatedVisibility(
+      visible = expanded,
+      enter =
+        expandVertically(animationSpec = tween(220, easing = FastOutSlowInEasing)) +
+          fadeIn(animationSpec = tween(180)),
+      exit =
+        shrinkVertically(animationSpec = tween(180, easing = FastOutSlowInEasing)) +
+          fadeOut(animationSpec = tween(140)),
+    ) {
       Column(
         Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -194,14 +216,28 @@ private fun ActivityStep(part: ConversationPart, onInspect: () -> Unit) {
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
             color = colors.muted,
           )
+          val thinkingChevron by
+            animateFloatAsState(
+              targetValue = if (open) 0f else -90f,
+              animationSpec = tween(200, easing = FastOutSlowInEasing),
+              label = "thinkingChevron",
+            )
           Icon(
             painterResource(R.drawable.ic_expand_more),
             contentDescription = null,
-            modifier = Modifier.size(12.dp).rotate(if (open) 0f else -90f),
+            modifier = Modifier.size(12.dp).rotate(thinkingChevron),
             tint = colors.muted,
           )
         }
-        if (open) {
+        AnimatedVisibility(
+          visible = open,
+          enter =
+            expandVertically(animationSpec = tween(200, easing = FastOutSlowInEasing)) +
+              fadeIn(animationSpec = tween(160)),
+          exit =
+            shrinkVertically(animationSpec = tween(160, easing = FastOutSlowInEasing)) +
+              fadeOut(animationSpec = tween(120)),
+        ) {
           Surface(
             shape = RoundedCornerShape(8.dp),
             color = colors.card2,
@@ -271,14 +307,28 @@ private fun ActivityStep(part: ConversationPart, onInspect: () -> Unit) {
               overflow = TextOverflow.Ellipsis,
             )
           }
+          val toolChevron by
+            animateFloatAsState(
+              targetValue = if (open) 0f else -90f,
+              animationSpec = tween(200, easing = FastOutSlowInEasing),
+              label = "toolChevron",
+            )
           Icon(
             painterResource(R.drawable.ic_expand_more),
             contentDescription = null,
-            modifier = Modifier.size(12.dp).rotate(if (open) 0f else -90f),
+            modifier = Modifier.size(12.dp).rotate(toolChevron),
             tint = colors.muted,
           )
         }
-        if (open) {
+        AnimatedVisibility(
+          visible = open,
+          enter =
+            expandVertically(animationSpec = tween(200, easing = FastOutSlowInEasing)) +
+              fadeIn(animationSpec = tween(160)),
+          exit =
+            shrinkVertically(animationSpec = tween(160, easing = FastOutSlowInEasing)) +
+              fadeOut(animationSpec = tween(120)),
+        ) {
           Surface(
             shape = RoundedCornerShape(8.dp),
             color = colors.codeBackground,

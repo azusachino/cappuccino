@@ -233,7 +233,7 @@ internal fun SettingsScreen(
       )
       SettingsDivider(indented = false)
       SettingRow(
-        title = "Iroh setup",
+        title = "Bridge setup",
         value = "Docs",
         onClick = {
           helpError =
@@ -243,18 +243,29 @@ internal fun SettingsScreen(
               )
             }
               .exceptionOrNull()
-              ?.let { "Couldn't open iroh setup guide." }
+              ?.let { "Couldn't open bridge setup guide." }
         },
       )
       SettingsDivider(indented = false)
       SettingRow(
-        title = "Source",
-        value = "GitHub",
+        title = "Herdr",
+        value = "herdr.dev",
         onClick = {
           helpError =
-            runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino") }
+            runCatching { uriHandler.openUri("https://herdr.dev") }
               .exceptionOrNull()
-              ?.let { "Couldn't open GitHub." }
+              ?.let { "Couldn't open herdr.dev." }
+        },
+      )
+      SettingsDivider(indented = false)
+      SettingRow(
+        title = "Iroh",
+        value = "iroh.computer",
+        onClick = {
+          helpError =
+            runCatching { uriHandler.openUri("https://iroh.computer") }
+              .exceptionOrNull()
+              ?.let { "Couldn't open iroh.computer." }
         },
       )
     }
@@ -465,18 +476,20 @@ internal fun AboutCappuccinoSheet(onDismiss: () -> Unit) {
 
       Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
       ) {
         OutlinedButton(
           modifier = Modifier.weight(1f),
+          contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
           onClick = {
             runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino#readme") }
           },
         ) {
-          Text("Docs")
+          Text("Docs", maxLines = 1)
         }
         OutlinedButton(
           modifier = Modifier.weight(1f),
+          contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
           onClick = {
             runCatching {
               uriHandler.openUri(
@@ -485,15 +498,21 @@ internal fun AboutCappuccinoSheet(onDismiss: () -> Unit) {
             }
           },
         ) {
-          Text("Iroh")
+          Text("Bridge", maxLines = 1)
         }
         OutlinedButton(
           modifier = Modifier.weight(1f),
-          onClick = {
-            runCatching { uriHandler.openUri("https://github.com/azusachino/cappuccino") }
-          },
+          contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+          onClick = { runCatching { uriHandler.openUri("https://herdr.dev") } },
         ) {
-          Text("GitHub")
+          Text("Herdr", maxLines = 1)
+        }
+        OutlinedButton(
+          modifier = Modifier.weight(1f),
+          contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+          onClick = { runCatching { uriHandler.openUri("https://iroh.computer") } },
+        ) {
+          Text("Iroh", maxLines = 1)
         }
       }
     }

@@ -4,7 +4,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -26,18 +25,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -60,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.azusachino.cappuccino.BuildConfig
 import com.azusachino.cappuccino.R
+import com.azusachino.cappuccino.core.BRIDGE_PROTOCOL_VERSION
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectionState
 import com.azusachino.cappuccino.io.MachineProfile
@@ -297,12 +294,37 @@ internal fun ValuePreviewDialog(
   AlertDialog(
     onDismissRequest = onDismiss,
     title = {
-      Text(
-        text = title,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = colors.text,
-      )
+      Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          text = title,
+          style = MaterialTheme.typography.titleMedium,
+          fontWeight = FontWeight.SemiBold,
+          color = colors.text,
+          modifier = Modifier.weight(1f, fill = false),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        IconButton(
+          onClick = {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText(title, value))
+            copied = true
+            Toast.makeText(context, "Copied $title to clipboard", Toast.LENGTH_SHORT).show()
+          },
+          modifier = Modifier.size(32.dp),
+        ) {
+          Icon(
+            painterResource(if (copied) R.drawable.ic_check else R.drawable.ic_copy),
+            contentDescription = "Copy $title",
+            modifier = Modifier.size(18.dp),
+            tint = if (copied) colors.ok else colors.accent,
+          )
+        }
+      }
     },
     text = {
       Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
@@ -330,19 +352,8 @@ internal fun ValuePreviewDialog(
         }
       }
     },
-    confirmButton = {
-      TextButton(
-        onClick = {
-          val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-          cm.setPrimaryClip(ClipData.newPlainText(title, value))
-          copied = true
-          Toast.makeText(context, "Copied $title to clipboard", Toast.LENGTH_SHORT).show()
-        }
-      ) {
-        Text(if (copied) "Copied" else "Copy")
-      }
-    },
-    dismissButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    dismissButton = null,
     containerColor = MaterialTheme.colorScheme.surface,
   )
 }
@@ -353,7 +364,6 @@ internal fun MachineInformation(
   profile: MachineProfile,
   state: ConnectedUiState,
   onDismiss: () -> Unit,
-  onTechnicalDetails: () -> Unit,
   onRename: () -> Unit,
 ) {
   val colors = MaterialTheme.appColors
@@ -516,11 +526,41 @@ internal fun MachineInformation(
             onLongClick = { onCopy("Tailnet address", host) },
           )
         }
+        profile.endpoint.iroh?.let { iroh ->
+          MachineDivider()
+          MachineDetailField(
+            "Iroh node ID",
+            iroh.endpointId,
+            isMono = true,
+            onClick = { onPreview("Iroh node ID", iroh.endpointId) },
+            onLongClick = { onCopy("Iroh node ID", iroh.endpointId) },
+          )
+          MachineDivider()
+          val relay = iroh.relayUrl ?: "Default N0 relay (aps1 Tokyo)"
+          MachineDetailField(
+            "Iroh relay",
+            relay,
+            isMono = true,
+            onClick = { onPreview("Iroh relay", relay) },
+            onLongClick = { onCopy("Iroh relay", relay) },
+          )
+          if (iroh.directAddrs.isNotEmpty()) {
+            MachineDivider()
+            val addrs = iroh.directAddrs.joinToString("\n")
+            MachineDetailField(
+              "Direct addresses (${iroh.directAddrs.size})",
+              addrs,
+              isMono = true,
+              onClick = { onPreview("Direct addresses", addrs) },
+              onLongClick = { onCopy("Direct addresses", addrs) },
+            )
+          }
+        }
       }
 
       // Card 2: System & Runtime
       MachineCard("System & Runtime") {
-        val bridgeVer = details?.version ?: "0.1.0"
+        val bridgeVer = details?.let { "${it.version}(v${it.protocol})" } ?: "Not reported"
         MachineDetailRow(
           "Bridge version",
           bridgeVer,
@@ -529,16 +569,27 @@ internal fun MachineInformation(
           onLongClick = { onCopy("Bridge version", bridgeVer) },
         )
         MachineDivider()
+        val appVer = "${BuildConfig.VERSION_NAME}(v$BRIDGE_PROTOCOL_VERSION)"
         MachineDetailRow(
           "App version",
-          BuildConfig.VERSION_NAME,
+          appVer,
           isMono = true,
-          onClick = { onPreview("App version", BuildConfig.VERSION_NAME) },
-          onLongClick = { onCopy("App version", BuildConfig.VERSION_NAME) },
+          onClick = { onPreview("App version", appVer) },
+          onLongClick = { onCopy("App version", appVer) },
         )
         if (
           state.activeProfileId == profile.id && state.selectedAgent?.machineId == profile.machineId
         ) {
+          state.selectedAgent.cwd?.let { cwd ->
+            MachineDivider()
+            MachineDetailField(
+              "Working directory",
+              cwd,
+              isMono = true,
+              onClick = { onPreview("Working directory", cwd) },
+              onLongClick = { onCopy("Working directory", cwd) },
+            )
+          }
           state.selectedAgent.branch?.let { branch ->
             MachineDivider()
             MachineDetailRow(
@@ -555,12 +606,6 @@ internal fun MachineInformation(
       // Card 3: Actions
       MachineCard("Actions") {
         MachineDetailRow(
-          "Technical details",
-          showChevron = true,
-          onClick = onTechnicalDetails,
-        )
-        MachineDivider()
-        MachineDetailRow(
           "Rename machine",
           showChevron = true,
           onClick = onRename,
@@ -575,44 +620,5 @@ internal fun MachineInformation(
       value = value,
       onDismiss = { previewItem = null },
     )
-  }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun TechnicalConnectionScreen(
-  profile: MachineProfile,
-  state: ConnectedUiState,
-  onBack: () -> Unit,
-) {
-  BackHandler(onBack = onBack)
-  val colors = MaterialTheme.appColors
-  Scaffold(
-    topBar = {
-      CenterAlignedTopAppBar(
-        title = {
-          Text(
-            "Technical details",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = colors.text,
-          )
-        },
-        navigationIcon = {
-          IconButton(onClick = onBack) {
-            Icon(
-              painterResource(R.drawable.ic_back),
-              contentDescription = "Back",
-              tint = colors.text,
-            )
-          }
-        },
-        colors =
-          TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-      )
-    },
-    containerColor = MaterialTheme.colorScheme.background,
-  ) { padding ->
-    Box(Modifier.padding(padding)) { ConnectionDiagnostics(profile, state) }
   }
 }
