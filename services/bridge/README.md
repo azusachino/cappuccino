@@ -79,11 +79,11 @@ the selected Pi session's identity.
 
 ## Configuration and security
 
-Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, optional TOML/JSON config file, then environment (`CAPP_BRIDGE_HOST`, `CAPP_BRIDGE_PORT`, `CAPP_BRIDGE_DATA_DIR`, `CAPP_BRIDGE_SERVE_AUTO_APPLY`). Non-loopback binds and enabled reserved auth are rejected.
+Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, optional TOML config file, then environment (`CAPP_BRIDGE_HOST`, `CAPP_BRIDGE_PORT`, `CAPP_BRIDGE_DATA_DIR`, `CAPP_BRIDGE_SERVE_AUTO_APPLY`). Non-loopback binds and enabled reserved auth are rejected.
 
 Paths, on macOS and Linux alike:
 
-- Config file: `CAPP_BRIDGE_CONFIG`, else `$XDG_CONFIG_HOME/cappuccino-bridge/config.toml` (if present), else `$XDG_CONFIG_HOME/cappuccino-bridge/config.json`, else `~/.config/cappuccino-bridge/config.toml` (if present), else `~/.config/cappuccino-bridge/config.json`.
+- Config file: `CAPP_BRIDGE_CONFIG`, else `$XDG_CONFIG_HOME/cappuccino-bridge/config.toml`, else `~/.config/cappuccino-bridge/config.toml`.
 - Runtime state (`data_dir`): `$XDG_STATE_HOME/cappuccino-bridge`, else `~/.local/state/cappuccino-bridge`. Set `data_dir` in the config file, or `CAPP_BRIDGE_DATA_DIR`, to use another directory; the environment variable wins over the file.
 - XDG variables are used only when they are absolute paths; relative or empty values are ignored.
 - Machine id: `machine-id` in the data dir (mode 0600). It is a stable identifier, not a secret, and paired apps recognise the machine by it. On start, if `machine-id` is missing or empty and `~/Library/Application Support/cappuccino-spike/machine-id` is readable and non-empty, its value is copied unchanged once (the old file is never deleted, and the copy is what later starts read). If that old file is missing, the bridge generates a new id. If it exists but is unreadable (for example a permission error), the bridge logs a warning and also generates a new id, so paired apps will not recognise it. An existing `machine-id` is never regenerated.

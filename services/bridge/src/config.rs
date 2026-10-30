@@ -1,12 +1,11 @@
 //! Configurable-but-simple settings: defaults for the tailnet-only MVP, an
-//! optional JSON config file, then environment overrides. The `auth` section
-//! is reserved: unset (or `enabled: false`) gives the no-auth MVP behavior;
-//! `enabled: true` is rejected until an authenticator exists, so the config
+//! optional TOML config file, then environment overrides. The `auth` section
+//! is reserved: unset (or `enabled = false`) gives the no-auth MVP behavior;
+//! `enabled = true` is rejected until an authenticator exists, so the config
 //! format never has to change when one lands.
 
 use iroh::RelayUrl;
 use serde::Deserialize;
-use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -37,19 +36,19 @@ pub struct AuthConfig {
     /// Reserved for a future authenticator's settings (accepted and ignored
     /// until one exists, so the config never changes shape).
     #[serde(default)]
-    pub options: serde_json::Map<String, serde_json::Value>,
+    pub options: toml::Table,
 }
 
 impl Default for AuthConfig {
     fn default() -> Self {
         AuthConfig {
             enabled: false,
-            options: serde_json::Map::new(),
+            options: toml::Table::new(),
         }
     }
 }
 
-/// Strict knob: accepted values are true/false (JSON booleans) or the
+/// Strict knob: accepted values are true/false (booleans) or the
 /// strings "0"/"false"/"no"/"off"/"true" (case-insensitive). Anything else is
 /// a parse error — never a silent default.
 #[derive(Debug, Clone, Copy, Default)]
@@ -60,10 +59,10 @@ impl<'de> Deserialize<'de> for StrictBool {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = Value::deserialize(deserializer)?;
+        let value = toml::Value::deserialize(deserializer)?;
         match value {
-            Value::Bool(flag) => Ok(StrictBool(flag)),
-            Value::String(text) => match text.trim().to_lowercase().as_str() {
+            toml::Value::Boolean(flag) => Ok(StrictBool(flag)),
+            toml::Value::String(text) => match text.trim().to_lowercase().as_str() {
                 "true" => Ok(StrictBool(true)),
                 "0" | "false" | "no" | "off" => Ok(StrictBool(false)),
                 other => Err(serde::de::Error::custom(format!(
@@ -141,8 +140,8 @@ pub fn default_data_dir(xdg_state_home: Option<&str>, home: &str) -> PathBuf {
 }
 
 /// Config file path: `CAPP_BRIDGE_CONFIG` when set, else
-/// `$XDG_CONFIG_HOME/cappuccino-bridge/config.toml` (if it exists), else
-/// `$XDG_CONFIG_HOME/cappuccino-bridge/config.json`.
+/// `$XDG_CONFIG_HOME/cappuccino-bridge/config.toml`, else
+/// `$HOME/.config/cappuccino-bridge/config.toml`.
 pub fn resolve_config_path(
     capp_bridge_config: Option<&str>,
     xdg_config_home: Option<&str>,
@@ -150,32 +149,15 @@ pub fn resolve_config_path(
 ) -> String {
     match capp_bridge_config {
         Some(path) => path.to_string(),
-        None => {
-            let base = xdg_base(xdg_config_home, home, ".config").join("cappuccino-bridge");
-            let toml = base.join("config.toml");
-            if toml.exists() {
-                toml.to_string_lossy().into_owned()
-            } else {
-                base.join("config.json").to_string_lossy().into_owned()
-            }
-        }
+        None => xdg_base(xdg_config_home, home, ".config")
+            .join("cappuccino-bridge/config.toml")
+            .to_string_lossy()
+            .into_owned(),
     }
 }
 
 fn parse_config_file(contents: &str, path: &str) -> Result<ConfigFile, String> {
-    if path.ends_with(".toml") {
-        toml::from_str(contents)
-            .map_err(|error| format!("config {path} is not valid TOML: {error}"))
-    } else if path.ends_with(".json") {
-        serde_json::from_str(contents)
-            .map_err(|error| format!("config {path} is not valid JSON: {error}"))
-    } else if contents.trim_start().starts_with('{') {
-        serde_json::from_str(contents)
-            .map_err(|error| format!("config {path} is not valid JSON: {error}"))
-    } else {
-        toml::from_str(contents)
-            .map_err(|error| format!("config {path} is not valid TOML: {error}"))
-    }
+    toml::from_str(contents).map_err(|error| format!("config {path} is not valid TOML: {error}"))
 }
 
 impl BridgeConfig {
@@ -324,12 +306,8 @@ mod tests {
     fn file_overrides_defaults() {
         let dir = std::env::temp_dir().join(format!("cap-cfg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("config.json");
-        std::fs::write(
-            &path,
-            r#"{"port": 7400, "auth": {"enabled": false}, "unknown_future": true}"#,
-        )
-        .unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "port = 7400\n[auth]\nenabled = false\n").unwrap();
         let config =
             BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None).unwrap();
         assert_eq!(config.port, 7400);
@@ -344,8 +322,8 @@ mod tests {
     fn enabled_auth_is_rejected_until_an_authenticator_exists() {
         let dir = std::env::temp_dir().join(format!("cap-cfg-auth-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("config.json");
-        std::fs::write(&path, r#"{"auth": {"enabled": true}}"#).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[auth]\nenabled = true\n").unwrap();
         let error =
             BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None).unwrap_err();
         assert!(error.contains("reserved"));
@@ -372,7 +350,7 @@ mod knob_tests {
     #[test]
     fn accepted_disable_values_parse_false_case_insensitively() {
         for text in ["0", "false", "no", "off", "FALSE", "No", "OFF"] {
-            let path = config_file(&format!(r#"{{"serve": {{"auto_apply": "{text}"}}}}"#));
+            let path = config_file(&format!("[serve]\nauto_apply = \"{text}\"\n"));
             let config = BridgeConfig::load_from(Some(&path), None, None, None).unwrap();
             assert!(
                 !config.serve_auto_apply,
@@ -383,8 +361,8 @@ mod knob_tests {
 
     #[test]
     fn true_and_bool_true_parse_enabled() {
-        let a = config_file(r#"{"serve": {"auto_apply": true}}"#);
-        let b = config_file(r#"{"serve": {"auto_apply": "true"}}"#);
+        let a = config_file("[serve]\nauto_apply = true\n");
+        let b = config_file("[serve]\nauto_apply = \"true\"\n");
         assert!(
             BridgeConfig::load_from(Some(&a), None, None, None)
                 .unwrap()
@@ -399,7 +377,7 @@ mod knob_tests {
 
     #[test]
     fn invalid_string_is_a_parse_error_not_a_silent_default() {
-        let path = config_file(r#"{"serve": {"auto_apply": "maybe"}}"#);
+        let path = config_file("[serve]\nauto_apply = \"maybe\"\n");
         let error = BridgeConfig::load_from(Some(&path), None, None, None).unwrap_err();
         assert!(
             error.contains("invalid serve.auto_apply value 'maybe'"),
@@ -436,7 +414,7 @@ mod knob_tests {
 
     #[test]
     fn invalid_type_is_a_parse_error() {
-        let path = config_file(r#"{"serve": {"auto_apply": 3}}"#);
+        let path = config_file("[serve]\nauto_apply = 3\n");
         let error = BridgeConfig::load_from(Some(&path), None, None, None).unwrap_err();
         assert!(error.contains("invalid serve.auto_apply"));
     }
@@ -474,19 +452,6 @@ relay_url = "https://relay.azusachino.com"
         );
         let _ = std::fs::remove_file(path);
     }
-
-    #[test]
-    fn toml_file_takes_precedence_over_json_when_both_exist() {
-        let dir = std::env::temp_dir().join(format!("cap-xdg-test-{}", std::process::id()));
-        let bridge_dir = dir.join("cappuccino-bridge");
-        std::fs::create_dir_all(&bridge_dir).unwrap();
-        std::fs::write(bridge_dir.join("config.json"), r#"{"port": 7392}"#).unwrap();
-        std::fs::write(bridge_dir.join("config.toml"), "port = 8443\n").unwrap();
-
-        let resolved = resolve_config_path(None, Some(dir.to_str().unwrap()), "/home/u");
-        assert!(resolved.ends_with("config.toml"));
-        let _ = std::fs::remove_dir_all(dir);
-    }
 }
 
 #[cfg(test)]
@@ -497,7 +462,7 @@ mod iroh_config_tests {
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let unique = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let path =
-            std::env::temp_dir().join(format!("cap-iroh-cfg-{}-{unique}", std::process::id()));
+            std::env::temp_dir().join(format!("cap-iroh-cfg-{}-{unique}.toml", std::process::id()));
         std::fs::write(&path, content).unwrap();
         BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None)
     }
@@ -505,27 +470,27 @@ mod iroh_config_tests {
     #[test]
     fn iroh_is_disabled_by_default() {
         assert!(!BridgeConfig::defaults().iroh_enabled);
-        assert!(!load("{}").unwrap().iroh_enabled);
+        assert!(!load("").unwrap().iroh_enabled);
     }
 
     #[test]
     fn iroh_enabled_is_a_strict_boolean() {
-        assert!(load(r#"{"iroh": {"enabled": true}}"#).unwrap().iroh_enabled);
-        assert!(load(r#"{"iroh": {"enabled": "on"}}"#).is_err());
-        assert!(load(r#"{"iroh": {"enabled": "maybe"}}"#).is_err());
-        assert!(!load(r#"{"iroh": {}}"#).unwrap().iroh_enabled);
+        assert!(load("[iroh]\nenabled = true\n").unwrap().iroh_enabled);
+        assert!(load("[iroh]\nenabled = \"on\"\n").is_err());
+        assert!(load("[iroh]\nenabled = \"maybe\"\n").is_err());
+        assert!(!load("[iroh]\n").unwrap().iroh_enabled);
     }
 
     #[test]
     fn retired_pair_token_ttl_is_a_parse_error() {
-        assert!(load(r#"{"auth": {"pair_token_ttl_secs": 120}}"#).is_err());
+        assert!(load("[auth]\npair_token_ttl_secs = 120\n").is_err());
     }
 
     #[test]
     fn relay_url_is_unset_by_default() {
         assert!(BridgeConfig::defaults().iroh_relay_url.is_none());
-        assert!(load("{}").unwrap().iroh_relay_url.is_none());
-        assert!(load(r#"{"iroh": {"enabled": true}}"#)
+        assert!(load("").unwrap().iroh_relay_url.is_none());
+        assert!(load("[iroh]\nenabled = true\n")
             .unwrap()
             .iroh_relay_url
             .is_none());
@@ -533,7 +498,7 @@ mod iroh_config_tests {
 
     #[test]
     fn valid_relay_url_is_kept() {
-        let config = load(r#"{"iroh": {"relay_url": "https://relay.example.test"}}"#).unwrap();
+        let config = load("[iroh]\nrelay_url = \"https://relay.example.test\"\n").unwrap();
         let url = config.iroh_relay_url.expect("relay_url set");
         assert_eq!(url.scheme(), "https");
         assert_eq!(url.host_str(), Some("relay.example.test"));
@@ -551,10 +516,7 @@ mod iroh_config_tests {
             " https://relay.example.test",
             "https://relay.example.test ",
         ] {
-            let content = format!(
-                r#"{{"iroh": {{"relay_url": {}}}}}"#,
-                serde_json::json!(text)
-            );
+            let content = format!("[iroh]\nrelay_url = \"{text}\"\n");
             let error = load(&content).unwrap_err();
             assert!(
                 error.starts_with("invalid iroh.relay_url"),
@@ -565,7 +527,7 @@ mod iroh_config_tests {
 
     #[test]
     fn non_string_relay_url_is_a_parse_error() {
-        assert!(load(r#"{"iroh": {"relay_url": 3}}"#).is_err());
+        assert!(load("[iroh]\nrelay_url = 3\n").is_err());
     }
 }
 
@@ -603,8 +565,8 @@ mod path_tests {
     #[test]
     fn config_path_prefers_capp_bridge_config_over_xdg() {
         assert_eq!(
-            resolve_config_path(Some("/etc/cap.json"), Some("/xdg/config"), "/home/u"),
-            "/etc/cap.json"
+            resolve_config_path(Some("/etc/cap.toml"), Some("/xdg/config"), "/home/u"),
+            "/etc/cap.toml"
         );
     }
 
@@ -612,7 +574,7 @@ mod path_tests {
     fn config_path_uses_absolute_xdg_config_home() {
         assert_eq!(
             resolve_config_path(None, Some("/xdg/config"), "/home/u"),
-            "/xdg/config/cappuccino-bridge/config.json"
+            "/xdg/config/cappuccino-bridge/config.toml"
         );
     }
 
@@ -620,18 +582,18 @@ mod path_tests {
     fn config_path_falls_back_to_home_dot_config() {
         assert_eq!(
             resolve_config_path(None, None, "/Users/u"),
-            "/Users/u/.config/cappuccino-bridge/config.json"
+            "/Users/u/.config/cappuccino-bridge/config.toml"
         );
         assert_eq!(
             resolve_config_path(None, Some("relative/config"), "/Users/u"),
-            "/Users/u/.config/cappuccino-bridge/config.json"
+            "/Users/u/.config/cappuccino-bridge/config.toml"
         );
     }
 
     #[test]
     fn file_data_dir_and_env_override_win_over_default() {
         let path = std::env::temp_dir().join(format!("cap-datadir-{}", std::process::id()));
-        std::fs::write(&path, r#"{"data_dir": "/from/file"}"#).unwrap();
+        std::fs::write(&path, "data_dir = \"/from/file\"\n").unwrap();
         let file = path.to_str().unwrap();
         let from_file = BridgeConfig::load_from(Some(file), None, None, None).unwrap();
         assert_eq!(from_file.data_dir, PathBuf::from("/from/file"));

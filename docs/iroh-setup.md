@@ -18,11 +18,9 @@ URL. A machine can carry both. iroh is off by default and changes nothing until
 
 ## Enable on the bridge
 
-The bridge reads one configuration file (TOML or JSON). Its path is `CAPP_BRIDGE_CONFIG` when set, else
-`$XDG_CONFIG_HOME/cappuccino-bridge/config.toml` (if present), else
-`$XDG_CONFIG_HOME/cappuccino-bridge/config.json`, else
-`~/.config/cappuccino-bridge/config.toml` (if present), else
-`~/.config/cappuccino-bridge/config.json`. Relative `XDG_*` values are ignored.
+The bridge reads one configuration file (`config.toml`). Its path is `CAPP_BRIDGE_CONFIG` when set, else
+`$XDG_CONFIG_HOME/cappuccino-bridge/config.toml`, else
+`~/.config/cappuccino-bridge/config.toml`. Relative `XDG_*` values are ignored.
 
 ```toml
 [iroh]
@@ -31,20 +29,6 @@ relay_url = "https://relay.azusachino.com"
 
 [serve]
 auto_apply = false
-```
-
-Or in JSON format (`config.json`):
-
-```json
-{
-  "iroh": {
-    "enabled": true,
-    "relay_url": "https://relay.azusachino.com"
-  },
-  "serve": {
-    "auto_apply": false
-  }
-}
 ```
 
 - `iroh.enabled`: strict boolean (`true`/`false`). Any other value stops startup.

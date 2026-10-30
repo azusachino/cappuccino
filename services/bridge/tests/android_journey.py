@@ -195,7 +195,7 @@ def running_fixture(binary):
             env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home),
                    "HERDR_SOCKET_PATH": str(root / "peer"), "CAPP_BRIDGE_HOST": "127.0.0.1",
                    "CAPP_BRIDGE_PORT": str(port), "CAPP_BRIDGE_DATA_DIR": str(root / "data"),
-                   "CAPP_BRIDGE_CONFIG": str(root / "no-config.json"), "CAPP_BRIDGE_SERVE_AUTO_APPLY": "0"}
+                   "CAPP_BRIDGE_CONFIG": str(root / "no-config.toml"), "CAPP_BRIDGE_SERVE_AUTO_APPLY": "0"}
             process = None
             try:
                 process = subprocess.Popen([str(binary)], env=env)

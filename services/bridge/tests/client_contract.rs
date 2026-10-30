@@ -339,7 +339,7 @@ fn spawn_bridge_once(
     let mut command = Command::new(BIN);
     command
         .env("HOME", root.path.join("home"))
-        .env("CAPP_BRIDGE_CONFIG", root.path.join("missing-config.json"))
+        .env("CAPP_BRIDGE_CONFIG", root.path.join("missing-config.toml"))
         .env("CAPP_BRIDGE_DATA_DIR", root.path.join("data"))
         .env("CAPP_BRIDGE_HOST", "127.0.0.1")
         .env("CAPP_BRIDGE_PORT", port.to_string())

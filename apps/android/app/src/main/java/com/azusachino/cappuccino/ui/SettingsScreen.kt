@@ -79,7 +79,7 @@ internal fun SettingsScreen(
             color = MaterialTheme.colorScheme.primary,
           )
           Text(
-            "• Official N0 relays (including aps1 in Asia) are supported by default when relay_url is unset.\n• Self-hosted relays or custom relay URLs can be set on the bridge in config.toml or config.json via \"relay_url\".",
+            "• Official N0 relays (including aps1 in Asia) are supported by default when relay_url is unset.\n• Self-hosted relays or custom relay URLs can be set on the bridge in config.toml via \"relay_url\".",
             style = MaterialTheme.typography.bodySmall,
           )
           Text(
