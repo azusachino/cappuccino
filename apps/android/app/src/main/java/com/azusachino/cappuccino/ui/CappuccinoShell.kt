@@ -42,7 +42,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -1253,19 +1252,66 @@ fun CappuccinoScreen(
   val editing = state.profiles.firstOrNull { it.id == editingProfileId }
   if (editing != null) {
     AlertDialog(
-      onDismissRequest = { if (!state.busy) editingProfileId = null },
+      onDismissRequest = {
+        if (!state.busy) {
+          editingProfileId = null
+          scanError = null
+        }
+      },
       title = { Text(if (editingIroh) "Pair over iroh" else "Add tailnet URL") },
       text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
           if (editingIroh) {
-            PairingPayloadInput(
-              payload = payload,
-              onPayload = { payload = it },
-              scanError = scanError,
-              onScanError = { scanError = it },
-              busy = state.busy,
-            )
+            if (state.busy) {
+              Column(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+              ) {
+                CircularProgressIndicator(modifier = Modifier.size(36.dp))
+                Text(
+                  "Pairing with machine...",
+                  style = MaterialTheme.typography.bodyMedium,
+                  fontWeight = FontWeight.Medium,
+                )
+                Text(
+                  "Securing peer-to-peer connection via iroh",
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+              }
+            } else {
+              Text(
+                "Run 'cappuccino-bridge pair' on the host machine to display the pairing QR code.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+              Button(
+                onClick = {
+                  scanError = null
+                  scanPairingPayload(
+                    context,
+                    onPayload = { qrPayload ->
+                      pendingEdit = true
+                      actions.addIrohPairing(editing.id, qrPayload)
+                    },
+                    onFailure = { scanError = it },
+                  )
+                },
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+              ) {
+                Text("Scan QR Code", style = MaterialTheme.typography.labelLarge)
+              }
+              scanError?.let { ErrorBanner(it) }
+              state.addError?.let { ErrorBanner(it) }
+            }
           } else {
+            Text(
+              "Enter the bridge address on your Tailnet.",
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(
               value = editingUrl,
               onValueChange = { editingUrl = it },
@@ -1280,6 +1326,7 @@ fun CappuccinoScreen(
               enabled = !state.busy,
               isError = state.addError != null,
               modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(12.dp),
               colors =
                 OutlinedTextFieldDefaults.colors(
                   focusedContainerColor = MaterialTheme.colorScheme.surface,
@@ -1288,26 +1335,35 @@ fun CappuccinoScreen(
                   unfocusedBorderColor = MaterialTheme.colorScheme.outline,
                 ),
             )
+            state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
+            if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
           }
-          state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
-          if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }
       },
       confirmButton = {
-        TextButton(
-          onClick = {
-            pendingEdit = true
-            if (editingIroh) actions.addIrohPairing(editing.id, payload)
-            else actions.addTailnetUrl(editing.id, editingUrl)
-          },
-          enabled =
-            !state.busy && (if (editingIroh) payload.isNotBlank() else editingUrl.isNotBlank()),
-        ) {
-          Text("Connect")
+        if (!editingIroh) {
+          Button(
+            onClick = {
+              pendingEdit = true
+              actions.addTailnetUrl(editing.id, editingUrl)
+            },
+            enabled = !state.busy && editingUrl.isNotBlank(),
+            shape = RoundedCornerShape(12.dp),
+          ) {
+            Text("Connect")
+          }
         }
       },
       dismissButton = {
-        TextButton(onClick = { editingProfileId = null }, enabled = !state.busy) { Text("Cancel") }
+        TextButton(
+          onClick = {
+            editingProfileId = null
+            scanError = null
+          },
+          enabled = !state.busy,
+        ) {
+          Text("Cancel")
+        }
       },
     )
   }
@@ -1326,42 +1382,77 @@ fun CappuccinoScreen(
         if (!state.busy) {
           adding = false
           pendingAdd = false
+          scanError = null
+          irohMode = true
         }
       },
-      title = { Text(if (irohMode) "Pair machine" else "Add bridge URL") },
+      title = { Text(if (irohMode) "Pair Machine" else "Add Bridge URL") },
       text = {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-          ) {
-            FilterChip(
-              selected = irohMode,
-              onClick = { irohMode = true },
-              label = { Text("Pair over iroh") },
-              modifier = Modifier.weight(1f),
-            )
-            FilterChip(
-              selected = !irohMode,
-              onClick = { irohMode = false },
-              label = { Text("Bridge URL") },
-              modifier = Modifier.weight(1f),
-            )
-          }
-          if (irohMode) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+          if (state.busy) {
+            Column(
+              modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+              CircularProgressIndicator(modifier = Modifier.size(36.dp))
+              Text(
+                "Connecting to machine...",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+              )
+              Text(
+                "Securing peer-to-peer connection via iroh",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+          } else if (irohMode) {
             Text(
-              "Run 'cappuccino-bridge pair' on the host machine to scan or paste the pairing code.",
-              style = MaterialTheme.typography.bodySmall,
+              "Run 'cappuccino-bridge pair' on your machine to display the pairing QR code.",
+              style = MaterialTheme.typography.bodyMedium,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            PairingPayloadInput(
-              payload = payload,
-              onPayload = { payload = it },
-              scanError = scanError,
-              onScanError = { scanError = it },
-              busy = state.busy,
-            )
+            Button(
+              onClick = {
+                scanError = null
+                scanPairingPayload(
+                  context,
+                  onPayload = { qrPayload ->
+                    previousProfileIds = state.addedProfileIds.joinToString("|")
+                    pendingAdd = true
+                    requestIrohConnect(label, qrPayload)
+                  },
+                  onFailure = { scanError = it },
+                )
+              },
+              shape = RoundedCornerShape(12.dp),
+              modifier = Modifier.fillMaxWidth().height(48.dp),
+            ) {
+              Text("Scan QR Code", style = MaterialTheme.typography.labelLarge)
+            }
+            scanError?.let { ErrorBanner(it) }
+            state.addError?.let { ErrorBanner(it) }
+
+            TextButton(
+              onClick = {
+                scanError = null
+                irohMode = false
+              },
+              modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) {
+              Text(
+                "Connect via Tailnet URL instead",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
           } else {
+            Text(
+              "Enter the bridge address on your Tailnet.",
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(
               value = endpoint,
               onValueChange = { endpoint = it },
@@ -1375,6 +1466,7 @@ fun CappuccinoScreen(
               singleLine = true,
               isError = state.addError != null,
               modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(12.dp),
               colors =
                 OutlinedTextFieldDefaults.colors(
                   focusedContainerColor = MaterialTheme.colorScheme.surface,
@@ -1383,36 +1475,52 @@ fun CappuccinoScreen(
                   unfocusedBorderColor = MaterialTheme.colorScheme.outline,
                 ),
             )
+            OutlinedTextField(
+              value = label,
+              onValueChange = { label = it },
+              label = { Text("Label (optional)") },
+              placeholder = { Text("Defaults to machine name") },
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(12.dp),
+              colors =
+                OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = MaterialTheme.colorScheme.surface,
+                  unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                  focusedBorderColor = MaterialTheme.colorScheme.primary,
+                  unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                ),
+            )
+            state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
+
+            TextButton(
+              onClick = {
+                scanError = null
+                irohMode = true
+              },
+              modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) {
+              Text(
+                "Back to QR code pairing",
+                style = MaterialTheme.typography.bodySmall,
+              )
+            }
           }
-          OutlinedTextField(
-            value = label,
-            onValueChange = { label = it },
-            label = { Text("Label (optional)") },
-            placeholder = { Text("Defaults to machine name") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            colors =
-              OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-              ),
-          )
-          state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
-          if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }
       },
       confirmButton = {
-        Button(
-          onClick = {
-            previousProfileIds = state.addedProfileIds.joinToString("|")
-            pendingAdd = true
-            if (irohMode) requestIrohConnect(label, payload) else requestConnect(label, endpoint)
-          },
-          enabled = !state.busy && (if (irohMode) payload.isNotBlank() else endpoint.isNotBlank()),
-        ) {
-          Text(if (irohMode) "Pair & Connect" else "Connect")
+        if (!irohMode && !state.busy) {
+          Button(
+            onClick = {
+              previousProfileIds = state.addedProfileIds.joinToString("|")
+              pendingAdd = true
+              requestConnect(label, endpoint)
+            },
+            enabled = endpoint.isNotBlank(),
+            shape = RoundedCornerShape(12.dp),
+          ) {
+            Text("Connect")
+          }
         }
       },
       dismissButton = {
@@ -1420,6 +1528,8 @@ fun CappuccinoScreen(
           onClick = {
             adding = false
             pendingAdd = false
+            scanError = null
+            irohMode = true
           },
           enabled = !state.busy,
         ) {
