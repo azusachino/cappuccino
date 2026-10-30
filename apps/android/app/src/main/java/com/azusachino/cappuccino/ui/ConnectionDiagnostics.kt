@@ -6,11 +6,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -18,111 +14,137 @@ import com.azusachino.cappuccino.BuildConfig
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectionState
 import com.azusachino.cappuccino.io.MachineProfile
+import com.azusachino.cappuccino.io.TransportBadge
 import com.azusachino.cappuccino.io.machineConnection
 
 @Composable
 internal fun ConnectionDiagnostics(profile: MachineProfile, state: ConnectedUiState) {
+  val colors = MaterialTheme.appColors
   val details = state.bridgeDetails[profile.id]?.takeIf { it.machineId == profile.machineId }
   val connection = state.machineConnection(profile).connection
+  val current = connection == ConnectionState.Connected
+  val status = machineInformationStatus(profile, state)
+  val statusColor = connectionStatusColor(status, colors)
+
   Column(
-    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-    verticalArrangement = Arrangement.spacedBy(16.dp),
+    Modifier.fillMaxWidth()
+      .verticalScroll(rememberScrollState())
+      .padding(top = 8.dp, bottom = 24.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp),
   ) {
-    DetailGroup("Machine & Transport") {
-      DetailRow("Name", profile.label.takeUnless { it == "iroh.invalid" } ?: "Machine")
+    MachineCard("Machine & Routing") {
+      MachineDetailRow("Name", profile.label.takeUnless { it == "iroh.invalid" } ?: "Machine")
+      MachineDivider()
+      MachineDetailRow("Status", status, valueColor = statusColor)
+      MachineDivider()
+
       if (profile.endpoint.iroh != null && profile.endpoint.hasTailnet) {
-        DetailRow("Primary transport", "iroh P2P (default)")
-        DetailRow("Fallback transport", "Tailnet (automatic fallback)")
-        DetailRow("Tailnet URL", profile.endpoint.base.toString().removeSuffix("/"), true)
-        val active =
-          when (state.machineBadges[profile.id]) {
-            com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
-              "iroh P2P (direct QUIC) — default active"
-            com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
-              "iroh P2P (relayed) — default active"
-            com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
-              "Tailnet — automatic fallback active"
-            else ->
-              if (connection == com.azusachino.cappuccino.io.ConnectionState.Connected) "Connected"
-              else "Connecting..."
+        MachineDetailRow("Primary transport", "iroh P2P (default)")
+        MachineDivider()
+        MachineDetailRow("Fallback transport", "Tailnet (automatic)")
+        MachineDivider()
+        val currentBadge = state.machineBadges[profile.id]
+        val (activeRoute, activeColor) =
+          when (currentBadge) {
+            TransportBadge.IROH_DIRECT -> "iroh P2P (direct QUIC) — default active" to colors.ok
+            TransportBadge.IROH_RELAYED -> "iroh P2P (relayed) — default active" to colors.ok
+            TransportBadge.TAILNET -> "Tailnet — automatic fallback active" to colors.warn
+            else -> if (current) "Connected" to colors.ok else status to colors.muted
           }
-        DetailRow("Active connection", active)
+        MachineDetailField("Active connection", activeRoute)
+        MachineDivider()
+        MachineDetailField(
+          "Tailnet endpoint",
+          profile.endpoint.base.toString().removeSuffix("/"),
+          isMono = true,
+        )
       } else if (profile.endpoint.iroh != null) {
-        DetailRow("Primary transport", "iroh P2P (default)")
-        val active =
-          when (state.machineBadges[profile.id]) {
-            com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT -> "iroh P2P (direct QUIC)"
-            com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED -> "iroh P2P (relayed)"
-            else ->
-              if (connection == com.azusachino.cappuccino.io.ConnectionState.Connected) "Connected"
-              else "Connecting..."
+        MachineDetailRow("Primary transport", "iroh P2P (default)")
+        MachineDivider()
+        val currentBadge = state.machineBadges[profile.id]
+        val (activeRoute, activeColor) =
+          when (currentBadge) {
+            TransportBadge.IROH_DIRECT -> "iroh P2P (direct QUIC)" to colors.ok
+            TransportBadge.IROH_RELAYED -> "iroh P2P (relayed)" to colors.ok
+            else -> if (current) "Connected" to colors.ok else status to colors.muted
           }
-        DetailRow("Active connection", active)
+        MachineDetailRow("Active connection", activeRoute, valueColor = activeColor)
       } else {
-        DetailRow("Transport", "Tailnet only")
-        DetailRow("Tailnet URL", profile.endpoint.base.toString().removeSuffix("/"), true)
+        MachineDetailRow("Transport", "Tailnet only")
+        MachineDivider()
+        MachineDetailField(
+          "Tailnet endpoint",
+          profile.endpoint.base.toString().removeSuffix("/"),
+          isMono = true,
+        )
       }
-      DetailRow("Status", machineInformationStatus(profile, state))
-      if (connection is ConnectionState.Error) DetailRow("Problem", connection.message, true)
+
+      profile.endpoint.iroh?.let { iroh ->
+        MachineDivider()
+        MachineDetailField("iroh Node ID", iroh.endpointId, isMono = true)
+        MachineDivider()
+        MachineDetailRow(
+          "iroh Relay",
+          iroh.relayUrl ?: "Default relay",
+          isMono = true,
+        )
+        if (iroh.directAddrs.isNotEmpty()) {
+          MachineDivider()
+          MachineDetailField(
+            "Direct addresses (${iroh.directAddrs.size})",
+            iroh.directAddrs.joinToString("\n"),
+            isMono = true,
+          )
+        }
+      }
+
+      if (connection is ConnectionState.Error) {
+        MachineDivider()
+        MachineDetailField(
+          "Connection problem",
+          connection.message,
+          isMono = true,
+          isError = true,
+        )
+      }
     }
-    DetailGroup("Versions") {
-      DetailRow("App", BuildConfig.VERSION_NAME)
-      DetailRow("Bridge", details?.version ?: "Not reported")
+
+    MachineCard("Versions & Protocol") {
+      MachineDetailRow("App version", BuildConfig.VERSION_NAME, isMono = true)
+      MachineDivider()
+      MachineDetailRow("Bridge version", details?.version ?: "Not reported", isMono = true)
+      MachineDivider()
+      MachineDetailRow("Protocol version", "${details?.protocol ?: 1}", isMono = true)
     }
+
     if (
       state.activeProfileId == profile.id && state.selectedAgent?.machineId == profile.machineId
     ) {
-      DetailGroup("Current agent") {
-        state.selectedAgent.cwd?.let { DetailRow("Working directory", it, true) }
-        state.selectedAgent.branch?.let { DetailRow("Branch", it) }
-        state.stream.error?.let { DetailRow("Runtime problem", it, true) }
-        if (state.connection is ConnectionState.Error)
-          DetailRow("Stream problem", state.connection.message, true)
+      val agent = state.selectedAgent
+      MachineCard("Current Agent & Session") {
+        MachineDetailRow("Agent name", agent.agent)
+        agent.cwd?.let { cwd ->
+          MachineDivider()
+          MachineDetailField("Working directory", cwd, isMono = true)
+        }
+        agent.branch?.let { branch ->
+          MachineDivider()
+          MachineDetailRow("Branch", branch, isMono = true)
+        }
+        state.stream.error?.let { streamErr ->
+          MachineDivider()
+          MachineDetailField("Runtime problem", streamErr, isMono = true, isError = true)
+        }
+        if (state.connection is ConnectionState.Error) {
+          MachineDivider()
+          MachineDetailField(
+            "Stream problem",
+            state.connection.message,
+            isMono = true,
+            isError = true,
+          )
+        }
       }
     }
   }
-}
-
-@Composable
-private fun DetailGroup(title: String, content: @Composable () -> Unit) {
-  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    Text(
-      title,
-      Modifier.padding(start = 12.dp),
-      style = MaterialTheme.typography.titleSmall,
-      color = MaterialTheme.colorScheme.primary,
-    )
-    Surface(
-      shape = MaterialTheme.shapes.medium,
-      color = MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-      Column { content() }
-    }
-  }
-}
-
-@Composable
-private fun DetailRow(label: String, value: String, longValue: Boolean = false) {
-  ListItem(
-    headlineContent = { Text(label, style = MaterialTheme.typography.bodyMedium) },
-    supportingContent =
-      if (longValue) {
-        { Text(value) }
-      } else null,
-    trailingContent =
-      if (!longValue) {
-        {
-          Text(
-            value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
-        }
-      } else null,
-    colors =
-      androidx.compose.material3.ListItemDefaults.colors(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-      ),
-  )
-  HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
 }
