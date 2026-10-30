@@ -670,11 +670,7 @@ fun CappuccinoScreen(
             },
             hazeState = hazeState,
             backgroundColor = MaterialTheme.colorScheme.background,
-            modifier =
-              Modifier.align(Alignment.BottomCenter)
-                .zIndex(2f)
-                .navigationBarsPadding()
-                .padding(bottom = 10.dp),
+            modifier = Modifier.align(Alignment.BottomCenter).zIndex(2f).navigationBarsPadding(),
           )
         }
         Column(
