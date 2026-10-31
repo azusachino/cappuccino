@@ -13,7 +13,15 @@ Initial release of Cappuccino: a companion client for remote coding agents, pair
   - Redesigned Settings screen featuring an Apple-style segmented control for theme modes (System, Light, Dark).
   - Clean settings sections for Appearance, iroh Transport, Saved Conversations, and Diagnostics.
   - Centered full-width floating bottom dock for smooth navigation across Machines, History, and Settings.
-  - Telegram-inspired chat interface with contextual bubble radii, fluid padding, timestamps, and refined markdown rendering.
+  - Telegram-inspired chat interface with right-aligned outgoing user bubbles hugging content, tail corners, and bottom-right timestamps (omitting redundant "› You" headers).
+  - Left-aligned assistant responses with bot name headers (`Claude`, `Pi`, `Agy`), grouped rounded corners, and bottom-right timestamps integrated into prose blocks.
+  - Tool invocations and executions consolidated into centered Telegram service pill badges (`Ran X commands`) with inline expand/collapse.
+  - Status notices (`ResponseStatusRow`) rendered as centered Telegram service pill badges.
+  - Empty text and blank thinking filter preventing fractured activity groups and hollow prose cards from streaming preambles.
+- **Connection Lifecycle & Reconnect Reliability**:
+  - Automatic reconnection triggered on network return via `ConnectivityManager.NetworkCallback`.
+  - In-memory `ConnectionLogger` ring buffer tracking connection state transitions, dial attempts, and error details.
+  - In-app Connection Logs bottom sheet in Settings with one-tap clipboard copy for mobile diagnostics.
 - **iroh Peer-to-Peer Pairing**:
   - Direct camera QR scanning via Google Code Scanner (`GmsBarcodeScanning`) with zero extra permissions required.
   - Instant pairing handshake directly from terminal output (`cappuccino-bridge pair`).

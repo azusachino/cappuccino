@@ -37,6 +37,7 @@ Do not map Herdr's prompt acknowledgement to `sent` or `confirmed`, and do not c
 **Status:** the bridge serves canonical transcripts for Pi, Claude Code and Agy when Herdr reports a usable session, and labeled scrollback otherwise. The UI tests use scripted fixtures, and live canonical Pi parity is not verified. Do not treat the scripted tests as live-history proof.
 
 - Initial load returns the session's durable active-branch history; streaming appends only confirmed-complete entries.
+- Transcript presentation: rendered in a Telegram-style chat layout. Outgoing user prompts are right-aligned bubble cards hugging text with bottom-right timestamps; incoming agent turns are left-aligned with bot headers and bottom-right timestamps. Consecutive tool executions and state transitions are grouped into centered collapsible service pill badges. Empty streaming text segments are filtered to prevent hollow cards and activity fracturing.
 - Reconciliation handles duplicates (idempotent by entry id), gaps (visible placeholder, never silent), out-of-order delivery (stable order by sequence), and session replacement (fresh stream; old pending actions/grants invalidated).
 - Disconnect shows `unresolved` state for in-flight actions; foreground recovery reconciles without duplicate sends or decisions.
 - Offline History: clients persist canonical session snapshots in a dedicated History tab, retaining snapshots for 30 days ordered date descending with manual wipe options.
@@ -45,6 +46,7 @@ Do not map Herdr's prompt acknowledgement to `sent` or `confirmed`, and do not c
 ## Client lifecycle boundaries
 
 - Activity recreation, tab switching and short backgrounding preserve selection, message drafts, and never re-send.
+- Network transitions: automatic reconnect triggers when network connectivity returns (`ConnectivityManager.NetworkCallback`). Diagnostics and transport transitions are recorded into an in-memory ring buffer accessible via connection logs.
 - Interactive curses commands (e.g. `/status`) are disallowed in client input to prevent unescapable terminal deadlocks on mobile.
 - Process death recovers from server state, not client memory; a dead app stores no grants and holds no approval authority.
 - Background sockets, foreground services and FCM are out of scope for the first prototype; generic Telegram alerts come later without previews or approval buttons.
