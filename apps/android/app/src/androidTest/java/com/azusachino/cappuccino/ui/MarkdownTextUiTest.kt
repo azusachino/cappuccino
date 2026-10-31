@@ -173,6 +173,7 @@ class MarkdownTextUiTest {
       .onNodeWithText(
         "See the docs [Image: morning alt] and [Image: evening alt]",
         substring = true,
+        useUnmergedTree = true,
       )
       .assertExists()
     compose.onNodeWithText("the docs", substring = true).assertExists()

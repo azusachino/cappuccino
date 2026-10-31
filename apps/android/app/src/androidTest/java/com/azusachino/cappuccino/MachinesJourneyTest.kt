@@ -155,8 +155,11 @@ class MachinesJourneyTest {
     compose.onNodeWithContentDescription("Retry Failing bridge").assertIsDisplayed()
     compose.onNodeWithContentDescription("Retry Healthy bridge").assertDoesNotExist()
     compose.onNodeWithContentDescription("Disconnect Failing bridge").assertDoesNotExist()
-    // At default width the longest real status (error plus transport badge) fits on one line.
-    assertEquals(1, statusLayout().lineCount)
+    // The status wraps to at most two lines (21330f8) and is never ellipsized. Line count depends
+    // on device font metrics, so only the wrap bound and the full text are asserted.
+    val layout = statusLayout()
+    assertTrue("lines=${layout.lineCount}", layout.lineCount in 1..2)
+    assertEquals(STATUS_TEXT.length, layout.getLineEnd(layout.lineCount - 1))
   }
 
   @Test

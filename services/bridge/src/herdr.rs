@@ -361,13 +361,13 @@ mod tests {
         F: FnOnce(tokio::net::UnixStream) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
+        // A counter, not the clock: parallel tests can share a timestamp on macOS, and bind fails
+        // with AlreadyExists.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let path = std::env::temp_dir().join(format!(
             "cap-h-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         let listener = tokio::net::UnixListener::bind(&path).unwrap();
         let peer = tokio::spawn(async move {
