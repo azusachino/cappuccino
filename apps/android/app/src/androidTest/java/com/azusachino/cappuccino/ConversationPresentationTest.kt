@@ -4,14 +4,8 @@ import android.graphics.Bitmap
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assert
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.platform.io.PlatformTestStorageRegistry
@@ -87,7 +81,8 @@ class ConversationPresentationTest {
             )
           ),
         )
-      // Only the person's prompts carry a time: HH:mm, with the full local time as its description.
+      // Both user prompt and assistant response carry local time: HH:mm, with full time as
+      // description.
       val prompt =
         ConversationTurn("prompt", "user", "2026-10-07T16:02:03Z", "Synthetic prompt", emptyList())
       compose.activity.runOnUiThread {
@@ -100,8 +95,8 @@ class ConversationPresentationTest {
           }
         }
       }
-      compose.onNodeWithText("01:02").assertIsDisplayed()
-      compose.onNodeWithContentDescription("2026-10-08 01:02:03").assertExists()
+      compose.onAllNodesWithText("01:02").assertCountEquals(2)
+      compose.onAllNodesWithContentDescription("2026-10-08 01:02:03").assertCountEquals(2)
       compose
         .onNodeWithText("Synthetic heading")
         .assertIsDisplayed()

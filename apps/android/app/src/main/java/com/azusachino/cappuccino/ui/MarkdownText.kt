@@ -14,6 +14,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.sp
 import com.mikepenz.markdown.annotator.annotatorSettings
 import com.mikepenz.markdown.compose.Markdown
 import com.mikepenz.markdown.compose.components.markdownComponents
@@ -288,16 +289,20 @@ private fun appMarkdownTypography(compact: Boolean) =
     val text = if (compact) bodyMedium else bodyLarge
     val heading = text.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.appColors.text)
     markdownTypography(
-      h1 = heading,
-      h2 = heading,
-      h3 = heading,
+      h1 = heading.copy(fontSize = (text.fontSize.value * 1.3f).sp),
+      h2 = heading.copy(fontSize = (text.fontSize.value * 1.2f).sp),
+      h3 = heading.copy(fontSize = (text.fontSize.value * 1.1f).sp),
       h4 = heading,
       h5 = heading,
       h6 = heading,
       text = text,
-      code = bodySmall,
+      code = bodySmall.copy(fontFamily = JetBrainsMono),
       inlineCode =
-        text.copy(fontSize = text.fontSize * 0.92f, color = MaterialTheme.appColors.text),
+        text.copy(
+          fontSize = (text.fontSize.value * 0.92f).sp,
+          fontFamily = JetBrainsMono,
+          color = MaterialTheme.appColors.text,
+        ),
       quote = text.copy(color = MaterialTheme.appColors.muted),
       paragraph = text,
       ordered = text,

@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
@@ -67,6 +67,7 @@ import com.azusachino.cappuccino.core.ToolKind
 import com.azusachino.cappuccino.core.activityDuration
 import com.azusachino.cappuccino.core.activityState
 import com.azusachino.cappuccino.core.activitySummary
+import com.azusachino.cappuccino.core.cleanToolOutput
 import com.azusachino.cappuccino.core.compactDuration
 import com.azusachino.cappuccino.core.stepOutcome
 import com.azusachino.cappuccino.core.stepWords
@@ -76,27 +77,29 @@ import com.azusachino.cappuccino.core.toolKind
 // message is a filled row with a prompt mark, and work between words is one line that opens into
 // a timeline.
 
-/** A person's message: right-aligned Telegram-style bubble with time at bottom-end. */
+/** A person's message: left-aligned full-width tinted bubble with time at bottom-end. */
 @Composable
 internal fun UserPromptRow(
   body: @Composable () -> Unit,
   time: String?,
   timeDescription: String?,
   modifier: Modifier = Modifier,
+  shape: RoundedCornerShape =
+    RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp),
 ) {
   val colors = MaterialTheme.appColors
   Box(
     modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 3.dp),
-    contentAlignment = Alignment.CenterEnd,
+    contentAlignment = Alignment.CenterStart,
   ) {
     Surface(
-      shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
-      color = colors.card2,
-      border = BorderStroke(0.6.dp, colors.line.copy(alpha = 0.5f)),
-      modifier = Modifier.widthIn(min = 60.dp, max = 340.dp).padding(start = 48.dp),
+      shape = shape,
+      color = colors.accent.copy(alpha = 0.08f).compositeOver(colors.card2),
+      border = BorderStroke(0.7.dp, colors.accent.copy(alpha = 0.28f)),
+      modifier = Modifier.fillMaxWidth(),
     ) {
       Column(
-        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
       ) {
         body()
@@ -106,8 +109,73 @@ internal fun UserPromptRow(
             Modifier.align(Alignment.End).semantics {
               if (timeDescription != null) contentDescription = timeDescription
             },
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-            color = colors.muted,
+            style =
+              MaterialTheme.typography.labelSmall.copy(
+                fontSize = 11.sp,
+                fontFamily = JetBrainsMono,
+              ),
+            color = colors.muted.copy(alpha = 0.75f),
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
+ * An agent's response message: left-aligned full-width neutral card with optional label and
+ * bottom-right time.
+ */
+@Composable
+internal fun AgentResponseRow(
+  body: @Composable () -> Unit,
+  assistantLabel: String,
+  time: String?,
+  timeDescription: String?,
+  modifier: Modifier = Modifier,
+  showLabel: Boolean = true,
+  shape: RoundedCornerShape = RoundedCornerShape(12.dp),
+) {
+  val colors = MaterialTheme.appColors
+  Box(
+    modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 3.dp),
+    contentAlignment = Alignment.CenterStart,
+  ) {
+    Surface(
+      shape = shape,
+      color = colors.card,
+      border = BorderStroke(0.6.dp, colors.line.copy(alpha = 0.45f)),
+      modifier = Modifier.fillMaxWidth(),
+    ) {
+      Column(
+        Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+      ) {
+        if (showLabel) {
+          Text(
+            assistantLabel,
+            style =
+              MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+              ),
+            color = colors.accent,
+            modifier = Modifier.padding(bottom = 2.dp),
+          )
+        }
+        body()
+        if (time != null) {
+          Text(
+            time,
+            Modifier.align(Alignment.End).semantics {
+              if (timeDescription != null) contentDescription = timeDescription
+            },
+            style =
+              MaterialTheme.typography.labelSmall.copy(
+                fontSize = 11.sp,
+                fontFamily = JetBrainsMono,
+              ),
+            color = colors.faint,
           )
         }
       }
@@ -136,18 +204,18 @@ internal fun ActivityGroup(
         if (!expanded) onInspect()
         chosen = !expanded
       },
-      shape = RoundedCornerShape(8.dp),
-      color = colors.card2.copy(alpha = 0.6f),
-      border = BorderStroke(0.5.dp, colors.line.copy(alpha = 0.4f)),
+      shape = RoundedCornerShape(10.dp),
+      color = colors.card2.copy(alpha = 0.65f),
+      border = BorderStroke(0.6.dp, colors.line.copy(alpha = 0.45f)),
       modifier =
-        Modifier.padding(horizontal = 4.dp, vertical = 2.dp).semantics {
+        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp).semantics {
           stateDescription = if (expanded) "Expanded" else "Collapsed"
         },
     ) {
       Row(
-        Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
         val chevronRotation by
           animateFloatAsState(
@@ -163,13 +231,21 @@ internal fun ActivityGroup(
         )
         Text(
           summary,
+          Modifier.weight(1f, fill = false),
           style = MaterialTheme.typography.labelMedium,
           color = colors.muted,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
-        if (duration != null)
-          Text(duration, style = MaterialTheme.typography.labelSmall, color = colors.faint)
+        if (duration != null) {
+          Text(
+            duration,
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMono),
+            color = colors.faint,
+            maxLines = 1,
+            softWrap = false,
+          )
+        }
       }
     }
     AnimatedVisibility(
@@ -478,17 +554,25 @@ private fun StepBody(part: ConversationPart) {
       }
       val kind = toolKind(part.name)
       when (kind) {
-        ToolKind.COMMAND -> field("command", "cmd")?.let { StepBlock(it, colors.ok) }
+        ToolKind.COMMAND -> {
+          val cmd = field("CommandLine", "commandLine", "command_line", "command", "cmd")
+          val summary = field("toolSummary")
+          if (summary != null) StepBlock(summary, colors.muted)
+          if (cmd != null) StepBlock(cmd, colors.ok)
+        }
         ToolKind.EDIT -> {
           val edits = buildList {
-            val old = field("old_string", "oldText")
-            if (old != null) add(old to (field("new_string", "newText") ?: ""))
+            val old = field("Target", "old_string", "oldText")
+            if (old != null) add(old to (field("Replacement", "new_string", "newText") ?: ""))
             (args?.get("edits") as? kotlinx.serialization.json.JsonArray)?.forEach { edit ->
               val o = edit as? kotlinx.serialization.json.JsonObject ?: return@forEach
               fun text(vararg keys: String) = keys.firstNotNullOfOrNull {
                 (o[it] as? kotlinx.serialization.json.JsonPrimitive)?.content
               }
-              add((text("old_string", "oldText") ?: "") to (text("new_string", "newText") ?: ""))
+              add(
+                (text("Target", "old_string", "oldText") ?: "") to
+                  (text("Replacement", "new_string", "newText") ?: "")
+              )
             }
           }
           if (edits.isNotEmpty())
@@ -507,8 +591,8 @@ private fun StepBody(part: ConversationPart) {
               }
             )
         }
-        ToolKind.WRITE -> field("content")?.let { StepBlock(it, colors.body) }
-        ToolKind.READ,
+        ToolKind.WRITE -> field("Content", "content")?.let { StepBlock(it, colors.body) }
+        ToolKind.READ -> field("Path", "path", "file_path")?.let { StepBlock(it, colors.muted) }
         ToolKind.SEARCH,
         ToolKind.LIST -> Unit
         ToolKind.OTHER ->
@@ -524,7 +608,7 @@ private fun StepBody(part: ConversationPart) {
           "${if (images == 1) "1 image" else "$images images"} returned · not shown on the phone",
           colors.muted,
         )
-      val output = part.output
+      val output = part.output?.let(::cleanToolOutput)
       // A successful edit's diff already says what changed.
       if (!output.isNullOrEmpty() && !(kind == ToolKind.EDIT && !failed))
         StepBlock(output, if (failed) colors.err else colors.body)

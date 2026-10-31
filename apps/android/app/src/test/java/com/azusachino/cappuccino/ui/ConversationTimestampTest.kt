@@ -27,6 +27,11 @@ class ConversationTimestampTest {
       "2026-10-08 01:02:03",
       formatConversationTimestamp("2026-10-07T18:02:03+02:00", ZoneId.of("Asia/Tokyo")),
     )
+    assertEquals(
+      "01:02",
+      formatShortConversationTime("2026-10-07T18:02:03+02:00", ZoneId.of("Asia/Tokyo")),
+    )
+    assertNull(formatShortConversationTime("not a timestamp"))
     assertNull(formatConversationTimestamp("+1000000000-12-31T23:59:59.999999999Z"))
     assertNull(formatConversationTimestamp("not a timestamp"))
     assertNull(formatConversationTimestamp("2026-10-07T16:02:03"))

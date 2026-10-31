@@ -92,7 +92,28 @@ class TranscriptActivityTest {
       "glob" to "**/*.kt  src",
       stepWords(call("Glob", """{"pattern":"**/*.kt","path":"src"}""")),
     )
+    assertEquals(
+      "run_command" to "Check devices",
+      stepWords(
+        call("run_command", """{"CommandLine":"adb devices","toolSummary":"Check devices"}""")
+      ),
+    )
+    assertEquals(
+      "read_file" to "/path/to/file.kt",
+      stepWords(call("read_file", """{"Path":"/path/to/file.kt"}""")),
+    )
     assertEquals("mcp__x" to "", stepWords(call("mcp__x", "not json")))
+  }
+
+  @Test
+  fun cleanToolOutputStripsAntigravityRunnerTimestamps() {
+    val withOutput =
+      "Created At: 2026-10-31T10:07:08+09:00\nCompleted At: 2026-10-31T10:07:08+09:00\nCommand exited with code 0.\n\nCommand output:\nList of devices attached\n0cadf428  device"
+    assertEquals("List of devices attached\n0cadf428  device", cleanToolOutput(withOutput))
+
+    val noOutput =
+      "Created At: 2026-10-31T10:07:08+09:00\nCompleted At: 2026-10-31T10:07:08+09:00\nCommand exited with code 0.\n\nNo output from the command."
+    assertEquals("Completed successfully (no output)", cleanToolOutput(noOutput))
   }
 
   @Test

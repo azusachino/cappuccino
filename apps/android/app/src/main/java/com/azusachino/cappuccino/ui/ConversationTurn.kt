@@ -178,7 +178,12 @@ fun ConversationTurnRow(
             if (part is ConversationPart.ResponseStatus) ResponseStatusRow(part)
             // Thinking and tool calls arrive grouped as activity, never as prose.
             else if (part !is ConversationPart.Text) Unit
-            else if (isUser)
+            else if (isUser) {
+              val isLastUserProse =
+                index ==
+                  segments.indexOfLast {
+                    it is TranscriptSegment.Prose && it.part is ConversationPart.Text
+                  }
               UserPromptRow(
                 body = {
                   MessageBody(
@@ -191,26 +196,38 @@ fun ConversationTurnRow(
                 },
                 time =
                   turn.timestamp
-                    ?.takeIf { index == 0 }
-                    ?.let {
-                      java.time.Instant.parse(it)
-                        .atZone(timeZone)
-                        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-                    },
-                timeDescription = turn.timestamp?.let { formatConversationTimestamp(it, timeZone) },
+                    ?.takeIf { isLastUserProse }
+                    ?.let { formatShortConversationTime(it, timeZone) },
+                timeDescription =
+                  turn.timestamp
+                    ?.takeIf { isLastUserProse }
+                    ?.let { formatConversationTimestamp(it, timeZone) },
               )
-            else {
-              Box(
-                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-                contentAlignment = Alignment.CenterStart,
-              ) {
-                MessageBody(
-                  part.text,
-                  onInspect = onInspect,
-                  modifier = textModifier,
-                  transcript = true,
-                )
-              }
+            } else {
+              val slot = proseSlots.getOrNull(index) ?: 0
+              val isLastProse = (slot == proseCount - 1)
+              val formattedTime =
+                turn.timestamp
+                  ?.takeIf { isLastProse }
+                  ?.let { formatShortConversationTime(it, timeZone) }
+              AgentResponseRow(
+                body = {
+                  MessageBody(
+                    part.text,
+                    onInspect = onInspect,
+                    modifier = textModifier,
+                    transcript = true,
+                  )
+                },
+                assistantLabel = assistantLabel,
+                time = formattedTime,
+                timeDescription =
+                  turn.timestamp
+                    ?.takeIf { isLastProse }
+                    ?.let { formatConversationTimestamp(it, timeZone) },
+                showLabel = (slot == 0),
+                shape = bubbleShape(slot),
+              )
             }
           }
         }
