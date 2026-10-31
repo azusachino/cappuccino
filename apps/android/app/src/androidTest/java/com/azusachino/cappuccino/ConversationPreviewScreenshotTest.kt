@@ -207,10 +207,12 @@ class ConversationPreviewScreenshotTest {
     val list = compose.onNodeWithTag("recentOutputList")
     list.performScrollToNode(hasText(summary))
     compose.onNodeWithText(summary).performClick()
-    list.performScrollToNode(hasText("Thought"))
-    // Invoke the row's OnClick directly: an injected touch hit-tests the row's position, which can
-    // still be animating while the group opens.
-    compose.onNodeWithText("Thought").performSemanticsAction(SemanticsActions.OnClick)
+    compose.waitUntil(timeoutMillis = 5_000) {
+      compose.onAllNodesWithText("Thinking").fetchSemanticsNodes().isNotEmpty()
+    }
+    list.performScrollToNode(hasText("Thinking"))
+    // Invoke the row's OnClick directly while the group may still be animating open.
+    compose.onNodeWithText("Thinking").performSemanticsAction(SemanticsActions.OnClick)
     // The opened step composes after the click lands; wait for it rather than scrolling blind.
     compose.waitUntil(timeoutMillis = 5_000) {
       compose

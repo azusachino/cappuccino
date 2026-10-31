@@ -79,8 +79,8 @@ class MarkdownTextUiTest {
   }
 
   @Test
-  fun defaultReaderHeadingsUseMobileBodySize() {
-    // Headings stay at the reader's body size; weight, not size, marks them.
+  fun readerHeadingsAreLargerAndBold() {
+    // The redesigned reader uses a larger bold heading while keeping body text compact.
     compose.setContent {
       MaterialTheme { Surface { MarkdownText("# Mobile heading\n\nBody text") } }
     }
@@ -94,7 +94,7 @@ class MarkdownTextUiTest {
       }
       return layouts.single().layoutInput.style
     }
-    org.junit.Assert.assertEquals(style("Body text").fontSize, style("Mobile heading").fontSize)
+    org.junit.Assert.assertTrue(style("Mobile heading").fontSize > style("Body text").fontSize)
     org.junit.Assert.assertEquals(
       androidx.compose.ui.text.font.FontWeight.Bold,
       style("Mobile heading").fontWeight,

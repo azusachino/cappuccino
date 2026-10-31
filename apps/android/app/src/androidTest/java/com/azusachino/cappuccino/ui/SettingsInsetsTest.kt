@@ -1,6 +1,7 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,7 @@ import com.azusachino.cappuccino.MainActivity
 import com.azusachino.cappuccino.core.AgentRow
 import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -38,6 +40,7 @@ class SettingsInsetsTest {
     val dockHeight = 120.dp
     var headerPx = 0f
     var dockPx = 0f
+    val scrollState = ScrollState(0)
     compose.activity.setContent {
       val density = LocalDensity.current
       headerPx = with(density) { headerHeight.toPx() }
@@ -51,6 +54,7 @@ class SettingsInsetsTest {
             connections = listOf(SettingsConnection("mac", "MacMini", "Connected")),
             onConnectionDetails = {},
             contentPadding = PaddingValues(top = headerHeight, bottom = dockHeight),
+            scrollState = scrollState,
           )
         }
       }
@@ -59,11 +63,10 @@ class SettingsInsetsTest {
     val first = compose.onNodeWithText("APPEARANCE").fetchSemanticsNode().boundsInRoot
     assertTrue("first item top ${first.top} < header bottom $headerPx", first.top >= headerPx)
 
-    // Fling to the end so the list is scrolled as far as it goes, not just until the node shows.
-    repeat(4) { compose.onRoot().performTouchInput { swipeUp(startY = bottom * 0.9f, endY = top) } }
+    runBlocking { scrollState.scrollTo(scrollState.maxValue) }
     compose.waitForIdle()
     val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
-    val last = compose.onNodeWithText("GPL-3.0").fetchSemanticsNode().boundsInRoot
+    val last = compose.onNodeWithText("Connection logs").fetchSemanticsNode().boundsInRoot
     val dockTop = root.bottom - dockPx
     assertTrue("last item bottom ${last.bottom} > dock top $dockTop", last.bottom <= dockTop)
   }

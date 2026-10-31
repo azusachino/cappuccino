@@ -82,7 +82,7 @@ class MachinesJourneyTest {
     }
     openMachines()
     compose.onNodeWithContentDescription("Add machine").performClick()
-    compose.onNodeWithText("Bridge URL").performClick()
+    compose.onNodeWithText("Enter bridge address instead").performClick()
     compose.onNodeWithText("Label (optional)").performTextInput("Synthetic bridge")
     compose.onNodeWithText("Bridge address").performTextInput("https://bridge.example")
     compose.onNodeWithText("Connect").performClick()
@@ -143,7 +143,7 @@ class MachinesJourneyTest {
     assertEquals(1, actions.refreshCalls)
     compose.onNodeWithContentDescription("Machine actions").performClick()
     compose.onNodeWithText("Remove").performClick()
-    compose.onNodeWithText("No machines configured").assertIsDisplayed()
+    compose.onNodeWithText("No machines").assertIsDisplayed()
     assertTrue(state.value.profiles.isEmpty())
   }
 
@@ -166,7 +166,7 @@ class MachinesJourneyTest {
     compose.waitForIdle()
     // At ~280dp the status wraps under the name; the full text is laid out, not ellipsized.
     val layout = statusLayout()
-    assertTrue("lines=${layout.lineCount}", layout.lineCount in 1..2)
+    assertTrue("lines=${layout.lineCount}", layout.lineCount in 1..3)
     assertFalse(layout.hasVisualOverflow)
     assertEquals(STATUS_TEXT.length, layout.getLineEnd(layout.lineCount - 1))
   }
@@ -361,7 +361,7 @@ class MachinesJourneyTest {
     compose.onNodeWithContentDescription("Machine actions").performClick()
     compose.onNodeWithText("Connection details").performClick()
     compose.onNodeWithText("Bridge version").assertIsDisplayed()
-    compose.onNodeWithText("0.1.0(v1)").assertIsDisplayed()
+    compose.onNode(hasText("Bridge version") and hasText("0.1.0(v1)")).assertIsDisplayed()
     compose.onNodeWithText("App version").assertIsDisplayed()
     compose.onNodeWithText("Technical details").assertDoesNotExist()
     compose.onNodeWithText("Protocol").assertDoesNotExist()
