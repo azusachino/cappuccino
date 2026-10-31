@@ -1,7 +1,13 @@
 package com.azusachino.cappuccino.core
 
 val ConversationPart.visibleInChat: Boolean
-  get() = !(this is ConversationPart.ResponseStatus && status == "failed")
+  get() =
+    when (this) {
+      is ConversationPart.ResponseStatus -> status != "failed"
+      is ConversationPart.Text -> text.isNotBlank()
+      is ConversationPart.Thinking -> text.isNotBlank()
+      is ConversationPart.ToolCall -> true
+    }
 
 fun conversationFollowContent(turns: List<ConversationTurn>): List<ConversationTurn> =
   turns

@@ -130,7 +130,13 @@ fun ConversationTurnRow(
   val isUser = turn.role.lowercase() == "user"
   val parts = buildList {
     turn.text?.takeIf { it.isNotBlank() }?.let { add(ConversationPart.Text(it)) }
-    addAll(turn.parts)
+    turn.parts.forEach { part ->
+      when {
+        part is ConversationPart.Text && part.text.isBlank() -> Unit
+        part is ConversationPart.Thinking && part.text.isBlank() -> Unit
+        else -> add(part)
+      }
+    }
   }
   val shownParts = parts.filter {
     it.visibleInChat || (showToolsInline && it is ConversationPart.ToolCall)
@@ -143,7 +149,12 @@ fun ConversationTurnRow(
     remember(segments, isUser) {
       var n = 0
       segments.map { seg ->
-        if (seg is TranscriptSegment.Prose && seg.part is ConversationPart.Text && !isUser) {
+        if (
+          seg is TranscriptSegment.Prose &&
+            seg.part is ConversationPart.Text &&
+            seg.part.text.isNotBlank() &&
+            !isUser
+        ) {
           n++
           n - 1
         } else null
@@ -167,7 +178,7 @@ fun ConversationTurnRow(
     modifier.fillMaxWidth().semantics {
       contentDescription = if (isUser) "You" else assistantLabel
     },
-    verticalArrangement = Arrangement.spacedBy(10.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
     segments.forEachIndexed { index, segment ->
       key(turn.id, index) {
@@ -177,7 +188,7 @@ fun ConversationTurnRow(
             val part = segment.part
             if (part is ConversationPart.ResponseStatus) ResponseStatusRow(part)
             // Thinking and tool calls arrive grouped as activity, never as prose.
-            else if (part !is ConversationPart.Text) Unit
+            else if (part !is ConversationPart.Text || part.text.isBlank()) Unit
             else if (isUser) {
               val isLastUserProse =
                 index ==

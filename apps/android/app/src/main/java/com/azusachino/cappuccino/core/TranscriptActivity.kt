@@ -17,11 +17,15 @@ fun transcriptSegments(parts: List<ConversationPart>): List<TranscriptSegment> {
   val segments = mutableListOf<TranscriptSegment>()
   var activity = mutableListOf<ConversationPart>()
   parts.forEach { part ->
-    if (part.isActivity) activity += part
-    else {
-      if (activity.isNotEmpty()) segments += TranscriptSegment.Activity(activity)
-      activity = mutableListOf()
-      segments += TranscriptSegment.Prose(part)
+    when {
+      part is ConversationPart.Text && part.text.isBlank() -> Unit
+      part is ConversationPart.Thinking && part.text.isBlank() -> Unit
+      part.isActivity -> activity += part
+      else -> {
+        if (activity.isNotEmpty()) segments += TranscriptSegment.Activity(activity)
+        activity = mutableListOf()
+        segments += TranscriptSegment.Prose(part)
+      }
     }
   }
   if (activity.isNotEmpty()) segments += TranscriptSegment.Activity(activity)

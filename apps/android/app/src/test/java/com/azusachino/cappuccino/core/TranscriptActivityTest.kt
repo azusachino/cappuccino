@@ -53,6 +53,25 @@ class TranscriptActivityTest {
     assertEquals(emptyList<TranscriptSegment>(), transcriptSegments(emptyList()))
   }
 
+  @Test
+  fun blankTextDoesNotFractureActivityOrProduceEmptyProse() {
+    val tool1 = tool("bash")
+    val blank = ConversationPart.Text("")
+    val whitespace = ConversationPart.Text("   \n  ")
+    val tool2 = tool("read")
+    val answer = ConversationPart.Text("Done.")
+
+    val segments = transcriptSegments(listOf(tool1, blank, tool2, whitespace, answer))
+
+    assertEquals(
+      listOf(
+        TranscriptSegment.Activity(listOf(tool1, tool2)),
+        TranscriptSegment.Prose(answer),
+      ),
+      segments,
+    )
+  }
+
   private fun call(name: String, input: String, output: String? = "ok", isError: Boolean? = null) =
     ConversationPart.ToolCall(name, input, output, isError)
 

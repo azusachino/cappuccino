@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -77,7 +78,7 @@ import com.azusachino.cappuccino.core.toolKind
 // message is a filled row with a prompt mark, and work between words is one line that opens into
 // a timeline.
 
-/** A person's message: left-aligned full-width tinted bubble with time at bottom-end. */
+/** A person's message: right-aligned Telegram-style bubble with time at bottom-end. */
 @Composable
 internal fun UserPromptRow(
   body: @Composable () -> Unit,
@@ -89,17 +90,17 @@ internal fun UserPromptRow(
 ) {
   val colors = MaterialTheme.appColors
   Box(
-    modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 3.dp),
-    contentAlignment = Alignment.CenterStart,
+    modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+    contentAlignment = Alignment.CenterEnd,
   ) {
     Surface(
       shape = shape,
-      color = colors.accent.copy(alpha = 0.08f).compositeOver(colors.card2),
-      border = BorderStroke(0.7.dp, colors.accent.copy(alpha = 0.28f)),
-      modifier = Modifier.fillMaxWidth(),
+      color = colors.accent.copy(alpha = 0.12f).compositeOver(colors.card2),
+      border = BorderStroke(0.6.dp, colors.accent.copy(alpha = 0.35f)),
+      modifier = Modifier.widthIn(min = 60.dp, max = 340.dp).padding(start = 40.dp),
     ) {
       Column(
-        Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 8.dp),
+        Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
       ) {
         body()
@@ -111,10 +112,10 @@ internal fun UserPromptRow(
             },
             style =
               MaterialTheme.typography.labelSmall.copy(
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 fontFamily = JetBrainsMono,
               ),
-            color = colors.muted.copy(alpha = 0.75f),
+            color = colors.muted.copy(alpha = 0.8f),
           )
         }
       }
@@ -123,7 +124,7 @@ internal fun UserPromptRow(
 }
 
 /**
- * An agent's response message: left-aligned full-width neutral card with optional label and
+ * An agent's response message: left-aligned Telegram-style card with optional label and
  * bottom-right time.
  */
 @Composable
@@ -138,17 +139,17 @@ internal fun AgentResponseRow(
 ) {
   val colors = MaterialTheme.appColors
   Box(
-    modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 3.dp),
+    modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
     contentAlignment = Alignment.CenterStart,
   ) {
     Surface(
       shape = shape,
       color = colors.card,
       border = BorderStroke(0.6.dp, colors.line.copy(alpha = 0.45f)),
-      modifier = Modifier.fillMaxWidth(),
+      modifier = Modifier.fillMaxWidth().padding(end = 24.dp),
     ) {
       Column(
-        Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 8.dp),
+        Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         if (showLabel) {
@@ -172,7 +173,7 @@ internal fun AgentResponseRow(
             },
             style =
               MaterialTheme.typography.labelSmall.copy(
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 fontFamily = JetBrainsMono,
               ),
             color = colors.faint,
@@ -198,24 +199,27 @@ internal fun ActivityGroup(
   val expanded = chosen ?: newest
   val summary = remember(parts) { activitySummary(parts) }
   val duration = remember(parts) { activityDuration(parts)?.let(::compactDuration) }
-  Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+  Column(
+    Modifier.fillMaxWidth().padding(vertical = 2.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
     Surface(
       onClick = {
         if (!expanded) onInspect()
         chosen = !expanded
       },
-      shape = RoundedCornerShape(10.dp),
-      color = colors.card2.copy(alpha = 0.65f),
+      shape = RoundedCornerShape(12.dp),
+      color = colors.card2.copy(alpha = 0.7f),
       border = BorderStroke(0.6.dp, colors.line.copy(alpha = 0.45f)),
       modifier =
-        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp).semantics {
+        Modifier.padding(horizontal = 8.dp).semantics {
           stateDescription = if (expanded) "Expanded" else "Collapsed"
         },
     ) {
       Row(
-        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+        Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
       ) {
         val chevronRotation by
           animateFloatAsState(
@@ -226,13 +230,12 @@ internal fun ActivityGroup(
         Icon(
           painterResource(R.drawable.ic_expand_more),
           contentDescription = null,
-          modifier = Modifier.size(14.dp).rotate(chevronRotation),
+          modifier = Modifier.size(13.dp).rotate(chevronRotation),
           tint = colors.muted,
         )
         Text(
           summary,
-          Modifier.weight(1f, fill = false),
-          style = MaterialTheme.typography.labelMedium,
+          style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp),
           color = colors.muted,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
@@ -240,7 +243,11 @@ internal fun ActivityGroup(
         if (duration != null) {
           Text(
             duration,
-            style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMono),
+            style =
+              MaterialTheme.typography.labelSmall.copy(
+                fontSize = 10.5.sp,
+                fontFamily = JetBrainsMono,
+              ),
             color = colors.faint,
             maxLines = 1,
             softWrap = false,
@@ -256,6 +263,7 @@ internal fun ActivityGroup(
       exit =
         shrinkVertically(animationSpec = tween(180, easing = FastOutSlowInEasing)) +
           fadeOut(animationSpec = tween(140)),
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
     ) {
       Column(
         Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
