@@ -375,6 +375,7 @@ internal fun MachineInformation(
   val statusColor = connectionStatusColor(status, colors)
 
   var previewItem by remember { mutableStateOf<Pair<String, String>?>(null) }
+  var showingLogs by remember { mutableStateOf(false) }
   val onPreview = { label: String, value: String -> previewItem = Pair(label, value) }
   val onCopy = { label: String, value: String ->
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -610,8 +611,18 @@ internal fun MachineInformation(
           showChevron = true,
           onClick = onRename,
         )
+        MachineDivider()
+        MachineDetailRow(
+          "Connection logs",
+          showChevron = true,
+          onClick = { showingLogs = true },
+        )
       }
     }
+  }
+
+  if (showingLogs) {
+    ConnectionLogsSheet(onDismiss = { showingLogs = false })
   }
 
   previewItem?.let { (label, value) ->

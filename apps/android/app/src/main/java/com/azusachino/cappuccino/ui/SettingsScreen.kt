@@ -82,6 +82,7 @@ internal fun SettingsScreen(
   var helpError by rememberSaveable { mutableStateOf<String?>(null) }
   var showingThemePicker by rememberSaveable { mutableStateOf(false) }
   var showingAboutGuide by rememberSaveable { mutableStateOf(false) }
+  var showingConnectionLogs by rememberSaveable { mutableStateOf(false) }
 
   if (showingThemePicker) {
     AlertDialog(
@@ -259,12 +260,22 @@ internal fun SettingsScreen(
               ?.let { "Couldn't open iroh.computer." }
         },
       )
+      SettingsDivider(indented = false)
+      SettingRow(
+        title = "Connection logs",
+        detail = "Diagnostics & transport events",
+        onClick = { showingConnectionLogs = true },
+      )
     }
     helpError?.let { SettingNote(it, warning = true) }
   }
 
   if (showingAboutGuide) {
     AboutCappuccinoSheet(onDismiss = { showingAboutGuide = false })
+  }
+
+  if (showingConnectionLogs) {
+    ConnectionLogsSheet(onDismiss = { showingConnectionLogs = false })
   }
 }
 

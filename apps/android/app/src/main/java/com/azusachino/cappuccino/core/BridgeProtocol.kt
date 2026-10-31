@@ -20,6 +20,10 @@ class StreamRetryBudget(private val maximumRetries: Int = 4) {
     if (retriesUsed >= maximumRetries) return null
     return longArrayOf(1_000L, 2_000L, 4_000L, 8_000L)[retriesUsed++]
   }
+
+  fun reset() {
+    retriesUsed = 0
+  }
 }
 
 class ProtocolException(message: String) : Exception(message), BridgeAnswered

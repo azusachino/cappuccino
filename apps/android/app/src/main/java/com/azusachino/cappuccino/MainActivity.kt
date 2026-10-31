@@ -171,6 +171,7 @@ class MainActivity : ComponentActivity() {
                   },
                   irohPairing = { pairing -> redeemIrohPairing(irohTransport, pairing) },
                   transportBadge = { endpoint -> transports.badge(endpoint) },
+                  onNetworkAvailable = { listener -> transports.addNetworkListener(listener) },
                 )
               }
             }
