@@ -1,7 +1,7 @@
 name: CI
 
-# Pull requests run format, tests, lint and builds. The emulator and simulator journeys run on
-# pushes to main and on demand (workflow_dispatch), where their cold boots are worth the time.
+# Pull requests run format, tests, lint and builds, plus the Android emulator journey when Android
+# changes. Pushes to main and on-demand runs (workflow_dispatch) also run the simulator journey.
 on:
   push:
     branches: [main]
@@ -135,14 +135,12 @@ jobs:
           apps/android/gradlew --no-daemon --version
       - run: make validate-android
       - name: Enable KVM on this disposable CI runner
-        if: github.event_name != 'pull_request'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Test disconnected Android shell
         id: smoke
-        if: github.event_name != 'pull_request'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35

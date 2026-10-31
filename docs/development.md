@@ -241,9 +241,10 @@ class. Short samples never prove an absolute zero leak.
 ## CI
 
 - **Pull requests** run the format, test, lint and build jobs for the platforms
-  they change. Pull requests that change no code run the Markdown check.
-- **Pushes to `main` and manual runs** (`workflow_dispatch`) also run the emulator
-  and simulator UI journeys. Those journeys preserve narrow synthetic evidence for
+  they change. Android pull requests also run the emulator UI journey. Pull
+  requests that change no code run the Markdown check.
+- **Pushes to `main` and manual runs** (`workflow_dispatch`) also run the
+  Android emulator and simulator UI journeys. Those journeys preserve narrow synthetic evidence for
   seven days.
 - **Apple job:** macOS 26 with Xcode 26.6 through `DEVELOPER_DIR`. It runs
   `make validate-apple`, creates one iOS 26.5 simulator, runs the iPhone shell
