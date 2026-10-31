@@ -2,7 +2,6 @@ package com.azusachino.cappuccino
 
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
-import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -63,12 +62,12 @@ class CappuccinoShellTest {
   @Test
   fun disconnectedJourneyAndRecreation() {
     // The app opens on Machines; agents are reached through their machine, not a Chats tab.
-    compose.onNodeWithText("No machines configured").assertIsDisplayed()
+    compose.onNodeWithText("No machines").assertIsDisplayed()
     compose.onNodeWithContentDescription("Add machine").assertIsDisplayed()
     capture("Machines")
 
     compose.onNodeWithContentDescription("Add machine").performClick()
-    compose.onNodeWithText("Bridge URL").performClick()
+    compose.onNodeWithText("Enter bridge address instead").performClick()
     compose.onNodeWithText("Bridge address").assertIsDisplayed()
     compose.onNodeWithText("Connect").assertIsDisplayed()
     compose.onNodeWithText("Bridge address").performClick()
@@ -77,13 +76,13 @@ class CappuccinoShellTest {
     capture("AddMachineIme")
     compose.activityRule.scenario.recreate()
     compose.waitForIdle()
-    compose.onNodeWithText("No machines configured").assertIsDisplayed()
+    compose.onNodeWithText("No machines").assertIsDisplayed()
 
     compose.onNode(hasContentDescription("Settings") and hasClickAction()).performClick()
     compose.onNodeWithText("Theme").assertIsDisplayed()
     capture("Settings")
     compose.onNode(hasContentDescription("Machines") and hasClickAction()).performClick()
-    compose.onNodeWithText("No machines configured").assertIsDisplayed()
+    compose.onNodeWithText("No machines").assertIsDisplayed()
   }
 
   @Test
@@ -152,19 +151,17 @@ class CappuccinoShellTest {
       }
     }
 
-    compose
-      .onNodeWithTag("composerModelLabel")
-      .assertTextEquals("opus 5.5 · high")
-      .assertIsDisplayed()
+    compose.onNodeWithTag("composerModelLabel", useUnmergedTree = true).assertTextEquals("opus 5.5")
+    compose.onNodeWithText("high", ignoreCase = true).assertIsDisplayed()
     assertSendAndStopSitAtTheEnd()
     compose.onNodeWithText("38% · 76K / 200K").assertIsDisplayed()
-    compose.onNodeWithText("cache 90%").assertIsDisplayed()
+    // Cache is no longer presented in the redesigned composer.
     // While working, /new is refused before it reaches the bridge: the command is disabled with a
     // hint, and a typed /new gets a refusal instead of a send.
     compose.onNodeWithContentDescription("Commands").performClick()
     compose.onNodeWithText("/new").assertIsNotEnabled()
     compose.onNodeWithText("Stop the agent first").assertIsDisplayed()
-    InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+    compose.onNodeWithContentDescription("Commands").performClick()
     compose.waitForIdle()
     compose.onNodeWithTag("promptInput").performTextInput("/new")
     compose.onNodeWithContentDescription("Send").performClick()

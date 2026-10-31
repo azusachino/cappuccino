@@ -1275,8 +1275,6 @@ fun CappuccinoScreen(
                               statusSubtitle,
                               style = MaterialTheme.typography.bodySmall,
                               color = MaterialTheme.appColors.muted,
-                              maxLines = 1,
-                              overflow = TextOverflow.Ellipsis,
                             )
                           }
                           Row(verticalAlignment = Alignment.CenterVertically) {
