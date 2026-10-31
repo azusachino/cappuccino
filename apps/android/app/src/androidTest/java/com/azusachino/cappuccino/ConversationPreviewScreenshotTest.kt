@@ -206,7 +206,8 @@ class ConversationPreviewScreenshotTest {
     val summary = activitySummary(previewTurns()[1].parts.filter { it !is ConversationPart.Text })
     val list = compose.onNodeWithTag("recentOutputList")
     list.performScrollToNode(hasText(summary))
-    compose.onNodeWithText(summary).performClick()
+    // Semantics click, not a coordinate click: the list may still be scrolling to the row.
+    compose.onNodeWithText(summary).performSemanticsAction(SemanticsActions.OnClick)
     compose.waitUntil(timeoutMillis = 5_000) {
       compose.onAllNodesWithText("Thinking").fetchSemanticsNodes().isNotEmpty()
     }
