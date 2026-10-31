@@ -420,8 +420,8 @@ fun PromptInputBar(
                     if (item.command == "/compact") {
                       confirmingCommand = "/compact"
                     } else {
+                      // Adding a command prefix must not replace the user's recoverable draft.
                       input = "${item.command} "
-                      onDraftChange?.invoke(input)
                       focusRequester.requestFocus()
                     }
                   },
