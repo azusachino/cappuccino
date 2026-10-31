@@ -228,6 +228,11 @@ class CappuccinoShellTest {
     }
     compose.onNodeWithTag("promptInput").performTextInput("/compact")
     compose.onNodeWithContentDescription("Send").performClick()
+    // The confirmation dialog animates in after the click; wait for it instead of asserting at
+    // once.
+    compose.waitUntil(timeoutMillis = 5_000) {
+      compose.onAllNodesWithText("Run /compact?").fetchSemanticsNodes().isNotEmpty()
+    }
     compose.onNodeWithText("Run /compact?").assertIsDisplayed()
     compose.runOnIdle {
       state.value =
