@@ -2,7 +2,7 @@
 
 The bridge is Cappuccino's phone-reachable transport facade over selected machine-local Herdr APIs. It is a Rust/Tokio/axum executable linked through a Herdr plugin manifest; Herdr starts and controls it, but does not load it into the Herdr server or an agent. Herdr and Pi continue to own agent/session lifetime.
 
-This standalone process serves a loopback HTTP/WebSocket API to native clients over the private tailnet. It has no auth by owner decision; public ingress is out of scope. The bridge is not an agent runtime.
+This standalone process serves a loopback HTTP/WebSocket API over an iroh-first peer-to-peer transport (with private tailnet fallback) to native clients. Tailnet fallback has no auth by owner decision; iroh transport requires cryptographic pairing with EndpointId allowlists; public ingress is out of scope. The bridge is not an agent runtime.
 
 ## Layout
 
@@ -79,11 +79,11 @@ the selected Pi session's identity.
 
 ## Configuration and security
 
-Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, optional JSON, then environment (`CAPP_BRIDGE_HOST`, `CAPP_BRIDGE_PORT`, `CAPP_BRIDGE_DATA_DIR`, `CAPP_BRIDGE_SERVE_AUTO_APPLY`). Non-loopback binds and enabled reserved auth are rejected.
+Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, optional TOML config file, then environment (`CAPP_BRIDGE_HOST`, `CAPP_BRIDGE_PORT`, `CAPP_BRIDGE_DATA_DIR`, `CAPP_BRIDGE_SERVE_AUTO_APPLY`). Non-loopback binds and enabled reserved auth are rejected.
 
 Paths, on macOS and Linux alike:
 
-- Config file: `CAPP_BRIDGE_CONFIG`, else `$XDG_CONFIG_HOME/cappuccino-bridge/config.json`, else `~/.config/cappuccino-bridge/config.json`.
+- Config file: `CAPP_BRIDGE_CONFIG`, else `$XDG_CONFIG_HOME/cappuccino-bridge/config.toml`, else `~/.config/cappuccino-bridge/config.toml`.
 - Runtime state (`data_dir`): `$XDG_STATE_HOME/cappuccino-bridge`, else `~/.local/state/cappuccino-bridge`. Set `data_dir` in the config file, or `CAPP_BRIDGE_DATA_DIR`, to use another directory; the environment variable wins over the file.
 - XDG variables are used only when they are absolute paths; relative or empty values are ignored.
 - Machine id: `machine-id` in the data dir (mode 0600). It is a stable identifier, not a secret, and paired apps recognise the machine by it. On start, if `machine-id` is missing or empty and `~/Library/Application Support/cappuccino-spike/machine-id` is readable and non-empty, its value is copied unchanged once (the old file is never deleted, and the copy is what later starts read). If that old file is missing, the bridge generates a new id. If it exists but is unreadable (for example a permission error), the bridge logs a warning and also generates a new id, so paired apps will not recognise it. An existing `machine-id` is never regenerated.
@@ -99,12 +99,12 @@ Setup, pairing and relay operations: [docs/iroh-setup.md](../../docs/iroh-setup.
 
 `iroh.enabled` (default `false`, strict boolean) starts an iroh endpoint beside the loopback listener. When false no endpoint is created. The phone reaches the same routes through iroh ALPN `cappuccino/1`, admitted only for EndpointIds on the allowlist. ALPN `cappuccino-pair/1` admits unknown ids for one token exchange. Pairing uses a code that rotates every 60 s and is single-use per window; `cappuccino-bridge pair` prints the current code. The secret key (`iroh-secret.key`) and allowlist (`iroh-allowlist.json`) live in the data dir with mode 0600.
 
-`iroh.relay_url` (optional, absolute `https` URL, strict: a bad value stops startup) makes the endpoint use only that relay instead of n0's. Unset keeps n0. Point it at a relay whose access allowlist admits the bridge's EndpointId; a relay that admits everyone is a relay that will carry anyone's traffic. A relay behind a Cloudflare Tunnel carries no UDP, so the endpoint gets no QUIC address discovery and its address is relay-only; paths can stay relayed. The pairing payload then carries that relay URL and no direct addresses.
+`iroh.relay_url` (optional, absolute `https` URL, strict: a bad value stops startup) makes the endpoint use only that relay instead of n0's. Unset keeps n0. Point it at a relay whose access allowlist admits the bridge's EndpointId. Custom relays should provide native UDP and direct exposure; running an iroh relay behind an HTTP tunnel (such as Cloudflare Tunnel) drops UDP, disabling QUIC address discovery and forcing all traffic over relayed streams.
 
 - `cappuccino-bridge pair` prints a QR and the payload. It asks the running bridge over the owner-only admin socket `iroh-admin.sock` in the data dir. Start the bridge first, or the command reports that it is not running.
 - The payload carries direct addresses only when no relay is known yet (`relay` null). With a relay, `addrs` is empty and the phone finds the direct path after connecting, which keeps the QR about 55 to 59 columns and 28 to 30 rows (error level L, one-module quiet zone). If the terminal is narrower, the command prints a hint; widen it or open `/pair` on a tailnet device, which shows the same payload as a QR.
 - `cappuccino-bridge pair --revoke <EndpointId>` removes the id and closes its live tunnel connections.
-- Payload format v1, compact JSON: `{"v":1,"endpoint_id":"<id>","relay":"<url>|null","addrs":["ip:port"],"token":"<64 hex>"}`. Unknown `v` values must be rejected by clients.
+- Payload format v1, compact JSON: `{"v":1,"endpoint_id":"<id>","relay":"<url>|null","addrs":["ip:port"],"token":"<64 hex>","tailnet_url":"<url>"}` (`tailnet_url` is optional, included when detected or configured under `[tailnet] url`). Unknown `v` values must be rejected by clients.
 - Pairing tokens and secret keys are never logged.
 
 ## Agent integration prerequisite

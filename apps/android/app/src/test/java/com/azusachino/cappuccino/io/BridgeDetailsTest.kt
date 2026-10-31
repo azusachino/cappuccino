@@ -46,8 +46,8 @@ class BridgeDetailsTest {
       parseBridgeDetails(parseJsonObject("{$prefix,\"protocol\":2}"))
       throw AssertionError("Incompatible protocol must fail closed")
     } catch (error: ProtocolException) {
-      assertTrue(error.message!!.contains("protocol 2"))
-      assertTrue(error.message!!.contains("requires 1"))
+      assertTrue(error.message!!.contains("protocol v2"))
+      assertTrue(error.message!!.contains("requires v1"))
     }
   }
 }

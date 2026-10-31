@@ -4,16 +4,18 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -23,7 +25,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +42,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
@@ -51,6 +54,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import com.azusachino.cappuccino.R
 import com.azusachino.cappuccino.core.COMMON_SLASH_COMMANDS
 import com.azusachino.cappuccino.core.PromptCard
@@ -59,6 +64,7 @@ import com.azusachino.cappuccino.core.disallowedSlashCommandReason
 import com.azusachino.cappuccino.core.matchingSlashCommands
 import com.azusachino.cappuccino.core.slashCommand
 import com.azusachino.cappuccino.core.slashCommandWarning
+import com.azusachino.cappuccino.io.SessionStats
 
 @Composable
 fun PromptCardView(
@@ -68,7 +74,6 @@ fun PromptCardView(
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
 ) {
-  // Approval stays prominent as a default ElevatedCard — no custom border (region 6).
   ElevatedCard(modifier = modifier.fillMaxWidth()) {
     Column(
       modifier =
@@ -98,44 +103,33 @@ fun PromptCardView(
         Text(
           text = msg,
           style = MaterialTheme.typography.bodyMedium,
-          color = MaterialTheme.colorScheme.onSurface,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
       }
 
-      prompt.command?.let { cmd ->
-        // Command on a tonal monospace block, no border.
-        Surface(
-          shape = MaterialTheme.shapes.small,
-          color = MaterialTheme.colorScheme.surfaceContainer,
-          modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp),
-        ) {
-          Text(
-            text = cmd,
-            fontFamily = JetBrainsMono,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(12.dp).horizontalScroll(rememberScrollState()),
-          )
-        }
-      }
-
-      if (!enabled) Text("This bridge can't accept answers.")
       if (prompt.options.isNotEmpty()) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          prompt.options.forEachIndexed { index, option ->
-            FilledTonalButton(
-              onClick = { onSelectOption(index, option.id) },
-              enabled = enabled,
-              modifier = Modifier.fillMaxWidth(),
+        val options = prompt.options
+        Column(
+          modifier = Modifier.fillMaxWidth(),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          options.forEachIndexed { index, option ->
+            Surface(
+              shape = RoundedCornerShape(12.dp),
+              color = MaterialTheme.colorScheme.surfaceVariant,
+              modifier =
+                Modifier.fillMaxWidth().clickable(enabled = enabled) {
+                  onSelectOption(index, option.id)
+                },
             ) {
               Column(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                horizontalAlignment = Alignment.Start,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
               ) {
                 Text(
-                  text = "${index + 1}. ${option.label}",
+                  text = option.label,
                   style = MaterialTheme.typography.bodyMedium,
-                  fontWeight = FontWeight.SemiBold,
+                  fontWeight = FontWeight.Medium,
                 )
                 option.description?.let { desc ->
                   Text(
@@ -161,32 +155,41 @@ fun PromptCardView(
   }
 }
 
+/**
+ * Pico-style unified composer card.
+ *
+ * Encapsulates the multi-line prompt text field, action shortcuts (+ slash commands, history),
+ * circular send/stop button, and embedded bottom toolbar (model pill, effort pill, and token
+ * usage).
+ */
 @Composable
 fun PromptInputBar(
-  /**
-   * Sends the draft; the flag is true once the owner confirmed the agent command it starts with.
-   */
   onSend: (String, Boolean) -> Unit,
   enabled: Boolean,
   modifier: Modifier = Modifier,
   placeholder: String = "Message agent…",
   onStop: (() -> Unit)? = null,
   model: String? = null,
+  agent: String? = null,
   thinkingLevel: String? = null,
   draft: String = "",
   onDraftChange: ((String) -> Unit)? = null,
   pending: Boolean = false,
   agentWorking: Boolean = false,
   outcome: String? = null,
+  stats: SessionStats? = null,
 ) {
   var input by rememberSaveable(draft) { mutableStateOf(draft) }
   LaunchedEffect(draft) { if (input != draft) input = draft }
   var commandsOpen by remember { mutableStateOf(false) }
   var historyOpen by remember { mutableStateOf(false) }
+  var modelMenuOpen by remember { mutableStateOf(false) }
+  var effortMenuOpen by remember { mutableStateOf(false) }
   var isFocused by remember { mutableStateOf(false) }
+  val focusRequester = remember { FocusRequester() }
   var promptHistory by rememberSaveable { mutableStateOf(listOf<String>()) }
-  // An agent command can cost far more than a message; it waits here, draft kept, until confirmed.
   var confirmingCommand by rememberSaveable { mutableStateOf<String?>(null) }
+
   confirmingCommand?.let { command ->
     val disallowedReason =
       disallowedSlashCommandReason(command) ?: busyAgentCommandReason(command, agentWorking)
@@ -224,19 +227,33 @@ fun PromptInputBar(
       )
     }
   }
+
   val colors = MaterialTheme.appColors
   val canSend = enabled && !pending && input.isNotBlank()
   val slashSuggestions = remember(input) { matchingSlashCommands(input) }
 
+  // Context token metrics for toolbar
+  val tokens = stats?.contextTokens
+  val effectiveModel = stats?.model ?: model
+  val window = stats?.contextWindow ?: defaultContextWindow(effectiveModel, agent)
+  val percent =
+    when {
+      tokens != null -> (tokens * 100 / window).coerceIn(0, 100).toInt()
+      else ->
+        stats?.rateLimits?.windows?.firstOrNull { it.window == "session" }?.usedPercent?.toInt()
+    }
+
   Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-    if (pending || outcome != null)
+    if (pending || outcome != null) {
       Text(
         if (pending) "Sending; not yet confirmed by the agent." else outcome.orEmpty(),
         Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
         style = MaterialTheme.typography.labelSmall,
         color = colors.muted,
       )
-    // 1. Slash command suggestions overlay (when typing '/')
+    }
+
+    // 1. Slash command suggestions dropdown overlay
     if (slashSuggestions.isNotEmpty() && isFocused) {
       Surface(
         shape = RoundedCornerShape(16.dp),
@@ -280,230 +297,384 @@ fun PromptInputBar(
       }
     }
 
-    // 2. The input pill: one quiet glass surface; content first, chrome underneath.
-    val pillShape = RoundedCornerShape(24.dp)
-    Column(
-      Modifier.fillMaxWidth()
-        .glassSurface(
-          shape = pillShape,
-          rimStroke = if (isFocused) 0.dp else GlassDefaults.RimStrokeWidth,
-        )
-        .then(
-          if (isFocused) Modifier.border(1.dp, colors.accent.copy(alpha = 0.5f), pillShape)
-          else Modifier
-        )
-        .clip(pillShape)
+    // 2. Pico unified composer card
+    val cardShape = RoundedCornerShape(20.dp)
+    Surface(
+      shape = cardShape,
+      color = colors.card,
+      border =
+        BorderStroke(
+          1.dp,
+          if (isFocused) colors.accent.copy(alpha = 0.5f) else colors.line.copy(alpha = 0.45f),
+        ),
+      shadowElevation = if (isFocused) 3.dp else 1.dp,
+      modifier = Modifier.fillMaxWidth(),
     ) {
-      Row(
-        Modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp, top = 12.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        androidx.compose.foundation.text.BasicTextField(
-          value = input,
-          onValueChange = {
-            input = it
-            onDraftChange?.invoke(it)
-          },
-          modifier =
-            Modifier.weight(1f).onFocusChanged { isFocused = it.isFocused }.testTag("promptInput"),
-          enabled = enabled,
-          maxLines = 6,
-          textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
-          cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.accent),
-          decorationBox = { field ->
-            Box {
-              if (input.isEmpty())
-                Text(
-                  if (enabled) placeholder else "Not connected",
-                  style = MaterialTheme.typography.bodyMedium,
-                  color = colors.faint,
-                )
-              field()
-            }
-          },
-        )
-        if (input.isNotEmpty()) {
-          IconButton(
-            onClick = {
-              input = ""
-              onDraftChange?.invoke("")
+      Column {
+        // Multi-line prompt text field
+        Row(
+          Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
+          verticalAlignment = Alignment.Top,
+        ) {
+          androidx.compose.foundation.text.BasicTextField(
+            value = input,
+            onValueChange = {
+              input = it
+              onDraftChange?.invoke(it)
             },
-            modifier = Modifier.size(28.dp),
-          ) {
-            Icon(
-              painterResource(com.azusachino.cappuccino.R.drawable.ic_close),
-              contentDescription = "Clear draft",
-              modifier = Modifier.size(16.dp),
-              tint = colors.muted,
-            )
-          }
-        }
-      }
-
-      Row(
-        Modifier.fillMaxWidth().padding(start = 10.dp, end = 12.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        // Commands (slash picker, one-tap continue/compact, new session)
-        Box {
-          IconButton(onClick = { commandsOpen = true }, modifier = Modifier.size(36.dp)) {
-            Icon(
-              painterResource(com.azusachino.cappuccino.R.drawable.ic_grid),
-              contentDescription = "Commands",
-              modifier = Modifier.size(18.dp),
-              tint = colors.muted,
-            )
-          }
-          DropdownMenu(expanded = commandsOpen, onDismissRequest = { commandsOpen = false }) {
-            if (enabled && !pending) {
-              DropdownMenuItem(
-                text = { Text("Continue") },
-                onClick = {
-                  commandsOpen = false
-                  onSend("continue", false)
-                },
-              )
-              DropdownMenuItem(
-                text = { Text("Compact context") },
-                onClick = {
-                  commandsOpen = false
-                  confirmingCommand = "/compact"
-                },
-              )
-            }
-            COMMON_SLASH_COMMANDS.forEach { item ->
-              DropdownMenuItem(
-                enabled = !(agentWorking && item.command == "/new"),
-                text = {
-                  Column {
-                    Text(
-                      item.command,
-                      style =
-                        MaterialTheme.typography.labelMedium.copy(
-                          fontFamily = FontFamily.Monospace
-                        ),
-                      color = colors.accent,
-                    )
-                    Text(
-                      if (agentWorking && item.command == "/new") "Stop the agent first"
-                      else item.description,
-                      style = MaterialTheme.typography.bodySmall,
-                      color = colors.muted,
-                    )
-                  }
-                },
-                onClick = {
-                  commandsOpen = false
-                  input = "${item.command} "
-                },
-              )
-            }
-          }
-        }
-
-        // Prompt history
-        if (promptHistory.isNotEmpty()) {
-          Box {
-            IconButton(onClick = { historyOpen = true }, modifier = Modifier.size(36.dp)) {
+            modifier =
+              Modifier.weight(1f)
+                .focusRequester(focusRequester)
+                .onFocusChanged { isFocused = it.isFocused }
+                .testTag("promptInput"),
+            enabled = enabled,
+            maxLines = 6,
+            textStyle =
+              MaterialTheme.typography.bodyMedium.copy(color = colors.text, lineHeight = 20.sp),
+            cursorBrush = SolidColor(colors.accent),
+            decorationBox = { field ->
+              Box {
+                if (input.isEmpty())
+                  Text(
+                    if (enabled) placeholder else "Not connected",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.faint,
+                  )
+                field()
+              }
+            },
+          )
+          if (input.isNotEmpty()) {
+            IconButton(
+              onClick = {
+                input = ""
+                onDraftChange?.invoke("")
+              },
+              modifier = Modifier.size(24.dp).padding(top = 2.dp),
+            ) {
               Icon(
-                painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
-                contentDescription = "Prompt history",
-                modifier = Modifier.size(18.dp),
+                painterResource(R.drawable.ic_close),
+                contentDescription = "Clear draft",
+                modifier = Modifier.size(15.dp),
                 tint = colors.muted,
               )
             }
-            DropdownMenu(expanded = historyOpen, onDismissRequest = { historyOpen = false }) {
-              Text(
-                "Recent prompts",
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.muted,
+          }
+        }
+
+        // Action controls row (+ / history on left, stop / send on right)
+        Row(
+          Modifier.fillMaxWidth().padding(start = 10.dp, end = 12.dp, bottom = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          // Pico + button for commands / actions
+          Box {
+            IconButton(
+              onClick = { commandsOpen = true },
+              modifier = Modifier.size(34.dp),
+            ) {
+              Icon(
+                painterResource(R.drawable.ic_add),
+                contentDescription = "Commands",
+                modifier = Modifier.size(20.dp),
+                tint = colors.muted,
               )
-              promptHistory.take(8).forEach { item ->
+            }
+            DropdownMenu(
+              expanded = commandsOpen,
+              onDismissRequest = { commandsOpen = false },
+              properties = PopupProperties(focusable = false),
+            ) {
+              if (enabled && !pending) {
                 DropdownMenuItem(
+                  text = { Text("Continue") },
+                  onClick = {
+                    commandsOpen = false
+                    onSend("continue", false)
+                  },
+                )
+              }
+              COMMON_SLASH_COMMANDS.forEach { item ->
+                DropdownMenuItem(
+                  enabled = !(agentWorking && item.command == "/new"),
                   text = {
-                    Text(
-                      item,
-                      maxLines = 1,
-                      overflow = TextOverflow.Ellipsis,
-                      style = MaterialTheme.typography.bodySmall,
-                    )
+                    Column {
+                      Text(
+                        item.command,
+                        style =
+                          MaterialTheme.typography.labelMedium.copy(
+                            fontFamily = FontFamily.Monospace
+                          ),
+                        color = colors.accent,
+                      )
+                      Text(
+                        if (agentWorking && item.command == "/new") "Stop the agent first"
+                        else item.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.muted,
+                      )
+                    }
                   },
                   onClick = {
-                    historyOpen = false
-                    input = item
-                    onDraftChange?.invoke(item)
+                    commandsOpen = false
+                    if (item.command == "/compact") {
+                      confirmingCommand = "/compact"
+                    } else {
+                      input = "${item.command} "
+                      onDraftChange?.invoke(input)
+                      focusRequester.requestFocus()
+                    }
                   },
                 )
               }
             }
           }
-        }
 
-        if (model != null)
-          Text(
-            listOfNotNull(shortModel(model), thinkingLevel).joinToString(" · "),
-            Modifier.padding(horizontal = 6.dp).widthIn(max = 160.dp).testTag("composerModelLabel"),
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.muted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
-
-        Spacer(Modifier.weight(1f))
-
-        val send: () -> Unit = {
-          if (input.isNotBlank()) {
-            val trimmed = input.trim()
-            if (promptHistory.firstOrNull() != trimmed) {
-              promptHistory = (listOf(trimmed) + promptHistory.filter { it != trimmed }).take(20)
+          // Prompt history button
+          if (promptHistory.isNotEmpty()) {
+            Box {
+              IconButton(
+                onClick = { historyOpen = true },
+                modifier = Modifier.size(34.dp),
+              ) {
+                Icon(
+                  painterResource(R.drawable.ic_history),
+                  contentDescription = "Prompt history",
+                  modifier = Modifier.size(18.dp),
+                  tint = colors.muted,
+                )
+              }
+              DropdownMenu(
+                expanded = historyOpen,
+                onDismissRequest = { historyOpen = false },
+                properties = PopupProperties(focusable = false),
+              ) {
+                Text(
+                  "Recent prompts",
+                  modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                  style = MaterialTheme.typography.labelSmall,
+                  color = colors.muted,
+                )
+                promptHistory.take(8).forEach { item ->
+                  DropdownMenuItem(
+                    text = {
+                      Text(
+                        item,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                      )
+                    },
+                    onClick = {
+                      historyOpen = false
+                      input = item
+                      onDraftChange?.invoke(item)
+                      focusRequester.requestFocus()
+                    },
+                  )
+                }
+              }
             }
-            val command = slashCommand(input)
-            if (command != null) {
-              confirmingCommand = command
-            } else {
-              onSend(input, false)
+          }
+
+          Spacer(Modifier.weight(1f))
+
+          // Stop agent action button
+          if (onStop != null) {
+            IconButton(onClick = onStop, modifier = Modifier.size(36.dp).testTag("stopAgent")) {
+              Box(
+                Modifier.size(20.dp)
+                  .background(MaterialTheme.colorScheme.error.copy(alpha = 0.2f), CircleShape),
+                contentAlignment = Alignment.Center,
+              ) {
+                Box(
+                  Modifier.size(10.dp)
+                    .background(MaterialTheme.colorScheme.error, RoundedCornerShape(2.dp))
+                    .semantics { contentDescription = "Stop" }
+                )
+              }
             }
           }
-        }
-        if (onStop != null)
-          IconButton(onClick = onStop, modifier = Modifier.size(36.dp).testTag("stopAgent")) {
-            Box(
-              Modifier.size(18.dp)
-                .background(MaterialTheme.colorScheme.error, RoundedCornerShape(4.dp))
-                .semantics { contentDescription = "Stop" }
-            )
+
+          val send: () -> Unit = {
+            if (input.isNotBlank()) {
+              val trimmed = input.trim()
+              if (promptHistory.firstOrNull() != trimmed) {
+                promptHistory = (listOf(trimmed) + promptHistory.filter { it != trimmed }).take(20)
+              }
+              val command = slashCommand(input)
+              if (command != null) {
+                confirmingCommand = command
+              } else {
+                onSend(input, false)
+              }
+            }
           }
-        if (pending) {
-          Box(
-            Modifier.size(40.dp)
-              .background(MaterialTheme.colorScheme.primary, CircleShape)
-              .testTag("pendingIndicator")
-              .semantics { contentDescription = "Sending" },
-            contentAlignment = Alignment.Center,
-          ) {
+
+          // Send / Pending button
+          if (pending) {
             Box(
-              Modifier.size(14.dp)
-                .background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(3.dp))
-            )
-          }
-        } else {
-          Box(
-            Modifier.size(40.dp)
-              .background(
-                if (canSend) MaterialTheme.colorScheme.primary else colors.card2,
-                CircleShape,
+              Modifier.size(36.dp)
+                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                .testTag("pendingIndicator")
+                .semantics { contentDescription = "Sending" },
+              contentAlignment = Alignment.Center,
+            ) {
+              Box(
+                Modifier.size(12.dp)
+                  .background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(2.dp))
               )
-              .clickable(enabled = canSend) { send() }
-              .testTag("sendPrompt"),
-            contentAlignment = Alignment.Center,
-          ) {
-            Icon(
-              painterResource(com.azusachino.cappuccino.R.drawable.ic_arrow_downward),
-              modifier = Modifier.size(18.dp).rotate(180f),
-              contentDescription = "Send",
-              tint = if (canSend) MaterialTheme.colorScheme.onPrimary else colors.faint,
-            )
+            }
+          } else {
+            Box(
+              Modifier.size(36.dp)
+                .background(
+                  if (canSend) MaterialTheme.colorScheme.primary else colors.card2,
+                  CircleShape,
+                )
+                .clickable(enabled = canSend) { send() }
+                .testTag("sendPrompt"),
+              contentAlignment = Alignment.Center,
+            ) {
+              Icon(
+                painterResource(R.drawable.ic_arrow_downward),
+                modifier = Modifier.size(18.dp).rotate(180f),
+                contentDescription = "Send",
+                tint = if (canSend) MaterialTheme.colorScheme.onPrimary else colors.faint,
+              )
+            }
+          }
+        }
+
+        // 3. Subtle horizontal divider
+        Box(Modifier.fillMaxWidth().height(0.6.dp).background(colors.line.copy(alpha = 0.35f)))
+
+        // 4. Pico bottom toolbar row (Model pill, Effort pill, Context tokens)
+        Row(
+          Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          // Model selector pill
+          Box {
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = colors.card2.copy(alpha = 0.7f),
+              modifier = Modifier.clickable { modelMenuOpen = true },
+            ) {
+              Row(
+                Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+              ) {
+                Text(
+                  shortModel(model ?: "Default"),
+                  modifier = Modifier.testTag("composerModelLabel"),
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                  color = colors.text,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+                Icon(
+                  painterResource(R.drawable.ic_expand_more),
+                  contentDescription = null,
+                  modifier = Modifier.size(12.dp),
+                  tint = colors.muted,
+                )
+              }
+            }
+            DropdownMenu(
+              expanded = modelMenuOpen,
+              onDismissRequest = { modelMenuOpen = false },
+              properties = PopupProperties(focusable = false),
+            ) {
+              DropdownMenuItem(
+                text = {
+                  Text(model ?: "Default model", style = MaterialTheme.typography.bodySmall)
+                },
+                onClick = { modelMenuOpen = false },
+              )
+            }
+          }
+
+          Spacer(Modifier.width(6.dp))
+
+          // Effort / Thinking pill
+          Box {
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = colors.card2.copy(alpha = 0.7f),
+              modifier = Modifier.clickable { effortMenuOpen = true },
+            ) {
+              Row(
+                Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+              ) {
+                Text(
+                  thinkingLevel ?: "High",
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                  color = colors.text,
+                  maxLines = 1,
+                )
+                Icon(
+                  painterResource(R.drawable.ic_expand_more),
+                  contentDescription = null,
+                  modifier = Modifier.size(12.dp),
+                  tint = colors.muted,
+                )
+              }
+            }
+            DropdownMenu(
+              expanded = effortMenuOpen,
+              onDismissRequest = { effortMenuOpen = false },
+              properties = PopupProperties(focusable = false),
+            ) {
+              listOf("Off", "Low", "Medium", "High").forEach { level ->
+                DropdownMenuItem(
+                  text = { Text(level, style = MaterialTheme.typography.bodySmall) },
+                  onClick = { effortMenuOpen = false },
+                )
+              }
+            }
+          }
+
+          Spacer(Modifier.weight(1f))
+
+          // Context usage / tokens
+          if (percent != null) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              modifier = Modifier.padding(end = 4.dp),
+            ) {
+              Box(
+                Modifier.size(width = 28.dp, height = 3.dp)
+                  .background(colors.card2, RoundedCornerShape(1.5.dp))
+                  .clip(RoundedCornerShape(1.5.dp))
+              ) {
+                Box(
+                  Modifier.fillMaxHeight()
+                    .fillMaxWidth(percent / 100f)
+                    .background(
+                      when {
+                        percent >= 85 -> MaterialTheme.colorScheme.error
+                        percent >= 70 -> colors.warn
+                        else -> colors.accent
+                      }
+                    )
+                )
+              }
+              Text(
+                if (tokens != null) "$percent% · ${formatTokens(tokens)} / ${formatTokens(window)}"
+                else "$percent%",
+                style =
+                  MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                  ),
+                color = colors.muted,
+              )
+            }
           }
         }
       }
@@ -513,6 +684,7 @@ fun PromptInputBar(
 
 /** A model id as people say it: "opus 5.5" for `claude-opus-5-5`. */
 internal fun shortModel(model: String): String =
-  model.removePrefix("claude-").replace(Regex("-(\\d+)-(\\d+)$"), " $1.$2")
-
-/** Under the message box: how full the context is and active rate limit quotas. */
+  model
+    .removePrefix("claude-")
+    .replace("gemini-", "Gemini ")
+    .replace(Regex("-(\\d+)-(\\d+)$"), " $1.$2")

@@ -54,9 +54,9 @@ const CLOSE_PAIR_DONE: u32 = 0;
 /// the phone's extra opens wait for a stream to finish.
 pub const MAX_TUNNEL_STREAMS: u32 = 32;
 /// Live tunnel connections per paired EndpointId; the excess is closed.
-pub const MAX_TUNNEL_CONNECTIONS_PER_ID: usize = 4;
+pub const MAX_TUNNEL_CONNECTIONS_PER_ID: usize = 16;
 /// Live tunnel connections across all paired EndpointIds.
-pub const MAX_TUNNEL_CONNECTIONS: usize = 16;
+pub const MAX_TUNNEL_CONNECTIONS: usize = 64;
 /// Unpaired `cappuccino-pair/1` connections served at once; the excess is closed.
 pub const MAX_PAIR_CONNECTIONS: usize = 4;
 /// Pairing attempts allowed per remote EndpointId in any PAIR_ATTEMPT_WINDOW.
@@ -455,6 +455,7 @@ pub struct IrohHub {
     pub endpoint: Endpoint,
     pub pairing: Arc<Pairing>,
     online_wait: Duration,
+    pub tailnet_url: Option<String>,
 }
 
 impl IrohHub {
@@ -466,20 +467,26 @@ impl IrohHub {
     pub async fn pairing_view(&self) -> (String, CodeStatus) {
         let _ = tokio::time::timeout(self.online_wait, self.endpoint.online()).await;
         let status = self.pairing.code_status();
-        let payload = encode_payload(&self.endpoint.addr(), &status.code);
+        let payload = encode_payload(
+            &self.endpoint.addr(),
+            &status.code,
+            self.tailnet_url.as_deref(),
+        );
         (payload, status)
     }
 }
 
 /// Pairing payload, format v1 (compact JSON, same text in the QR and the
 /// copy-paste line):
-/// `{"v":1,"endpoint_id":"<id>","relay":"<url>|null","addrs":["ip:port"...],"token":"<64 hex>"}`
+/// `{"v":1,"endpoint_id":"<id>","relay":"<url>|null","addrs":["ip:port"...],"token":"<64 hex>","tailnet_url":"<url>"}`
 ///
 /// With a relay the direct addresses are omitted: the phone dials through the
 /// relay and iroh finds the direct path after connecting, and the addresses
 /// would make the QR several times larger. Without a relay (endpoint not yet
 /// online) they are the only way in, so they stay.
-pub fn encode_payload(addr: &EndpointAddr, token: &str) -> String {
+/// An optional `tailnet_url` provides an automatic fallback route for the phone
+/// when QUIC connection state expires during sleep or network migrations.
+pub fn encode_payload(addr: &EndpointAddr, token: &str, tailnet_url: Option<&str>) -> String {
     let mut relay = None;
     let mut addrs = Vec::new();
     for transport in &addr.addrs {
@@ -492,14 +499,17 @@ pub fn encode_payload(addr: &EndpointAddr, token: &str) -> String {
     if relay.is_some() {
         addrs.clear();
     }
-    serde_json::json!({
+    let mut payload = serde_json::json!({
         "v": 1,
         "endpoint_id": addr.id.to_string(),
         "relay": relay,
         "addrs": addrs,
         "token": token,
-    })
-    .to_string()
+    });
+    if let Some(tailnet) = tailnet_url {
+        payload["tailnet_url"] = serde_json::Value::String(tailnet.to_string());
+    }
+    payload.to_string()
 }
 
 /// Relay mode override for `iroh.relay_url`. Unset (`None`) keeps the N0
@@ -517,6 +527,7 @@ pub async fn start(
     data_dir: &Path,
     target: Target,
     relay_url: Option<RelayUrl>,
+    tailnet_url: Option<String>,
 ) -> Result<Arc<IrohHub>, String> {
     ensure_private_dir(data_dir)?;
     let key = load_or_create_secret_key(&data_dir.join(SECRET_KEY_FILE))?;
@@ -533,6 +544,7 @@ pub async fn start(
         endpoint: endpoint.clone(),
         pairing: Arc::clone(&pairing),
         online_wait: ONLINE_WAIT,
+        tailnet_url,
     });
     spawn_accept_loop(endpoint, pairing, target);
     let admin = bind_admin_socket(&data_dir.join(ADMIN_SOCKET_FILE))?;
@@ -1026,10 +1038,15 @@ pub fn run_pair_command(args: &[String]) -> Result<(), String> {
                     let qr = qr_terminal(payload)?;
                     if let Some(hint) = narrow_terminal_hint(display_width(&qr), terminal_columns())
                     {
-                        println!("{hint}\n");
+                        println!("{hint}");
                     }
                     println!("{qr}");
-                    println!("{payload}\n");
+                    println!("{payload}");
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) {
+                        if let Some(tailnet) = parsed["tailnet_url"].as_str() {
+                            println!("tailnet fallback: {tailnet}");
+                        }
+                    }
                     println!(
                         "valid for about {seconds} s (rotates every {PAIR_WINDOW_SECS} s; \
                          the previous code is accepted for one more window)"
@@ -1472,6 +1489,7 @@ mod tests {
             endpoint: endpoint.clone(),
             pairing: Arc::clone(&pairing),
             online_wait: Duration::ZERO,
+            tailnet_url: None,
         });
         let listener = bind_admin_socket(&dir.join(ADMIN_SOCKET_FILE)).unwrap();
         tokio::spawn(serve_admin(listener, Arc::clone(&hub)));
@@ -1529,6 +1547,7 @@ mod tests {
             endpoint,
             pairing: Arc::clone(&pairing),
             online_wait: Duration::ZERO,
+            tailnet_url: None,
         });
         let enabled = with_routes(Router::<()>::new(), Some(hub));
         let response = enabled
@@ -1860,6 +1879,7 @@ mod tests {
             endpoint,
             pairing: Arc::clone(&pairing),
             online_wait: Duration::ZERO,
+            tailnet_url: None,
         });
         let app = with_routes(Router::<()>::new(), Some(hub));
         let shown = pairing.code_status().code;
@@ -1921,6 +1941,7 @@ mod tests {
             endpoint,
             pairing: Arc::clone(&pairing),
             online_wait: Duration::ZERO,
+            tailnet_url: None,
         });
         let app = with_routes(Router::<()>::new(), Some(hub));
         let shown = pairing.code_status().code;
@@ -1974,7 +1995,7 @@ mod pairing_payload_tests {
     }
 
     fn payload_json(addr: &EndpointAddr) -> serde_json::Value {
-        serde_json::from_str(&encode_payload(addr, &"c".repeat(64))).unwrap()
+        serde_json::from_str(&encode_payload(addr, &"c".repeat(64), None)).unwrap()
     }
 
     #[test]
@@ -2032,11 +2053,22 @@ mod pairing_payload_tests {
     }
 
     #[test]
+    fn payload_includes_tailnet_url_when_provided() {
+        let addr = addr_for_seed(7, true);
+        let tailnet = "https://harus-macmini.talpidae-beta.ts.net";
+        let raw = encode_payload(&addr, &"c".repeat(64), Some(tailnet));
+        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(json["tailnet_url"], tailnet);
+        assert_eq!(json["v"], 1);
+        assert_eq!(json["relay"], RELAY);
+    }
+
+    #[test]
     fn terminal_qr_for_realistic_payloads_fits_sixty_columns() {
         // The crate picks the smallest version per payload; digit runs in a
         // hex id can save bits, so widths vary by key. Sweep several keys.
         for seed in 0..64 {
-            let payload = encode_payload(&addr_for_seed(seed, true), &"c".repeat(64));
+            let payload = encode_payload(&addr_for_seed(seed, true), &"c".repeat(64), None);
             let qr = qr_terminal(&payload).unwrap();
             let code =
                 qrcode::QrCode::with_error_correction_level(payload.as_bytes(), qrcode::EcLevel::L)
@@ -2058,7 +2090,7 @@ mod pairing_payload_tests {
 
     #[test]
     fn terminal_qr_carries_the_level_l_modules_of_the_payload() {
-        let payload = encode_payload(&addr_for_seed(7, true), &"c".repeat(64));
+        let payload = encode_payload(&addr_for_seed(7, true), &"c".repeat(64), None);
         let code =
             qrcode::QrCode::with_error_correction_level(payload.as_bytes(), qrcode::EcLevel::L)
                 .unwrap();

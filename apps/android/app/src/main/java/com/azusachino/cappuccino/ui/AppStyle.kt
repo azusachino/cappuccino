@@ -16,11 +16,9 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.azusachino.cappuccino.R
-
-// Visual language adapted from pi-pocket's web/style.css (MIT, docs/licenses/pi-pocket):
-// one monospace face, surfaces mixed from the foreground over the background, square tiles.
 
 @OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
 private fun jetBrainsMonoWeight(weight: FontWeight) =
@@ -41,7 +39,7 @@ val JetBrainsMono =
 // Code ligatures turn `!=` and `->` into glyphs that are not what the agent wrote.
 private const val NO_LIGATURES = "liga 0, calt 0"
 
-private fun style(size: Int, line: Int, weight: FontWeight = FontWeight.Normal) =
+fun monoStyle(size: Int, line: Int, weight: FontWeight = FontWeight.Normal) =
   TextStyle(
     fontFamily = JetBrainsMono,
     fontWeight = weight,
@@ -51,35 +49,49 @@ private fun style(size: Int, line: Int, weight: FontWeight = FontWeight.Normal) 
     fontFeatureSettings = NO_LIGATURES,
   )
 
-// Monospace sets wide, so sizes sit a step under Material's; body keeps pi-pocket's 14 / 1.6.
-val AppTypography =
-  Typography(
-    displayLarge = style(40, 48),
-    displayMedium = style(34, 42),
-    displaySmall = style(28, 36),
-    headlineLarge = style(26, 34),
-    headlineMedium = style(22, 30),
-    headlineSmall = style(19, 26),
-    titleLarge = style(17, 24, FontWeight.SemiBold),
-    titleMedium = style(15, 22, FontWeight.SemiBold),
-    titleSmall = style(13, 20, FontWeight.SemiBold),
-    bodyLarge = style(15, 24),
-    bodyMedium = style(14, 22),
-    bodySmall = style(12, 18),
-    labelLarge = style(13, 18, FontWeight.Medium),
-    labelMedium = style(12, 16, FontWeight.Medium),
-    labelSmall = style(11, 14, FontWeight.Medium),
+private fun uiStyle(
+  size: Int,
+  line: Int,
+  weight: FontWeight = FontWeight.Normal,
+  letterSpacing: Double = 0.0,
+) =
+  TextStyle(
+    fontFamily = FontFamily.Default,
+    fontWeight = weight,
+    fontSize = size.sp,
+    lineHeight = line.sp,
+    letterSpacing = letterSpacing.sp,
   )
 
-private val Square = RoundedCornerShape(0)
+// tw93-inspired typography: clean, proportional system sans-serif hierarchy for UI,
+// reserving JetBrainsMono exclusively for code, transcripts, hashes, and technical specs.
+val AppTypography =
+  Typography(
+    displayLarge = uiStyle(32, 40, FontWeight.Bold),
+    displayMedium = uiStyle(28, 36, FontWeight.Bold),
+    displaySmall = uiStyle(24, 32, FontWeight.SemiBold),
+    headlineLarge = uiStyle(24, 32, FontWeight.Bold),
+    headlineMedium = uiStyle(20, 26, FontWeight.SemiBold),
+    headlineSmall = uiStyle(18, 24, FontWeight.SemiBold),
+    titleLarge = uiStyle(17, 22, FontWeight.SemiBold),
+    titleMedium = uiStyle(15, 20, FontWeight.SemiBold),
+    titleSmall = uiStyle(13, 18, FontWeight.SemiBold),
+    bodyLarge = uiStyle(16, 23),
+    bodyMedium = uiStyle(15, 22),
+    bodySmall = uiStyle(13, 18),
+    labelLarge = uiStyle(13, 18, FontWeight.Medium),
+    labelMedium = uiStyle(12, 16, FontWeight.Medium, letterSpacing = 0.3),
+    labelSmall = uiStyle(11, 14, FontWeight.Medium),
+  )
 
+// Soft, rounded elevated shapes matching modern Apple / tw93 liquid glass design.
 val AppShapes =
   Shapes(
-    extraSmall = Square,
-    small = Square,
-    medium = Square,
-    large = Square,
-    extraLarge = Square,
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(18.dp),
+    extraLarge = RoundedCornerShape(24.dp),
   )
 
 /** Roles Material has no slot for: quieter text tiers, rules and status hues. */
@@ -108,22 +120,22 @@ fun appColors(scheme: ColorScheme, dark: Boolean): AppColors {
   val bg = scheme.background
   val fg = scheme.onBackground
   return AppColors(
-    card = fg.over(bg, 0.04f),
-    card2 = fg.over(bg, 0.08f),
-    raised = fg.over(bg, 0.11f),
-    line = fg.over(bg, if (dark) 0.13f else 0.15f),
-    lineStrong = fg.over(bg, 0.26f),
+    card = fg.over(bg, if (dark) 0.05f else 0.04f),
+    card2 = fg.over(bg, if (dark) 0.09f else 0.07f),
+    raised = fg.over(bg, if (dark) 0.13f else 0.10f),
+    line = fg.over(bg, if (dark) 0.10f else 0.12f),
+    lineStrong = fg.over(bg, if (dark) 0.22f else 0.20f),
     text = fg,
-    body = fg.over(bg, 0.9f),
-    muted = fg.over(bg, if (dark) 0.62f else 0.78f),
-    faint = fg.over(bg, if (dark) 0.38f else 0.58f),
-    codeBackground = if (dark) Color.Black.over(bg, 0.22f) else fg.over(bg, 0.05f),
+    body = fg.over(bg, if (dark) 0.92f else 0.90f),
+    muted = fg.over(bg, if (dark) 0.70f else 0.78f),
+    faint = fg.over(bg, if (dark) 0.44f else 0.52f),
+    codeBackground = if (dark) Color.Black.over(bg, 0.24f) else fg.over(bg, 0.05f),
     accent = scheme.primary,
-    // Status hues stay semantic: green, amber, Chino blue, rose.
-    ok = if (dark) Color(0xFFA3D9B0) else Color(0xFF33774A),
-    warn = if (dark) Color(0xFFE3C48E) else Color(0xFF8F5D26),
+    // Status hues stay semantic: emerald, amber, coral rose, and soft chino blue.
+    ok = if (dark) Color(0xFF34D399) else Color(0xFF059669),
+    warn = if (dark) Color(0xFFFBBF24) else Color(0xFFD97706),
     err = scheme.error,
-    working = if (dark) Color(0xFF9CC4EE) else Color(0xFF35639F),
+    working = if (dark) Color(0xFF60A5FA) else Color(0xFF2563EB),
   )
 }
 

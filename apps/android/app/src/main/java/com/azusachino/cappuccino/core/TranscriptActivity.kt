@@ -17,11 +17,15 @@ fun transcriptSegments(parts: List<ConversationPart>): List<TranscriptSegment> {
   val segments = mutableListOf<TranscriptSegment>()
   var activity = mutableListOf<ConversationPart>()
   parts.forEach { part ->
-    if (part.isActivity) activity += part
-    else {
-      if (activity.isNotEmpty()) segments += TranscriptSegment.Activity(activity)
-      activity = mutableListOf()
-      segments += TranscriptSegment.Prose(part)
+    when {
+      part is ConversationPart.Text && part.text.isBlank() -> Unit
+      part is ConversationPart.Thinking && part.text.isBlank() -> Unit
+      part.isActivity -> activity += part
+      else -> {
+        if (activity.isNotEmpty()) segments += TranscriptSegment.Activity(activity)
+        activity = mutableListOf()
+        segments += TranscriptSegment.Prose(part)
+      }
     }
   }
   if (activity.isNotEmpty()) segments += TranscriptSegment.Activity(activity)
@@ -44,13 +48,16 @@ enum class ToolKind(val glyph: String) {
 fun toolKind(name: String): ToolKind =
   when (name.lowercase()) {
     "read",
+    "read_file",
     "view",
     "notebookread" -> ToolKind.READ
     "edit",
+    "edit_file",
     "multiedit",
     "notebookedit",
     "apply_patch" -> ToolKind.EDIT
-    "write" -> ToolKind.WRITE
+    "write",
+    "write_file" -> ToolKind.WRITE
     "bash",
     "shell",
     "exec",
@@ -85,7 +92,8 @@ private fun JsonObject.number(key: String): Long? =
     null
   }
 
-private fun pathOf(args: JsonObject?): String? = args?.text("path", "file_path", "notebook_path")
+private fun pathOf(args: JsonObject?): String? =
+  args?.text("Path", "path", "file_path", "notebook_path", "filePath")
 
 /** What a group did, in the order first done: "Thought, searched, read 2 files, ran 1 command". */
 fun activitySummary(parts: List<ConversationPart>): String {
@@ -149,12 +157,34 @@ fun stepWords(part: ConversationPart.ToolCall): Pair<String, String> {
       ToolKind.EDIT,
       ToolKind.WRITE,
       ToolKind.LIST -> pathOf(args) ?: ""
-      ToolKind.COMMAND -> args?.text("command", "cmd") ?: ""
+      ToolKind.COMMAND ->
+        args?.text("toolSummary")
+          ?: args?.text("CommandLine", "commandLine", "command_line", "command", "cmd")
+          ?: ""
       ToolKind.SEARCH ->
         listOfNotNull(args?.text("pattern", "query"), pathOf(args)).joinToString("  ")
       ToolKind.OTHER -> ""
     }
   return label to subject.lineSequence().firstOrNull().orEmpty()
+}
+
+/**
+ * Cleans Antigravity harness runner header/timestamps from tool output so actual stdout is visible.
+ */
+fun cleanToolOutput(output: String): String {
+  if (output.startsWith("Created At:") && output.contains("Completed At:")) {
+    val outputIndex = output.indexOf("Command output:\n")
+    if (outputIndex != -1) {
+      return output.substring(outputIndex + "Command output:\n".length).trimEnd()
+    }
+    val noOutputIndex = output.indexOf("No output from the command.")
+    if (noOutputIndex != -1) {
+      val exitCode = Regex("Command exited with code (\\d+)").find(output)?.groupValues?.get(1)
+      return if (exitCode == "0") "Completed successfully (no output)"
+      else "Exited with code $exitCode (no output)"
+    }
+  }
+  return output
 }
 
 enum class Tone {

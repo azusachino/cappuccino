@@ -166,7 +166,7 @@ class IrohEndpointTransport private constructor(private val keyFile: File) : Iro
       ?.let {
         return it
       }
-    connections.remove(key)
+    connections.remove(key)?.let { oldConn -> runCatching { oldConn.close(0L, ByteArray(0)) } }
     val ep = endpointLocked()
     val target = addr.toIroh()
     val connection = target.use { ep.connect(it, alpn.toByteArray(Charsets.UTF_8)) }

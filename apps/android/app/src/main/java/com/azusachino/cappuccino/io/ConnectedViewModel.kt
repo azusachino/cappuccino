@@ -174,6 +174,7 @@ internal constructor(
   private val irohPairing: (suspend (IrohPairing) -> Unit)? = null,
   private val transportBadge: (Endpoint) -> TransportBadge = { TransportBadge.NONE },
   private val clock: () -> Long = { System.currentTimeMillis() },
+  private val onNetworkAvailable: (((() -> Unit)) -> (() -> Unit))? = null,
 ) : ViewModel(), ConnectedActions {
   private val mutableState =
     MutableStateFlow(
@@ -198,9 +199,30 @@ internal constructor(
   private var pendingRestore = savedStateHandle.get<String>(SELECTED_PROFILE) != null
 
   private var offlineIndexJob: Job? = null
+  private var networkUnsubscribe: (() -> Unit)? = null
 
   init {
     reloadSavedHistory()
+    networkUnsubscribe = onNetworkAvailable?.invoke {
+      viewModelScope.launch { handleNetworkRegained() }
+    }
+  }
+
+  fun handleNetworkRegained() {
+    ConnectionLogger.log("RECOVERY", "Network regained notification received")
+    if (!foreground) return
+    val selected = mutableState.value.selectedAgent
+    val profile =
+      mutableState.value.profiles.firstOrNull { it.id == mutableState.value.activeProfileId }
+    if (selected != null && profile != null) {
+      if (mutableState.value.connection != ConnectionState.Connected) {
+        ConnectionLogger.log("RECOVERY", "Auto-reconnecting stream to ${selected.label}")
+        openStream(profile, selected)
+      }
+    } else {
+      ConnectionLogger.log("RECOVERY", "Refreshing machines after network recovery")
+      refresh()
+    }
   }
 
   private fun reloadSavedHistory() {
@@ -353,7 +375,12 @@ internal constructor(
     val name = reportedName?.trim()?.takeIf { it.isNotEmpty() } ?: return
     val current = store.read().firstOrNull { it.id == profile.id } ?: return
     // Migrate only old URL-derived defaults; never overwrite an owner-given name.
-    if (current.label != current.endpoint.base.host) return
+    if (
+      current.label != current.endpoint.base.host &&
+        current.label != "iroh.invalid" &&
+        current.label != "Machine"
+    )
+      return
     store.save(current.copy(label = name))
     mutableState.value = mutableState.value.copy(profiles = store.read())
   }
@@ -366,7 +393,13 @@ internal constructor(
       val pairing = parseIrohPairing(payload)
       val redeem = irohPairing ?: throw IllegalStateException("iroh is unavailable")
       redeem(pairing)
-      Endpoint.iroh(pairing.endpoint)
+      val irohEndpoint = Endpoint.iroh(pairing.endpoint)
+      val tailnetUrl = pairing.tailnetUrl?.takeIf { it.isNotBlank() }
+      if (tailnetUrl != null) {
+        irohEndpoint.withTailnet(Endpoint.parse(tailnetUrl, allowLocalHttp = BuildConfig.DEBUG))
+      } else {
+        irohEndpoint
+      }
     }
 
   override fun addIrohPairing(profileId: String, payload: String) =
@@ -374,7 +407,13 @@ internal constructor(
       val pairing = parseIrohPairing(payload)
       val redeem = irohPairing ?: throw IllegalStateException("iroh is unavailable")
       redeem(pairing)
-      endpoint.withIroh(pairing.endpoint)
+      val withIroh = endpoint.withIroh(pairing.endpoint)
+      val tailnetUrl = pairing.tailnetUrl?.takeIf { it.isNotBlank() }
+      if (!withIroh.hasTailnet && tailnetUrl != null) {
+        withIroh.withTailnet(Endpoint.parse(tailnetUrl, allowLocalHttp = BuildConfig.DEBUG))
+      } else {
+        withIroh
+      }
     }
 
   override fun addTailnetUrl(profileId: String, url: String) =
@@ -424,7 +463,7 @@ internal constructor(
         val profile =
           MachineProfile(
             UUID.randomUUID().toString(),
-            label.ifBlank { client.machineName ?: endpoint.base.host },
+            label.ifBlank { client.machineName ?: endpoint.defaultLabel },
             endpoint,
             machineId,
           )
@@ -1132,12 +1171,21 @@ internal constructor(
                 selected.sessionId != agent.sessionId
             )
               return@collect
-            if (event is StreamEvent.Open) opened = true
+            if (event is StreamEvent.Open) {
+              opened = true
+              ConnectionLogger.log(
+                "STREAM",
+                "Stream opened (session=${agent.sessionId}, gen=${event.generation})",
+              )
+            }
             if (event is StreamEvent.AgentStatus && !opened)
               throw ProtocolException("Agent status arrived before stream_open")
             val current = mutableState.value
             val reduced = reduce(current.stream, event, agent.sessionId)
             val streamError = (event as? StreamEvent.Error)?.let { "${it.code}: ${it.message}" }
+            if (streamError != null) {
+              ConnectionLogger.log("STREAM", "Stream error: $streamError", ConnectionLogLevel.ERROR)
+            }
             val freshBaseline =
               event is StreamEvent.AgentStatus && event.sessionId == agent.sessionId
             mutableState.value =
@@ -1182,6 +1230,11 @@ internal constructor(
                   agentStatusDetail = null,
                 ),
             )
+          ConnectionLogger.log(
+            "STREAM",
+            "Stream disconnected: ${error.javaClass.simpleName} (${error.message})",
+            ConnectionLogLevel.WARN,
+          )
           if (error is ProtocolException || error is SSLException || error is BridgeStreamError) {
             mutableState.value =
               mutableState.value.copy(
@@ -1191,12 +1244,18 @@ internal constructor(
           }
           val nextDelay = retryBudget.nextDelayMillis()
           if (nextDelay == null || !foreground || token != epoch) {
+            ConnectionLogger.log(
+              "RECOVERY",
+              "Retry budget exhausted; awaiting network event or manual reconnect",
+              ConnectionLogLevel.WARN,
+            )
             mutableState.value =
               mutableState.value.copy(
                 connection = ConnectionState.Error(error.message ?: "Stream failed")
               )
             break
           }
+          ConnectionLogger.log("RECOVERY", "Scheduling stream retry in ${nextDelay}ms")
           mutableState.value = mutableState.value.copy(connection = ConnectionState.Recovering)
           retryPause(nextDelay)
         }
@@ -1361,5 +1420,7 @@ internal constructor(
     cancelOwnedWork()
     stopMachineJobs()
     addJob?.cancel()
+    networkUnsubscribe?.invoke()
+    networkUnsubscribe = null
   }
 }

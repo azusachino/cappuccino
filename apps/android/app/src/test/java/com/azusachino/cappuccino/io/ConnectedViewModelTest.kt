@@ -2017,6 +2017,45 @@ class ConnectedViewModelTest {
       dispatcher,
     )
 
+  @Test
+  fun networkRegainedAutomaticallyReconnectsSelectedAgentWhenDisconnected() =
+    runTest(dispatcher) {
+      var streamConnections = 0
+      viewModel =
+        createViewModel(
+          pause = {},
+          streamFactory = {
+            streamConnections++
+            if (streamConnections <= 5) {
+              flow {
+                emit(StreamEvent.Open(agent.sessionId, streamConnections.toLong()))
+                emit(StreamEvent.AgentStatus(agent.sessionId, "idle", null))
+                throw IOException("simulated connection drop")
+              }
+            } else {
+              flow {
+                emit(StreamEvent.Open(agent.sessionId, streamConnections.toLong()))
+                emit(StreamEvent.AgentStatus(agent.sessionId, "working", null))
+              }
+            }
+          },
+        )
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      advanceUntilIdle()
+      assertTrue(viewModel.state.value.connection is ConnectionState.Error)
+      assertEquals(5, streamConnections)
+
+      // Simulate network coming back online
+      viewModel.handleNetworkRegained()
+      advanceUntilIdle()
+
+      assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
+      assertEquals(6, streamConnections)
+    }
+
   private class MemoryProfiles(initial: MachineProfile) : MachineProfileStore {
     private val profiles = mutableListOf(initial)
 

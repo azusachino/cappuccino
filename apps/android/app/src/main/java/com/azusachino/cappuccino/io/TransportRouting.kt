@@ -149,10 +149,16 @@ class MachineRouter<C : Any>(
       try {
         val result = attempt(kind, block)
         recordSuccess(kind)
+        ConnectionLogger.log("ROUTER", "Transport $kind request succeeded")
         return result
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
+        ConnectionLogger.log(
+          "ROUTER",
+          "Transport $kind failed: ${error.javaClass.simpleName} (${error.message})",
+          ConnectionLogLevel.WARN,
+        )
         if (!isTransportFailure(error)) {
           // The bridge answered over this transport, so the path works; the error belongs to the
           // caller. No fall-through and no failure count. Other errors are bugs, not path health.
@@ -182,6 +188,7 @@ class MachineRouter<C : Any>(
         it.cancel()
       }
     }
+    ConnectionLogger.log("ROUTER", "Network change: reset stickiness & redialing")
   }
 
   /** The badge for this machine now. Call it on each poll tick; the hold-down needs ticks. */
@@ -254,6 +261,13 @@ class MachineRouter<C : Any>(
           }
         }
       }
-    if (rebuild) iroh?.stop()
+    if (rebuild) {
+      ConnectionLogger.log(
+        "IROH",
+        "3 consecutive Iroh failures; restarting endpoint",
+        ConnectionLogLevel.WARN,
+      )
+      iroh?.stop()
+    }
   }
 }

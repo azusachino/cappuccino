@@ -15,9 +15,8 @@ Xcode is the fallback if xtool does not work for you; see
 
 - Tailscale must be running on the iPhone, on the same tailnet as your Herdr
   machines.
-- Each machine's bridge must be exposed on the tailnet, as in
-  [step 3 of the README](../README.md#3-expose-the-bridge-to-your-tailnet). You
-  need its `https://<machine>.<tailnet>.ts.net` address.
+- Each machine's bridge must be started and accessible, as in
+  [step 3 of the README](../README.md#3-start-the-bridge-and-pair-over-iroh).
 
 ## Route 1: xtool (USB, free Apple ID)
 
@@ -85,6 +84,6 @@ choose your Personal Team again after it. The 7-day limit applies here too.
 
 ## Add a machine
 
-In the app, open Machines and add the machine's bridge address:
-`https://<machine>.<tailnet>.ts.net`. See
-[step 6 of the README](../README.md#6-add-a-machine).
+In the app, open Machines and add the machine by scanning its QR code or
+entering its bridge address. See
+[step 6 of the README](../README.md#6-pair-or-add-a-machine).

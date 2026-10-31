@@ -160,4 +160,42 @@ class ConnectedViewModelPairingTest {
       assertEquals(listOf(irohProfile), store.read())
       assertNotNull(vm.state.value.addError)
     }
+
+  @Test
+  fun addIrohMachineWithTailnetUrlConfiguresBothTransports() =
+    runTest(dispatcher) {
+      val store = MemoryStore(emptyList())
+      val redeemed = mutableListOf<IrohPairing>()
+      val vm = viewModel(store, redeemed = redeemed)
+      val payloadWithTailnet =
+        pairingPayload.replace("\"tok\"}", "\"tok\",\"tailnet_url\":\"https://mac.example\"}")
+
+      vm.addIrohMachine("My Machine", payloadWithTailnet)
+      advanceUntilIdle()
+
+      val saved = store.read().single()
+      assertEquals("My Machine", saved.label)
+      assertEquals(Endpoint.parse("https://mac.example").base, saved.endpoint.base)
+      assertEquals("bridge-id", saved.endpoint.iroh?.endpointId)
+      assertEquals(true, saved.endpoint.hasTailnet)
+      assertNull(vm.state.value.addError)
+    }
+
+  @Test
+  fun addIrohPairingWithTailnetUrlAttachesTailnetWhenMachineWasIrohOnly() =
+    runTest(dispatcher) {
+      val store = MemoryStore(listOf(irohProfile))
+      val vm = viewModel(store)
+      val payloadWithTailnet =
+        pairingPayload.replace("\"tok\"}", "\"tok\",\"tailnet_url\":\"https://mac.example\"}")
+
+      vm.addIrohPairing(irohProfile.id, payloadWithTailnet)
+      advanceUntilIdle()
+
+      val saved = store.read().single()
+      assertEquals(Endpoint.parse("https://mac.example").base, saved.endpoint.base)
+      assertEquals("bridge-id", saved.endpoint.iroh?.endpointId)
+      assertEquals(true, saved.endpoint.hasTailnet)
+      assertNull(vm.state.value.addError)
+    }
 }

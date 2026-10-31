@@ -170,6 +170,20 @@ struct RecentHistoryTests {
       contextWindow: 200_000, cachePercent: 60)
     #expect(contextSummary(known) == "38% · 76K / 200K")
     #expect(modelChip(known) == "opus 5.5 · low")
+
+    let terra = SessionStats(
+      model: "gpt-6.1-terra", thinkingLevel: "high", contextTokens: 130_000,
+      contextWindow: nil, cachePercent: nil)
+    #expect(contextSummary(terra) == "26% · 130K / 500K")
+    #expect(defaultContextWindow(model: "gpt-6.1-terra") == 500_000)
+    #expect(defaultContextWindow(model: "gpt-5.6-terra") == 500_000)
+    #expect(defaultContextWindow(model: "terra") == 500_000)
+    #expect(defaultContextWindow(model: "gemini-2.5-pro") == 1_000_000)
+    #expect(defaultContextWindow(model: "glm-5.3-flash") == 1_000_000)
+    #expect(defaultContextWindow(model: nil, agent: "agy") == 1_000_000)
+    #expect(defaultContextWindow(model: "deepseek-chat") == 64_000)
+    #expect(defaultContextWindow(model: "gpt-4o") == 128_000)
+    #expect(defaultContextWindow(model: "qwen-2.5-coder") == 128_000)
   }
 
   @Test func contextShowsTokensAloneWhenWindowIsUnknownAndNothingWithoutTokens() {

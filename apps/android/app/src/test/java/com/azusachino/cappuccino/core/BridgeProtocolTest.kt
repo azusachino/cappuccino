@@ -21,6 +21,16 @@ class BridgeProtocolTest {
     assertEquals(1_000L, StreamRetryBudget().nextDelayMillis())
   }
 
+  @Test
+  fun retryBudgetResetRestoresRetries() {
+    val budget = StreamRetryBudget()
+    repeat(4) { assertNotNull(budget.nextDelayMillis()) }
+    assertNull(budget.nextDelayMillis())
+    budget.reset()
+    assertEquals(listOf(1_000L, 2_000L, 4_000L, 8_000L), List(4) { budget.nextDelayMillis() })
+    assertNull(budget.nextDelayMillis())
+  }
+
   private val machine = UUID.fromString("11111111-1111-4111-8111-111111111111")
 
   private fun obj(vararg fields: Pair<String, JsonValue>) = JsonObject(mapOf(*fields))

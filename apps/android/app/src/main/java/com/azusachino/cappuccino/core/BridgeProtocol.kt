@@ -20,9 +20,15 @@ class StreamRetryBudget(private val maximumRetries: Int = 4) {
     if (retriesUsed >= maximumRetries) return null
     return longArrayOf(1_000L, 2_000L, 4_000L, 8_000L)[retriesUsed++]
   }
+
+  fun reset() {
+    retriesUsed = 0
+  }
 }
 
 class ProtocolException(message: String) : Exception(message), BridgeAnswered
+
+const val BRIDGE_PROTOCOL_VERSION: Long = 1L
 
 /**
  * Marks an error raised after the bridge answered (a status, a rejection or a response that failed
@@ -80,6 +86,26 @@ class Endpoint private constructor(val base: URI, val iroh: IrohEndpointAddr? = 
   /** True when the machine has a tailnet URL, not only the iroh placeholder. */
   val hasTailnet: Boolean
     get() = base.toString() != IROH_PLACEHOLDER_URL
+
+  /** Clean user-facing address description; never leaks internal placeholder URIs. */
+  val displayAddress: String
+    get() =
+      when {
+        hasTailnet && iroh != null -> "${base.toString().removeSuffix("/")} (iroh P2P)"
+        hasTailnet -> base.toString().removeSuffix("/")
+        else -> "iroh peer-to-peer"
+      }
+
+  val transportSummary: String
+    get() =
+      when {
+        hasTailnet && iroh != null -> "iroh P2P + Tailnet"
+        hasTailnet -> "Tailnet"
+        else -> "iroh P2P"
+      }
+
+  val defaultLabel: String
+    get() = if (hasTailnet) base.host else "Machine"
 
   /** The same machine with its iroh pairing set (or replaced). */
   fun withIroh(addr: IrohEndpointAddr): Endpoint = Endpoint(base, addr)
@@ -250,7 +276,7 @@ fun parsePaired(json: JsonObject): UUID {
     throw ProtocolException("Unsupported bridge session response")
   val protocol = json.long("protocol")
   if (protocol != 1L)
-    throw ProtocolException("Incompatible bridge protocol $protocol; app requires 1")
+    throw ProtocolException("Incompatible bridge protocol v$protocol; app requires v1")
   return uuid(json.string("machine_id"))
 }
 

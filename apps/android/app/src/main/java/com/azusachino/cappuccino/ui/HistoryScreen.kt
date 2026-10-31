@@ -1,6 +1,7 @@
 package com.azusachino.cappuccino.ui
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -30,7 +33,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -50,63 +55,84 @@ internal fun HistoryScreen(
   onDeleteSaved: (UUID, String) -> Unit,
   modifier: Modifier = Modifier,
   contentPadding: PaddingValues = PaddingValues(0.dp),
+  lazyListState: LazyListState = rememberLazyListState(),
 ) {
   val colors = MaterialTheme.appColors
   var pendingDelete by rememberSaveable { mutableStateOf<String?>(null) }
 
   if (conversations.isEmpty()) {
-    Box(
-      modifier = modifier.fillMaxSize().padding(horizontal = 32.dp),
-      contentAlignment = Alignment.Center,
-    ) {
-      Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    Column(modifier = modifier.fillMaxSize().padding(contentPadding)) {
+      Text(
+        stringResource(R.string.history),
+        Modifier.padding(start = 24.dp, top = 8.dp, bottom = 4.dp),
+        style = MaterialTheme.typography.headlineLarge,
+        fontWeight = FontWeight.Bold,
+        color = colors.text,
+      )
+      Box(
+        modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 32.dp),
+        contentAlignment = Alignment.Center,
       ) {
-        Surface(
-          shape = CircleShape,
-          color = colors.card2,
-          modifier = Modifier.size(64.dp),
+        Column(
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-          Box(contentAlignment = Alignment.Center) {
-            Icon(
-              painter = painterResource(R.drawable.ic_history),
-              contentDescription = null,
-              modifier = Modifier.size(32.dp),
-              tint = colors.muted,
-            )
+          Surface(
+            shape = CircleShape,
+            color = colors.card2,
+            modifier = Modifier.size(64.dp),
+          ) {
+            Box(contentAlignment = Alignment.Center) {
+              Icon(
+                painter = painterResource(R.drawable.ic_history),
+                contentDescription = null,
+                modifier = Modifier.size(32.dp),
+                tint = colors.muted,
+              )
+            }
           }
+          Text(
+            "No saved sessions",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.text,
+          )
+          Text(
+            "Nothing brewing yet. Conversations are preserved automatically while agents run or start a fresh session (/new), and kept locally for 30 days.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.muted,
+            textAlign = TextAlign.Center,
+          )
         }
-        Text(
-          "No saved sessions",
-          style = MaterialTheme.typography.titleMedium,
-          fontWeight = FontWeight.SemiBold,
-          color = colors.text,
-        )
-        Text(
-          "Nothing brewing yet. Conversations are preserved automatically while agents run or start a fresh session (/new), and kept locally for 30 days.",
-          style = MaterialTheme.typography.bodyMedium,
-          color = colors.muted,
-          textAlign = TextAlign.Center,
-        )
       }
     }
   } else {
     LazyColumn(
+      state = lazyListState,
       modifier = modifier.fillMaxSize(),
       contentPadding =
         PaddingValues(
           start = 16.dp,
           end = 16.dp,
-          top = contentPadding.calculateTopPadding() + 12.dp,
+          top = contentPadding.calculateTopPadding(),
           bottom = contentPadding.calculateBottomPadding() + 12.dp,
         ),
       verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+      item(key = "history_large_title") {
+        Text(
+          stringResource(R.string.history),
+          Modifier.padding(start = 8.dp, top = 8.dp, bottom = 4.dp),
+          style = MaterialTheme.typography.headlineLarge,
+          fontWeight = FontWeight.Bold,
+          color = colors.text,
+        )
+      }
+
       item(key = "history_header") {
         Text(
           "Retained locally for 30 days · ${conversations.size} saved",
-          Modifier.fillMaxWidth().padding(bottom = 4.dp),
+          Modifier.fillMaxWidth().padding(start = 8.dp, bottom = 4.dp),
           style = MaterialTheme.typography.labelMedium,
           color = colors.muted,
         )
@@ -123,73 +149,63 @@ internal fun HistoryScreen(
         val turnsLabel =
           if (saved.messageCount == 1) "1 message" else "${saved.messageCount} messages"
 
-        Surface(
-          shape = RoundedCornerShape(16.dp),
-          color = if (isCurrent) colors.accent.copy(alpha = 0.12f) else colors.card,
-          border =
-            BorderStroke(
-              GlassDefaults.RimStrokeWidth,
-              if (isCurrent) colors.accent.copy(alpha = 0.5f) else colors.line,
-            ),
-          onClick = { onOpenSaved(saved.agent.machineId, saved.conversationId) },
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Row(
-            modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-          ) {
-            AgentAvatar(saved.agent.agent, 36.dp)
-
-            Column(modifier = Modifier.weight(1f)) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-              ) {
-                Text(
-                  saved.agent.label,
-                  style = MaterialTheme.typography.bodyMedium,
-                  fontWeight = FontWeight.SemiBold,
-                  color = colors.text,
-                )
-                if (isCurrent) {
-                  Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = colors.accent.copy(alpha = 0.2f),
-                  ) {
-                    Text(
-                      "Active",
-                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                      style = MaterialTheme.typography.labelSmall,
-                      color = colors.accent,
-                    )
-                  }
-                }
+        val cardShape = RoundedCornerShape(16.dp)
+        Row(
+          modifier =
+            Modifier.fillMaxWidth()
+              .glassSurface(shape = cardShape, isElevated = true)
+              .then(
+                if (isCurrent) Modifier.border(1.dp, colors.accent.copy(alpha = 0.5f), cardShape)
+                else Modifier
+              )
+              .clip(cardShape)
+              .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                onOpenSaved(saved.agent.machineId, saved.conversationId)
               }
-              Spacer(Modifier.height(2.dp))
+              .padding(start = 14.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+          AgentAvatar(saved.agent.agent, 36.dp)
+
+          Column(modifier = Modifier.weight(1f)) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
               Text(
-                "$machineName · $turnsLabel",
-                style = MaterialTheme.typography.bodySmall,
+                saved.agent.label,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
                 color = colors.text,
               )
-              Text(
-                "Saved $formattedTime",
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.muted,
-              )
+              if (isCurrent) {
+                StatusPill(text = "Active", color = colors.accent)
+              }
             }
+            Spacer(Modifier.height(2.dp))
+            Text(
+              "$machineName · $turnsLabel",
+              style = MaterialTheme.typography.bodySmall,
+              color = colors.muted,
+            )
+            Text(
+              "Saved $formattedTime",
+              style = MaterialTheme.typography.labelSmall,
+              color = colors.faint,
+            )
+          }
 
-            IconButton(
-              onClick = { pendingDelete = "${saved.agent.machineId}|${saved.conversationId}" },
-              modifier = Modifier.size(36.dp),
-            ) {
-              Icon(
-                painter = painterResource(R.drawable.ic_close),
-                contentDescription = "Delete saved conversation",
-                modifier = Modifier.size(16.dp),
-                tint = colors.muted,
-              )
-            }
+          IconButton(
+            onClick = { pendingDelete = "${saved.agent.machineId}|${saved.conversationId}" },
+            modifier = Modifier.size(36.dp),
+          ) {
+            Icon(
+              painter = painterResource(R.drawable.ic_close),
+              contentDescription = "Delete saved conversation",
+              modifier = Modifier.size(16.dp),
+              tint = colors.faint,
+            )
           }
         }
       }

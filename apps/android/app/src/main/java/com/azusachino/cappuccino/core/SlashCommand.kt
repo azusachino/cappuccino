@@ -32,6 +32,9 @@ fun disallowedSlashCommandReason(command: String): String? =
   when (command.lowercase().trim()) {
     "/status" ->
       "The /status command opens an interactive full-screen curses overlay that requires pressing the physical Esc key to quit. Because mobile keyboards lack an Escape key, this command is disabled to prevent locking the session."
+    "/exit",
+    "/quit" ->
+      "Exiting the agent is disabled: Cappuccino has no mechanism to restore terminated agent sessions."
     else -> null
   }
 
@@ -54,7 +57,6 @@ val COMMON_SLASH_COMMANDS: List<AgentSlashCommand> =
     AgentSlashCommand("/compact", "Summarize and shrink conversation history"),
     AgentSlashCommand("/model", "Change the active model"),
     AgentSlashCommand("/clear", "Reset conversation and clear context"),
-    AgentSlashCommand("/exit", "Exit the agent terminal session"),
   )
 
 fun matchingSlashCommands(query: String): List<AgentSlashCommand> {

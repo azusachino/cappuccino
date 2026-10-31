@@ -278,9 +278,11 @@ struct ConnectionDetailsSheet: View {
         Section("Bridge") {
           LabeledContent("Address", value: profile.endpoint.absoluteString)
           LabeledContent("Machine ID", value: profile.machineID.uuidString.lowercased())
-          LabeledContent("Version", value: state?.details?.version ?? "Not advertised")
           LabeledContent(
-            "Protocol", value: state?.details.map { String($0.protocolVersion) } ?? "Unknown")
+            "Bridge version",
+            value: state?.details.map { "\($0.version ?? "Unknown")(v\($0.protocolVersion))" }
+              ?? "Not advertised")
+          LabeledContent("App version", value: "0.1.0(v1)")
         }
         Section("Capabilities") {
           if let capabilities = state?.details?.capabilities {

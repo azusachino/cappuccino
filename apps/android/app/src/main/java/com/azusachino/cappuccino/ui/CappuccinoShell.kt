@@ -1,9 +1,22 @@
 package com.azusachino.cappuccino.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,14 +34,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -37,7 +53,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -45,8 +60,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -62,6 +75,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -110,21 +125,41 @@ private enum class Destination(val title: Int, val icon: Int) {
   ),
 }
 
+private enum class ShellScreen {
+  CONVERSATION,
+  MACHINES,
+  HISTORY,
+  SETTINGS,
+}
+
+private fun screenOrder(screen: ShellScreen): Int =
+  when (screen) {
+    ShellScreen.MACHINES -> 0
+    ShellScreen.HISTORY -> 1
+    ShellScreen.SETTINGS -> 2
+    ShellScreen.CONVERSATION -> 3
+  }
+
 @Composable
 fun StatusBadge(status: String, modifier: Modifier = Modifier) {
   val badge = agentStatusStyle(status, MaterialTheme.colorScheme.background.luminance() < 0.5f)
-  Surface(modifier = modifier, shape = CircleShape, color = badge.background) {
+  Surface(
+    modifier = modifier,
+    shape = RoundedCornerShape(12.dp),
+    color = badge.background.copy(alpha = 0.14f),
+    border = BorderStroke(0.5.dp, badge.background.copy(alpha = 0.35f)),
+  ) {
     Row(
-      modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+      modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-      Box(modifier = Modifier.size(6.dp).background(badge.foreground, CircleShape))
+      Box(modifier = Modifier.size(6.dp).background(badge.background, CircleShape))
       Text(
         text = badge.label,
         style = MaterialTheme.typography.labelSmall,
-        color = badge.foreground,
-        fontWeight = FontWeight.SemiBold,
+        color = badge.background,
+        fontWeight = FontWeight.Medium,
       )
     }
   }
@@ -169,9 +204,11 @@ fun CappuccinoScreen(
     }
   }
   val machineTreeState = rememberLazyListState()
+  val historyListState = rememberLazyListState()
+  val settingsScrollState = rememberScrollState()
   val hazeState = rememberHazeState()
   // Floating islands: lists scroll beneath them, so their content padding clears both.
-  val chromeTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 76.dp
+  val chromeTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 44.dp
   val dockBottom = 116.dp
   val mainScreenState = rememberSaveableStateHolder()
   val composerState = rememberSaveableStateHolder()
@@ -181,7 +218,6 @@ fun CappuccinoScreen(
   var showingHistory by rememberSaveable { mutableStateOf(false) }
   var confirmingClearAll by rememberSaveable { mutableStateOf(false) }
   var historyMachineId by rememberSaveable { mutableStateOf<java.util.UUID?>(null) }
-  var showingTechnical by rememberSaveable { mutableStateOf(false) }
   var detailsProfileId by rememberSaveable { mutableStateOf<String?>(null) }
   var namingProfileId by rememberSaveable { mutableStateOf<String?>(null) }
   var adding by rememberSaveable { mutableStateOf(false) }
@@ -189,7 +225,7 @@ fun CappuccinoScreen(
   var endpoint by rememberSaveable { mutableStateOf("") }
   var pendingAdd by rememberSaveable { mutableStateOf(false) }
   var previousProfileIds by rememberSaveable { mutableStateOf("") }
-  var irohMode by rememberSaveable { mutableStateOf(false) }
+  var irohMode by rememberSaveable { mutableStateOf(true) }
   var payload by rememberSaveable { mutableStateOf("") }
   var scanError by rememberSaveable { mutableStateOf<String?>(null) }
   // Existing-machine pairing: iroh pairing for a tailnet machine, or a tailnet URL for iroh-only.
@@ -199,6 +235,38 @@ fun CappuccinoScreen(
   var pendingEdit by rememberSaveable { mutableStateOf(false) }
   val context = LocalContext.current
   val selected = state.selectedAgent
+  var lastSelectedAgent by remember { mutableStateOf(selected) }
+  var lastSelectedProfileId by remember { mutableStateOf(state.activeProfileId) }
+  androidx.compose.runtime.LaunchedEffect(selected) {
+    if (selected != null) {
+      lastSelectedAgent = selected
+      lastSelectedProfileId = state.activeProfileId
+    }
+  }
+  val lastSelectedProfile = state.profiles.firstOrNull { it.id == lastSelectedProfileId }
+  val isCollapsed by
+    remember(
+      selected,
+      destination,
+      machineTreeState,
+      historyListState,
+      settingsScrollState,
+    ) {
+      derivedStateOf {
+        if (selected != null) true
+        else
+          when (destination) {
+            Destination.MACHINES ->
+              machineTreeState.firstVisibleItemIndex > 0 ||
+                machineTreeState.firstVisibleItemScrollOffset > 24
+            Destination.HISTORY ->
+              historyListState.firstVisibleItemIndex > 0 ||
+                historyListState.firstVisibleItemScrollOffset > 24
+            Destination.SETTINGS -> settingsScrollState.value > 24
+            else -> false
+          }
+      }
+    }
   fun mutate(send: (ConnectedActions) -> Unit) {
     if (selected != null && actions.acceptsMutation(state.activeProfileId, selected)) send(actions)
   }
@@ -362,18 +430,10 @@ fun CappuccinoScreen(
     }
   }
   if (showingConnection && detailsProfile != null) {
-    if (showingTechnical) {
-      TechnicalConnectionScreen(detailsProfile, state, onBack = { showingTechnical = false })
-      return
-    }
     MachineInformation(
       profile = detailsProfile,
       state = state,
-      onDismiss = {
-        showingConnection = false
-        showingTechnical = false
-      },
-      onTechnicalDetails = { showingTechnical = true },
+      onDismiss = { showingConnection = false },
       onRename = {
         showingConnection = false
         namingProfileId = detailsProfile.id
@@ -462,141 +522,192 @@ fun CappuccinoScreen(
   mainScreenState.SaveableStateProvider("main-screen") {
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { contentPadding ->
       Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        Column(
+        Box(
           Modifier.align(Alignment.TopCenter)
             .fillMaxWidth()
             .zIndex(2f)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .statusBarsPadding()
-            .glassBackdrop(
-              hazeState = hazeState,
-              backgroundColor = MaterialTheme.colorScheme.background,
-              shape = RoundedCornerShape(28.dp),
+            .then(
+              if (isCollapsed || selected != null) {
+                Modifier.glassBackdrop(
+                  hazeState = hazeState,
+                  backgroundColor = MaterialTheme.colorScheme.background,
+                  shape = RectangleShape,
+                )
+              } else {
+                Modifier
+              }
             )
+            .statusBarsPadding()
         ) {
-          TopAppBar(
-            colors =
-              TopAppBarDefaults.topAppBarColors(
-                containerColor = androidx.compose.ui.graphics.Color.Transparent
-              ),
-            title = {
-              if (selected != null) {
-                val status =
-                  agentStatusStyle(
-                    selectedStatus ?: "unknown",
-                    MaterialTheme.colorScheme.background.luminance() < 0.5f,
-                  )
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                  Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+          AnimatedContent(
+            targetState = selected != null,
+            transitionSpec = {
+              fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
+            },
+            label = "appBarContent",
+          ) { inConversation ->
+            if (inConversation) {
+              val currentAgent = selected ?: lastSelectedAgent
+              val currentProfile = selectedProfile ?: lastSelectedProfile
+              if (currentAgent != null) {
+                Row(
+                  Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                ) {
+                  IconButton(
+                    onClick = {
+                      if (state.offlineSavedAt != null) actions.closeSavedConversation()
+                      else actions.selectAgent(null)
+                    },
+                    modifier = Modifier.pressScale().size(40.dp),
                   ) {
-                    AgentAvatar(selected.agent, 24.dp)
-                    Text(
-                      selected.label,
-                      style = MaterialTheme.typography.titleSmall,
-                      maxLines = 1,
-                      overflow = TextOverflow.Ellipsis,
+                    Icon(
+                      painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
+                      contentDescription =
+                        if (state.offlineSavedAt != null) "Back to history" else "Back",
                     )
                   }
-                  // Status keeps its color as a square beside its word, never color alone.
+                  val status =
+                    agentStatusStyle(
+                      selectedStatus ?: "unknown",
+                      MaterialTheme.colorScheme.background.luminance() < 0.5f,
+                    )
                   Row(
+                    Modifier.weight(1f)
+                      .clip(RoundedCornerShape(8.dp))
+                      .clickable(enabled = currentProfile != null) {
+                        detailsProfileId = currentProfile?.id
+                        showingConnection = true
+                      }
+                      .padding(horizontal = 6.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                   ) {
-                    if (state.offlineSavedAt != null) {
-                      StatusSquare(MaterialTheme.appColors.muted)
+                    AgentAvatar(currentAgent.agent, 32.dp)
+                    Column(
+                      Modifier.weight(1f),
+                      verticalArrangement = Arrangement.spacedBy(1.dp),
+                    ) {
                       Text(
-                        "Saved history · Read-only",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.appColors.muted,
+                        currentAgent.label,
+                        style =
+                          MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.SemiBold
+                          ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                       )
-                    } else {
-                      StatusSquare(status.background)
-                      Text(
-                        status.label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.appColors.muted,
+                      // Status keeps its color as a square beside its word, never color alone.
+                      Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                      ) {
+                        if (state.offlineSavedAt != null) {
+                          StatusSquare(MaterialTheme.appColors.muted)
+                          Text(
+                            "Saved history · Read-only",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.appColors.muted,
+                          )
+                        } else {
+                          StatusSquare(status.background)
+                          Text(
+                            status.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.appColors.muted,
+                          )
+                        }
+                      }
+                    }
+                  }
+                  if (currentProfile != null) {
+                    IconButton(
+                      onClick = { showingHistory = true },
+                      modifier = Modifier.testTag("conversationHistoryButton").size(40.dp),
+                    ) {
+                      Icon(
+                        painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
+                        contentDescription = "Conversation history",
+                      )
+                    }
+                    IconButton(
+                      onClick = {
+                        detailsProfileId = currentProfile.id
+                        showingConnection = true
+                      },
+                      modifier = Modifier.size(40.dp),
+                    ) {
+                      Icon(
+                        painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
+                        contentDescription = "Connection details",
                       )
                     }
                   }
                 }
-              } else {
-                Text(
-                  stringResource(destination.title),
-                  fontWeight = FontWeight.Bold,
-                )
               }
-            },
-            navigationIcon = {
-              if (selected != null) {
-                IconButton(
-                  onClick = {
-                    if (state.offlineSavedAt != null) actions.closeSavedConversation()
-                    else actions.selectAgent(null)
-                  },
-                  modifier = Modifier.pressScale(),
-                ) {
-                  Icon(
-                    painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
-                    contentDescription =
-                      if (state.offlineSavedAt != null) "Back to history" else "Back",
-                  )
-                }
-              }
-            },
-            // Liquid glass chrome: transcript blurs behind the bar (owner decision
-            // 2026-10-27, superseding the no-colors-override note in android-material3.md).
-            actions = {
-              if (
-                destination == Destination.HISTORY &&
-                  selected == null &&
-                  state.savedConversations.isNotEmpty()
+            } else {
+              Box(
+                Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 4.dp),
+                contentAlignment = Alignment.Center,
               ) {
-                IconButton(
-                  onClick = { confirmingClearAll = true },
-                  modifier = Modifier.pressScale().testTag("clearAllHistory"),
+                AnimatedVisibility(
+                  visible = isCollapsed,
+                  enter = fadeIn(animationSpec = tween(150)),
+                  exit = fadeOut(animationSpec = tween(150)),
+                  modifier = Modifier.align(Alignment.Center),
                 ) {
-                  Icon(
-                    painterResource(com.azusachino.cappuccino.R.drawable.ic_trash),
-                    contentDescription = "Clear all saved conversations",
+                  Text(
+                    stringResource(destination.title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.testTag("slimBarTitle"),
                   )
                 }
-              }
-              if (destination == Destination.MACHINES && selected == null) {
-                IconButton(onClick = { adding = true }, modifier = Modifier.pressScale()) {
-                  Icon(
-                    painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
-                    contentDescription = "Add machine",
-                  )
-                }
-              }
-              if (selectedProfile != null && selected != null) {
-                IconButton(
-                  onClick = { showingHistory = true },
-                  modifier = Modifier.testTag("conversationHistoryButton"),
+                Row(
+                  Modifier.align(Alignment.CenterEnd),
+                  verticalAlignment = Alignment.CenterVertically,
                 ) {
-                  Icon(
-                    painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
-                    contentDescription = "Conversation history",
-                  )
-                }
-                IconButton(
-                  onClick = {
-                    detailsProfileId = selectedProfile.id
-                    showingConnection = true
+                  if (destination == Destination.HISTORY && state.savedConversations.isNotEmpty()) {
+                    IconButton(
+                      onClick = { confirmingClearAll = true },
+                      modifier = Modifier.pressScale().testTag("clearAllHistory").size(40.dp),
+                    ) {
+                      Icon(
+                        painterResource(com.azusachino.cappuccino.R.drawable.ic_trash),
+                        contentDescription = "Clear all saved conversations",
+                      )
+                    }
                   }
-                ) {
-                  Icon(
-                    painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
-                    contentDescription = "Connection details",
-                  )
+                  if (destination == Destination.MACHINES) {
+                    IconButton(
+                      onClick = { adding = true },
+                      modifier = Modifier.pressScale().size(40.dp),
+                    ) {
+                      Icon(
+                        painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
+                        contentDescription = "Add machine",
+                      )
+                    }
+                  }
                 }
               }
-            },
-          )
+            }
+          }
         }
-        if (selected == null) {
+        AnimatedVisibility(
+          visible = selected == null,
+          enter =
+            slideInVertically(
+              initialOffsetY = { it },
+              animationSpec = tween(260, easing = FastOutSlowInEasing),
+            ) + fadeIn(animationSpec = tween(200)),
+          exit =
+            slideOutVertically(
+              targetOffsetY = { it },
+              animationSpec = tween(200, easing = FastOutSlowInEasing),
+            ) + fadeOut(animationSpec = tween(160)),
+          modifier = Modifier.align(Alignment.BottomCenter).zIndex(2f).navigationBarsPadding(),
+        ) {
           BottomDock(
             items =
               listOf(Destination.MACHINES, Destination.HISTORY, Destination.SETTINGS).map {
@@ -615,537 +726,697 @@ fun CappuccinoScreen(
             },
             hazeState = hazeState,
             backgroundColor = MaterialTheme.colorScheme.background,
-            modifier =
-              Modifier.align(Alignment.BottomCenter)
-                .zIndex(2f)
-                .navigationBarsPadding()
-                .padding(bottom = 10.dp),
           )
         }
-        Column(
-          Modifier.fillMaxSize().hazeSource(hazeState).navigationBarsPadding().imePadding(),
-          verticalArrangement = Arrangement.spacedBy(if (selected == null) 12.dp else 4.dp),
-        ) {
+        val currentScreen =
           when {
-            selected != null -> {
-              state.offlineSavedAt?.let { savedAt ->
-                val colors = MaterialTheme.appColors
-                Surface(
-                  shape = RoundedCornerShape(8.dp),
-                  color = colors.card2,
-                  border = BorderStroke(1.dp, colors.line),
-                  modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                ) {
-                  Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                  ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                      Text(
-                        "Viewing saved conversation",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.text,
-                      )
-                      Text(
-                        "Saved ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(savedAt).toString(), timeZone) ?: "earlier"} · Read-only",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.muted,
-                      )
-                    }
-                    FilledTonalButton(
-                      onClick = {
-                        selectedProfile?.let { profile ->
-                          actions.selectProfile(profile.id)
-                          actions.selectAgent(selected)
-                        }
-                      },
-                      contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    ) {
-                      Text("Live session")
-                    }
-                  }
-                }
-              }
-              // Transcript metadata as plain text lines under the app bar; cardless
-              // (android-material3.md region 2).
-              Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-              ) {
-                if (state.conversationSource in setOf("scrollback", "terminal_scrollback"))
-                  Text(
-                    "Recent output · Scrollback fallback",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
-                else if (turns.isEmpty() && rows.isNotEmpty() && state.conversationSource == null)
-                  Text(
-                    "Recent output · History not verified",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
-              }
-              val bannerInset =
-                if (
-                  state.connection is ConnectionState.Connecting ||
-                    state.connection is ConnectionState.Recovering ||
-                    state.connection is ConnectionState.Error
-                )
-                  12.dp
-                else chromeTop
-              when (val connection = state.connection) {
-                ConnectionState.Connecting ->
-                  Column(
-                    Modifier.fillMaxWidth().padding(top = chromeTop).padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                  ) {
-                    Text(
-                      "Connecting…",
-                      style = MaterialTheme.typography.bodyMedium,
-                      color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                  }
-                ConnectionState.Recovering ->
-                  WarningBanner(
-                    "Reconnecting; earlier output may be missing",
-                    Modifier.padding(top = chromeTop),
-                  )
-                is ConnectionState.Error ->
-                  ErrorBanner(connection.message, Modifier.padding(top = chromeTop))
-                else -> Unit
-              }
+            selected != null -> ShellScreen.CONVERSATION
+            destination == Destination.HISTORY -> ShellScreen.HISTORY
+            destination == Destination.SETTINGS -> ShellScreen.SETTINGS
+            else -> ShellScreen.MACHINES
+          }
 
-              if (state.conversationSource == "scrollback") {
-                Text(
-                  "Live terminal output · canonical session unavailable",
-                  Modifier.padding(horizontal = 16.dp),
-                  style = MaterialTheme.typography.labelSmall,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-              }
-              Column(Modifier.weight(1f).fillMaxWidth()) {
-                readerState.SaveableStateProvider(conversationKey) {
-                  val historyOmitted =
-                    state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
-                  Box(Modifier.weight(1f).fillMaxWidth()) {
-                    SelectionContainer(Modifier.fillMaxSize()) {
-                      if (
-                        turns.isEmpty() &&
-                          state.conversationSource == null &&
-                          restoringReadingPosition
+        AnimatedContent(
+          targetState = currentScreen,
+          modifier =
+            Modifier.fillMaxSize().hazeSource(hazeState).navigationBarsPadding().imePadding(),
+          transitionSpec = {
+            if (
+              initialState != ShellScreen.CONVERSATION && targetState == ShellScreen.CONVERSATION
+            ) {
+              (slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = tween(280, easing = FastOutSlowInEasing),
+              ) + fadeIn(animationSpec = tween(200))) togetherWith
+                (slideOutHorizontally(
+                  targetOffsetX = { -it / 3 },
+                  animationSpec = tween(280, easing = FastOutSlowInEasing),
+                ) + fadeOut(animationSpec = tween(120)))
+            } else if (
+              initialState == ShellScreen.CONVERSATION && targetState != ShellScreen.CONVERSATION
+            ) {
+              (slideInHorizontally(
+                initialOffsetX = { -it / 3 },
+                animationSpec = tween(260, easing = FastOutSlowInEasing),
+              ) + fadeIn(animationSpec = tween(200))) togetherWith
+                (slideOutHorizontally(
+                  targetOffsetX = { it },
+                  animationSpec = tween(260, easing = FastOutSlowInEasing),
+                ) + fadeOut(animationSpec = tween(120)))
+            } else {
+              val forward = screenOrder(targetState) > screenOrder(initialState)
+              val slideDirection = if (forward) 1 else -1
+              (slideInHorizontally(animationSpec = tween(240, easing = FastOutSlowInEasing)) {
+                (it * 0.15f * slideDirection).toInt()
+              } + fadeIn(animationSpec = tween(180, delayMillis = 40))) togetherWith
+                (slideOutHorizontally(animationSpec = tween(200, easing = FastOutSlowInEasing)) {
+                  (-it * 0.15f * slideDirection).toInt()
+                } + fadeOut(animationSpec = tween(80, easing = FastOutLinearInEasing)))
+            }
+          },
+          label = "mainScreenTransition",
+        ) { screen ->
+          Column(
+            Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+            verticalArrangement =
+              Arrangement.spacedBy(if (screen == ShellScreen.CONVERSATION) 4.dp else 12.dp),
+          ) {
+            when (screen) {
+              ShellScreen.CONVERSATION -> {
+                val currentSelected = selected ?: lastSelectedAgent
+                val currentProfile = selectedProfile ?: lastSelectedProfile
+                val currentProfileId = state.activeProfileId ?: lastSelectedProfileId
+                if (currentSelected != null) {
+                  state.offlineSavedAt?.let { savedAt ->
+                    val colors = MaterialTheme.appColors
+                    Surface(
+                      shape = RoundedCornerShape(8.dp),
+                      color = colors.card2,
+                      border = BorderStroke(1.dp, colors.line),
+                      modifier =
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    ) {
+                      Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                       ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                          Text("Loading history…", Modifier.padding(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                          Text(
+                            "Viewing saved conversation",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.text,
+                          )
+                          Text(
+                            "Saved ${formatConversationTimestamp(java.time.Instant.ofEpochMilli(savedAt).toString(), timeZone) ?: "earlier"} · Read-only",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.muted,
+                          )
                         }
-                      } else if (turns.isNotEmpty()) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                          LazyColumn(
-                            state = outputListState,
-                            modifier =
-                              Modifier.fillMaxSize()
-                                .padding(horizontal = 16.dp)
-                                .testTag("recentOutputList"),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                          ) {
-                            items(
-                              chatTurns,
-                              key = {
-                                "${state.activeProfileId}:${selected.machineId}:${selected.sessionId}:${it.id}"
-                              },
-                            ) { turn ->
-                              if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
-                                Text(
-                                  "Older messages aren't loaded.",
-                                  Modifier.padding(vertical = 12.dp),
-                                  style = MaterialTheme.typography.bodySmall,
-                                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                              }
-                              ConversationTurnRow(
-                                turn,
-                                timeZone = timeZone,
-                                assistantLabel = selected.agent.replaceFirstChar { it.uppercase() },
-                                onInspect = { followingOutput = false },
-                                showToolsInline = true,
-                                onTextSizeChanged = onTextLayoutChanged,
-                                newest = turn.id in newestTurnIds,
-                              )
+                        FilledTonalButton(
+                          onClick = {
+                            currentProfile?.let { profile ->
+                              actions.selectProfile(profile.id)
+                              actions.selectAgent(currentSelected)
                             }
-                            // The live line lives in the bottom marker so follow targets stay put.
-                            item(key = "conversation-bottom") {
-                              Column {
-                                val liveStatus = selectedStatus
-                                if (
-                                  state.offlineSavedAt == null &&
-                                    liveStatus in setOf("working", "blocked")
-                                )
-                                  LiveStatusLine(
-                                    MaterialTheme.appColors.working,
-                                    state.stream.agentStatusDetail,
-                                  )
-                                Spacer(Modifier.height(8.dp))
-                              }
-                            }
-                          }
-                        }
-                      } else {
-                        LazyColumn(
-                          state = outputListState,
-                          modifier =
-                            Modifier.fillMaxSize()
-                              .padding(horizontal = 16.dp)
-                              .testTag("recentOutputList"),
-                          contentPadding = PaddingValues(top = bannerInset, bottom = 12.dp),
-                          verticalArrangement = Arrangement.spacedBy(6.dp),
+                          },
+                          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                         ) {
-                          items(collapsedRows, key = { "row:${it.key}" }) { row ->
-                            OutputItemRow(row, onInspect = { followingOutput = false })
-                          }
-                          item(key = "stream-bottom") { Spacer(Modifier.height(8.dp)) }
+                          Text("Live session")
                         }
                       }
                     }
-                    if (!nearBottom && displayedContent.isNotEmpty())
-                      JumpToLatest(
-                        newOutput = hasNewOutput,
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
-                        onClick = {
-                          outputScope.launch {
-                            followingOutput = true
-                            automaticScroll = true
-                            try {
-                              outputListState.scrollToItem(displayedContent.size, 10000)
-                              hasNewOutput = false
-                            } finally {
-                              automaticScroll = false
+                  }
+                  // Transcript metadata as plain text lines under the app bar; cardless
+                  // (android-material3.md region 2).
+                  Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                  ) {
+                    if (state.conversationSource in setOf("scrollback", "terminal_scrollback"))
+                      Text(
+                        "Recent output · Scrollback fallback",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                    else if (
+                      turns.isEmpty() && rows.isNotEmpty() && state.conversationSource == null
+                    )
+                      Text(
+                        "Recent output · History not verified",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                  }
+                  val bannerInset =
+                    if (
+                      state.connection is ConnectionState.Connecting ||
+                        state.connection is ConnectionState.Recovering ||
+                        state.connection is ConnectionState.Error
+                    )
+                      12.dp
+                    else chromeTop
+                  when (val connection = state.connection) {
+                    ConnectionState.Connecting ->
+                      Column(
+                        Modifier.fillMaxWidth()
+                          .padding(top = chromeTop)
+                          .padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                      ) {
+                        Text(
+                          "Connecting…",
+                          style = MaterialTheme.typography.bodyMedium,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                      }
+                    ConnectionState.Recovering ->
+                      WarningBanner(
+                        "Reconnecting; earlier output may be missing",
+                        Modifier.padding(top = chromeTop),
+                      )
+                    is ConnectionState.Error ->
+                      ErrorBanner(connection.message, Modifier.padding(top = chromeTop))
+                    else -> Unit
+                  }
+
+                  if (state.conversationSource == "scrollback") {
+                    Text(
+                      "Live terminal output · canonical session unavailable",
+                      Modifier.padding(horizontal = 16.dp),
+                      style = MaterialTheme.typography.labelSmall,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                  }
+                  Column(Modifier.weight(1f).fillMaxWidth()) {
+                    readerState.SaveableStateProvider(conversationKey) {
+                      val historyOmitted =
+                        state.omittedConversationTurns > 0 || state.omittedToolOperations > 0
+                      Box(Modifier.weight(1f).fillMaxWidth()) {
+                        SelectionContainer(Modifier.fillMaxSize()) {
+                          if (
+                            turns.isEmpty() &&
+                              state.conversationSource == null &&
+                              restoringReadingPosition
+                          ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                              Text("Loading history…", Modifier.padding(16.dp))
+                            }
+                          } else if (turns.isNotEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                              LazyColumn(
+                                state = outputListState,
+                                modifier =
+                                  Modifier.fillMaxSize()
+                                    .padding(horizontal = 16.dp)
+                                    .testTag("recentOutputList"),
+                                contentPadding = PaddingValues(top = bannerInset, bottom = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                              ) {
+                                items(
+                                  chatTurns,
+                                  key = { ":::${it.id}" },
+                                ) { turn ->
+                                  if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
+                                    Text(
+                                      "Older messages aren't loaded.",
+                                      Modifier.padding(vertical = 12.dp),
+                                      style = MaterialTheme.typography.bodySmall,
+                                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                  }
+                                  ConversationTurnRow(
+                                    turn,
+                                    timeZone = timeZone,
+                                    assistantLabel =
+                                      currentSelected.agent.replaceFirstChar { it.uppercase() },
+                                    onInspect = { followingOutput = false },
+                                    showToolsInline = true,
+                                    onTextSizeChanged = onTextLayoutChanged,
+                                    newest = turn.id in newestTurnIds,
+                                  )
+                                }
+                                // The bottom spacer keeps follow targets clean.
+                                item(key = "conversation-bottom") { Spacer(Modifier.height(8.dp)) }
+                              }
+                            }
+                          } else {
+                            LazyColumn(
+                              state = outputListState,
+                              modifier =
+                                Modifier.fillMaxSize()
+                                  .padding(horizontal = 16.dp)
+                                  .testTag("recentOutputList"),
+                              contentPadding = PaddingValues(top = bannerInset, bottom = 12.dp),
+                              verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                              items(collapsedRows, key = { "row:${it.key}" }) { row ->
+                                OutputItemRow(row, onInspect = { followingOutput = false })
+                              }
+                              item(key = "stream-bottom") { Spacer(Modifier.height(8.dp)) }
                             }
                           }
-                        },
-                      )
-                  }
-                }
-                if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty())
-                  Text(
-                    "No recent output received.",
-                    Modifier.padding(16.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
+                        }
+                        if (!nearBottom && displayedContent.isNotEmpty())
+                          JumpToLatest(
+                            newOutput = hasNewOutput,
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                            onClick = {
+                              outputScope.launch {
+                                followingOutput = true
+                                automaticScroll = true
+                                try {
+                                  outputListState.scrollToItem(displayedContent.size, 10000)
+                                  hasNewOutput = false
+                                } finally {
+                                  automaticScroll = false
+                                }
+                              }
+                            },
+                          )
+                      }
+                    }
+                    if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty()) {
+                      Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center,
+                      ) {
+                        Column(
+                          horizontalAlignment = Alignment.CenterHorizontally,
+                          verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                          AgentAvatar(currentSelected.agent, 56.dp)
+                          Text(
+                            "Let's make progress",
+                            style =
+                              MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.SemiBold
+                              ),
+                            color = MaterialTheme.appColors.text,
+                          )
+                          Text(
+                            "/ · ",
+                            style =
+                              MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
+                            color = MaterialTheme.appColors.muted,
+                          )
+                        }
+                      }
+                    }
 
-                // A waiting prompt sits by the composer, after the output that asked it, so the
-                // transcript keeps the top of the screen and the answer is within thumb reach.
-                state.actionError?.let { ErrorBanner(it) }
-                state.stream.pendingPrompt?.let { card ->
-                  val answersEnabled =
-                    state.connection == ConnectionState.Connected &&
-                      state.canMutate &&
-                      state.bridgeDetails[state.activeProfileId]
-                        ?.capabilities
-                        ?.get("prompt_answers") != false
-                  Box(
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("pendingPrompt")
-                  ) {
-                    if (card.questions.isNotEmpty())
-                      QuestionFormCard(
-                        prompt = card,
-                        enabled = answersEnabled,
-                        onSubmit = { answers ->
-                          mutate { it.answerQuestions(card.promptId, answers) }
-                        },
-                        onCancel = {
-                          mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
-                        },
-                      )
-                    else
-                      PromptCardView(
-                        prompt = card,
-                        enabled = answersEnabled,
-                        onSelectOption = { idx, optId ->
-                          mutate { it.answerPrompt(card.promptId, idx, optId, "select_option") }
-                        },
-                        onCancel = {
-                          mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
-                        },
-                      )
-                  }
-                }
-
-                if (state.streamLive && !state.canMutate) {
-                  Text(
-                    "Session-bound actions unavailable. Update the bridge or reselect a session with native identity.",
-                    Modifier.padding(horizontal = 16.dp),
-                  )
-                }
-                // Existing live prompt route; saved readers remain read-only.
-                if (
-                  state.bridgeDetails[state.activeProfileId]?.capabilities?.get("prompt_input") ==
-                    false
-                ) {
-                  Text("This bridge can't receive messages.", Modifier.padding(horizontal = 16.dp))
-                }
-                val draftKey = agentDraftKey(selected)
-                val sendState =
-                  state.promptSends[agentSendKey(state.activeProfileId ?: "", selected)]
-                val composerKey = agentSendKey(state.activeProfileId ?: "", selected)
-                if (state.offlineSavedAt == null)
-                  composerState.SaveableStateProvider(composerKey) {
-                    PromptInputBar(
-                      onSend = { text, confirmed -> mutate { it.submitPrompt(text, confirmed) } },
-                      pending = sendState != null && sendState.outcome == null,
-                      agentWorking = selectedStatus == "working",
-                      outcome = sendState?.outcome,
-                      onStop =
-                        if (agentControl && selectedStatus == "working") {
-                          { mutate { it.controlAgent("interrupt") } }
-                        } else null,
-                      model = state.sessionStats?.model,
-                      thinkingLevel = state.sessionStats?.thinkingLevel,
-                      placeholder =
-                        "Message ${selected.agent.replaceFirstChar { it.uppercase() }}…",
-                      enabled =
+                    // A waiting prompt sits by the composer, after the output that asked it, so the
+                    // transcript keeps the top of the screen and the answer is within thumb reach.
+                    state.actionError?.let { ErrorBanner(it) }
+                    state.stream.pendingPrompt?.let { card ->
+                      val answersEnabled =
                         state.connection == ConnectionState.Connected &&
                           state.canMutate &&
                           state.bridgeDetails[state.activeProfileId]
                             ?.capabilities
-                            ?.get("prompt_input") != false,
-                      draft = state.drafts[draftKey] ?: "",
-                      onDraftChange = { text -> actions.setDraft(draftKey, text) },
-                    )
-                    state.sessionStats?.let { SessionStatusLine(it, agent = selected.agent) }
-                  }
-              }
-            }
-            destination == Destination.HISTORY -> {
-              HistoryScreen(
-                conversations = state.savedConversations,
-                savedMachineNames = state.profiles.associate { it.machineId to it.label },
-                currentConversationId = state.conversationId,
-                timeZone = timeZone,
-                onOpenSaved = { machineId, convoId ->
-                  savedHistoryAction?.invoke(machineId, convoId)
-                },
-                onDeleteSaved = actions::deleteSavedConversation,
-                contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
-              )
-            }
-            destination == Destination.SETTINGS -> {
-              SettingsScreen(
-                themeMode = state.themeMode,
-                onSelectTheme = actions::setThemeMode,
-                onReloadMachines = actions::refreshAll,
-                contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
-                connections =
-                  state.profiles.map { profile ->
-                    SettingsConnection(
-                      profile.id,
-                      profile.label,
-                      state.machineConnection(profile).connection.statusText(),
-                    )
-                  },
-                onConnectionDetails = { profileId ->
-                  detailsProfileId = profileId
-                  showingConnection = true
-                },
-              )
-            }
-            else -> {
-              // Destination.MACHINES
-              if (state.profiles.isEmpty()) {
-                Box(
-                  modifier =
-                    Modifier.fillMaxWidth().weight(1f).padding(top = chromeTop).padding(24.dp),
-                  contentAlignment = Alignment.Center,
-                ) {
-                  Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                  ) {
-                    Text(
-                      "No machines configured",
-                      style = MaterialTheme.typography.titleMedium,
-                      fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                      "Tap the + button below to connect to a private Herdr bridge.",
-                      color = MaterialTheme.colorScheme.onSurfaceVariant,
-                      style = MaterialTheme.typography.bodySmall,
-                    )
+                            ?.get("prompt_answers") != false
+                      Box(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                          .testTag("pendingPrompt")
+                      ) {
+                        if (card.questions.isNotEmpty())
+                          QuestionFormCard(
+                            prompt = card,
+                            enabled = answersEnabled,
+                            onSubmit = { answers ->
+                              mutate { it.answerQuestions(card.promptId, answers) }
+                            },
+                            onCancel = {
+                              mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                            },
+                          )
+                        else
+                          PromptCardView(
+                            prompt = card,
+                            enabled = answersEnabled,
+                            onSelectOption = { idx, optId ->
+                              mutate { it.answerPrompt(card.promptId, idx, optId, "select_option") }
+                            },
+                            onCancel = {
+                              mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                            },
+                          )
+                      }
+                    }
+
+                    if (state.streamLive && !state.canMutate) {
+                      Text(
+                        "Session-bound actions unavailable. Update the bridge or reselect a session with native identity.",
+                        Modifier.padding(horizontal = 16.dp),
+                      )
+                    }
+                    // Existing live prompt route; saved readers remain read-only.
+                    if (
+                      state.bridgeDetails[currentProfileId]?.capabilities?.get("prompt_input") ==
+                        false
+                    ) {
+                      Text(
+                        "This bridge can't receive messages.",
+                        Modifier.padding(horizontal = 16.dp),
+                      )
+                    }
+                    val draftKey = agentDraftKey(currentSelected)
+                    val sendState =
+                      state.promptSends[agentSendKey(currentProfileId ?: "", currentSelected)]
+                    val composerKey = agentSendKey(currentProfileId ?: "", currentSelected)
+                    if (state.offlineSavedAt == null)
+                      composerState.SaveableStateProvider(composerKey) {
+                        PromptInputBar(
+                          onSend = { text, confirmed ->
+                            mutate { it.submitPrompt(text, confirmed) }
+                          },
+                          pending = sendState != null && sendState.outcome == null,
+                          agentWorking = selectedStatus == "working",
+                          outcome = sendState?.outcome,
+                          onStop =
+                            if (agentControl && selectedStatus == "working") {
+                              { mutate { it.controlAgent("interrupt") } }
+                            } else null,
+                          agent = currentSelected.agent,
+                          model = state.sessionStats?.model,
+                          thinkingLevel = state.sessionStats?.thinkingLevel,
+                          stats = state.sessionStats,
+                          placeholder =
+                            "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…",
+                          enabled =
+                            state.connection == ConnectionState.Connected &&
+                              state.canMutate &&
+                              state.bridgeDetails[currentProfileId]
+                                ?.capabilities
+                                ?.get("prompt_input") != false,
+                          draft = state.drafts[draftKey] ?: "",
+                          onDraftChange = { text -> actions.setDraft(draftKey, text) },
+                        )
+                      }
                   }
                 }
-              } else {
-                LazyColumn(
-                  state = machineTreeState,
-                  modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+              }
+              ShellScreen.HISTORY -> {
+                HistoryScreen(
+                  conversations = state.savedConversations,
+                  savedMachineNames = state.profiles.associate { it.machineId to it.label },
+                  currentConversationId = state.conversationId,
+                  timeZone = timeZone,
+                  onOpenSaved = { machineId, convoId ->
+                    savedHistoryAction?.invoke(machineId, convoId)
+                  },
+                  onDeleteSaved = actions::deleteSavedConversation,
                   contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
-                  verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                  items(state.profiles, key = { it.id }) { profile ->
-                    val machine = state.machineConnection(profile)
-                    Column {
-                      Surface(
-                        onClick = {
-                          detailsProfileId = profile.id
-                          showingConnection = true
-                        },
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth(),
+                  lazyListState = historyListState,
+                )
+              }
+              ShellScreen.SETTINGS -> {
+                SettingsScreen(
+                  themeMode = state.themeMode,
+                  onSelectTheme = actions::setThemeMode,
+                  onReloadMachines = actions::refreshAll,
+                  contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
+                  connections =
+                    state.profiles.map { profile ->
+                      val details =
+                        state.bridgeDetails[profile.id]?.takeIf {
+                          it.machineId == profile.machineId
+                        }
+                      val conn = state.machineConnection(profile).connection
+                      val conflictProto =
+                        if (conn is ConnectionState.Error) {
+                          Regex("""protocol v?(\d+)""")
+                            .find(conn.message)
+                            ?.groupValues
+                            ?.get(1)
+                            ?.toLongOrNull()
+                        } else null
+                      SettingsConnection(
+                        id = profile.id,
+                        label = profile.label,
+                        status = conn.statusText(),
+                        bridgeVersion = details?.version,
+                        protocol = details?.protocol ?: conflictProto,
+                      )
+                    },
+                  onConnectionDetails = { profileId ->
+                    detailsProfileId = profileId
+                    showingConnection = true
+                  },
+                  scrollState = settingsScrollState,
+                )
+              }
+              ShellScreen.MACHINES -> {
+                // Destination.MACHINES
+                if (state.profiles.isEmpty()) {
+                  Column(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = chromeTop)) {
+                    Text(
+                      stringResource(com.azusachino.cappuccino.R.string.machines),
+                      Modifier.padding(start = 24.dp, top = 8.dp, bottom = 4.dp),
+                      style = MaterialTheme.typography.headlineLarge,
+                      fontWeight = FontWeight.Bold,
+                      color = MaterialTheme.appColors.text,
+                    )
+                    Box(
+                      modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 24.dp),
+                      contentAlignment = Alignment.Center,
+                    ) {
+                      Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                       ) {
-                        Column {
-                          ListItem(
-                            headlineContent = {
-                              Text(
-                                profile.label.takeUnless { it == profile.endpoint.base.host }
-                                  ?: "Saved machine",
-                                fontWeight = FontWeight.SemiBold,
-                              )
-                            },
-                            leadingContent = {
-                              Icon(
-                                painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
-                                contentDescription = null,
-                              )
-                            },
-                            trailingContent = {
-                              Row(verticalAlignment = Alignment.CenterVertically) {
-                                // Retry is offered only where the row is in error; the banner it
-                                // replaced used to carry this.
-                                if (machine.connection is ConnectionState.Error) {
-                                  IconButton(
-                                    onClick = { actions.refreshProfile(profile.id) },
-                                    enabled = !machine.busy,
-                                  ) {
-                                    Icon(
-                                      painterResource(
-                                        com.azusachino.cappuccino.R.drawable.ic_refresh
-                                      ),
-                                      contentDescription = "Retry ${profile.label}",
-                                    )
-                                  }
-                                }
-                                Box {
-                                  IconButton(onClick = { machineMenuId = profile.id }) {
-                                    Icon(
-                                      painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
-                                      contentDescription = "Machine actions",
-                                    )
-                                  }
-                                  DropdownMenu(
-                                    expanded = machineMenuId == profile.id,
-                                    onDismissRequest = { machineMenuId = null },
-                                  ) {
-                                    DropdownMenuItem(
-                                      text = { Text("Connection details") },
-                                      onClick = {
-                                        detailsProfileId = profile.id
-                                        showingConnection = true
-                                        machineMenuId = null
-                                      },
-                                    )
-                                    DropdownMenuItem(
-                                      text = { Text("Conversation history") },
-                                      onClick = {
-                                        historyMachineId = profile.machineId
-                                        showingHistory = true
-                                        machineMenuId = null
-                                      },
-                                    )
-                                    DropdownMenuItem(
-                                      text = { Text("Rename") },
-                                      onClick = {
-                                        namingProfileId = profile.id
-                                        machineNameDraft = profile.label
-                                        namingMachine = true
-                                        machineMenuId = null
-                                      },
-                                    )
-                                    if (profile.endpoint.iroh == null) {
-                                      DropdownMenuItem(
-                                        text = { Text("Pair over iroh") },
-                                        onClick = {
-                                          editingProfileId = profile.id
-                                          editingIroh = true
-                                          payload = ""
-                                          scanError = null
-                                          pendingEdit = false
-                                          machineMenuId = null
-                                        },
-                                      )
-                                    }
-                                    if (
-                                      profile.endpoint.iroh != null && !profile.endpoint.hasTailnet
-                                    ) {
-                                      DropdownMenuItem(
-                                        text = { Text("Add tailnet URL") },
-                                        onClick = {
-                                          editingProfileId = profile.id
-                                          editingIroh = false
-                                          editingUrl = ""
-                                          pendingEdit = false
-                                          machineMenuId = null
-                                        },
-                                      )
-                                    }
-                                    DropdownMenuItem(
-                                      text = { Text("Remove") },
-                                      onClick = {
-                                        actions.removeProfile(profile.id)
-                                        machineMenuId = null
-                                      },
-                                    )
-                                  }
-                                }
-                              }
-                            },
+                        Icon(
+                          painter =
+                            painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
+                          contentDescription = null,
+                          modifier = Modifier.size(56.dp),
+                          tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                        )
+                        Text(
+                          "No machines",
+                          style = MaterialTheme.typography.titleMedium,
+                          fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                          onClick = {
+                            irohMode = true
+                            adding = true
+                          },
+                          shape = RoundedCornerShape(12.dp),
+                        ) {
+                          Icon(
+                            painterResource(com.azusachino.cappuccino.R.drawable.ic_add),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
                           )
-                          // Full row width under the name: the trailing actions leave the status a
-                          // narrow column on ~280dp phones, so it wraps to a second line only then.
-                          Text(
-                            listOfNotNull(
-                                machine.connection.statusText(),
-                                state.machineBadges[profile.id]?.label(),
-                              )
-                              .joinToString(" · "),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
-                          )
+                          Spacer(Modifier.width(8.dp))
+                          Text("Add Machine")
                         }
                       }
-                      Column(Modifier.padding(start = 24.dp)) {
+                    }
+                  }
+                } else {
+                  LazyColumn(
+                    state = machineTreeState,
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(top = chromeTop, bottom = dockBottom),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                  ) {
+                    item(key = "machines_large_title") {
+                      Text(
+                        stringResource(com.azusachino.cappuccino.R.string.machines),
+                        Modifier.padding(start = 8.dp, top = 8.dp, bottom = 4.dp),
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.appColors.text,
+                      )
+                    }
+                    items(state.profiles, key = { it.id }) { profile ->
+                      val machine = state.machineConnection(profile)
+                      Column(
+                        Modifier.fillMaxWidth()
+                          .glassSurface(shape = RoundedCornerShape(16.dp), isElevated = true)
+                          .padding(vertical = 4.dp)
+                      ) {
+                        Row(
+                          Modifier.fillMaxWidth()
+                            .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                              detailsProfileId = profile.id
+                              showingConnection = true
+                            }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                          verticalAlignment = Alignment.CenterVertically,
+                          horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                          Box(
+                            Modifier.size(36.dp)
+                              .background(MaterialTheme.appColors.card2, RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center,
+                          ) {
+                            Icon(
+                              painterResource(com.azusachino.cappuccino.R.drawable.ic_machine),
+                              contentDescription = null,
+                              modifier = Modifier.size(20.dp),
+                              tint = MaterialTheme.appColors.accent,
+                            )
+                          }
+                          Column(
+                            Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                          ) {
+                            Text(
+                              profile.label.takeUnless {
+                                it == profile.endpoint.base.host || it == "iroh.invalid"
+                              } ?: "Machine",
+                              style = MaterialTheme.typography.bodyMedium,
+                              fontWeight = FontWeight.SemiBold,
+                              color = MaterialTheme.appColors.text,
+                              maxLines = 1,
+                              overflow = TextOverflow.Ellipsis,
+                            )
+                            val statusSubtitle =
+                              listOfNotNull(
+                                  machine.connection.statusText(),
+                                  when (state.machineBadges[profile.id]) {
+                                    com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
+                                      "iroh direct"
+                                    com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
+                                      "iroh relayed"
+                                    com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
+                                      if (profile.endpoint.iroh != null) "tailnet (fallback)"
+                                      else "tailnet"
+                                    else -> null
+                                  },
+                                )
+                                .joinToString(" · ")
+                            Text(
+                              statusSubtitle,
+                              style = MaterialTheme.typography.bodySmall,
+                              color = MaterialTheme.appColors.muted,
+                              maxLines = 1,
+                              overflow = TextOverflow.Ellipsis,
+                            )
+                          }
+                          Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (machine.connection is ConnectionState.Error) {
+                              IconButton(
+                                onClick = { actions.refreshProfile(profile.id) },
+                                enabled = !machine.busy,
+                                modifier = Modifier.size(36.dp),
+                              ) {
+                                Icon(
+                                  painterResource(com.azusachino.cappuccino.R.drawable.ic_refresh),
+                                  contentDescription = "Retry ${profile.label}",
+                                  modifier = Modifier.size(18.dp),
+                                  tint = MaterialTheme.appColors.warn,
+                                )
+                              }
+                            }
+                            Box {
+                              IconButton(
+                                onClick = { machineMenuId = profile.id },
+                                modifier = Modifier.size(36.dp),
+                              ) {
+                                Icon(
+                                  painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
+                                  contentDescription = "Machine actions",
+                                  modifier = Modifier.size(18.dp),
+                                  tint = MaterialTheme.appColors.faint,
+                                )
+                              }
+                              DropdownMenu(
+                                expanded = machineMenuId == profile.id,
+                                onDismissRequest = { machineMenuId = null },
+                              ) {
+                                DropdownMenuItem(
+                                  text = { Text("Connection details") },
+                                  onClick = {
+                                    detailsProfileId = profile.id
+                                    showingConnection = true
+                                    machineMenuId = null
+                                  },
+                                )
+                                DropdownMenuItem(
+                                  text = { Text("Conversation history") },
+                                  onClick = {
+                                    historyMachineId = profile.machineId
+                                    showingHistory = true
+                                    machineMenuId = null
+                                  },
+                                )
+                                DropdownMenuItem(
+                                  text = { Text("Rename") },
+                                  onClick = {
+                                    namingProfileId = profile.id
+                                    machineNameDraft = profile.label
+                                    namingMachine = true
+                                    machineMenuId = null
+                                  },
+                                )
+                                if (profile.endpoint.iroh == null) {
+                                  DropdownMenuItem(
+                                    text = { Text("Pair over iroh") },
+                                    onClick = {
+                                      editingProfileId = profile.id
+                                      editingIroh = true
+                                      payload = ""
+                                      scanError = null
+                                      pendingEdit = false
+                                      machineMenuId = null
+                                    },
+                                  )
+                                }
+                                if (profile.endpoint.iroh != null && !profile.endpoint.hasTailnet) {
+                                  DropdownMenuItem(
+                                    text = { Text("Add tailnet URL") },
+                                    onClick = {
+                                      editingProfileId = profile.id
+                                      editingIroh = false
+                                      editingUrl = ""
+                                      pendingEdit = false
+                                      machineMenuId = null
+                                    },
+                                  )
+                                }
+                                DropdownMenuItem(
+                                  text = { Text("Remove") },
+                                  onClick = {
+                                    actions.removeProfile(profile.id)
+                                    machineMenuId = null
+                                  },
+                                )
+                              }
+                            }
+                          }
+                        }
                         if (
                           machine.busy && machine.agents.isEmpty() ||
                             machine.connection == ConnectionState.Connecting
                         ) {
-                          LinearProgressIndicator(Modifier.fillMaxWidth())
-                        } else if (machine.connection != ConnectionState.Connected) {
-                          // The row's status line carries the error; details live in the sheet.
-                        } else {
-                          val agents = machine.agents.filter { it.machineId == profile.machineId }
-                          if (agents.isEmpty()) Text("No active agents", Modifier.padding(16.dp))
-                          agents.forEach { agent ->
-                            key(profile.id, agent.sessionId) {
-                              AgentItemCard(
-                                agent,
-                                onClick = {
-                                  actions.selectProfile(profile.id)
-                                  actions.selectAgent(agent)
-                                },
-                              )
+                          LinearProgressIndicator(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                          )
+                        }
+                        val agents = machine.agents.filter { it.machineId == profile.machineId }
+                        if (machine.connection == ConnectionState.Connected) {
+                          if (agents.isNotEmpty()) {
+                            MachineDivider()
+                            Column(
+                              Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+                              verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                              agents.forEach { agent ->
+                                key(profile.id, agent.sessionId) {
+                                  AgentItemCard(
+                                    agent,
+                                    onClick = {
+                                      actions.selectProfile(profile.id)
+                                      actions.selectAgent(agent)
+                                    },
+                                  )
+                                }
+                              }
                             }
+                          } else {
+                            MachineDivider()
+                            Text(
+                              "No active agents",
+                              Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                              style = MaterialTheme.typography.bodySmall,
+                              color = MaterialTheme.appColors.faint,
+                            )
                           }
                         }
                       }
                     }
                   }
                 }
-              }
 
-              if (state.busy)
-                CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+                if (state.busy)
+                  CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+              }
             }
           }
         }
@@ -1156,19 +1427,61 @@ fun CappuccinoScreen(
   val editing = state.profiles.firstOrNull { it.id == editingProfileId }
   if (editing != null) {
     AlertDialog(
-      onDismissRequest = { if (!state.busy) editingProfileId = null },
+      onDismissRequest = {
+        if (!state.busy) {
+          editingProfileId = null
+          scanError = null
+        }
+      },
       title = { Text(if (editingIroh) "Pair over iroh" else "Add tailnet URL") },
       text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
           if (editingIroh) {
-            PairingPayloadInput(
-              payload = payload,
-              onPayload = { payload = it },
-              scanError = scanError,
-              onScanError = { scanError = it },
-              busy = state.busy,
-            )
+            if (state.busy) {
+              Column(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+              ) {
+                CircularProgressIndicator(modifier = Modifier.size(36.dp))
+                Text(
+                  "Pairing with machine...",
+                  style = MaterialTheme.typography.bodyMedium,
+                  fontWeight = FontWeight.Medium,
+                )
+                Text(
+                  "Securing peer-to-peer connection via iroh",
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+              }
+            } else {
+              Button(
+                onClick = {
+                  scanError = null
+                  scanPairingPayload(
+                    context,
+                    onPayload = { qrPayload ->
+                      pendingEdit = true
+                      actions.addIrohPairing(editing.id, qrPayload)
+                    },
+                    onFailure = { scanError = it },
+                  )
+                },
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+              ) {
+                Text("Scan QR Code", style = MaterialTheme.typography.labelLarge)
+              }
+              scanError?.let { ErrorBanner(it) }
+              state.addError?.let { ErrorBanner(it) }
+            }
           } else {
+            Text(
+              "Enter the bridge address on your Tailnet.",
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(
               value = editingUrl,
               onValueChange = { editingUrl = it },
@@ -1183,6 +1496,7 @@ fun CappuccinoScreen(
               enabled = !state.busy,
               isError = state.addError != null,
               modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(12.dp),
               colors =
                 OutlinedTextFieldDefaults.colors(
                   focusedContainerColor = MaterialTheme.colorScheme.surface,
@@ -1191,26 +1505,35 @@ fun CappuccinoScreen(
                   unfocusedBorderColor = MaterialTheme.colorScheme.outline,
                 ),
             )
+            state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
+            if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
           }
-          state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
-          if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }
       },
       confirmButton = {
-        TextButton(
-          onClick = {
-            pendingEdit = true
-            if (editingIroh) actions.addIrohPairing(editing.id, payload)
-            else actions.addTailnetUrl(editing.id, editingUrl)
-          },
-          enabled =
-            !state.busy && (if (editingIroh) payload.isNotBlank() else editingUrl.isNotBlank()),
-        ) {
-          Text("Connect")
+        if (!editingIroh) {
+          Button(
+            onClick = {
+              pendingEdit = true
+              actions.addTailnetUrl(editing.id, editingUrl)
+            },
+            enabled = !state.busy && editingUrl.isNotBlank(),
+            shape = RoundedCornerShape(12.dp),
+          ) {
+            Text("Connect")
+          }
         }
       },
       dismissButton = {
-        TextButton(onClick = { editingProfileId = null }, enabled = !state.busy) { Text("Cancel") }
+        TextButton(
+          onClick = {
+            editingProfileId = null
+            scanError = null
+          },
+          enabled = !state.busy,
+        ) {
+          Text("Cancel")
+        }
       },
     )
   }
@@ -1229,32 +1552,62 @@ fun CappuccinoScreen(
         if (!state.busy) {
           adding = false
           pendingAdd = false
+          scanError = null
+          irohMode = true
         }
       },
-      title = { Text("Add machine") },
+      title = { Text("Add Machine") },
       text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          OutlinedTextField(
-            value = label,
-            onValueChange = { label = it },
-            label = { Text("Label") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            colors =
-              OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-              ),
-          )
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { irohMode = false }, enabled = irohMode) { Text("Bridge URL") }
-            TextButton(onClick = { irohMode = true }, enabled = !irohMode) {
-              Text("Pair over iroh")
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+          if (state.busy) {
+            Column(
+              modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+              CircularProgressIndicator(modifier = Modifier.size(36.dp))
+              Text(
+                "Connecting...",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+              )
             }
-          }
-          if (!irohMode)
+          } else if (irohMode) {
+            Button(
+              onClick = {
+                scanError = null
+                scanPairingPayload(
+                  context,
+                  onPayload = { qrPayload ->
+                    previousProfileIds = state.addedProfileIds.joinToString("|")
+                    pendingAdd = true
+                    requestIrohConnect(label, qrPayload)
+                  },
+                  onFailure = { scanError = it },
+                )
+              },
+              shape = RoundedCornerShape(12.dp),
+              modifier = Modifier.fillMaxWidth().height(48.dp),
+            ) {
+              Text("Scan QR Code", style = MaterialTheme.typography.labelLarge)
+            }
+            scanError?.let { ErrorBanner(it) }
+            state.addError?.let { ErrorBanner(it) }
+
+            TextButton(
+              onClick = {
+                scanError = null
+                irohMode = false
+              },
+              modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) {
+              Text(
+                "Enter bridge address instead",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+          } else {
             OutlinedTextField(
               value = endpoint,
               onValueChange = { endpoint = it },
@@ -1268,6 +1621,7 @@ fun CappuccinoScreen(
               singleLine = true,
               isError = state.addError != null,
               modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(12.dp),
               colors =
                 OutlinedTextFieldDefaults.colors(
                   focusedContainerColor = MaterialTheme.colorScheme.surface,
@@ -1276,29 +1630,53 @@ fun CappuccinoScreen(
                   unfocusedBorderColor = MaterialTheme.colorScheme.outline,
                 ),
             )
-          if (irohMode) {
-            PairingPayloadInput(
-              payload = payload,
-              onPayload = { payload = it },
-              scanError = scanError,
-              onScanError = { scanError = it },
-              busy = state.busy,
+            OutlinedTextField(
+              value = label,
+              onValueChange = { label = it },
+              label = { Text("Label (optional)") },
+              placeholder = { Text("Defaults to machine name") },
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(12.dp),
+              colors =
+                OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = MaterialTheme.colorScheme.surface,
+                  unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                  focusedBorderColor = MaterialTheme.colorScheme.primary,
+                  unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                ),
             )
+            state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
+
+            TextButton(
+              onClick = {
+                scanError = null
+                irohMode = true
+              },
+              modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) {
+              Text(
+                "Scan QR code instead",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
           }
-          state.addError?.let { ErrorBanner(it, modifier = Modifier.padding(top = 4.dp)) }
-          if (state.busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }
       },
       confirmButton = {
-        TextButton(
-          onClick = {
-            previousProfileIds = state.addedProfileIds.joinToString("|")
-            pendingAdd = true
-            if (irohMode) requestIrohConnect(label, payload) else requestConnect(label, endpoint)
-          },
-          enabled = !state.busy && (if (irohMode) payload.isNotBlank() else endpoint.isNotBlank()),
-        ) {
-          Text("Connect")
+        if (!irohMode && !state.busy) {
+          Button(
+            onClick = {
+              previousProfileIds = state.addedProfileIds.joinToString("|")
+              pendingAdd = true
+              requestConnect(label, endpoint)
+            },
+            enabled = endpoint.isNotBlank(),
+            shape = RoundedCornerShape(12.dp),
+          ) {
+            Text("Connect")
+          }
         }
       },
       dismissButton = {
@@ -1306,6 +1684,8 @@ fun CappuccinoScreen(
           onClick = {
             adding = false
             pendingAdd = false
+            scanError = null
+            irohMode = true
           },
           enabled = !state.busy,
         ) {

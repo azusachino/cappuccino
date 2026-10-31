@@ -68,6 +68,7 @@ class CappuccinoShellTest {
     capture("Machines")
 
     compose.onNodeWithContentDescription("Add machine").performClick()
+    compose.onNodeWithText("Bridge URL").performClick()
     compose.onNodeWithText("Bridge address").assertIsDisplayed()
     compose.onNodeWithText("Connect").assertIsDisplayed()
     compose.onNodeWithText("Bridge address").performClick()

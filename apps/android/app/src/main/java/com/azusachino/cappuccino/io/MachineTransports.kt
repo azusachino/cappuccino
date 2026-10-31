@@ -42,15 +42,29 @@ class MachineTransports private constructor(context: Context) {
   suspend fun <T> backgroundPoll(endpoint: Endpoint, block: suspend (BridgeTransport) -> T): T =
     poller.poll(endpoint, block)
 
+  private val networkListeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+
+  fun addNetworkListener(listener: () -> Unit): () -> Unit {
+    networkListeners += listener
+    return { networkListeners -= listener }
+  }
+
   init {
     // One callback for the process. `watchNetworkChange` is not used (see IrohEndpointTransport).
     context
       .getSystemService(ConnectivityManager::class.java)
       .registerDefaultNetworkCallback(
         object : ConnectivityManager.NetworkCallback() {
-          override fun onAvailable(network: Network) = onNetworkChanged()
+          override fun onAvailable(network: Network) {
+            ConnectionLogger.log("NETWORK", "Network available (transports re-enabled)")
+            onNetworkChanged()
+            networkListeners.forEach { runCatching { it.invoke() } }
+          }
 
-          override fun onLost(network: Network) = onNetworkChanged()
+          override fun onLost(network: Network) {
+            ConnectionLogger.log("NETWORK", "Network lost (offline)", ConnectionLogLevel.WARN)
+            onNetworkChanged()
+          }
         }
       )
   }

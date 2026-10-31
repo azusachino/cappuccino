@@ -15,10 +15,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,19 +45,12 @@ internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
         stats.rateLimits?.windows?.firstOrNull { it.window == "session" }?.usedPercent?.toInt()
     }
 
-  val modelLabel =
-    stats.model?.let { shortModel(it) }
-      ?: agent?.let {
-        if (it.lowercase() in setOf("agy", "antigravity", "antigravity-cli")) "gemini" else null
-      }
-  val modelParts = listOfNotNull(modelLabel, stats.thinkingLevel, stats.rateLimits?.planTier)
-
   val rateLimitWindows =
     stats.rateLimits?.windows?.filterNot {
       it.window == "session" && percent != null && tokens == null
     } ?: emptyList()
 
-  if (percent == null && modelParts.isEmpty() && rateLimitWindows.isEmpty()) return
+  if (percent == null && rateLimitWindows.isEmpty()) return
 
   Row(
     Modifier.fillMaxWidth()
@@ -96,25 +87,6 @@ internal fun SessionStatusLine(stats: SessionStats, agent: String? = null) {
             percent >= 70 -> colors.warn
             else -> colors.text
           },
-      )
-    }
-
-    stats.cachePercent?.let { cache ->
-      Text(
-        "cache $cache%",
-        style = MaterialTheme.typography.labelSmall,
-        color = colors.muted,
-      )
-    }
-
-    if (modelParts.isNotEmpty()) {
-      if (percent != null || tokens != null) {
-        Text("·", style = MaterialTheme.typography.labelSmall, color = colors.faint)
-      }
-      Text(
-        modelParts.joinToString(" · "),
-        style = MaterialTheme.typography.labelSmall,
-        color = colors.muted,
       )
     }
 
@@ -158,7 +130,13 @@ fun ConversationTurnRow(
   val isUser = turn.role.lowercase() == "user"
   val parts = buildList {
     turn.text?.takeIf { it.isNotBlank() }?.let { add(ConversationPart.Text(it)) }
-    addAll(turn.parts)
+    turn.parts.forEach { part ->
+      when {
+        part is ConversationPart.Text && part.text.isBlank() -> Unit
+        part is ConversationPart.Thinking && part.text.isBlank() -> Unit
+        else -> add(part)
+      }
+    }
   }
   val shownParts = parts.filter {
     it.visibleInChat || (showToolsInline && it is ConversationPart.ToolCall)
@@ -171,7 +149,12 @@ fun ConversationTurnRow(
     remember(segments, isUser) {
       var n = 0
       segments.map { seg ->
-        if (seg is TranscriptSegment.Prose && seg.part is ConversationPart.Text && !isUser) {
+        if (
+          seg is TranscriptSegment.Prose &&
+            seg.part is ConversationPart.Text &&
+            seg.part.text.isNotBlank() &&
+            !isUser
+        ) {
           n++
           n - 1
         } else null
@@ -179,12 +162,13 @@ fun ConversationTurnRow(
     }
   val proseCount = remember(proseSlots) { proseSlots.filterNotNull().size }
   fun bubbleShape(slot: Int): RoundedCornerShape {
-    val outer = 18.dp
+    val outer = 16.dp
     val seam = 6.dp
     return when {
-      proseCount == 1 -> RoundedCornerShape(outer)
+      proseCount == 1 ->
+        RoundedCornerShape(topStart = 4.dp, topEnd = outer, bottomStart = outer, bottomEnd = outer)
       slot == 0 ->
-        RoundedCornerShape(topStart = outer, topEnd = outer, bottomEnd = seam, bottomStart = seam)
+        RoundedCornerShape(topStart = 4.dp, topEnd = outer, bottomEnd = seam, bottomStart = seam)
       slot == proseCount - 1 ->
         RoundedCornerShape(topStart = seam, topEnd = seam, bottomEnd = outer, bottomStart = outer)
       else -> RoundedCornerShape(seam)
@@ -194,7 +178,7 @@ fun ConversationTurnRow(
     modifier.fillMaxWidth().semantics {
       contentDescription = if (isUser) "You" else assistantLabel
     },
-    verticalArrangement = Arrangement.spacedBy(10.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
     segments.forEachIndexed { index, segment ->
       key(turn.id, index) {
@@ -204,8 +188,13 @@ fun ConversationTurnRow(
             val part = segment.part
             if (part is ConversationPart.ResponseStatus) ResponseStatusRow(part)
             // Thinking and tool calls arrive grouped as activity, never as prose.
-            else if (part !is ConversationPart.Text) Unit
-            else if (isUser)
+            else if (part !is ConversationPart.Text || part.text.isBlank()) Unit
+            else if (isUser) {
+              val isLastUserProse =
+                index ==
+                  segments.indexOfLast {
+                    it is TranscriptSegment.Prose && it.part is ConversationPart.Text
+                  }
               UserPromptRow(
                 body = {
                   MessageBody(
@@ -218,29 +207,38 @@ fun ConversationTurnRow(
                 },
                 time =
                   turn.timestamp
-                    ?.takeIf { index == 0 }
-                    ?.let {
-                      java.time.Instant.parse(it)
-                        .atZone(timeZone)
-                        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-                    },
-                timeDescription = turn.timestamp?.let { formatConversationTimestamp(it, timeZone) },
+                    ?.takeIf { isLastUserProse }
+                    ?.let { formatShortConversationTime(it, timeZone) },
+                timeDescription =
+                  turn.timestamp
+                    ?.takeIf { isLastUserProse }
+                    ?.let { formatConversationTimestamp(it, timeZone) },
               )
-            else {
-              val slot = proseSlots[index] ?: 0
-              val colors = MaterialTheme.appColors
-              Box(
-                Modifier.fillMaxWidth()
-                  .background(colors.card, bubbleShape(slot))
-                  .padding(horizontal = 12.dp, vertical = 8.dp)
-              ) {
-                MessageBody(
-                  part.text,
-                  onInspect = onInspect,
-                  modifier = textModifier,
-                  transcript = true,
-                )
-              }
+            } else {
+              val slot = proseSlots.getOrNull(index) ?: 0
+              val isLastProse = (slot == proseCount - 1)
+              val formattedTime =
+                turn.timestamp
+                  ?.takeIf { isLastProse }
+                  ?.let { formatShortConversationTime(it, timeZone) }
+              AgentResponseRow(
+                body = {
+                  MessageBody(
+                    part.text,
+                    onInspect = onInspect,
+                    modifier = textModifier,
+                    transcript = true,
+                  )
+                },
+                assistantLabel = assistantLabel,
+                time = formattedTime,
+                timeDescription =
+                  turn.timestamp
+                    ?.takeIf { isLastProse }
+                    ?.let { formatConversationTimestamp(it, timeZone) },
+                showLabel = (slot == 0),
+                shape = bubbleShape(slot),
+              )
             }
           }
         }
@@ -250,12 +248,13 @@ fun ConversationTurnRow(
 }
 
 internal fun defaultContextWindow(model: String?, agent: String? = null): Long {
-  val m = model?.lowercase()
-  val a = agent?.lowercase()
+  val m = model?.trim()?.lowercase()
+  val a = agent?.trim()?.lowercase()
   return when {
-    m != null && "gemini" in m -> 1_000_000L
+    m != null && ("terra" in m || "gpt-5" in m || "gpt-6" in m) -> 500_000L
+    m != null && ("gemini" in m || "glm" in m) -> 1_000_000L
     m != null && "deepseek" in m -> 64_000L
-    m != null && ("gpt-4" in m || "o1" in m || "o3" in m) -> 128_000L
+    m != null && ("gpt-4" in m || "o1" in m || "o3" in m || "qwen" in m) -> 128_000L
     a in setOf("agy", "antigravity", "antigravity-cli") -> 1_000_000L
     else -> 200_000L
   }
