@@ -121,6 +121,15 @@ public final class MachineConnections {
     return router
   }
 
+  /// Runs one bridge request on the machine's best transport: iroh first, then the tailnet
+  /// fallback. A mutation is never resent over the other transport once it may have been sent.
+  public func request<T: Sendable>(
+    _ profile: BridgeProfile, mutation: Bool = false,
+    _ block: @escaping @Sendable (URL) async throws -> T
+  ) async throws -> T {
+    try await route(for: profile).request(mutation: mutation, block)
+  }
+
   /// Pairs an iroh machine from its pairing payload and saves it under its verified identity.
   public func addIrohMachine(payload: String, label: String) async throws {
     let profile = try await pairIrohMachine(payload: payload, name: label, verifier: client)

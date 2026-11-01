@@ -207,8 +207,11 @@ public final class SessionModel {
   private func loadConversation(token: Int) async {
     guard let agent = selectedAgent, let profile = selectedProfile else { return }
     do {
-      let snapshot = try await makeClient().conversationSnapshot(
-        base: profile.endpoint, session: agent.sessionID, agent: agent.provider)
+      let client = makeClient()
+      let snapshot = try await machines.request(profile) { base in
+        try await client.conversationSnapshot(
+          base: base, session: agent.sessionID, agent: agent.provider)
+      }
       if let machine = snapshot.machineID, machine != profile.machineID {
         throw BridgeError.protocolError("Conversation machine identity changed")
       }
@@ -249,8 +252,12 @@ public final class SessionModel {
         if attached {
           guard UUID(uuidString: agent.machineID) == profile.machineID,
             agent.nativeSessionRef != nil,
-            try await client.verifyBinding(
-              base: profile.endpoint, machineID: profile.machineID, agent: agent)
+            try await machines.request(
+              profile,
+              { base in
+                try await client.verifyBinding(
+                  base: base, machineID: profile.machineID, agent: agent)
+              })
           else {
             throw BridgeError.protocolError(
               "Agent session identity is unavailable or replaced; reselect it")
@@ -262,8 +269,10 @@ public final class SessionModel {
           conversationTask = nil
           conversationRequested = false
           let expectedConversation = conversationID
-          let snapshot = try await client.conversationSnapshot(
-            base: profile.endpoint, session: agent.sessionID, agent: agent.provider)
+          let snapshot = try await machines.request(profile) { base in
+            try await client.conversationSnapshot(
+              base: base, session: agent.sessionID, agent: agent.provider)
+          }
           guard token == epoch, !Task.isCancelled else { return }
           guard snapshot.source == "canonical_log" else {
             throw BridgeError.unreachable("Canonical history unavailable; retry to enable actions")
@@ -408,7 +417,10 @@ public final class SessionModel {
       return false
     }
     do {
-      try await send(makeClient(), profile.endpoint, agent.sessionID)
+      let client = makeClient()
+      try await machines.request(profile, mutation: true) { base in
+        try await send(client, base, agent.sessionID)
+      }
       guard token == epoch else { return false }
       return true
     } catch {
