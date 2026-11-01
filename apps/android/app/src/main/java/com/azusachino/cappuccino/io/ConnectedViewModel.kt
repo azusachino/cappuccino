@@ -582,7 +582,11 @@ internal constructor(
       }
   }
 
-  override fun refreshProfile(id: String) = refreshProfile(id, background = false)
+  /** A user refresh joins the attempt already running for [id] instead of starting another. */
+  override fun refreshProfile(id: String) {
+    if (machineJobs[id]?.isActive == true) return
+    refreshProfile(id, background = false)
+  }
 
   private fun refreshProfile(id: String, background: Boolean) {
     val profile = mutableState.value.profiles.firstOrNull { it.id == id } ?: return

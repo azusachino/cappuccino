@@ -1033,6 +1033,41 @@ class ConnectedViewModelTest {
     }
 
   @Test
+  fun userRefreshJoinsTheAttemptAlreadyInFlight() =
+    runTest(dispatcher) {
+      var gate = CompletableDeferred<Unit>().apply { complete(Unit) }
+      var verifies = 0
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID {
+            verifies++
+            gate.await()
+            return machine
+          }
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
+
+          override fun stream(sessionId: String): Flow<StreamEvent> =
+            kotlinx.coroutines.flow.emptyFlow()
+        }
+      viewModel = ConnectedViewModel(store, { transport }, {}, SavedStateHandle())
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      verifies = 0
+
+      gate = CompletableDeferred()
+      viewModel.refreshProfile(profile.id)
+      viewModel.refreshProfile(profile.id)
+      viewModel.refreshProfile(profile.id)
+      gate.complete(Unit)
+      advanceUntilIdle()
+
+      assertEquals(1, verifies)
+      assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
+    }
+
+  @Test
   fun lateSendFailureDoesNotLeakIntoReplacementConversation() =
     runTest(dispatcher) {
       val response = CompletableDeferred<Unit>()
