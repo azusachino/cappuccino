@@ -20,13 +20,6 @@ import SwiftUI
   public var body: some View {
     NavigationStack {
       List {
-        if machines.profiles.isEmpty {
-          ContentUnavailableView(
-            "No machines configured",
-            systemImage: "desktopcomputer",
-            description: Text(
-              "Add the machine running the Cappuccino bridge: loopback or your tailnet address."))
-        }
         ForEach(machines.profiles) { profile in
           MachineSection(
             profile: profile, state: machines.connections[profile.id] ?? MachineConnection(),
@@ -37,6 +30,16 @@ import SwiftUI
               session.select(profileID: profile.id, agent: agent)
               openAgent = true
             })
+        }
+      }
+      .overlay {
+        // Outside the list, so the empty state is not drawn as a row card.
+        if machines.profiles.isEmpty {
+          ContentUnavailableView(
+            "No machines configured",
+            systemImage: "desktopcomputer",
+            description: Text(
+              "Add the machine running the Cappuccino bridge: loopback or your tailnet address."))
         }
       }
       .navigationTitle("Machines")

@@ -34,6 +34,17 @@ final class CappuccinoUITests: XCTestCase {
   }
 
   @MainActor
+  func testHistoryShowsTheEmptyStateOnAFreshDevice() {
+    let app = XCUIApplication()
+    app.launchArguments = ["-cappuccino-fresh"]
+    app.launch()
+
+    app.tabBars.buttons["History"].tap()
+    XCTAssertTrue(app.staticTexts["No saved sessions"].waitForExistence(timeout: 5))
+    capture("History", app: app)
+  }
+
+  @MainActor
   func testFixtureConversationShowsTheReplyAndIdleControls() {
     let app = fixtureApp()
     openFixtureAgent(app)
