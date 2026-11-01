@@ -8,15 +8,21 @@ public protocol AgentSessionServing: Sendable {
     -> ConversationSnapshot
   func events(base: URL, session: String) -> AsyncThrowingStream<AgentStreamEvent, Error>
   func verifyBinding(base: URL, machineID: UUID, agent: AgentRow) async throws -> Bool
-  func controlAgent(base: URL, session: String, action: String, capabilities: [String: Bool]?)
-    async throws
-  func submitPrompt(base: URL, session: String, text: String, confirmed: Bool) async throws
-  func answerPrompt(
-    base: URL, session: String, promptID: String, optionIndex: Int?, optionID: String?,
-    action: String?
+  func controlAgent(
+    base: URL, session: String, binding: SessionBinding, action: String,
+    capabilities: [String: Bool]?
   ) async throws
-  func answerQuestions(base: URL, session: String, promptID: String, answers: [QuestionAnswer])
-    async throws
+  func submitPrompt(
+    base: URL, session: String, binding: SessionBinding, text: String, confirmed: Bool
+  ) async throws
+  func answerPrompt(
+    base: URL, session: String, binding: SessionBinding, promptID: String, optionIndex: Int?,
+    optionID: String?, action: String?
+  ) async throws
+  func answerQuestions(
+    base: URL, session: String, binding: SessionBinding, promptID: String,
+    answers: [QuestionAnswer]
+  ) async throws
 }
 
 extension AgentSessionServing {
@@ -104,6 +110,7 @@ public final class SessionModel {
   public var canControl: Bool { isLive && capabilities?["agent_control"] == true }
 
   static let reconnecting = "Reconnecting to the agent"
+  static let unboundAgent = "This agent cannot take commands: its session identity is not known"
   /// The stream dropped and is being re-established; `streamError` holds no failure yet.
   public var isReconnecting: Bool { streamError == Self.reconnecting }
   /// The selected agent's first conversation read has not finished, successfully or not.
@@ -367,9 +374,9 @@ public final class SessionModel {
     return await perform(
       "Failed to submit prompt", supported: capabilities?["prompt_input"] != false,
       unsupported: "Prompt input unsupported by this bridge"
-    ) { client, base, session in
+    ) { client, base, session, binding in
       try await client.submitPrompt(
-        base: base, session: session, text: text, confirmed: confirmed)
+        base: base, session: session, binding: binding, text: text, confirmed: confirmed)
     }
   }
 
@@ -377,9 +384,9 @@ public final class SessionModel {
   public func control(_ action: String) async {
     guard canControl else { return }
     let advertised = capabilities
-    await perform("Failed to control the agent") { client, base, session in
+    await perform("Failed to control the agent") { client, base, session, binding in
       try await client.controlAgent(
-        base: base, session: session, action: action, capabilities: advertised)
+        base: base, session: session, binding: binding, action: action, capabilities: advertised)
     }
   }
 
@@ -390,29 +397,33 @@ public final class SessionModel {
     await perform(
       "Failed to answer prompt", supported: capabilities?["prompt_answers"] != false,
       unsupported: "Prompt answers unsupported by this bridge"
-    ) { client, base, session in
+    ) { client, base, session, binding in
       try await client.answerPrompt(
-        base: base, session: session, promptID: promptID, optionIndex: optionIndex,
+        base: base, session: session, binding: binding, promptID: promptID,
+        optionIndex: optionIndex,
         optionID: optionID, action: action)
     }
   }
 
   /// Answers every question of an AskUserQuestion card in one submission.
   public func answerQuestions(_ promptID: String, _ answers: [QuestionAnswer]) async {
-    await perform("Failed to answer the question") { client, base, session in
+    await perform("Failed to answer the question") { client, base, session, binding in
       try await client.answerQuestions(
-        base: base, session: session, promptID: promptID, answers: answers)
+        base: base, session: session, binding: binding, promptID: promptID, answers: answers)
     }
   }
 
   /// The one path for owner actions. A failure sets `actionError` and leaves the connection
-  /// alone; a result for an agent the owner has since left is dropped.
+  /// alone; a result for an agent the owner has since left is dropped. Every write carries the
+  /// agent's session binding, so an agent without a known pane and native ref gets none.
   /// Runs an owner action; `true` when the bridge accepted it.
   @discardableResult private func perform(
     _ failure: String,
     supported: Bool = true,
     unsupported: String = "",
-    _ send: @escaping @Sendable (any AgentSessionServing, URL, String) async throws -> Void
+    _ send:
+      @escaping @Sendable (any AgentSessionServing, URL, String, SessionBinding) async throws ->
+      Void
   ) async -> Bool {
     guard let agent = selectedAgent, let profile = selectedProfile else { return false }
     let token = epoch
@@ -425,10 +436,14 @@ public final class SessionModel {
       actionError = unsupported
       return false
     }
+    guard let binding = SessionBinding(agent) else {
+      actionError = Self.unboundAgent
+      return false
+    }
     do {
       let client = makeClient()
       try await machines.request(profile, mutation: true) { base in
-        try await send(client, base, agent.sessionID)
+        try await send(client, base, agent.sessionID, binding)
       }
       guard token == epoch else { return false }
       return true

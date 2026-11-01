@@ -104,7 +104,7 @@ extension BridgeClientTests {
       return (200, Data(#"{"event":"question_answered"}"#.utf8))
     }
     try await client().answerQuestions(
-      base: base, session: "s-1", promptID: "q-toolu_1",
+      base: base, session: "s-1", binding: binding, promptID: "q-toolu_1",
       answers: [
         QuestionAnswer(selected: [1], other: nil),
         QuestionAnswer(selected: [0, 2], other: "a \"bird\""),
@@ -112,6 +112,7 @@ extension BridgeClientTests {
     let sent = try JSONSerialization.jsonObject(with: recorder.bodies[0]) as? [String: Any]
     #expect(sent?["type"] as? String == "answer_question")
     #expect(sent?["prompt_id"] as? String == "q-toolu_1")
+    #expect((sent?["expected_session"] as? [String: String])?["pane_id"] == binding.paneID)
     let answers = sent?["answers"] as? [[String: Any]]
     #expect(answers?[0]["selected"] as? [Int] == [1])
     #expect(answers?[0]["other"] == nil)
@@ -127,7 +128,7 @@ extension BridgeClientTests {
     }
     do {
       try await client().answerQuestions(
-        base: base, session: "s-1", promptID: "q",
+        base: base, session: "s-1", binding: binding, promptID: "q",
         answers: [QuestionAnswer(selected: [0], other: nil)])
       Issue.record("a refused answer must throw")
     } catch {
@@ -145,15 +146,26 @@ extension BridgeClientTests {
     }
     await #expect(throws: BridgeError.self) {
       try await client().controlAgent(
-        base: base, session: "s-1", action: "interrupt", capabilities: ["agent_control": false])
+        base: base, session: "s-1", binding: binding, action: "interrupt",
+        capabilities: ["agent_control": false])
     }
     #expect(recorder.bodies.isEmpty)
     try await client().controlAgent(
-      base: base, session: "s-1", action: "interrupt", capabilities: ["agent_control": true])
-    try await client().controlAgent(base: base, session: "s-1", action: "new_session")
-    #expect(
-      recorder.bodies.map { String(decoding: $0, as: UTF8.self) }
-        == [#"{"action":"interrupt"}"#, #"{"action":"new_session"}"#])
+      base: base, session: "s-1", binding: binding, action: "interrupt",
+      capabilities: ["agent_control": true])
+    try await client().controlAgent(
+      base: base, session: "s-1", binding: binding, action: "new_session")
+    let sent = try recorder.bodies.map {
+      try JSONSerialization.jsonObject(with: $0) as? [String: Any]
+    }
+    #expect(sent.map { $0?["action"] as? String } == ["interrupt", "new_session"])
+    for body in sent {
+      #expect(
+        body?["expected_session"] as? [String: String] == [
+          "machine_id": binding.machineID, "pane_id": binding.paneID,
+          "native_session_ref": binding.nativeSessionRef,
+        ])
+    }
   }
 
 }
