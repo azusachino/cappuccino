@@ -91,6 +91,8 @@ import SwiftUI
     .onAppear { promptOpen = session.stream.pendingPrompt != nil }
     .navigationTitle(session.selectedAgent?.label ?? "Conversation")
     .inlineTitle()
+    // The conversation has its own composer and back button; the app's tabs stay on the list.
+    .hideTabBarOnIOS()
     .toolbar {
       ToolbarItem(placement: .principal) {
         VStack(spacing: 0) {

@@ -92,3 +92,15 @@ extension View {
     #endif
   }
 }
+
+extension View {
+  /// Hides the app's tab bar on pushed pages that bring their own controls. The package also
+  /// compiles for macOS, where there is no tab bar to hide.
+  @ViewBuilder func hideTabBarOnIOS() -> some View {
+    #if os(iOS)
+      self.toolbar(.hidden, for: .tabBar)
+    #else
+      self
+    #endif
+  }
+}

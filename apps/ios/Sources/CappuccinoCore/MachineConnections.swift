@@ -39,6 +39,7 @@ public final class MachineConnections {
   @ObservationIgnored private var manuallyDisconnected: Set<UUID> = []
   @ObservationIgnored private var foreground = false
   @ObservationIgnored private var routes: [UUID: MachineRoute] = [:]
+  @ObservationIgnored private var poller: Task<Void, Never>?
   public let log: ConnectionLog
 
   public init(
@@ -152,7 +153,9 @@ public final class MachineConnections {
     foreground = active
     if active {
       refreshAll()
+      startPolling()
     } else {
+      stopPolling()
       for id in Array(jobs.keys) { invalidate(id) }
       for id in Array(connections.keys) {
         connections[id]?.phase = .disconnected
@@ -165,6 +168,25 @@ public final class MachineConnections {
     invalidate(id)
     manuallyDisconnected.insert(id)
     connections[id] = MachineConnection()
+  }
+
+  /// Agent status goes stale without polling. While the app is in the foreground, every machine
+  /// is refreshed on a fixed cadence (Android's direct-path rate); a refresh already in flight is
+  /// skipped by refreshAll.
+  private func startPolling() {
+    guard poller == nil else { return }
+    poller = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(pollIntervalSeconds(.noReading)))
+        guard !Task.isCancelled, let self else { return }
+        self.refreshAll()
+      }
+    }
+  }
+
+  private func stopPolling() {
+    poller?.cancel()
+    poller = nil
   }
 
   public func refreshAll() {
