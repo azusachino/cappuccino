@@ -7,6 +7,12 @@ public protocol IrohStreaming: Sendable {
   func finish() async throws
   func read(max: UInt32) async throws -> Data
   func stopReading() async throws
+  /// Marks the stream done for the endpoint's idle count. Test streams need not override it.
+  func release() async
+}
+
+extension IrohStreaming {
+  public func release() async {}
 }
 
 extension IrohStream: IrohStreaming {}
@@ -62,5 +68,6 @@ public func pairIrohMachine(
   let endpoint = URL(string: "\(irohURLScheme)://\(pairing.endpoint.endpointID)")!
   let verified = try await verifier.verifyMachine(baseURL: endpoint, expectedID: nil)
   return try BridgeProfile(
-    machineID: verified.machine.id, endpoint: endpoint, name: name, iroh: pairing.endpoint)
+    machineID: verified.machine.id, endpoint: endpoint, name: name, iroh: pairing.endpoint,
+    tailnetFallback: pairing.tailnetURL.flatMap(URL.init(string:)))
 }
