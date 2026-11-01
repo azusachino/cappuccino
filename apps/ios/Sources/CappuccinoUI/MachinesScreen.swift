@@ -11,6 +11,7 @@ import SwiftUI
   @State private var inspecting: BridgeProfile?
   @State private var removing: BridgeProfile?
   @State private var openAgent = false
+  @State private var showingLogs = false
 
   public init(machines: MachineConnections, session: SessionModel) {
     self.machines = machines
@@ -56,6 +57,13 @@ import SwiftUI
         }
         ToolbarItem(placement: .secondaryAction) {
           Button {
+            showingLogs = true
+          } label: {
+            Label("Connection logs", systemImage: "list.bullet.rectangle")
+          }
+        }
+        ToolbarItem(placement: .secondaryAction) {
+          Button {
             for profile in machines.profiles { machines.refresh(profile.id) }
           } label: {
             Label("Refresh", systemImage: "arrow.clockwise")
@@ -65,6 +73,9 @@ import SwiftUI
       }
       .sheet(isPresented: $adding) {
         AddMachineSheet(machines: machines)
+      }
+      .sheet(isPresented: $showingLogs) {
+        ConnectionLogsSheet(log: machines.log)
       }
       .sheet(item: $renaming) { profile in
         RenameMachineSheet(machines: machines, profile: profile)
