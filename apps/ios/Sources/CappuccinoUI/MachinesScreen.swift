@@ -125,6 +125,23 @@ private struct MachineSection: View {
       HStack {
         Text(profile.name)
         Spacer()
+        // The common actions sit on the section itself; the menu keeps the full set.
+        Button {
+          machines.refresh(profile.id)
+        } label: {
+          Image(systemName: "arrow.clockwise")
+        }
+        .buttonStyle(.borderless)
+        .disabled(state.refreshing)
+        .accessibilityLabel("Refresh \(profile.name)")
+        Button {
+          machines.disconnect(profile.id)
+        } label: {
+          Image(systemName: "bolt.slash")
+        }
+        .buttonStyle(.borderless)
+        .disabled(state.phase == .disconnected)
+        .accessibilityLabel("Disconnect \(profile.name)")
         Menu {
           Button("Refresh", systemImage: "arrow.clockwise") { machines.refresh(profile.id) }
           Button("Connection details", systemImage: "info.circle", action: onInspect)
@@ -173,9 +190,7 @@ struct AgentRowLabel: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      Image(systemName: "terminal")
-        .frame(width: 24)
-        .foregroundStyle(.secondary)
+      AgentKindGlyph(provider: agent.provider)
       VStack(alignment: .leading, spacing: 2) {
         Text(agent.label).font(.headline)
         HStack(spacing: 6) {
@@ -196,6 +211,50 @@ struct AgentRowLabel: View {
     }
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
+  }
+}
+
+/// The agent program as Android's avatar shows it: its initial on the program's colour.
+private struct AgentKindGlyph: View {
+  let provider: String?
+  @Environment(\.colorScheme) private var colorScheme
+
+  var body: some View {
+    let kind = AgentKind(provider: provider)
+    let (top, bottom) = colors(kind, dark: colorScheme == .dark)
+    ZStack {
+      Circle().fill(LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom))
+      if kind == .other {
+        Image(systemName: "terminal").font(.caption.bold())
+      } else {
+        Text(provider.map { String($0.prefix(1)).uppercased() } ?? "").font(.subheadline.bold())
+      }
+    }
+    .foregroundStyle(.white)
+    .frame(width: 28, height: 28)
+    .accessibilityLabel(provider ?? "Agent")
+  }
+
+  /// Ports `agentBrandColors` from AppStyle.kt.
+  private func colors(_ kind: AgentKind, dark: Bool) -> (Color, Color) {
+    switch kind {
+    case .pi:
+      dark
+        ? (Color(hex: 0x9CC4EE), Color(hex: 0x5B8FD0))
+        : (Color(hex: 0x5B8FD0), Color(hex: 0x35639F))
+    case .claude:
+      dark
+        ? (Color(hex: 0xE8946A), Color(hex: 0xB85C33))
+        : (Color(hex: 0xC15F3C), Color(hex: 0x9A4A2C))
+    case .agy:
+      dark
+        ? (Color(hex: 0xB08FE8), Color(hex: 0x7A55C4))
+        : (Color(hex: 0x8E6AD9), Color(hex: 0x6A4AB0))
+    case .other:
+      dark
+        ? (Color(hex: 0x8A94A8), Color(hex: 0x5A6478))
+        : (Color(hex: 0x7A8498), Color(hex: 0x58617A))
+    }
   }
 }
 
