@@ -58,7 +58,7 @@ public final class IrohHub: @unchecked Sendable {
     if let query = url.query { target += "?\(query)" }
     let wire = encodeHTTPRequest(
       method: request.httpMethod ?? "GET", target: target, host: host,
-      headers: request.allHTTPHeaderFields ?? [:], body: request.httpBody ?? Data())
+      headers: request.allHTTPHeaderFields ?? [:], body: requestBody(request))
     let reply: Data
     do {
       reply = try await exchange(stream, wire)
@@ -146,4 +146,21 @@ public enum BridgeSession {
     configuration.protocolClasses = [IrohURLProtocol.self] + (configuration.protocolClasses ?? [])
     return URLSession(configuration: configuration)
   }()
+}
+
+/// The request body. URLSession hands a URLProtocol uploads as `httpBodyStream` as often as
+/// `httpBody`, so both are read; without this a POST reaches the bridge empty.
+func requestBody(_ request: URLRequest) -> Data {
+  if let body = request.httpBody { return body }
+  guard let stream = request.httpBodyStream else { return Data() }
+  stream.open()
+  defer { stream.close() }
+  var data = Data()
+  var chunk = [UInt8](repeating: 0, count: 16 * 1024)
+  while stream.hasBytesAvailable {
+    let read = stream.read(&chunk, maxLength: chunk.count)
+    if read <= 0 { break }
+    data.append(chunk, count: read)
+  }
+  return data
 }

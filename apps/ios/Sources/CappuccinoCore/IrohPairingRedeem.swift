@@ -67,7 +67,10 @@ public func pairIrohMachine(
   IrohHub.shared.register(pairing.endpoint)
   let endpoint = URL(string: "\(irohURLScheme)://\(pairing.endpoint.endpointID)")!
   let verified = try await verifier.verifyMachine(baseURL: endpoint, expectedID: nil)
+  // A blank label takes the machine's own name, not its endpoint id.
+  let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
   return try BridgeProfile(
-    machineID: verified.machine.id, endpoint: endpoint, name: name, iroh: pairing.endpoint,
+    machineID: verified.machine.id, endpoint: endpoint,
+    name: label.isEmpty ? (verified.name ?? "Mac") : label, iroh: pairing.endpoint,
     tailnetFallback: pairing.tailnetURL.flatMap(URL.init(string:)))
 }

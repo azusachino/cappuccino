@@ -165,7 +165,8 @@ public struct BridgeClient: Sendable {
     }
     let (data, http) = try await boundedFetch(request)
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      throw BridgeError.protocolError("response is not a JSON object")
+      throw BridgeError.protocolError(
+        "response is not a JSON object (HTTP \(http.statusCode), \(data.count) bytes)")
     }
     switch http.statusCode {
     case 200, 201:
@@ -184,7 +185,8 @@ public struct BridgeClient: Sendable {
     request.timeoutInterval = timeout
     let (data, http) = try await boundedFetch(request)
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      throw BridgeError.protocolError("response is not a JSON object")
+      throw BridgeError.protocolError(
+        "response is not a JSON object (HTTP \(http.statusCode), \(data.count) bytes)")
     }
     switch http.statusCode {
     case 200:

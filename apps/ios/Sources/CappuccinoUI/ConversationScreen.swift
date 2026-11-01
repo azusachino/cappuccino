@@ -68,20 +68,21 @@ import SwiftUI
           PromptSheet(session: session, prompt: prompt)
         }
       }
+      // The jump control sits in the bottom bar above the composer, so it never overlaps the
+      // send button.
       .bottomComposer {
-        Composer(session: session)
-          .padding(.horizontal, 12)
-          .padding(.bottom, 4)
-      }
-      .overlay(alignment: .bottomTrailing) {
-        if !follow.following {
-          JumpToLatestButton(hasNewOutput: hasNewOutput) {
-            follow.jumpToLatest()
-            hasNewOutput = false
-            withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+        VStack(alignment: .trailing, spacing: 8) {
+          if !follow.following {
+            JumpToLatestButton(hasNewOutput: hasNewOutput) {
+              follow.jumpToLatest()
+              hasNewOutput = false
+              withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
           }
-          .padding(16)
+          Composer(session: session)
         }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
       }
     }
     .onChange(of: session.stream.pendingPrompt?.promptID) { _, promptID in

@@ -71,6 +71,27 @@ private actor ReplyingStream: IrohStreaming {
     }
   }
 
+  /// A POST must reach the bridge with its JSON body; an empty body makes the bridge refuse it.
+  @Test func aPostReachesTheBridgeWithItsBody() async throws {
+    IrohHub.shared.register(peer("peer-post"))
+    let stream = ReplyingStream(
+      reply: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")
+    IrohHub.shared.setOpener { addr, _ in
+      #expect(addr.endpointID == "peer-post")
+      return stream
+    }
+
+    var request = URLRequest(url: URL(string: "cappiroh://peer-post/api/agents/s1/prompt")!)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = Data("{\"type\":\"prompt\",\"text\":\"hi\"}".utf8)
+    _ = try await BridgeSession.shared.data(for: request)
+
+    let sent = String(decoding: await stream.request, as: UTF8.self)
+    #expect(sent.hasPrefix("POST /api/agents/s1/prompt HTTP/1.1\r\n"))
+    #expect(sent.hasSuffix("{\"type\":\"prompt\",\"text\":\"hi\"}"))
+  }
+
   @Test func anIrohProfileMustNameItsPairedPeer() throws {
     let addr = peer("peer-a")
     let machine = UUID()
