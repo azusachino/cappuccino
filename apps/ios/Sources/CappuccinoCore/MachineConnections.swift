@@ -54,6 +54,10 @@ public final class MachineConnections {
       profiles = []
       storageError = error.localizedDescription
     }
+    // Iroh peers must be known before their requests can be routed.
+    for profile in profiles {
+      if let iroh = profile.iroh { IrohHub.shared.register(iroh) }
+    }
   }
 
   /// Called only with a profile constructed after pairing. Refresh re-verifies its UUID.
@@ -94,12 +98,19 @@ public final class MachineConnections {
       try BridgeProfile(machineID: verified.machine.id, endpoint: url, name: name))
   }
 
+  /// Pairs an iroh machine from its pairing payload and saves it under its verified identity.
+  public func addIrohMachine(payload: String, label: String) async throws {
+    let profile = try await pairIrohMachine(payload: payload, name: label, verifier: client)
+    try saveVerifiedProfile(profile)
+  }
+
   /// Renames a saved machine. Its verified identity and endpoint are unchanged.
   public func rename(_ id: UUID, to label: String) throws {
     guard let profile = profiles.first(where: { $0.id == id }) else { return }
     try saveVerifiedProfile(
       try BridgeProfile(
-        id: id, machineID: profile.machineID, endpoint: profile.endpoint, name: label))
+        id: id, machineID: profile.machineID, endpoint: profile.endpoint, name: label,
+        iroh: profile.iroh))
   }
 
   public func remove(_ id: UUID) throws {

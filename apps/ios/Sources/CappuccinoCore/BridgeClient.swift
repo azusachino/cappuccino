@@ -13,7 +13,7 @@ public struct BridgeClient: Sendable {
 
   public init(
     host: String = "127.0.0.1", port: UInt16 = 7392, timeout: TimeInterval = 5,
-    session: URLSession = .shared
+    session: URLSession = BridgeSession.shared
   ) {
     self.baseURL = URL(string: "http://\(host):\(port)")!
     self.timeout = timeout

@@ -191,6 +191,7 @@ private struct AddMachineSheet: View {
   let machines: MachineConnections
   @Environment(\.dismiss) private var dismiss
   @State private var address = ""
+  @State private var payload = ""
   @State private var label = ""
   @State private var error: String?
   @State private var connecting = false
@@ -206,6 +207,19 @@ private struct AddMachineSheet: View {
           TextField("Label (optional)", text: $label)
         } footer: {
           Text("The bridge has no login: your tailnet is the boundary.")
+        }
+        Section {
+          TextField("Pairing payload", text: $payload, axis: .vertical)
+            .lineLimit(3...6)
+            .autocorrectionDisabled()
+            .font(.callout.monospaced())
+            .accessibilityIdentifier("pairing-payload")
+        } header: {
+          Text("Pair over iroh")
+        } footer: {
+          Text(
+            "Paste the payload from `cappuccino-bridge pair`. A payload takes the place of the bridge address."
+          )
         }
         if let error {
           Section { Text(error).foregroundStyle(.red).accessibilityIdentifier("pairing-error") }
@@ -223,14 +237,21 @@ private struct AddMachineSheet: View {
             Task {
               defer { connecting = false }
               do {
-                try await machines.addMachine(address: address, label: label)
+                let irohPayload = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+                if irohPayload.isEmpty {
+                  try await machines.addMachine(address: address, label: label)
+                } else {
+                  try await machines.addIrohMachine(payload: irohPayload, label: label)
+                }
                 dismiss()
               } catch {
                 self.error = OwnerMessage.text(for: error)
               }
             }
           }
-          .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || connecting)
+          .disabled(
+            (address.trimmingCharacters(in: .whitespaces).isEmpty
+              && payload.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || connecting)
         }
       }
     }

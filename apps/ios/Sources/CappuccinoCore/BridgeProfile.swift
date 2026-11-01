@@ -6,15 +6,18 @@ public struct BridgeProfile: Identifiable, Codable, Hashable, Sendable {
   public let machineID: UUID
   public let endpoint: URL
   public var name: String
+  /// Dial details for an iroh machine; nil for a machine reached over HTTP(S).
+  public let iroh: IrohEndpointAddr?
 
-  public init(id: UUID = UUID(), machineID: UUID, endpoint: URL, name: String) throws {
+  public init(
+    id: UUID = UUID(), machineID: UUID, endpoint: URL, name: String,
+    iroh: IrohEndpointAddr? = nil
+  ) throws {
     guard let components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false),
       let host = components.host, !host.isEmpty,
       components.user == nil, components.password == nil,
       components.query == nil, components.fragment == nil,
-      components.scheme?.lowercased() == "https"
-        || (components.scheme?.lowercased() == "http"
-          && ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host.lowercased()))
+      Self.isAllowedScheme(components, host: host, iroh: iroh)
     else {
       throw BridgeError.protocolError(
         "Use HTTPS or a local loopback URL without credentials or query parameters")
@@ -22,11 +25,23 @@ public struct BridgeProfile: Identifiable, Codable, Hashable, Sendable {
     self.id = id
     self.machineID = machineID
     self.endpoint = endpoint
+    self.iroh = iroh
     let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
     self.name = label.isEmpty ? host : label
   }
 
-  private enum CodingKeys: String, CodingKey { case id, machineID, endpoint, name }
+  /// An iroh endpoint URL names its peer in the host and must match the paired address.
+  private static func isAllowedScheme(
+    _ components: URLComponents, host: String, iroh: IrohEndpointAddr?
+  ) -> Bool {
+    let scheme = components.scheme?.lowercased()
+    if scheme == irohURLScheme { return iroh?.endpointID == host }
+    return scheme == "https"
+      || (scheme == "http"
+        && ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host.lowercased()))
+  }
+
+  private enum CodingKeys: String, CodingKey { case id, machineID, endpoint, name, iroh }
 
   public init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -34,7 +49,8 @@ public struct BridgeProfile: Identifiable, Codable, Hashable, Sendable {
       id: values.decode(UUID.self, forKey: .id),
       machineID: values.decode(UUID.self, forKey: .machineID),
       endpoint: values.decode(URL.self, forKey: .endpoint),
-      name: values.decode(String.self, forKey: .name))
+      name: values.decode(String.self, forKey: .name),
+      iroh: values.decodeIfPresent(IrohEndpointAddr.self, forKey: .iroh))
   }
 }
 
