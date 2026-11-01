@@ -66,6 +66,34 @@ final class CappuccinoUITests: XCTestCase {
     capture("New session confirmation", app: app)
   }
 
+  /// Live iroh pairing against a task-owned bridge. Opt-in: `TEST_RUNNER_CAPPUCCINO_LIVE_IROH_PAYLOAD`
+  /// carries a fresh `cappuccino-bridge pair` payload, which rotates every 60 seconds. Pairs over iroh
+  /// and checks the machine reaches Connected. It captures nothing beyond the machine list.
+  @MainActor
+  func testLiveIrohPairingConnectsTheMachine() throws {
+    let payload = ProcessInfo.processInfo.environment["CAPPUCCINO_LIVE_IROH_PAYLOAD"] ?? ""
+    try XCTSkipIf(payload.isEmpty, "live iroh pairing is opt-in")
+    let app = XCUIApplication()
+    app.launchArguments = ["-cappuccino-fresh"]
+    app.launch()
+
+    app.buttons["Add machine"].tap()
+    let field = app.descendants(matching: .any)["pairing-payload"]
+    XCTAssertTrue(field.waitForExistence(timeout: 5), "pairing payload field is missing")
+    field.tap()
+    field.typeText(payload)
+    app.buttons["Connect"].tap()
+
+    if app.staticTexts["Connected"].waitForExistence(timeout: 150) {
+      capture("Iroh machine", app: app)
+      return
+    }
+    // The sheet stays open on failure and shows the owner-facing reason.
+    let reason = app.staticTexts["pairing-error"].label
+    capture("Iroh pairing failure", app: app)
+    XCTFail("iroh pairing did not reach Connected: \(reason)")
+  }
+
   /// Read-only against the Mac bridge: add it, see its agents, open one and read its status.
   /// Opt-in, since it needs a bridge on this host:
   /// `TEST_RUNNER_CAPPUCCINO_LIVE_BRIDGE=1 make ui-test DESTINATION=...`. It captures nothing:

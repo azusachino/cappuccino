@@ -9,6 +9,8 @@ import Security
 public enum IrohEndpointError: Error, Equatable, Sendable {
   case invalidEndpointID(String)
   case invalidSecretKey
+  /// The Keychain refused a read or write. The status is kept for diagnosis.
+  case keychain(OSStatus)
 }
 
 /// One bi-directional iroh stream. Its send and receive halves are fetched once and reused.
@@ -182,7 +184,7 @@ public enum IrohSecretKeyStore {
 
   private static func read() throws -> Data? {
     let query: [String: Any] = [
-      kSecClassGenericPassword as String: true,
+      kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecAttrAccount as String: account,
       kSecReturnData as String: true,
@@ -191,7 +193,8 @@ public enum IrohSecretKeyStore {
     var item: CFTypeRef?
     let status = SecItemCopyMatching(query as CFDictionary, &item)
     if status == errSecItemNotFound { return nil }
-    guard status == errSecSuccess, let data = item as? Data, data.count == 32 else {
+    guard status == errSecSuccess else { throw IrohEndpointError.keychain(status) }
+    guard let data = item as? Data, data.count == 32 else {
       throw IrohEndpointError.invalidSecretKey
     }
     return data
@@ -199,14 +202,14 @@ public enum IrohSecretKeyStore {
 
   private static func write(_ secret: Data) throws {
     let attributes: [String: Any] = [
-      kSecClassGenericPassword as String: true,
+      kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecAttrAccount as String: account,
       kSecValueData as String: secret,
       kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
     ]
     let status = SecItemAdd(attributes as CFDictionary, nil)
-    guard status == errSecSuccess else { throw IrohEndpointError.invalidSecretKey }
+    guard status == errSecSuccess else { throw IrohEndpointError.keychain(status) }
   }
 }
 
