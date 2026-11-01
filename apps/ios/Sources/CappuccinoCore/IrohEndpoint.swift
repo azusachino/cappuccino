@@ -15,10 +15,17 @@ public enum IrohEndpointError: Error, Equatable, Sendable {
 public struct IrohStream: Sendable {
   private let send: SendStream
   private let recv: RecvStream
+  private let onRelease: @Sendable () -> Void
 
-  init(_ stream: BiStream) {
+  init(_ stream: BiStream, onRelease: @escaping @Sendable () -> Void) {
     send = stream.send()
     recv = stream.recv()
+    self.onRelease = onRelease
+  }
+
+  /// Marks this stream as done, so the endpoint can count it toward its idle close.
+  public func release() async {
+    onRelease()
   }
 
   public func write(_ bytes: Data) async throws {
@@ -46,11 +53,18 @@ public actor IrohEndpointService {
   public static let shared = IrohEndpointService(loadSecretKey: IrohSecretKeyStore.loadOrCreate)
 
   private let loadSecretKey: @Sendable () throws -> Data
+  private let idleCloseSeconds: Double
   private var endpoint: Endpoint?
   private var connections: [String: Connection] = [:]
+  private var streams = StreamIdleTracker()
+  private var idleClose: Task<Void, Never>?
 
-  public init(loadSecretKey: @escaping @Sendable () throws -> Data) {
+  /// `idleCloseSeconds` is how long the endpoint stays up with no open stream (Android uses 60).
+  public init(
+    loadSecretKey: @escaping @Sendable () throws -> Data, idleCloseSeconds: Double = 60
+  ) {
     self.loadSecretKey = loadSecretKey
+    self.idleCloseSeconds = idleCloseSeconds
   }
 
   /// Opens a bi-stream to `addr` on `alpn`, reusing a live cached connection.
@@ -91,7 +105,34 @@ public actor IrohEndpointService {
         addr: try Self.binding(addr), alpn: Data(alpn.utf8))
       connections[key] = connection
     }
-    return IrohStream(try await connection.openBi())
+    let stream = try await connection.openBi()
+    streamOpened()
+    return IrohStream(stream) { [self] in
+      Task { await self.streamReleased() }
+    }
+  }
+
+  private func streamOpened() {
+    streams.opened()
+    idleClose?.cancel()
+    idleClose = nil
+  }
+
+  /// When the last open stream closes, the endpoint closes after the quiet period unless a new
+  /// stream opens first.
+  private func streamReleased() {
+    guard streams.released() else { return }
+    let seconds = idleCloseSeconds
+    idleClose = Task {
+      try? await Task.sleep(for: .seconds(seconds))
+      guard !Task.isCancelled else { return }
+      await self.stopIfStillIdle()
+    }
+  }
+
+  private func stopIfStillIdle() async {
+    guard streams.isIdle else { return }
+    await stop()
   }
 
   private func started() async throws -> Endpoint {
@@ -166,5 +207,22 @@ public enum IrohSecretKeyStore {
     ]
     let status = SecItemAdd(attributes as CFDictionary, nil)
     guard status == errSecSuccess else { throw IrohEndpointError.invalidSecretKey }
+  }
+}
+
+/// Counts open streams, so the endpoint can close after a quiet period with none open.
+struct StreamIdleTracker: Equatable {
+  private(set) var open = 0
+
+  var isIdle: Bool { open == 0 }
+
+  mutating func opened() {
+    open += 1
+  }
+
+  /// True when the last open stream has just closed.
+  mutating func released() -> Bool {
+    open = max(open - 1, 0)
+    return open == 0
   }
 }

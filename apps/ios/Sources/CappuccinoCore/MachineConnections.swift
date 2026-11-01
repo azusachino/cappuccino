@@ -38,6 +38,7 @@ public final class MachineConnections {
   @ObservationIgnored private var generations: [UUID: UUID] = [:]
   @ObservationIgnored private var manuallyDisconnected: Set<UUID> = []
   @ObservationIgnored private var foreground = false
+  @ObservationIgnored private var routes: [UUID: MachineRoute] = [:]
   public let log: ConnectionLog
 
   public init(
@@ -98,6 +99,27 @@ public final class MachineConnections {
       try BridgeProfile(machineID: verified.machine.id, endpoint: url, name: name))
   }
 
+  /// The transports for one machine, in Android's order: iroh first, then the tailnet fallback.
+  /// The router is kept per machine so its sticky choice survives between refreshes. A changed
+  /// address rebuilds it.
+  private func route(for profile: BridgeProfile) -> MachineRouter<URL> {
+    var clients: [TransportKind: URL] = [:]
+    if let iroh = profile.iroh, let url = URL(string: "\(irohURLScheme)://\(iroh.endpointID)") {
+      clients[.iroh] = url
+    }
+    if let tailnet = profile.tailnetFallback {
+      clients[.tailnet] = tailnet
+    } else if profile.iroh == nil {
+      clients[.tailnet] = profile.endpoint
+    }
+    if let cached = routes[profile.id], cached.clients == clients {
+      return cached.router
+    }
+    let router = MachineRouter<URL>(clients: clients, now: { Date().timeIntervalSince1970 })
+    routes[profile.id] = MachineRoute(clients: clients, router: router)
+    return router
+  }
+
   /// Pairs an iroh machine from its pairing payload and saves it under its verified identity.
   public func addIrohMachine(payload: String, label: String) async throws {
     let profile = try await pairIrohMachine(payload: payload, name: label, verifier: client)
@@ -110,7 +132,7 @@ public final class MachineConnections {
     try saveVerifiedProfile(
       try BridgeProfile(
         id: id, machineID: profile.machineID, endpoint: profile.endpoint, name: label,
-        iroh: profile.iroh))
+        iroh: profile.iroh, tailnetFallback: profile.tailnetFallback))
   }
 
   public func remove(_ id: UUID) throws {
@@ -166,13 +188,16 @@ public final class MachineConnections {
     connection.refreshing = manual
     connections[id] = connection
     log.log("MACHINE", "Refreshing \(profile.name)")
+    let router = route(for: profile)
     jobs[id] = Task { [weak self, client] in
       do {
-        let verified = try await client.verifyMachine(
-          baseURL: profile.endpoint, expectedID: profile.machineID)
+        let verified = try await router.request { base in
+          try await client.verifyMachine(baseURL: base, expectedID: profile.machineID)
+        }
         try Task.checkCancellation()
-        let agents = try await client.listAgents(
-          baseURL: profile.endpoint, expectedMachineID: profile.machineID)
+        let agents = try await router.request { base in
+          try await client.listAgents(baseURL: base, expectedMachineID: profile.machineID)
+        }
         try Task.checkCancellation()
         guard
           agents.allSatisfy({
@@ -208,4 +233,10 @@ public final class MachineConnections {
     generations.removeValue(forKey: id)
     jobs.removeValue(forKey: id)?.cancel()
   }
+}
+
+/// One machine's router, with the transport addresses it was built from.
+private struct MachineRoute {
+  let clients: [TransportKind: URL]
+  let router: MachineRouter<URL>
 }

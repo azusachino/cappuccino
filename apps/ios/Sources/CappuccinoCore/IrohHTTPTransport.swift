@@ -48,19 +48,31 @@ public final class IrohHub: @unchecked Sendable {
     let wire = encodeHTTPRequest(
       method: request.httpMethod ?? "GET", target: target, host: host,
       headers: request.allHTTPHeaderFields ?? [:], body: request.httpBody ?? Data())
+    let reply: Data
+    do {
+      reply = try await exchange(stream, wire)
+    } catch {
+      await stream.release()
+      throw error
+    }
+    await stream.release()
+    do {
+      return try parseHTTPResponse(reply)
+    } catch {
+      throw URLError(.badServerResponse)
+    }
+  }
+
+  /// Writes the request and reads the reply to end-of-stream, within the response size cap.
+  private func exchange(_ stream: any IrohStreaming, _ wire: Data) async throws -> Data {
     try await stream.write(wire)
     try await stream.finish()
     var reply = Data()
     while true {
       let chunk = try await stream.read(max: 64 * 1024)
-      if chunk.isEmpty { break }
+      if chunk.isEmpty { return reply }
       reply.append(chunk)
       if reply.count > Self.maxResponseBytes { throw URLError(.dataLengthExceedsMaximum) }
-    }
-    do {
-      return try parseHTTPResponse(reply)
-    } catch {
-      throw URLError(.badServerResponse)
     }
   }
 }
