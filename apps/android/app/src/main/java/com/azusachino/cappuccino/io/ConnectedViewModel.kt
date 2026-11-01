@@ -125,6 +125,8 @@ interface ConnectedActions {
 
   fun refreshProfile(id: String) = refresh()
 
+  fun reconnectProfile(id: String) = refreshProfile(id)
+
   fun disconnectMachine(id: String) = disconnectProfile()
 
   fun refreshAll() = refresh()
@@ -175,6 +177,7 @@ internal constructor(
   private val transportBadge: (Endpoint) -> TransportBadge = { TransportBadge.NONE },
   private val clock: () -> Long = { System.currentTimeMillis() },
   private val onNetworkAvailable: (((() -> Unit)) -> (() -> Unit))? = null,
+  private val redialTransport: (suspend (Endpoint) -> Unit)? = null,
 ) : ViewModel(), ConnectedActions {
   private val mutableState =
     MutableStateFlow(
@@ -588,7 +591,13 @@ internal constructor(
     refreshProfile(id, background = false)
   }
 
-  private fun refreshProfile(id: String, background: Boolean) {
+  /** Reconnect now: like a refresh, but the attempt first drops the machine's cached transport. */
+  override fun reconnectProfile(id: String) {
+    if (machineJobs[id]?.isActive == true) return
+    refreshProfile(id, background = false, redial = true)
+  }
+
+  private fun refreshProfile(id: String, background: Boolean, redial: Boolean = false) {
     val profile = mutableState.value.profiles.firstOrNull { it.id == id } ?: return
     onMonitorPause?.invoke(id, false)
     lastRefreshAt[id] = clock()
@@ -610,13 +619,14 @@ internal constructor(
                 busy = !background,
               ))
       )
-    machineJobs[id] = viewModelScope.launch { refresh(profile) }
+    machineJobs[id] = viewModelScope.launch { refresh(profile, redial) }
   }
 
-  private suspend fun refresh(profile: MachineProfile) {
+  private suspend fun refresh(profile: MachineProfile, redial: Boolean = false) {
     val token = epoch
     val machineToken = machineEpochs[profile.id]
     try {
+      if (redial) redialTransport?.invoke(profile.endpoint)
       val client = bridgeFor(profile.endpoint)
       client.verify(profile.machineId)
       val agents = client.agents(profile.machineId)

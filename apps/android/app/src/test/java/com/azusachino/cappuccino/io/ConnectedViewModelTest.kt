@@ -1068,6 +1068,41 @@ class ConnectedViewModelTest {
     }
 
   @Test
+  fun reconnectNowRedialsOnceAndJoinsRepeatedTaps() =
+    runTest(dispatcher) {
+      var redials = 0
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID = machine
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
+
+          override fun stream(sessionId: String): Flow<StreamEvent> =
+            kotlinx.coroutines.flow.emptyFlow()
+        }
+      viewModel =
+        ConnectedViewModel(
+          store,
+          { transport },
+          {},
+          SavedStateHandle(),
+          redialTransport = { redials++ },
+        )
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      redials = 0
+
+      viewModel.reconnectProfile(profile.id)
+      viewModel.reconnectProfile(profile.id)
+      viewModel.reconnectProfile(profile.id)
+      advanceUntilIdle()
+
+      assertEquals(1, redials)
+      assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
+    }
+
+  @Test
   fun lateSendFailureDoesNotLeakIntoReplacementConversation() =
     runTest(dispatcher) {
       val response = CompletableDeferred<Unit>()

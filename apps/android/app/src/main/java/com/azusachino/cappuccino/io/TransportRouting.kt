@@ -191,6 +191,17 @@ class MachineRouter<C : Any>(
     ConnectionLogger.log("ROUTER", "Network change: reset stickiness & redialing")
   }
 
+  /**
+   * Forgets stickiness and the iroh failure count, and drops the connections: the next call dials.
+   */
+  suspend fun redial() {
+    synchronized(lock) {
+      sticky = null
+      irohFailures = 0
+    }
+    iroh?.dropConnections()
+  }
+
   /** The badge for this machine now. Call it on each poll tick; the hold-down needs ticks. */
   fun badge(): TransportBadge =
     synchronized(lock) {

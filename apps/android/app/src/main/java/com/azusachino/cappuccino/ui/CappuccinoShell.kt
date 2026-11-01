@@ -1326,7 +1326,7 @@ fun CappuccinoScreen(
                                 DropdownMenuItem(
                                   text = { Text("Reconnect now") },
                                   onClick = {
-                                    actions.refreshProfile(profile.id)
+                                    actions.reconnectProfile(profile.id)
                                     machineMenuId = null
                                   },
                                 )
