@@ -13,6 +13,18 @@ struct TranscriptPresentationTests {
     ConversationTurn(id: id, role: role, timestamp: nil, text: text, parts: parts)
   }
 
+  @Test func thinkingIsGatheredIntoOneBlockPerTurn() {
+    let call = ToolCall(
+      name: "bash", input: "ls", output: nil, isError: nil, startedAt: nil, finishedAt: nil,
+      images: nil)
+    let split = separatingThinking([
+      .thinking("first"), .toolCall(call), .thinking("  "), .text("done"), .thinking("second\n"),
+    ])
+    #expect(split.thinking == "first\n\nsecond")
+    #expect(split.rest == [.toolCall(call), .text("done")])
+    #expect(separatingThinking([.text("only")]).thinking == nil)
+  }
+
   @Test func repliesPreviewSixLinesAndSixHundredCharacters() {
     let lines = (1...8).map { "line \($0)" }.joined(separator: "\n")
     #expect(messagePreview(lines) == (1...6).map { "line \($0)" }.joined(separator: "\n"))
