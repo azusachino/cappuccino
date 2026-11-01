@@ -22,6 +22,8 @@ public struct MachineConnection: Equatable, Sendable {
   /// Advertisements from the last verified handshake; nil until connected.
   public var details: BridgeDetails?
   public var name: String?
+  /// The transport the last verified request used, shown on the machine row.
+  public var transport: TransportBadge = .noReading
 
   public init() {}
 }
@@ -243,6 +245,7 @@ public final class MachineConnections {
         result.agents = agents
         result.details = verified.details
         result.name = verified.name
+        result.transport = await router.badge()
         self.connections[id] = result
         self.log.log("MACHINE", "\(profile.name) connected, \(agents.count) agents")
         self.jobs.removeValue(forKey: id)

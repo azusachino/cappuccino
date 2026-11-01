@@ -105,6 +105,9 @@ private struct MachineSection: View {
   var body: some View {
     Section {
       ConnectionStatusRow(phase: state.phase, refreshing: state.refreshing)
+      if let transport = state.transport.label {
+        Text(transport).font(.caption).foregroundStyle(.secondary)
+      }
       ForEach(state.agents) { agent in
         Button {
           onOpen(agent)
