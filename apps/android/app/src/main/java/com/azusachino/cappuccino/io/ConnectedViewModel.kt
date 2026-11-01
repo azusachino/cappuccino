@@ -40,6 +40,8 @@ data class MachineConnection(
   val busy: Boolean = false,
   /** The retry the stream is on while [connection] is Recovering; 0 otherwise. */
   val reconnectAttempt: Int = 0,
+  /** Why the last retry was scheduled, kept while [connection] is Recovering. */
+  val reconnectReason: String? = null,
 )
 
 fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnection =
@@ -50,6 +52,7 @@ fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnecti
         agents.filter { it.machineId == profile.machineId },
         busy,
         reconnectAttempt,
+        reconnectReason,
       )
     else MachineConnection()
 
@@ -104,6 +107,8 @@ data class ConnectedUiState(
   val connection: ConnectionState = ConnectionState.Disconnected,
   /** The retry the stream is on while [connection] is Recovering; 0 otherwise. */
   val reconnectAttempt: Int = 0,
+  /** Why the last retry was scheduled, kept while [connection] is Recovering. */
+  val reconnectReason: String? = null,
   val busy: Boolean = false,
   val themeMode: com.azusachino.cappuccino.ui.ThemeMode =
     com.azusachino.cappuccino.ui.ThemeMode.SYSTEM,
@@ -1286,6 +1291,7 @@ internal constructor(
             mutableState.value.copy(
               connection = ConnectionState.Recovering,
               reconnectAttempt = retryBudget.attempts,
+              reconnectReason = error.message,
             )
           retryPause(nextDelay)
         }
