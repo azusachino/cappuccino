@@ -135,7 +135,7 @@ class MachinesJourneyTest {
       "Machine row sits under the header: row=$row header=$header",
       row.top > header.bottom,
     )
-    compose.onNodeWithContentDescription("ReconnectSynthetic bridge").performClick()
+    compose.onNodeWithContentDescription("Reconnect Synthetic bridge").performClick()
     // The injected click is delivered after waitForIdle can return; wait for its effect, then
     // require exactly one call so a double-fire still fails.
     compose.waitUntil(timeoutMillis = 5_000) { actions.refreshCalls > 0 }
@@ -152,8 +152,8 @@ class MachinesJourneyTest {
     setFailingAndHealthy()
     openMachines()
     compose.waitForIdle()
-    compose.onNodeWithContentDescription("ReconnectFailing bridge").assertIsDisplayed()
-    compose.onNodeWithContentDescription("ReconnectHealthy bridge").assertDoesNotExist()
+    compose.onNodeWithContentDescription("Reconnect Failing bridge").assertIsDisplayed()
+    compose.onNodeWithContentDescription("Reconnect Healthy bridge").assertDoesNotExist()
     compose.onNodeWithContentDescription("Disconnect Failing bridge").assertDoesNotExist()
     // The status wraps to at most two lines (21330f8) and is never ellipsized. Line count depends
     // on device font metrics, so only the wrap bound and the full text are asserted.
