@@ -80,10 +80,13 @@ public struct SavedConversationStore: Sendable {
       .sorted { $0.savedAt > $1.savedAt }
   }
 
-  /// The saved transcripts of one agent, its machine and session, newest first.
+  /// The saved transcripts for an agent, newest first, as Android's history dialog filters them:
+  /// the same machine and agent kind. When none match, the whole machine's transcripts show.
   public func list(for agent: AgentRow) throws -> [SavedConversation] {
     guard let machineID = UUID(uuidString: agent.machineID) else { return [] }
-    return try list().filter { $0.machineID == machineID && $0.agent.sessionID == agent.sessionID }
+    let onMachine = try list().filter { $0.machineID == machineID }
+    let sameKind = onMachine.filter { $0.agent.provider == agent.provider }
+    return sameKind.isEmpty ? onMachine : sameKind
   }
 
   public func delete(machineID: UUID, conversationID: String) throws {

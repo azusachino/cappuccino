@@ -72,7 +72,7 @@ struct SavedConversationStoreTests {
     #expect(try store.list().map(\.conversationID) == [conversationID(1)])
   }
 
-  @Test func listsOnlyTheAgentsOwnConversations() throws {
+  @Test func listsTheSameMachineAndKindNewestFirst() throws {
     let store = SavedConversationStore(directory: directory())
     let first = saved(1, at: base)
     try store.save(first)
@@ -90,7 +90,15 @@ struct SavedConversationStoreTests {
         omittedMessages: 0, omittedTools: 0))
     #expect(
       try store.list(for: first.agent).map(\.conversationID) == [
-        conversationID(3), conversationID(1),
+        conversationID(3), conversationID(2), conversationID(1),
+      ])
+    // No conversation of this kind on the machine: the whole machine's show, as Android does.
+    let claude = AgentRow(
+      machineID: machine.uuidString, sessionID: "s9", label: "Claude", branch: nil, working: false,
+      provider: "claude", status: "idle")
+    #expect(
+      try store.list(for: claude).map(\.conversationID) == [
+        conversationID(3), conversationID(2), conversationID(1),
       ])
     #expect(try store.list(for: elsewhere).map(\.conversationID) == [conversationID(4)])
   }
