@@ -538,8 +538,9 @@ internal constructor(
         actionError = null,
         busy = false,
       )
+    // Opening a machine starts a fresh attempt; only an explicit refresh joins one in flight.
     if (mutableState.value.machineConnection(profile).connection != ConnectionState.Connected)
-      refreshProfile(id)
+      refreshProfile(id, background = false)
   }
 
   override fun disconnectProfile() {
