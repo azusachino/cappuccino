@@ -9,7 +9,7 @@ public let irohPairALPN = "cappuccino-pair/1"
 
 /// Where the bridge endpoint is: its id, its relay (nil until it has a home relay) and direct
 /// addresses.
-public struct IrohEndpointAddr: Equatable, Sendable {
+public struct IrohEndpointAddr: Codable, Hashable, Sendable {
   public let endpointID: String
   public let relayURL: String?
   public let directAddrs: [String]

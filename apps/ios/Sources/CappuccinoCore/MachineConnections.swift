@@ -54,6 +54,10 @@ public final class MachineConnections {
       profiles = []
       storageError = error.localizedDescription
     }
+    // Iroh peers must be known before their requests can be routed.
+    for profile in profiles {
+      if let iroh = profile.iroh { IrohHub.shared.register(iroh) }
+    }
   }
 
   /// Called only with a profile constructed after pairing. Refresh re-verifies its UUID.
