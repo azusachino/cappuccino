@@ -35,6 +35,17 @@ public final class IrohHub: @unchecked Sendable {
     lock.withLock { self.opener = opener }
   }
 
+  /// A raw stream to the peer named by a `cappiroh` URL, for protocols that are not plain HTTP
+  /// (the live WebSocket). The caller owns the stream and releases it.
+  public func openStream(for url: URL) async throws -> any IrohStreaming {
+    guard let host = url.host else { throw URLError(.badURL) }
+    let (addr, open) = try lock.withLock {
+      guard let addr = peers[host] else { throw URLError(.cannotFindHost) }
+      return (addr, opener)
+    }
+    return try await open(addr, irohBridgeALPN)
+  }
+
   /// One request over a fresh stream. The stream is closed by the peer after the response.
   func fetch(_ request: URLRequest) async throws -> HTTPWireResponse {
     guard let url = request.url, let host = url.host else { throw URLError(.badURL) }
