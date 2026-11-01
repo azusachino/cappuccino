@@ -34,6 +34,7 @@ import SwiftUI
     .tint(palette.accent)
     .preferredColorScheme(AppearanceMode(rawValue: appearance)?.colorScheme)
     .onAppear {
+      IrohNetworkMonitor.shared.start()
       machines.setForeground(scenePhase == .active)
       session.setForeground(scenePhase == .active)
     }
