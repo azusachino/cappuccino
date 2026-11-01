@@ -18,4 +18,25 @@ struct SlashCommandTests {
     #expect(slashCommandWarning("/Clear").contains("fresh conversation"))
     #expect(slashCommandWarning("/foo").hasPrefix("/foo is an agent command"))
   }
+
+  @Test func listedCommandsMatchAndLeaveRefusedOnesOut() {
+    #expect(commonSlashCommands.map(\.command) == ["/new", "/compact", "/model", "/clear"])
+    #expect(commonSlashCommands.allSatisfy { disallowedSlashCommandReason($0.command) == nil })
+    #expect(matchingSlashCommands(" /c").map(\.command) == ["/compact", "/clear"])
+    #expect(matchingSlashCommands("/model opus").map(\.command) == ["/model"])
+    #expect(matchingSlashCommands("/status").isEmpty)
+    #expect(matchingSlashCommands("hello /new").isEmpty)
+  }
+
+  @Test func recentPromptsAreNewestFirstWithoutRepeats() {
+    var recent: [String] = []
+    recent = rememberingPrompt("one", in: recent)
+    recent = rememberingPrompt(" two ", in: recent)
+    recent = rememberingPrompt("one", in: recent)
+    recent = rememberingPrompt("   ", in: recent)
+    #expect(recent == ["one", "two"])
+    let many = (1...25).reduce(into: [String]()) { $0 = rememberingPrompt("p\($1)", in: $0) }
+    #expect(many.count == 20)
+    #expect(many.first == "p25")
+  }
 }
