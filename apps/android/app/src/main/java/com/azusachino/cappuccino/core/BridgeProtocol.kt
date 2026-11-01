@@ -21,6 +21,10 @@ class StreamRetryBudget(private val maximumRetries: Int = 4) {
     return longArrayOf(1_000L, 2_000L, 4_000L, 8_000L)[retriesUsed++]
   }
 
+  /** How many retries have been scheduled so far; the next one is attempt `attempts`. */
+  val attempts: Int
+    get() = retriesUsed
+
   fun reset() {
     retriesUsed = 0
   }

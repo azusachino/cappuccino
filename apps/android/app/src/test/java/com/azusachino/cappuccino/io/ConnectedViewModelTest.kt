@@ -1358,6 +1358,7 @@ class ConnectedViewModelTest {
       events.emit(StreamEvent.Error("upstream_unavailable", "Source unavailable"))
       runCurrent()
       assertEquals(ConnectionState.Recovering, viewModel.state.value.connection)
+      assertEquals(1, viewModel.state.value.reconnectAttempt)
       assertFalse(viewModel.state.value.streamLive)
       firstRead.complete(Unit)
       advanceUntilIdle()

@@ -38,12 +38,19 @@ data class MachineConnection(
   val connection: ConnectionState = ConnectionState.Disconnected,
   val agents: List<AgentRow> = emptyList(),
   val busy: Boolean = false,
+  /** The retry the stream is on while [connection] is Recovering; 0 otherwise. */
+  val reconnectAttempt: Int = 0,
 )
 
 fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnection =
   machines[profile.id]
     ?: if (activeProfileId == profile.id)
-      MachineConnection(connection, agents.filter { it.machineId == profile.machineId }, busy)
+      MachineConnection(
+        connection,
+        agents.filter { it.machineId == profile.machineId },
+        busy,
+        reconnectAttempt,
+      )
     else MachineConnection()
 
 data class PromptSendState(val text: String, val outcome: String? = null)
@@ -95,6 +102,8 @@ data class ConnectedUiState(
   val offlineSavedAt: Long? = null,
   val conversationId: String? = null,
   val connection: ConnectionState = ConnectionState.Disconnected,
+  /** The retry the stream is on while [connection] is Recovering; 0 otherwise. */
+  val reconnectAttempt: Int = 0,
   val busy: Boolean = false,
   val themeMode: com.azusachino.cappuccino.ui.ThemeMode =
     com.azusachino.cappuccino.ui.ThemeMode.SYSTEM,
@@ -1273,7 +1282,11 @@ internal constructor(
             break
           }
           ConnectionLogger.log("RECOVERY", "Scheduling stream retry in ${nextDelay}ms")
-          mutableState.value = mutableState.value.copy(connection = ConnectionState.Recovering)
+          mutableState.value =
+            mutableState.value.copy(
+              connection = ConnectionState.Recovering,
+              reconnectAttempt = retryBudget.attempts,
+            )
           retryPause(nextDelay)
         }
       }

@@ -95,6 +95,7 @@ import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ConnectionState
+import com.azusachino.cappuccino.io.MachineConnection
 import com.azusachino.cappuccino.io.agentDraftKey
 import com.azusachino.cappuccino.io.agentSendKey
 import com.azusachino.cappuccino.io.canMutate
@@ -1258,7 +1259,7 @@ fun CappuccinoScreen(
                             )
                             val statusSubtitle =
                               listOfNotNull(
-                                  machine.connection.statusText(),
+                                  machine.statusLabel(),
                                   when (state.machineBadges[profile.id]) {
                                     com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
                                       "iroh direct"
@@ -1715,6 +1716,12 @@ fun CappuccinoScreen(
     )
   }
 }
+
+/** The row's status word; a retry shows which attempt the stream is on. */
+private fun MachineConnection.statusLabel(): String =
+  if (connection == ConnectionState.Recovering && reconnectAttempt > 0)
+    "Reconnecting · attempt $reconnectAttempt"
+  else connection.statusText()
 
 private fun ConnectionState.statusText(): String =
   when (this) {
