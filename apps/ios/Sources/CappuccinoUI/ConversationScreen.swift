@@ -9,6 +9,7 @@ import SwiftUI
   @State private var follow = FollowState()
   @State private var hasNewOutput = false
   @State private var showingDetails = false
+  @State private var showingHistory = false
   @State private var promptOpen = false
   @Environment(\.colorScheme) private var colorScheme
 
@@ -126,6 +127,11 @@ import SwiftUI
       ToolbarItem(placement: .primaryAction) {
         Menu {
           Button("Connection details", systemImage: "info.circle") { showingDetails = true }
+          if session.historyStore != nil, session.selectedAgent != nil {
+            Button("Conversation history", systemImage: "clock.arrow.circlepath") {
+              showingHistory = true
+            }
+          }
         } label: {
           Label("Conversation actions", systemImage: "ellipsis.circle")
         }
@@ -134,6 +140,13 @@ import SwiftUI
     .sheet(isPresented: $showingDetails) {
       if let profile = session.selectedProfile {
         ConnectionDetailsSheet(profile: profile, state: machines.connections[profile.id])
+      }
+    }
+    .sheet(isPresented: $showingHistory) {
+      if let store = session.historyStore, let agent = session.selectedAgent {
+        AgentHistorySheet(
+          store: store, agent: agent, machineName: session.selectedProfile?.name ?? "",
+          currentConversationID: session.conversationID)
       }
     }
   }

@@ -80,6 +80,12 @@ public struct SavedConversationStore: Sendable {
       .sorted { $0.savedAt > $1.savedAt }
   }
 
+  /// The saved transcripts of one agent, its machine and session, newest first.
+  public func list(for agent: AgentRow) throws -> [SavedConversation] {
+    guard let machineID = UUID(uuidString: agent.machineID) else { return [] }
+    return try list().filter { $0.machineID == machineID && $0.agent.sessionID == agent.sessionID }
+  }
+
   public func delete(machineID: UUID, conversationID: String) throws {
     let url = file(machineID, conversationID)
     if FileManager.default.fileExists(atPath: url.path) {

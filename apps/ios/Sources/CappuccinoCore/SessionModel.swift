@@ -85,6 +85,9 @@ public final class SessionModel {
     self.history = history
   }
 
+  /// Where canonical transcripts are kept, for the conversation's history sheet.
+  public var historyStore: SavedConversationStore? { history }
+
   /// The owner's profile for the selection, if it still exists.
   public var selectedProfile: BridgeProfile? {
     machines.profiles.first { $0.id == selectedProfileID }
