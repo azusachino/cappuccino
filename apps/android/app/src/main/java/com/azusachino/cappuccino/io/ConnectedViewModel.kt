@@ -38,12 +38,22 @@ data class MachineConnection(
   val connection: ConnectionState = ConnectionState.Disconnected,
   val agents: List<AgentRow> = emptyList(),
   val busy: Boolean = false,
+  /** The retry the stream is on while [connection] is Recovering; 0 otherwise. */
+  val reconnectAttempt: Int = 0,
+  /** Why the last retry was scheduled, kept while [connection] is Recovering. */
+  val reconnectReason: String? = null,
 )
 
 fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnection =
   machines[profile.id]
     ?: if (activeProfileId == profile.id)
-      MachineConnection(connection, agents.filter { it.machineId == profile.machineId }, busy)
+      MachineConnection(
+        connection,
+        agents.filter { it.machineId == profile.machineId },
+        busy,
+        reconnectAttempt,
+        reconnectReason,
+      )
     else MachineConnection()
 
 data class PromptSendState(val text: String, val outcome: String? = null)
@@ -95,6 +105,10 @@ data class ConnectedUiState(
   val offlineSavedAt: Long? = null,
   val conversationId: String? = null,
   val connection: ConnectionState = ConnectionState.Disconnected,
+  /** The retry the stream is on while [connection] is Recovering; 0 otherwise. */
+  val reconnectAttempt: Int = 0,
+  /** Why the last retry was scheduled, kept while [connection] is Recovering. */
+  val reconnectReason: String? = null,
   val busy: Boolean = false,
   val themeMode: com.azusachino.cappuccino.ui.ThemeMode =
     com.azusachino.cappuccino.ui.ThemeMode.SYSTEM,
@@ -124,6 +138,8 @@ interface ConnectedActions {
   fun disconnectProfile()
 
   fun refreshProfile(id: String) = refresh()
+
+  fun reconnectProfile(id: String) = refreshProfile(id)
 
   fun disconnectMachine(id: String) = disconnectProfile()
 
@@ -175,6 +191,7 @@ internal constructor(
   private val transportBadge: (Endpoint) -> TransportBadge = { TransportBadge.NONE },
   private val clock: () -> Long = { System.currentTimeMillis() },
   private val onNetworkAvailable: (((() -> Unit)) -> (() -> Unit))? = null,
+  private val redialTransport: (suspend (Endpoint) -> Unit)? = null,
 ) : ViewModel(), ConnectedActions {
   private val mutableState =
     MutableStateFlow(
@@ -427,6 +444,8 @@ internal constructor(
    */
   private fun updateEndpoint(profileId: String, change: suspend (Endpoint) -> Endpoint) {
     val profile = mutableState.value.profiles.firstOrNull { it.id == profileId } ?: return
+    // A second submit while a pairing is running is ignored, not restarted.
+    if (addJob?.isActive == true) return
     addEpoch++
     val token = addEpoch
     addJob?.cancel()
@@ -450,6 +469,7 @@ internal constructor(
   }
 
   private fun startAdd(label: String, endpointFor: suspend () -> Endpoint) {
+    if (addJob?.isActive == true) return
     addEpoch++
     val token = addEpoch
     addJob?.cancel()
@@ -518,8 +538,9 @@ internal constructor(
         actionError = null,
         busy = false,
       )
+    // Opening a machine starts a fresh attempt; only an explicit refresh joins one in flight.
     if (mutableState.value.machineConnection(profile).connection != ConnectionState.Connected)
-      refreshProfile(id)
+      refreshProfile(id, background = false)
   }
 
   override fun disconnectProfile() {
@@ -582,9 +603,19 @@ internal constructor(
       }
   }
 
-  override fun refreshProfile(id: String) = refreshProfile(id, background = false)
+  /** A user refresh joins the attempt already running for [id] instead of starting another. */
+  override fun refreshProfile(id: String) {
+    if (machineJobs[id]?.isActive == true) return
+    refreshProfile(id, background = false)
+  }
 
-  private fun refreshProfile(id: String, background: Boolean) {
+  /** Reconnect now: like a refresh, but the attempt first drops the machine's cached transport. */
+  override fun reconnectProfile(id: String) {
+    if (machineJobs[id]?.isActive == true) return
+    refreshProfile(id, background = false, redial = true)
+  }
+
+  private fun refreshProfile(id: String, background: Boolean, redial: Boolean = false) {
     val profile = mutableState.value.profiles.firstOrNull { it.id == id } ?: return
     onMonitorPause?.invoke(id, false)
     lastRefreshAt[id] = clock()
@@ -606,13 +637,14 @@ internal constructor(
                 busy = !background,
               ))
       )
-    machineJobs[id] = viewModelScope.launch { refresh(profile) }
+    machineJobs[id] = viewModelScope.launch { refresh(profile, redial) }
   }
 
-  private suspend fun refresh(profile: MachineProfile) {
+  private suspend fun refresh(profile: MachineProfile, redial: Boolean = false) {
     val token = epoch
     val machineToken = machineEpochs[profile.id]
     try {
+      if (redial) redialTransport?.invoke(profile.endpoint)
       val client = bridgeFor(profile.endpoint)
       client.verify(profile.machineId)
       val agents = client.agents(profile.machineId)
@@ -1256,7 +1288,12 @@ internal constructor(
             break
           }
           ConnectionLogger.log("RECOVERY", "Scheduling stream retry in ${nextDelay}ms")
-          mutableState.value = mutableState.value.copy(connection = ConnectionState.Recovering)
+          mutableState.value =
+            mutableState.value.copy(
+              connection = ConnectionState.Recovering,
+              reconnectAttempt = retryBudget.attempts,
+              reconnectReason = error.message,
+            )
           retryPause(nextDelay)
         }
       }

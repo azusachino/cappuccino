@@ -431,6 +431,14 @@ internal fun MachineInformation(
             },
         )
       }
+      // While a retry is scheduled, the reason it is retrying stays visible.
+      val reconnectReason = state.machineConnection(profile).reconnectReason
+      if (connection == ConnectionState.Recovering && reconnectReason != null) {
+        ErrorBanner(
+          reconnectReason,
+          modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+      }
       machineInformationWarnings(profile, state).forEach { warning ->
         ErrorBanner(
           warning,

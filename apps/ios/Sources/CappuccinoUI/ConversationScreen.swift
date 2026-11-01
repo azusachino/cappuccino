@@ -121,7 +121,7 @@ import SwiftUI
       ToolbarItem(placement: .principal) {
         VStack(spacing: 0) {
           Text(session.selectedAgent?.label ?? "").font(.headline)
-          Text(headerDetail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+          Text(statusLabel(liveStatusWord)).font(.caption).foregroundStyle(.secondary)
         }
       }
       ToolbarItem(placement: .primaryAction) {
@@ -157,15 +157,6 @@ import SwiftUI
       pendingPrompt: session.stream.pendingPrompt != nil,
       streamStatus: session.stream.agentStatus,
       listedStatus: session.selectedAgent?.status ?? "idle")
-  }
-
-  private var headerDetail: String {
-    let state = statusLabel(liveStatusWord)
-    let machine = session.selectedProfile?.name ?? ""
-    let folder = folderName(session.selectedAgent?.cwd)
-    let branch = session.selectedAgent?.branch
-    return [state, machine, folder, branch].compactMap { $0 }.filter { !$0.isEmpty }.joined(
-      separator: " · ")
   }
 }
 

@@ -44,12 +44,6 @@ import SwiftUI
           if session.isLive {
             commandsMenu(idle: isIdle(status), working: status == "working")
           }
-          if let chip = modelChip(session.stats) {
-            Text(chip)
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-          }
           Spacer(minLength: 0)
           if session.canControl, status == "working" {
             Button {
@@ -72,16 +66,18 @@ import SwiftUI
           .accessibilityLabel("Send")
         }
 
-        if let context = session.stats.flatMap(contextSummary) {
-          HStack(spacing: 8) {
-            Text("context \(context)")
-            if let cache = session.stats?.cachePercent {
-              Text("cache \(cache)%")
-            }
-          }
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-          .padding(.horizontal, 4)
+        // One quiet line: model, context and cache, shown only when the bridge reports them.
+        let info = [
+          modelChip(session.stats),
+          session.stats.flatMap(contextSummary).map { "context \($0)" },
+          session.stats?.cachePercent.map { "cache \($0)%" },
+        ].compactMap { $0 }
+        if !info.isEmpty {
+          Text(info.joined(separator: " · "))
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 4)
         }
       }
       .padding(12)

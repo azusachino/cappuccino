@@ -75,6 +75,11 @@ class MachineTransports private constructor(context: Context) {
     return RoutedBridge(routerFor(endpoint, addr))
   }
 
+  /** Forgets [endpoint]'s transport state so the next call dials it afresh (Reconnect now). */
+  suspend fun redial(endpoint: Endpoint) {
+    routers[endpoint]?.redial()
+  }
+
   /** The badge for [endpoint]'s row. Call it on each poll tick so the hold-down can settle. */
   fun badge(endpoint: Endpoint): TransportBadge {
     val addr = endpoint.iroh ?: return TransportBadge.TAILNET

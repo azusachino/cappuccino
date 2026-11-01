@@ -149,6 +149,32 @@ class ConnectedViewModelPairingTest {
     }
 
   @Test
+  fun secondTailnetSubmitWhileTheFirstVerifiesIsIgnored() =
+    runTest(dispatcher) {
+      val store = MemoryStore(listOf(irohProfile))
+      val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bridge =
+        object : BridgeTransport by VerifyingBridge(machine) {
+          override suspend fun verify(expectedMachine: UUID?): UUID {
+            gate.await()
+            return machine
+          }
+        }
+      val vm = ConnectedViewModel(store, { bridge }, {}, SavedStateHandle())
+
+      vm.addTailnetUrl(irohProfile.id, "https://office.example")
+      vm.addTailnetUrl(irohProfile.id, "https://other.example")
+      gate.complete(Unit)
+      advanceUntilIdle()
+
+      assertEquals(
+        Endpoint.parse("https://office.example").base,
+        store.read().single().endpoint.base,
+      )
+      assertNull(vm.state.value.addError)
+    }
+
+  @Test
   fun addTailnetUrlLeavesTheProfileUnchangedWhenTheBridgeIsAnotherMachine() =
     runTest(dispatcher) {
       val store = MemoryStore(listOf(irohProfile))

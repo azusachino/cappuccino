@@ -95,6 +95,7 @@ import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ConnectionState
+import com.azusachino.cappuccino.io.MachineConnection
 import com.azusachino.cappuccino.io.agentDraftKey
 import com.azusachino.cappuccino.io.agentSendKey
 import com.azusachino.cappuccino.io.canMutate
@@ -1258,7 +1259,7 @@ fun CappuccinoScreen(
                             )
                             val statusSubtitle =
                               listOfNotNull(
-                                  machine.connection.statusText(),
+                                  machine.statusLabel(),
                                   when (state.machineBadges[profile.id]) {
                                     com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
                                       "iroh direct"
@@ -1278,18 +1279,33 @@ fun CappuccinoScreen(
                             )
                           }
                           Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (machine.connection is ConnectionState.Error) {
-                              IconButton(
-                                onClick = { actions.refreshProfile(profile.id) },
-                                enabled = !machine.busy,
-                                modifier = Modifier.size(36.dp),
+                            // A fixed slot: the spinner and the button take the same space, so the
+                            // row does not jump as the connection changes.
+                            Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                              if (
+                                machine.connection == ConnectionState.Connecting ||
+                                  machine.connection == ConnectionState.Recovering
                               ) {
-                                Icon(
-                                  painterResource(com.azusachino.cappuccino.R.drawable.ic_refresh),
-                                  contentDescription = "Retry ${profile.label}",
-                                  modifier = Modifier.size(18.dp),
-                                  tint = MaterialTheme.appColors.warn,
+                                CircularProgressIndicator(
+                                  Modifier.size(18.dp),
+                                  strokeWidth = 2.dp,
+                                  color = MaterialTheme.appColors.warn,
                                 )
+                              } else if (machine.connection != ConnectionState.Connected) {
+                                IconButton(
+                                  onClick = { actions.refreshProfile(profile.id) },
+                                  enabled = !machine.busy,
+                                  modifier = Modifier.size(36.dp),
+                                ) {
+                                  Icon(
+                                    painterResource(
+                                      com.azusachino.cappuccino.R.drawable.ic_refresh
+                                    ),
+                                    contentDescription = "Reconnect ${profile.label}",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.appColors.warn,
+                                  )
+                                }
                               }
                             }
                             Box {
@@ -1308,6 +1324,13 @@ fun CappuccinoScreen(
                                 expanded = machineMenuId == profile.id,
                                 onDismissRequest = { machineMenuId = null },
                               ) {
+                                DropdownMenuItem(
+                                  text = { Text("Reconnect now") },
+                                  onClick = {
+                                    actions.reconnectProfile(profile.id)
+                                    machineMenuId = null
+                                  },
+                                )
                                 DropdownMenuItem(
                                   text = { Text("Connection details") },
                                   onClick = {
@@ -1694,11 +1717,17 @@ fun CappuccinoScreen(
   }
 }
 
+/** The row's status word; a retry shows which attempt the stream is on. */
+private fun MachineConnection.statusLabel(): String =
+  if (connection == ConnectionState.Recovering && reconnectAttempt > 0)
+    "Reconnecting · attempt $reconnectAttempt"
+  else connection.statusText()
+
 private fun ConnectionState.statusText(): String =
   when (this) {
     ConnectionState.Disconnected -> "Not connected"
     ConnectionState.Connecting -> "Connecting"
     ConnectionState.Connected -> "Connected"
-    ConnectionState.Recovering -> "Recovering"
+    ConnectionState.Recovering -> "Reconnecting"
     is ConnectionState.Error -> "Connection error"
   }
