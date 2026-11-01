@@ -195,6 +195,7 @@ private struct AddMachineSheet: View {
   @State private var label = ""
   @State private var error: String?
   @State private var connecting = false
+  @State private var scanning = false
 
   var body: some View {
     NavigationStack {
@@ -214,11 +215,19 @@ private struct AddMachineSheet: View {
             .autocorrectionDisabled()
             .font(.callout.monospaced())
             .accessibilityIdentifier("pairing-payload")
+          #if os(iOS)
+            Button {
+              scanning = true
+            } label: {
+              Label("Scan QR code", systemImage: "qrcode.viewfinder")
+            }
+            .accessibilityIdentifier("scan-pairing-qr")
+          #endif
         } header: {
           Text("Pair over iroh")
         } footer: {
           Text(
-            "Paste the payload from `cappuccino-bridge pair`. A payload takes the place of the bridge address."
+            "Scan the QR from `cappuccino-bridge pair`, or paste its payload. A payload takes the place of the bridge address."
           )
         }
         if let error {
@@ -227,6 +236,11 @@ private struct AddMachineSheet: View {
       }
       .navigationTitle("Add machine")
       .inlineTitle()
+      #if os(iOS)
+        .sheet(isPresented: $scanning) {
+          PairingScannerSheet { payload = $0 }
+        }
+      #endif
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") { dismiss() }

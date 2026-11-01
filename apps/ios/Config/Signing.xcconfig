@@ -1,0 +1,3 @@
+// Signing for every app target. The team belongs to this machine, so it lives in
+// Signing.local.xcconfig (git-ignored). Add DEVELOPMENT_TEAM there, not here.
+#include? "Signing.local.xcconfig"

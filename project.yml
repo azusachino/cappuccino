@@ -1,4 +1,7 @@
 name: Cappuccino
+configFiles:
+  Debug: apps/ios/Config/Signing.xcconfig
+  Release: apps/ios/Config/Signing.xcconfig
 options:
   minimumXcodeGenVersion: 2.46.0
   indentWidth: 2
@@ -22,14 +25,17 @@ targets:
     platform: iOS
     sources:
       - path: apps/ios/App
+      - path: apps/ios/Assets.xcassets
     dependencies:
       - package: CappuccinoApple
         product: CappuccinoUI
     settings:
       base:
         PRODUCT_NAME: Cappuccino
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: com.azusachino.cappuccino
         INFOPLIST_KEY_CFBundleDisplayName: Cappuccino
+        INFOPLIST_KEY_NSCameraUsageDescription: "Scan the pairing QR code that cappuccino-bridge prints, to pair this iPhone with your Mac."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         TARGETED_DEVICE_FAMILY: "1,2"
