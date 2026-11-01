@@ -167,7 +167,8 @@ private struct InstantDiscovery: BridgeMachineServing {
 
   private func fixture(
     capabilities: [String: Bool] = ["agent_control": true], events: [AgentStreamEvent]? = nil,
-    nativeRef: String? = "pi:synthetic", holdOpen: Bool? = nil
+    nativeRef: String? = "pi:synthetic", holdOpen: Bool? = nil,
+    history: SavedConversationStore? = nil
   ) async throws -> Fixture {
     let suite = "cappuccino-session-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
@@ -191,10 +192,12 @@ private struct InstantDiscovery: BridgeMachineServing {
       turns: [], source: "canonical_log",
       conversationID: "pi:" + String(repeating: "a", count: 64), machineID: machineID, stats: nil)
     let counter = ClientCounter()
-    let model = SessionModel(machines: machines) {
-      counter.count += 1
-      return bridge
-    }
+    let model = SessionModel(
+      machines: machines,
+      makeClient: {
+        counter.count += 1
+        return bridge
+      }, history: history)
     let agent = AgentRow(
       machineID: machineID.uuidString, sessionID: "s-1", label: "pi", branch: nil, working: false,
       provider: "pi", paneID: "pane-1", nativeSessionRef: nativeRef)
@@ -210,6 +213,46 @@ private struct InstantDiscovery: BridgeMachineServing {
       await Task.yield()
     }
     #expect(fx.model.isLive, "Controlled stream must deliver its fresh baseline")
+  }
+
+  @Test func canonicalTranscriptIsSavedForHistoryAndTerminalOnlyIsNot() async throws {
+    let directory = URL.temporaryDirectory.appendingPathComponent("history-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let history = SavedConversationStore(directory: directory)
+    let conversationID = "pi:" + String(repeating: "a", count: 64)
+    let fx = try await fixture(history: history)
+    fx.bridge.snapshot = ConversationSnapshot(
+      turns: [ConversationTurn(id: "u1", role: "user", timestamp: nil, text: "hi", parts: [])],
+      source: "canonical_log", conversationID: conversationID, machineID: fx.machineID, stats: nil)
+    await selectLive(fx)
+    // The save runs detached from the main actor, so poll briefly for the file.
+    for _ in 0..<200 {
+      if try !history.list().isEmpty { break }
+      try await Task.sleep(nanoseconds: 5_000_000)
+    }
+    let saved = try history.list()
+    #expect(saved.count == 1)
+    #expect(saved.first?.conversationID == conversationID)
+    #expect(saved.first?.turns.first?.text == "hi")
+    fx.model.clearSelection()
+  }
+
+  @Test func terminalOnlySnapshotIsNotSaved() async throws {
+    let directory = URL.temporaryDirectory.appendingPathComponent("history-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let history = SavedConversationStore(directory: directory)
+    let fx = try await fixture(history: history)
+    fx.bridge.snapshot = ConversationSnapshot(
+      turns: [ConversationTurn(id: "u1", role: "user", timestamp: nil, text: "hi", parts: [])],
+      source: "scrollback", conversationID: nil, machineID: fx.machineID, stats: nil)
+    await selectLive(fx)
+    // Wait until the scrollback load has been applied, so the empty result is not a race.
+    for _ in 0..<200 where fx.model.conversationSource == nil {
+      try await Task.sleep(nanoseconds: 5_000_000)
+    }
+    #expect(fx.model.conversationSource == "scrollback")
+    #expect(try history.list().isEmpty)
+    fx.model.clearSelection()
   }
 
   @Test func controlsRequireAdvertisedCapabilityAndUseAFreshClientEach() async throws {

@@ -209,7 +209,7 @@ public enum ConversationPart: Equatable, Sendable {
   case toolCall(ToolCall)
 }
 
-public struct ToolCall: Equatable, Sendable {
+public struct ToolCall: Codable, Equatable, Sendable {
   public let name: String
   public let input: String
   public let output: String?

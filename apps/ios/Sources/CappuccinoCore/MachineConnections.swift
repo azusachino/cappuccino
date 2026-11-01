@@ -38,13 +38,16 @@ public final class MachineConnections {
   @ObservationIgnored private var generations: [UUID: UUID] = [:]
   @ObservationIgnored private var manuallyDisconnected: Set<UUID> = []
   @ObservationIgnored private var foreground = false
+  public let log: ConnectionLog
 
   public init(
     store: BridgeProfileStore = BridgeProfileStore(),
-    client: any BridgeMachineServing = BridgeClient()
+    client: any BridgeMachineServing = BridgeClient(),
+    log: ConnectionLog = ConnectionLog()
   ) {
     self.store = store
     self.client = client
+    self.log = log
     do {
       profiles = try store.read()
     } catch {
@@ -151,6 +154,7 @@ public final class MachineConnections {
     if connection.phase != .connected { connection.phase = .connecting }
     connection.refreshing = manual
     connections[id] = connection
+    log.log("MACHINE", "Refreshing \(profile.name)")
     jobs[id] = Task { [weak self, client] in
       do {
         let verified = try await client.verifyMachine(
@@ -173,13 +177,16 @@ public final class MachineConnections {
         result.details = verified.details
         result.name = verified.name
         self.connections[id] = result
+        self.log.log("MACHINE", "\(profile.name) connected, \(agents.count) agents")
         self.jobs.removeValue(forKey: id)
       } catch {
         guard let self, self.generations[id] == generation, self.foreground else { return }
         if error is CancellationError { return }
+        let reason = (error as? BridgeError)?.message ?? error.localizedDescription
         var result = MachineConnection()
-        result.phase = .failed((error as? BridgeError)?.message ?? error.localizedDescription)
+        result.phase = .failed(reason)
         self.connections[id] = result
+        self.log.log("MACHINE", "\(profile.name) failed: \(reason)", level: .error)
         self.jobs.removeValue(forKey: id)
       }
     }
