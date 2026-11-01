@@ -104,7 +104,9 @@ private struct MachineSection: View {
 
   var body: some View {
     Section {
-      ConnectionStatusRow(phase: state.phase, refreshing: state.refreshing)
+      ConnectionStatusRow(phase: state.phase, refreshing: state.refreshing) {
+        machines.refresh(profile.id)
+      }
       if let transport = state.transport.label {
         Text(transport).font(.caption).foregroundStyle(.secondary)
       }
@@ -141,6 +143,7 @@ private struct MachineSection: View {
 private struct ConnectionStatusRow: View {
   let phase: MachineConnectionPhase
   let refreshing: Bool
+  let retry: () -> Void
 
   var body: some View {
     switch phase {
@@ -152,8 +155,14 @@ private struct ConnectionStatusRow: View {
     case .connected:
       Label("Connected", systemImage: "checkmark.circle").foregroundStyle(.green)
     case .failed(let message):
-      Label("Failed: \(message)", systemImage: "exclamationmark.triangle")
-        .foregroundStyle(.red)
+      HStack {
+        Label("Failed: \(message)", systemImage: "exclamationmark.triangle")
+          .foregroundStyle(.red)
+        Spacer(minLength: 8)
+        Button("Retry", action: retry)
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+      }
     }
   }
 }

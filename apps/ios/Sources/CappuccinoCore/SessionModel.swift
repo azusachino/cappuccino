@@ -100,6 +100,12 @@ public final class SessionModel {
   public var isLive: Bool { stream.generation != nil && stream.agentStatus != nil }
   public var canControl: Bool { isLive && capabilities?["agent_control"] == true }
 
+  static let reconnecting = "Reconnecting to the agent"
+  /// The stream dropped and is being re-established; `streamError` holds no failure yet.
+  public var isReconnecting: Bool { streamError == Self.reconnecting }
+  /// The selected agent's first conversation read has not finished, successfully or not.
+  public var isLoadingHistory: Bool { selectedAgent != nil && conversationSource == nil }
+
   /// Leaves the agent: its stream and conversation stop, its results are dropped, and the
   /// transcript is cleared. Switching agents bumps the same epoch.
   public func clearSelection(profileID: UUID? = nil) {
@@ -129,7 +135,7 @@ public final class SessionModel {
     foreground = value
     if value {
       if selectedAgent != nil {
-        streamError = "Reconnecting to the agent"
+        streamError = Self.reconnecting
         startStream(token: epoch, recovering: true)
       }
     } else {
@@ -229,7 +235,7 @@ public final class SessionModel {
   public func retryStream() {
     guard foreground, selectedAgent != nil else { return }
     invalidateLiveStream()
-    streamError = "Reconnecting to the agent"
+    streamError = Self.reconnecting
     startStream(token: epoch, recovering: true)
   }
 
@@ -330,7 +336,7 @@ public final class SessionModel {
           streamError = (error as? BridgeError)?.message ?? error.localizedDescription
           return
         }
-        streamError = "Reconnecting to the agent"
+        streamError = Self.reconnecting
         do { try await retryPause(delay) } catch { return }
       }
     }

@@ -27,7 +27,13 @@ import SwiftUI
               .font(.footnote)
               .foregroundStyle(palette.muted)
           }
-          if !session.isLive, session.streamError == nil, session.turns.isEmpty {
+          if session.isLoadingHistory, session.turns.isEmpty {
+            HStack(spacing: 8) {
+              ProgressView()
+              Text("Loading history…").foregroundStyle(palette.muted)
+            }
+            .accessibilityIdentifier("loading-history")
+          } else if !session.isLive, session.streamError == nil, session.turns.isEmpty {
             HStack(spacing: 8) {
               ProgressView()
               Text("Connecting…").foregroundStyle(palette.muted)
@@ -51,11 +57,6 @@ import SwiftUI
           // keeps its card on the page.
           if let prompt = session.stream.pendingPrompt, !promptOpen {
             PendingPromptRow(title: prompt.title) { promptOpen = true }
-          }
-          if let error = session.streamError {
-            Text(error).foregroundStyle(palette.error)
-            Button("Retry connection") { session.retryStream() }
-              .accessibilityIdentifier("retry-stream")
           }
           if let error = session.actionError {
             Text(error).foregroundStyle(palette.error).accessibilityIdentifier("action-error")
@@ -86,6 +87,14 @@ import SwiftUI
       // send button.
       .bottomComposer {
         VStack(alignment: .trailing, spacing: 8) {
+          // Connection trouble stays above the composer, visible wherever the reader has scrolled.
+          if let error = session.streamError {
+            StreamBanner(
+              message: session.isReconnecting
+                ? "Reconnecting; earlier output may be missing" : error,
+              reconnecting: session.isReconnecting, palette: palette
+            ) { session.retryStream() }
+          }
           if !follow.following {
             JumpToLatestButton(hasNewOutput: hasNewOutput) {
               follow.jumpToLatest()
@@ -182,6 +191,43 @@ func statusWord(_ status: String) -> String {
   case "blocked": "Waiting for your answer"
   case "": "Idle"
   default: "Idle"
+  }
+}
+
+/// The stream's state when it is not live: an amber strip while it retries, as Android's warning
+/// banner shows it, or the failure with Retry once it has given up. Retry only re-reads; it never
+/// replays a prompt, answer or control.
+private struct StreamBanner: View {
+  let message: String
+  let reconnecting: Bool
+  let palette: CatppuccinPalette
+  let retry: () -> Void
+
+  var body: some View {
+    HStack(spacing: 10) {
+      if reconnecting {
+        ProgressView().controlSize(.small)
+      } else {
+        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(palette.error)
+      }
+      Text(message)
+        .font(.footnote)
+        .foregroundStyle(palette.text)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      if !reconnecting {
+        Button("Retry", action: retry)
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .accessibilityIdentifier("retry-stream")
+      }
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .background(
+      (reconnecting ? palette.warn : palette.error).opacity(0.18), in: .rect(cornerRadius: 12)
+    )
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier(reconnecting ? "reconnecting" : "stream-error")
   }
 }
 

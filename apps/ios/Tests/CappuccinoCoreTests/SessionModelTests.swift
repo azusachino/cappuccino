@@ -469,6 +469,7 @@ private struct InstantDiscovery: BridgeMachineServing {
       await Task.yield()
     }
     #expect(await gate.reads == 1)
+    #expect(fx.model.isLoadingHistory)
     for _ in 0..<20 { fx.model.requestConversation() }
     #expect(await gate.reads == 1)
     fx.bridge.continuation?.yield(
@@ -476,6 +477,7 @@ private struct InstantDiscovery: BridgeMachineServing {
     await fx.model.awaitStreamForTesting()
     #expect(!fx.model.isLive)
     #expect(fx.model.streamError != nil)
+    #expect(fx.model.isReconnecting)
     await gate.release()
     for _ in 0..<100 {
       if fx.model.turns.last?.text == "Settled 2" { break }
@@ -483,6 +485,7 @@ private struct InstantDiscovery: BridgeMachineServing {
     }
     #expect(await gate.reads == 2)
     #expect(fx.model.turns.last?.text == "Settled 2")
+    #expect(!fx.model.isLoadingHistory)
     #expect(!fx.model.isLive)
     #expect(fx.model.streamError != nil)
   }
@@ -593,6 +596,7 @@ private struct InstantDiscovery: BridgeMachineServing {
       #expect(fx.model.stream.pendingPrompt == nil)
       #expect(fx.model.stream.agentStatusDetail == nil)
       #expect(fx.model.streamError != nil)
+      #expect(!fx.model.isReconnecting)
       await fx.model.answerPrompt("p-stale")
       #expect(fx.bridge.sent.isEmpty)
     }
