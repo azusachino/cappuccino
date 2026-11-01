@@ -430,6 +430,8 @@ internal constructor(
    */
   private fun updateEndpoint(profileId: String, change: suspend (Endpoint) -> Endpoint) {
     val profile = mutableState.value.profiles.firstOrNull { it.id == profileId } ?: return
+    // A second submit while a pairing is running is ignored, not restarted.
+    if (addJob?.isActive == true) return
     addEpoch++
     val token = addEpoch
     addJob?.cancel()
@@ -453,6 +455,7 @@ internal constructor(
   }
 
   private fun startAdd(label: String, endpointFor: suspend () -> Endpoint) {
+    if (addJob?.isActive == true) return
     addEpoch++
     val token = addEpoch
     addJob?.cancel()
