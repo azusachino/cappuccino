@@ -9,6 +9,7 @@ import SwiftUI
   @State private var follow = FollowState()
   @State private var hasNewOutput = false
   @State private var showingDetails = false
+  @State private var showingHistory = false
   @State private var promptOpen = false
   @Environment(\.colorScheme) private var colorScheme
 
@@ -27,21 +28,36 @@ import SwiftUI
               .font(.footnote)
               .foregroundStyle(palette.muted)
           }
+          if session.isLoadingHistory, session.turns.isEmpty {
+            HStack(spacing: 8) {
+              ProgressView()
+              Text("Loading history…").foregroundStyle(palette.muted)
+            }
+            .accessibilityIdentifier("loading-history")
+          } else if !session.isLive, session.streamError == nil, session.turns.isEmpty {
+            HStack(spacing: 8) {
+              ProgressView()
+              Text("Connecting…").foregroundStyle(palette.muted)
+            }
+            .accessibilityIdentifier("connecting")
+          }
           ForEach(chatTurns(session.turns)) { turn in
             TurnRow(
               turn: turn, newest: newestTurnIDs(session.turns).contains(turn.id),
               assistantLabel: session.selectedAgent?.label ?? "Assistant")
+          }
+          // With no canonical history, the live output stands in, labelled as Android labels it.
+          if session.turns.isEmpty, !session.stream.rows().isEmpty {
+            ScrollbackRows(
+              rows: session.stream.rows(),
+              isScrollback: ["scrollback", "terminal_scrollback"].contains(
+                session.conversationSource))
           }
           LiveStatusLine(status: liveStatusWord, detail: session.stream.agentStatusDetail)
           // The sheet can be swiped away; the waiting prompt stays reachable here, as Android
           // keeps its card on the page.
           if let prompt = session.stream.pendingPrompt, !promptOpen {
             PendingPromptRow(title: prompt.title) { promptOpen = true }
-          }
-          if let error = session.streamError {
-            Text(error).foregroundStyle(palette.error)
-            Button("Retry connection") { session.retryStream() }
-              .accessibilityIdentifier("retry-stream")
           }
           if let error = session.actionError {
             Text(error).foregroundStyle(palette.error).accessibilityIdentifier("action-error")
@@ -68,20 +84,29 @@ import SwiftUI
           PromptSheet(session: session, prompt: prompt)
         }
       }
+      // The jump control sits in the bottom bar above the composer, so it never overlaps the
+      // send button.
       .bottomComposer {
-        Composer(session: session)
-          .padding(.horizontal, 12)
-          .padding(.bottom, 4)
-      }
-      .overlay(alignment: .bottomTrailing) {
-        if !follow.following {
-          JumpToLatestButton(hasNewOutput: hasNewOutput) {
-            follow.jumpToLatest()
-            hasNewOutput = false
-            withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+        VStack(alignment: .trailing, spacing: 8) {
+          // Connection trouble stays above the composer, visible wherever the reader has scrolled.
+          if let error = session.streamError {
+            StreamBanner(
+              message: session.isReconnecting
+                ? "Reconnecting; earlier output may be missing" : error,
+              reconnecting: session.isReconnecting, palette: palette
+            ) { session.retryStream() }
           }
-          .padding(16)
+          if !follow.following {
+            JumpToLatestButton(hasNewOutput: hasNewOutput) {
+              follow.jumpToLatest()
+              hasNewOutput = false
+              withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+          }
+          Composer(session: session)
         }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
       }
     }
     .onChange(of: session.stream.pendingPrompt?.promptID) { _, promptID in
@@ -90,6 +115,8 @@ import SwiftUI
     .onAppear { promptOpen = session.stream.pendingPrompt != nil }
     .navigationTitle(session.selectedAgent?.label ?? "Conversation")
     .inlineTitle()
+    // The conversation has its own composer and back button; the app's tabs stay on the list.
+    .hideTabBarOnIOS()
     .toolbar {
       ToolbarItem(placement: .principal) {
         VStack(spacing: 0) {
@@ -100,6 +127,11 @@ import SwiftUI
       ToolbarItem(placement: .primaryAction) {
         Menu {
           Button("Connection details", systemImage: "info.circle") { showingDetails = true }
+          if session.historyStore != nil, session.selectedAgent != nil {
+            Button("Conversation history", systemImage: "clock.arrow.circlepath") {
+              showingHistory = true
+            }
+          }
         } label: {
           Label("Conversation actions", systemImage: "ellipsis.circle")
         }
@@ -108,6 +140,13 @@ import SwiftUI
     .sheet(isPresented: $showingDetails) {
       if let profile = session.selectedProfile {
         ConnectionDetailsSheet(profile: profile, state: machines.connections[profile.id])
+      }
+    }
+    .sheet(isPresented: $showingHistory) {
+      if let store = session.historyStore, let agent = session.selectedAgent {
+        AgentHistorySheet(
+          store: store, agent: agent, machineName: session.selectedProfile?.name ?? "",
+          currentConversationID: session.conversationID)
       }
     }
   }
@@ -165,6 +204,43 @@ func statusWord(_ status: String) -> String {
   case "blocked": "Waiting for your answer"
   case "": "Idle"
   default: "Idle"
+  }
+}
+
+/// The stream's state when it is not live: an amber strip while it retries, as Android's warning
+/// banner shows it, or the failure with Retry once it has given up. Retry only re-reads; it never
+/// replays a prompt, answer or control.
+private struct StreamBanner: View {
+  let message: String
+  let reconnecting: Bool
+  let palette: CatppuccinPalette
+  let retry: () -> Void
+
+  var body: some View {
+    HStack(spacing: 10) {
+      if reconnecting {
+        ProgressView().controlSize(.small)
+      } else {
+        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(palette.error)
+      }
+      Text(message)
+        .font(.footnote)
+        .foregroundStyle(palette.text)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      if !reconnecting {
+        Button("Retry", action: retry)
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .accessibilityIdentifier("retry-stream")
+      }
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .background(
+      (reconnecting ? palette.warn : palette.error).opacity(0.18), in: .rect(cornerRadius: 12)
+    )
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier(reconnecting ? "reconnecting" : "stream-error")
   }
 }
 
@@ -229,5 +305,31 @@ private struct LiveStatusLine: View {
         }
       }
     }
+  }
+}
+
+/// Live output lines shown when the transcript is not available, labelled as Android labels them.
+private struct ScrollbackRows: View {
+  let rows: [OutputRow]
+  let isScrollback: Bool
+  @Environment(\.colorScheme) private var colorScheme
+
+  var body: some View {
+    let palette = CatppuccinPalette.current(colorScheme)
+    VStack(alignment: .leading, spacing: 6) {
+      Text(
+        isScrollback
+          ? "Recent output · Scrollback fallback" : "Recent output · History not verified"
+      )
+      .font(.caption2)
+      .foregroundStyle(palette.muted)
+      ForEach(rows, id: \.key) { row in
+        Text(row.text)
+          .font(.system(.footnote, design: .monospaced))
+          .foregroundStyle(row.gap ? palette.muted : palette.text)
+          .textSelection(.enabled)
+      }
+    }
+    .accessibilityIdentifier("scrollback-rows")
   }
 }

@@ -86,7 +86,7 @@ build-ios: generate ## Build an unsigned iOS Simulator app
 	$(XCODEBUILD) -scheme Cappuccino -destination 'generic/platform=iOS Simulator' build
 
 ipa: ## Build an unsigned release iPhone .ipa with xtool (apps/ios/xtool/Cappuccino.ipa)
-	cd apps/ios && $(XTOOL) dev build --configuration release --ipa
+	cd apps/ios && $(XTOOL) dev build --configuration release --ipa && scripts/add-app-icon.sh xtool/Cappuccino.ipa
 
 dev: ## Build, sign and install on a connected iPhone with xtool (run xtool setup once first)
 	cd apps/ios && $(XTOOL) dev

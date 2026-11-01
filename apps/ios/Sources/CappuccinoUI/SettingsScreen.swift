@@ -41,7 +41,9 @@ import SwiftUI
         }
         Section("About") {
           Button("About Cappuccino") { showingGuide = true }
-          LabeledContent("Version", value: Self.version)
+          ShareLink(item: Self.version) {
+            LabeledContent("Version", value: Self.version)
+          }
         }
       }
       .navigationTitle("Settings")

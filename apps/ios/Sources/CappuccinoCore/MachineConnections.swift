@@ -22,6 +22,8 @@ public struct MachineConnection: Equatable, Sendable {
   /// Advertisements from the last verified handshake; nil until connected.
   public var details: BridgeDetails?
   public var name: String?
+  /// The transport the last verified request used, shown on the machine row.
+  public var transport: TransportBadge = .noReading
 
   public init() {}
 }
@@ -39,6 +41,7 @@ public final class MachineConnections {
   @ObservationIgnored private var manuallyDisconnected: Set<UUID> = []
   @ObservationIgnored private var foreground = false
   @ObservationIgnored private var routes: [UUID: MachineRoute] = [:]
+  @ObservationIgnored private var poller: Task<Void, Never>?
   public let log: ConnectionLog
 
   public init(
@@ -120,6 +123,15 @@ public final class MachineConnections {
     return router
   }
 
+  /// Runs one bridge request on the machine's best transport: iroh first, then the tailnet
+  /// fallback. A mutation is never resent over the other transport once it may have been sent.
+  public func request<T: Sendable>(
+    _ profile: BridgeProfile, mutation: Bool = false,
+    _ block: @escaping @Sendable (URL) async throws -> T
+  ) async throws -> T {
+    try await route(for: profile).request(mutation: mutation, block)
+  }
+
   /// Pairs an iroh machine from its pairing payload and saves it under its verified identity.
   public func addIrohMachine(payload: String, label: String) async throws {
     let profile = try await pairIrohMachine(payload: payload, name: label, verifier: client)
@@ -152,7 +164,9 @@ public final class MachineConnections {
     foreground = active
     if active {
       refreshAll()
+      startPolling()
     } else {
+      stopPolling()
       for id in Array(jobs.keys) { invalidate(id) }
       for id in Array(connections.keys) {
         connections[id]?.phase = .disconnected
@@ -165,6 +179,25 @@ public final class MachineConnections {
     invalidate(id)
     manuallyDisconnected.insert(id)
     connections[id] = MachineConnection()
+  }
+
+  /// Agent status goes stale without polling. While the app is in the foreground, every machine
+  /// is refreshed on a fixed cadence (Android's direct-path rate); a refresh already in flight is
+  /// skipped by refreshAll.
+  private func startPolling() {
+    guard poller == nil else { return }
+    poller = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(pollIntervalSeconds(.noReading)))
+        guard !Task.isCancelled, let self else { return }
+        self.refreshAll()
+      }
+    }
+  }
+
+  private func stopPolling() {
+    poller?.cancel()
+    poller = nil
   }
 
   public func refreshAll() {
@@ -212,6 +245,7 @@ public final class MachineConnections {
         result.agents = agents
         result.details = verified.details
         result.name = verified.name
+        result.transport = await router.badge()
         self.connections[id] = result
         self.log.log("MACHINE", "\(profile.name) connected, \(agents.count) agents")
         self.jobs.removeValue(forKey: id)

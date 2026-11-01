@@ -25,7 +25,7 @@ public struct FixtureBridge: Sendable {
 
   static let agent = AgentRow(
     machineID: machineID.uuidString, sessionID: sessionID, label: "pi on fixture", branch: "main",
-    working: false, provider: "pi")
+    working: false, provider: "pi", paneID: "p-fixture", nativeSessionRef: "pi:fixture")
 
   static let turns: [ConversationTurn] = [
     ConversationTurn(
@@ -75,21 +75,24 @@ extension FixtureBridge: AgentSessionServing {
   }
 
   public func controlAgent(
-    base: URL, session: String, action: String, capabilities: [String: Bool]?
+    base: URL, session: String, binding: SessionBinding, action: String,
+    capabilities: [String: Bool]?
   )
     async throws
   {}
 
-  public func submitPrompt(base: URL, session: String, text: String, confirmed: Bool) async throws {
-  }
+  public func submitPrompt(
+    base: URL, session: String, binding: SessionBinding, text: String, confirmed: Bool
+  ) async throws {}
 
   public func answerPrompt(
-    base: URL, session: String, promptID: String, optionIndex: Int?, optionID: String?,
-    action: String?
+    base: URL, session: String, binding: SessionBinding, promptID: String, optionIndex: Int?,
+    optionID: String?, action: String?
   ) async throws {}
 
   public func answerQuestions(
-    base: URL, session: String, promptID: String, answers: [QuestionAnswer]
+    base: URL, session: String, binding: SessionBinding, promptID: String,
+    answers: [QuestionAnswer]
   )
     async throws
   {}

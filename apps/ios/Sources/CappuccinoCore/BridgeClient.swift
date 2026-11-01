@@ -94,10 +94,13 @@ public struct BridgeClient: Sendable {
   /// Sends a user prompt to an agent session via Bridge V2. `confirmed` says the owner approved
   /// the agent command it starts with; the bridge refuses an unconfirmed command with 409.
   public func submitPrompt(
-    base url: URL, session: String, text: String, confirmed: Bool = false
+    base url: URL, session: String, binding: SessionBinding, text: String,
+    confirmed: Bool = false
   ) async throws {
     let endpoint = agentURL(url, session: session, "prompt")
-    var body: [String: Any] = ["type": "prompt", "text": text]
+    var body: [String: Any] = [
+      "type": "prompt", "text": text, "expected_session": binding.json,
+    ]
     if confirmed { body["confirmed"] = true }
     _ = try await post(endpoint, body: body)
   }
@@ -106,6 +109,7 @@ public struct BridgeClient: Sendable {
   public func answerPrompt(
     base url: URL,
     session: String,
+    binding: SessionBinding,
     promptID: String,
     optionIndex: Int? = nil,
     optionID: String? = nil,
@@ -115,6 +119,7 @@ public struct BridgeClient: Sendable {
     var body: [String: Any] = [
       "type": "answer_prompt",
       "prompt_id": promptID,
+      "expected_session": binding.json,
     ]
     if let optionIndex { body["option_index"] = optionIndex }
     if let optionID { body["option_id"] = optionID }
@@ -165,7 +170,8 @@ public struct BridgeClient: Sendable {
     }
     let (data, http) = try await boundedFetch(request)
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      throw BridgeError.protocolError("response is not a JSON object")
+      throw BridgeError.protocolError(
+        "response is not a JSON object (HTTP \(http.statusCode), \(data.count) bytes)")
     }
     switch http.statusCode {
     case 200, 201:
@@ -184,7 +190,8 @@ public struct BridgeClient: Sendable {
     request.timeoutInterval = timeout
     let (data, http) = try await boundedFetch(request)
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      throw BridgeError.protocolError("response is not a JSON object")
+      throw BridgeError.protocolError(
+        "response is not a JSON object (HTTP \(http.statusCode), \(data.count) bytes)")
     }
     switch http.statusCode {
     case 200:
@@ -255,18 +262,21 @@ extension BridgeClient {
   /// Owner control (`interrupt` or `new_session`). A bridge that advertises
   /// `agent_control: false` never receives it.
   public func controlAgent(
-    base url: URL, session: String, action: String, capabilities: [String: Bool]? = nil
+    base url: URL, session: String, binding: SessionBinding, action: String,
+    capabilities: [String: Bool]? = nil
   ) async throws {
     guard capabilities?["agent_control"] != false else {
       throw BridgeError.protocolError("Agent controls unsupported by this bridge")
     }
     _ = try await post(
-      agentURL(url, session: session, "control"), body: ["action": action])
+      agentURL(url, session: session, "control"),
+      body: ["action": action, "expected_session": binding.json])
   }
 
   /// Answers every question of an AskUserQuestion card in one structured submission.
   public func answerQuestions(
-    base url: URL, session: String, promptID: String, answers: [QuestionAnswer]
+    base url: URL, session: String, binding: SessionBinding, promptID: String,
+    answers: [QuestionAnswer]
   ) async throws {
     let rows: [[String: Any]] = answers.map { answer in
       var row: [String: Any] = ["selected": answer.selected]
@@ -275,7 +285,10 @@ extension BridgeClient {
     }
     _ = try await post(
       agentURL(url, session: session, "prompt"),
-      body: ["type": "answer_question", "prompt_id": promptID, "answers": rows])
+      body: [
+        "type": "answer_question", "prompt_id": promptID, "answers": rows,
+        "expected_session": binding.json,
+      ])
   }
 
   /// Locators such as `w1:p3K` are one path component. Percent-encoding keeps a

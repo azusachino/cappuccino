@@ -72,6 +72,37 @@ struct SavedConversationStoreTests {
     #expect(try store.list().map(\.conversationID) == [conversationID(1)])
   }
 
+  @Test func listsTheSameMachineAndKindNewestFirst() throws {
+    let store = SavedConversationStore(directory: directory())
+    let first = saved(1, at: base)
+    try store.save(first)
+    try store.save(saved(2, at: base.addingTimeInterval(30)))
+    let again = SavedConversation(
+      agent: first.agent, conversationID: conversationID(3), savedAt: base.addingTimeInterval(60),
+      turns: first.turns, omittedMessages: 0, omittedTools: 0)
+    try store.save(again)
+    let elsewhere = AgentRow(
+      machineID: UUID().uuidString, sessionID: "s1", label: "Pi 1", branch: nil, working: false,
+      provider: "pi", status: "idle")
+    try store.save(
+      SavedConversation(
+        agent: elsewhere, conversationID: conversationID(4), savedAt: base, turns: first.turns,
+        omittedMessages: 0, omittedTools: 0))
+    #expect(
+      try store.list(for: first.agent).map(\.conversationID) == [
+        conversationID(3), conversationID(2), conversationID(1),
+      ])
+    // No conversation of this kind on the machine: the whole machine's show, as Android does.
+    let claude = AgentRow(
+      machineID: machine.uuidString, sessionID: "s9", label: "Claude", branch: nil, working: false,
+      provider: "claude", status: "idle")
+    #expect(
+      try store.list(for: claude).map(\.conversationID) == [
+        conversationID(3), conversationID(2), conversationID(1),
+      ])
+    #expect(try store.list(for: elsewhere).map(\.conversationID) == [conversationID(4)])
+  }
+
   @Test func rejectsIdentityThatDoesNotMatchTheProvider() {
     let store = SavedConversationStore(directory: directory())
     var wrongPrefix = saved(1)

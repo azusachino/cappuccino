@@ -12,6 +12,7 @@ private final class FakeBridge: AgentSessionServing, @unchecked Sendable {
   var failure: Error?
   var latency: UInt64 = 0
   var sent: [String] = []
+  var bindings: [SessionBinding] = []
   var holdOpen = false
   var continuation: AsyncThrowingStream<AgentStreamEvent, Error>.Continuation?
   var streamFailure: Error?
@@ -45,32 +46,37 @@ private final class FakeBridge: AgentSessionServing, @unchecked Sendable {
     }
   }
 
-  func controlAgent(base: URL, session: String, action: String, capabilities: [String: Bool]?)
-    async throws
-  {
-    try await act("control:\(action)")
+  func controlAgent(
+    base: URL, session: String, binding: SessionBinding, action: String,
+    capabilities: [String: Bool]?
+  ) async throws {
+    try await act("control:\(action)", binding)
   }
 
-  func submitPrompt(base: URL, session: String, text: String, confirmed: Bool) async throws {
-    try await act("prompt:\(text)")
+  func submitPrompt(
+    base: URL, session: String, binding: SessionBinding, text: String, confirmed: Bool
+  ) async throws {
+    try await act("prompt:\(text)", binding)
   }
 
   func answerPrompt(
-    base: URL, session: String, promptID: String, optionIndex: Int?, optionID: String?,
-    action: String?
+    base: URL, session: String, binding: SessionBinding, promptID: String, optionIndex: Int?,
+    optionID: String?, action: String?
   ) async throws {
-    try await act("answer:\(promptID)")
+    try await act("answer:\(promptID)", binding)
   }
 
-  func answerQuestions(base: URL, session: String, promptID: String, answers: [QuestionAnswer])
-    async throws
-  {
-    try await act("questions:\(promptID)")
+  func answerQuestions(
+    base: URL, session: String, binding: SessionBinding, promptID: String,
+    answers: [QuestionAnswer]
+  ) async throws {
+    try await act("questions:\(promptID)", binding)
   }
 
-  private func act(_ name: String) async throws {
+  private func act(_ name: String, _ binding: SessionBinding) async throws {
     if latency > 0 { try await Task.sleep(nanoseconds: latency) }
     sent.append(name)
+    bindings.append(binding)
     if let failure { throw failure }
   }
 }
@@ -265,6 +271,20 @@ private struct InstantDiscovery: BridgeMachineServing {
     #expect(fx.bridge.sent == ["control:interrupt", "control:new_session"])
     #expect(fx.counter.count >= before + 2)
     #expect(fx.model.actionError == nil)
+    let expected = SessionBinding(
+      machineID: fx.machineID.uuidString, paneID: "pane-1", nativeSessionRef: "pi:synthetic")
+    #expect(fx.bridge.bindings == [expected, expected])
+  }
+
+  @Test func promptToAnAgentWithoutANativeRefIsRefusedBeforeSending() async throws {
+    let fx = try await fixture(nativeRef: nil)
+    defer { fx.model.clearSelection() }
+    await selectLive(fx)
+    let accepted = await fx.model.sendPrompt("hello")
+    #expect(!accepted)
+    #expect(fx.bridge.sent.isEmpty)
+    #expect(
+      fx.model.actionError == "This agent cannot take commands: its session identity is not known")
   }
 
   @Test func controlIsNotOfferedWhenTheBridgeDeclinesIt() async throws {
@@ -469,6 +489,7 @@ private struct InstantDiscovery: BridgeMachineServing {
       await Task.yield()
     }
     #expect(await gate.reads == 1)
+    #expect(fx.model.isLoadingHistory)
     for _ in 0..<20 { fx.model.requestConversation() }
     #expect(await gate.reads == 1)
     fx.bridge.continuation?.yield(
@@ -476,6 +497,7 @@ private struct InstantDiscovery: BridgeMachineServing {
     await fx.model.awaitStreamForTesting()
     #expect(!fx.model.isLive)
     #expect(fx.model.streamError != nil)
+    #expect(fx.model.isReconnecting)
     await gate.release()
     for _ in 0..<100 {
       if fx.model.turns.last?.text == "Settled 2" { break }
@@ -483,6 +505,7 @@ private struct InstantDiscovery: BridgeMachineServing {
     }
     #expect(await gate.reads == 2)
     #expect(fx.model.turns.last?.text == "Settled 2")
+    #expect(!fx.model.isLoadingHistory)
     #expect(!fx.model.isLive)
     #expect(fx.model.streamError != nil)
   }
@@ -593,6 +616,7 @@ private struct InstantDiscovery: BridgeMachineServing {
       #expect(fx.model.stream.pendingPrompt == nil)
       #expect(fx.model.stream.agentStatusDetail == nil)
       #expect(fx.model.streamError != nil)
+      #expect(!fx.model.isReconnecting)
       await fx.model.answerPrompt("p-stale")
       #expect(fx.bridge.sent.isEmpty)
     }

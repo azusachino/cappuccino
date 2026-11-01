@@ -88,6 +88,10 @@ final class StubURLProtocol: URLProtocol {
         == false)
   }
 
+  let binding = SessionBinding(
+    machineID: "6f1c2d3e-4a5b-4c6d-8e7f-001122334455", paneID: "w1:p3",
+    nativeSessionRef: "pi:native-1")
+
   private func stubbedClient() -> BridgeClient {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [StubURLProtocol.self]
@@ -265,15 +269,37 @@ final class StubURLProtocol: URLProtocol {
       return (200, #"{"status":"delivered"}"#.data(using: .utf8)!)
     }
     try await stubbedClient().submitPrompt(
-      base: base, session: "s-aurora", text: "test input")
+      base: base, session: "s-aurora", binding: binding, text: "test input")
     try await stubbedClient().submitPrompt(
-      base: base, session: "s-aurora", text: "/new", confirmed: true)
+      base: base, session: "s-aurora", binding: binding, text: "/new", confirmed: true)
     let unconfirmed = try JSONSerialization.jsonObject(with: recorder.bodies[0]) as? [String: Any]
     let confirmed = try JSONSerialization.jsonObject(with: recorder.bodies[1]) as? [String: Any]
     #expect(unconfirmed?["text"] as? String == "test input")
     #expect(unconfirmed?["confirmed"] == nil)
     #expect(confirmed?["text"] as? String == "/new")
     #expect(confirmed?["confirmed"] as? Bool == true)
+    for body in [unconfirmed, confirmed] {
+      let expected = body?["expected_session"] as? [String: String]
+      #expect(
+        expected == [
+          "machine_id": "6f1c2d3e-4a5b-4c6d-8e7f-001122334455", "pane_id": "w1:p3",
+          "native_session_ref": "pi:native-1",
+        ])
+    }
+  }
+
+  @Test func sessionBindingNeedsAPaneAndANativeRef() {
+    let machine = "6f1c2d3e-4a5b-4c6d-8e7f-001122334455"
+    func row(pane: String?, native: String?) -> AgentRow {
+      AgentRow(
+        machineID: machine, sessionID: "s-1", label: "pi", branch: nil, working: false,
+        paneID: pane, nativeSessionRef: native)
+    }
+    #expect(SessionBinding(row(pane: "w1:p3", native: "pi:native-1")) == binding)
+    #expect(SessionBinding(row(pane: nil, native: "pi:native-1")) == nil)
+    #expect(SessionBinding(row(pane: "", native: "pi:native-1")) == nil)
+    #expect(SessionBinding(row(pane: "w1:p3", native: nil)) == nil)
+    #expect(SessionBinding(row(pane: "w1:p3", native: "")) == nil)
   }
 
   @Test func answerPromptSendsSelection() async throws {
@@ -285,6 +311,7 @@ final class StubURLProtocol: URLProtocol {
     try await stubbedClient().answerPrompt(
       base: URL(string: "http://127.0.0.1:7392")!,
       session: "s-aurora",
+      binding: binding,
       promptID: "p123",
       optionIndex: 0,
       optionID: "opt-1",

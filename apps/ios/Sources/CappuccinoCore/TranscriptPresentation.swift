@@ -31,6 +31,24 @@ public func chatTurns(_ turns: [ConversationTurn]) -> [ConversationTurn] {
   }
 }
 
+/// A turn's thinking, split from the rest so it shows as one collapsed row per turn: every
+/// thinking block joined in order (nil when there is none), and the parts without it.
+public func separatingThinking(_ parts: [ConversationPart]) -> (
+  thinking: String?, rest: [ConversationPart]
+) {
+  var thoughts: [String] = []
+  var rest: [ConversationPart] = []
+  for part in parts {
+    if case .thinking(let text) = part {
+      let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty { thoughts.append(trimmed) }
+    } else {
+      rest.append(part)
+    }
+  }
+  return (thoughts.isEmpty ? nil : thoughts.joined(separator: "\n\n"), rest)
+}
+
 /// Everything after the last person's message is the newest turn: its activity opens by default.
 public func newestTurnIDs(_ turns: [ConversationTurn]) -> Set<String> {
   let lastUser = turns.lastIndex { $0.role.lowercased() == "user" }

@@ -19,8 +19,12 @@ public protocol BridgeWebSocketConnecting: Sendable {
 public struct URLSessionWebSocketConnector: BridgeWebSocketConnecting {
   public init() {}
 
-  /// `url` is the stream endpoint itself (`BridgeStream.endpointURL`), already ws or wss.
+  /// `url` is the stream endpoint itself (`BridgeStream.endpointURL`), already ws, wss or
+  /// `cappiroh`. An iroh endpoint carries its WebSocket over an iroh stream instead.
   public func connect(url: URL) async throws -> BridgeWebSocket {
+    if url.scheme?.lowercased() == irohURLScheme {
+      return try await IrohWebSocketConnector().connect(url: url)
+    }
     let task = URLSession.shared.webSocketTask(with: url)
     task.resume()
     return URLSessionWebSocketConnection(task: task)
@@ -43,6 +47,9 @@ public enum BridgeStream {
       components.scheme = "ws"
     case "https":
       components.scheme = "wss"
+    case irohURLScheme:
+      // An iroh machine keeps its own scheme; the connector carries the WebSocket over iroh.
+      break
     default:
       throw BridgeError.protocolError(
         "stream URL scheme must be http or https, got '\(scheme)'")

@@ -77,7 +77,7 @@ import SwiftUI
   }
 }
 
-private struct SavedRow: View {
+struct SavedRow: View {
   let conversation: SavedConversation
   let machineName: String
   @Environment(\.colorScheme) private var colorScheme
@@ -100,8 +100,63 @@ private struct SavedRow: View {
   }
 }
 
+/// The saved conversations of one agent, opened from its conversation's actions. Ports
+/// ConversationHistoryDialog.kt, narrowed to that agent's machine and session.
+struct AgentHistorySheet: View {
+  let store: SavedConversationStore
+  let agent: AgentRow
+  let machineName: String
+  let currentConversationID: String?
+  @Environment(\.dismiss) private var dismiss
+  @State private var saved: [SavedConversation] = []
+  @State private var problem: String?
+
+  var body: some View {
+    NavigationStack {
+      List {
+        ForEach(saved) { conversation in
+          NavigationLink {
+            SavedTranscriptView(conversation: conversation, machineName: machineName)
+          } label: {
+            HStack {
+              SavedRow(conversation: conversation, machineName: machineName)
+              if conversation.conversationID == currentConversationID {
+                Spacer()
+                Text("Current").font(.caption).foregroundStyle(.secondary)
+              }
+            }
+          }
+        }
+        if let problem {
+          Text(problem).foregroundStyle(.red)
+        }
+      }
+      .overlay {
+        if saved.isEmpty, problem == nil {
+          ContentUnavailableView(
+            "No saved conversations", systemImage: "clock.arrow.circlepath",
+            description: Text("\(agent.label)'s conversations are kept here for 30 days."))
+        }
+      }
+      .navigationTitle("Conversation history")
+      .inlineTitle()
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+      }
+      .onAppear {
+        do {
+          saved = try store.list(for: agent)
+          problem = nil
+        } catch {
+          problem = "Saved history could not be read."
+        }
+      }
+    }
+  }
+}
+
 /// The saved copy of one conversation. It is read-only history: live state comes from the agent.
-private struct SavedTranscriptView: View {
+struct SavedTranscriptView: View {
   let conversation: SavedConversation
   let machineName: String
   @Environment(\.colorScheme) private var colorScheme
