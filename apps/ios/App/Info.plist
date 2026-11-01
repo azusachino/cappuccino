@@ -13,6 +13,9 @@
     <key>UISceneConfigurations</key>
     <dict/>
   </dict>
+  <!-- The live pairing QR scanner. Without this, iOS ends the app when the camera opens. -->
+  <key>NSCameraUsageDescription</key>
+  <string>Scan the pairing QR code that cappuccino-bridge prints, to pair this iPhone with your Mac.</string>
   <key>UISupportedInterfaceOrientations</key>
   <array>
     <string>UIInterfaceOrientationPortrait</string>

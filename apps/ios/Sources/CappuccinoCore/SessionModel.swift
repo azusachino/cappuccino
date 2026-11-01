@@ -336,7 +336,17 @@ public final class SessionModel {
   /// Sends a prompt to the selected agent.
   /// `true` once the bridge accepted it, so the composer keeps the text until then.
   @discardableResult public func sendPrompt(_ text: String, confirmed: Bool = false) async -> Bool {
-    await perform(
+    // Refused before anything reaches the bridge, as Android does; the reason shows on the page.
+    if let command = slashCommand(text) {
+      let working = (stream.agentStatus ?? selectedAgent?.status) == "working"
+      if let reason = disallowedSlashCommandReason(command)
+        ?? busyAgentCommandReason(command, agentWorking: working)
+      {
+        actionError = reason
+        return false
+      }
+    }
+    return await perform(
       "Failed to submit prompt", supported: capabilities?["prompt_input"] != false,
       unsupported: "Prompt input unsupported by this bridge"
     ) { client, base, session in

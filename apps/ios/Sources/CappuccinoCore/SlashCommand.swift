@@ -24,3 +24,24 @@ public func slashCommandWarning(_ command: String) -> String {
     return "\(command) is an agent command, not a message. It runs in the terminal as typed."
   }
 }
+
+/// Why a command cannot be sent from the phone at all; nil when it is permitted. Ports
+/// `disallowedSlashCommandReason` from core/SlashCommand.kt.
+public func disallowedSlashCommandReason(_ command: String) -> String? {
+  switch command.lowercased() {
+  case "/status":
+    return "The /status command opens a full-screen overlay that needs the physical Esc key to "
+      + "close, which phones lack. It is disabled to avoid locking the session."
+  case "/exit", "/quit":
+    return "Exiting the agent is disabled: Cappuccino has no way to restore a terminated session."
+  default:
+    return nil
+  }
+}
+
+/// Why a command must wait: `/new` starts a fresh session, so it waits until the agent is idle.
+/// Ports `busyAgentCommandReason` from core/SlashCommand.kt.
+public func busyAgentCommandReason(_ command: String, agentWorking: Bool) -> String? {
+  agentWorking && command.lowercased() == "/new"
+    ? "Stop the agent first, then start a new session." : nil
+}

@@ -102,7 +102,8 @@ import SwiftUI
 
   /// Ordinary text sends at once; an agent command waits for the owner to confirm it.
   private func submitDraft() {
-    if let command = slashCommand(draft) {
+    // A command Android refuses is not offered for confirmation; the refusal reason is shown.
+    if let command = slashCommand(draft), disallowedSlashCommandReason(command) == nil {
       commandToConfirm = command
       confirmingCommand = true
     } else {

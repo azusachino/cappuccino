@@ -137,6 +137,9 @@ private struct ProseRow: View {
       ReplyText(text: text)
     case .thinking(let text):
       Text(text).font(.footnote).foregroundStyle(.secondary)
+    case .responseStatus(let status, _) where status == "failed":
+      // Android keeps a failed response out of the chat (`visibleInChat`).
+      EmptyView()
     case .responseStatus(let status, let detail):
       VStack(alignment: .leading, spacing: 2) {
         Label(
@@ -209,16 +212,34 @@ private struct StepRow: View {
     case .toolCall(let call):
       let words = stepWords(call)
       let outcome = stepOutcome(call)
-      HStack(alignment: .firstTextBaseline, spacing: 8) {
-        Text(toolKind(call.name).glyph).frame(width: 14)
-        Text(words.label).bold()
-        Text(words.subject).foregroundStyle(.secondary).lineLimit(1)
-        Spacer(minLength: 0)
-        if let outcome {
-          Text(outcome.text).foregroundStyle(outcome.tone == .err ? .red : .secondary)
+      // Each step opens to what the tool was given and what it returned, as Android's does.
+      DisclosureGroup {
+        VStack(alignment: .leading, spacing: 6) {
+          if !call.input.isEmpty {
+            Text(call.input).textSelection(.enabled)
+          }
+          if let output = call.output, !output.isEmpty {
+            Text(output)
+              .foregroundStyle(call.isError == true ? .red : .secondary)
+              .textSelection(.enabled)
+          } else if call.output == nil {
+            Text("No result recorded").foregroundStyle(.secondary)
+          }
         }
+        .font(.caption.monospaced())
+        .padding(.top, 4)
+      } label: {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text(toolKind(call.name).glyph).frame(width: 14)
+          Text(words.label).bold()
+          Text(words.subject).foregroundStyle(.secondary).lineLimit(1)
+          Spacer(minLength: 0)
+          if let outcome {
+            Text(outcome.text).foregroundStyle(outcome.tone == .err ? .red : .secondary)
+          }
+        }
+        .font(.footnote.monospaced())
       }
-      .font(.footnote.monospaced())
     default:
       EmptyView()
     }

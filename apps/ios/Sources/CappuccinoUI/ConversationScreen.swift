@@ -27,10 +27,24 @@ import SwiftUI
               .font(.footnote)
               .foregroundStyle(palette.muted)
           }
+          if !session.isLive, session.streamError == nil, session.turns.isEmpty {
+            HStack(spacing: 8) {
+              ProgressView()
+              Text("Connecting…").foregroundStyle(palette.muted)
+            }
+            .accessibilityIdentifier("connecting")
+          }
           ForEach(chatTurns(session.turns)) { turn in
             TurnRow(
               turn: turn, newest: newestTurnIDs(session.turns).contains(turn.id),
               assistantLabel: session.selectedAgent?.label ?? "Assistant")
+          }
+          // With no canonical history, the live output stands in, labelled as Android labels it.
+          if session.turns.isEmpty, !session.stream.rows().isEmpty {
+            ScrollbackRows(
+              rows: session.stream.rows(),
+              isScrollback: ["scrollback", "terminal_scrollback"].contains(
+                session.conversationSource))
           }
           LiveStatusLine(status: liveStatusWord, detail: session.stream.agentStatusDetail)
           // The sheet can be swiped away; the waiting prompt stays reachable here, as Android
@@ -232,5 +246,31 @@ private struct LiveStatusLine: View {
         }
       }
     }
+  }
+}
+
+/// Live output lines shown when the transcript is not available, labelled as Android labels them.
+private struct ScrollbackRows: View {
+  let rows: [OutputRow]
+  let isScrollback: Bool
+  @Environment(\.colorScheme) private var colorScheme
+
+  var body: some View {
+    let palette = CatppuccinPalette.current(colorScheme)
+    VStack(alignment: .leading, spacing: 6) {
+      Text(
+        isScrollback
+          ? "Recent output · Scrollback fallback" : "Recent output · History not verified"
+      )
+      .font(.caption2)
+      .foregroundStyle(palette.muted)
+      ForEach(rows, id: \.key) { row in
+        Text(row.text)
+          .font(.system(.footnote, design: .monospaced))
+          .foregroundStyle(row.gap ? palette.muted : palette.text)
+          .textSelection(.enabled)
+      }
+    }
+    .accessibilityIdentifier("scrollback-rows")
   }
 }
