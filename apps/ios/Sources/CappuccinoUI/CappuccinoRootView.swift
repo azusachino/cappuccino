@@ -15,7 +15,9 @@ import SwiftUI
     makeClient: @escaping @Sendable () -> any AgentSessionServing = { BridgeClient() }
   ) {
     _machines = State(initialValue: machines)
-    _session = State(initialValue: SessionModel(machines: machines, makeClient: makeClient))
+    _session = State(
+      initialValue: SessionModel(
+        machines: machines, makeClient: makeClient, history: SavedConversationStore.app))
   }
 
   public var body: some View {
@@ -23,6 +25,8 @@ import SwiftUI
     TabView {
       MachinesScreen(machines: machines, session: session)
         .tabItem { Label("Machines", systemImage: "desktopcomputer") }
+      HistoryScreen(machines: machines, store: SavedConversationStore.app)
+        .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
       SettingsScreen(machines: machines)
         .tabItem { Label("Settings", systemImage: "gearshape") }
     }

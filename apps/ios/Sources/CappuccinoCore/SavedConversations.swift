@@ -2,7 +2,8 @@ import Foundation
 
 /// Ports io/OfflineConversations.kt: the saved transcripts behind History, kept on this device for
 /// 30 days. A saved transcript is read-only history and never establishes live session state.
-public struct SavedConversation: Equatable, Sendable {
+public struct SavedConversation: Identifiable, Equatable, Sendable {
+  public var id: String { "\(agent.machineID)/\(conversationID)" }
   public let agent: AgentRow
   public let conversationID: String
   public let savedAt: Date
@@ -22,7 +23,7 @@ public struct SavedConversation: Equatable, Sendable {
     self.omittedTools = omittedTools
   }
 
-  var machineID: UUID? { UUID(uuidString: agent.machineID) }
+  public var machineID: UUID? { UUID(uuidString: agent.machineID) }
 }
 
 public enum SavedConversationError: Error, Equatable {
@@ -38,6 +39,11 @@ public struct SavedConversationStore: Sendable {
   public static let maxBytes = 64 * 1024 * 1024
   public static let maxEntryBytes = 4 * 1024 * 1024
   public static let retention: TimeInterval = 30 * 24 * 60 * 60
+
+  /// The app's store under Application Support. Device and iCloud backups can include it.
+  public static let app = SavedConversationStore(
+    directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("saved-conversations"))
 
   private let directory: URL
   private let now: @Sendable () -> Date

@@ -72,12 +72,17 @@ public final class SessionModel {
     try await Task.sleep(nanoseconds: UInt64($0) * 1_000_000)
   }
 
+  @ObservationIgnored private let history: SavedConversationStore?
+
+  /// `history` receives each canonical transcript for the History tab; nil keeps nothing.
   public init(
     machines: MachineConnections,
-    makeClient: @escaping @Sendable () -> any AgentSessionServing = { BridgeClient() }
+    makeClient: @escaping @Sendable () -> any AgentSessionServing = { BridgeClient() },
+    history: SavedConversationStore? = nil
   ) {
     self.machines = machines
     self.makeClient = makeClient
+    self.history = history
   }
 
   /// The owner's profile for the selection, if it still exists.
@@ -183,6 +188,20 @@ public final class SessionModel {
     conversationSource = snapshot.source
     conversationID = snapshot.conversationID
     stats = snapshot.stats
+    saveHistory(recent, snapshot)
+  }
+
+  /// Keeps the canonical transcript for History. Best-effort: a failed write never touches the
+  /// live view, and the file write runs off the main actor.
+  private func saveHistory(_ recent: RecentConversation, _ snapshot: ConversationSnapshot) {
+    guard
+      let history, snapshot.source == "canonical_log", let conversationID = snapshot.conversationID,
+      let agent = selectedAgent, !recent.turns.isEmpty
+    else { return }
+    let saved = SavedConversation(
+      agent: agent, conversationID: conversationID, savedAt: Date(), turns: recent.turns,
+      omittedMessages: recent.omittedMessages, omittedTools: recent.omittedTools)
+    Task.detached(priority: .utility) { try? history.save(saved) }
   }
 
   private func loadConversation(token: Int) async {
