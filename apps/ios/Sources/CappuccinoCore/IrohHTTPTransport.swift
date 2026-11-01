@@ -63,10 +63,11 @@ public final class IrohHub: @unchecked Sendable {
     }
   }
 
-  /// Writes the request and reads the reply to end-of-stream, within the response size cap.
+  /// Writes the request and reads the reply to end-of-stream, within the response size cap. The
+  /// send side stays open: a half-close makes the bridge's HTTP server drop the request unanswered.
+  /// `Connection: close` ends the reply, so the server closes the stream when it is done.
   private func exchange(_ stream: any IrohStreaming, _ wire: Data) async throws -> Data {
     try await stream.write(wire)
-    try await stream.finish()
     var reply = Data()
     while true {
       let chunk = try await stream.read(max: 64 * 1024)
