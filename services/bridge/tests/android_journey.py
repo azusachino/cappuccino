@@ -138,7 +138,11 @@ class Peer(socketserver.ThreadingUnixStreamServer):
 class RpcHandler(socketserver.StreamRequestHandler):
     def handle(self):
         self.request.settimeout(10)
-        call = json.loads(self.rfile.readline(1024 * 1024))
+        line = self.rfile.readline(1024 * 1024)
+        # A probe that connects and closes without sending a call is not a request.
+        if not line:
+            return
+        call = json.loads(line)
         result = self.server.fixture.rpc(call)
         if result is not None:
             result["id"] = call.get("id")
@@ -157,7 +161,14 @@ class Admin(http.server.BaseHTTPRequestHandler):
             size = int(self.headers.get("Content-Length", "0"))
             if not 0 < size <= 4096:
                 raise ValueError("invalid fixture body length")
-            self.server.fixture.change(json.loads(self.rfile.read(size)))
+            body = json.loads(self.rfile.read(size))
+            restart = body.pop("restart_bridge", False)
+            if not isinstance(restart, bool):
+                raise ValueError("restart_bridge must be a boolean")
+            self.server.fixture.change(body)
+            if restart:
+                # The owned bridge is stopped and started again on the same port and data dir.
+                self.server.restart()
             self.reply(self.server.fixture.snapshot())
         except (ValueError, KeyError) as error:
             self.reply({"error": str(error)}, 400)
@@ -196,33 +207,47 @@ def running_fixture(binary):
                    "HERDR_SOCKET_PATH": str(root / "peer"), "CAPP_BRIDGE_HOST": "127.0.0.1",
                    "CAPP_BRIDGE_PORT": str(port), "CAPP_BRIDGE_DATA_DIR": str(root / "data"),
                    "CAPP_BRIDGE_CONFIG": str(root / "no-config.toml"), "CAPP_BRIDGE_SERVE_AUTO_APPLY": "0"}
-            process = None
-            try:
-                process = subprocess.Popen([str(binary)], env=env)
-                base = f"http://127.0.0.1:{port}"
+            base = f"http://127.0.0.1:{port}"
+            current = {}
+
+            def spawn():
+                child = subprocess.Popen([str(binary)], env=env)
                 deadline = time.monotonic() + 10
                 while True:
-                    if process.poll() is not None:
+                    if child.poll() is not None:
                         raise RuntimeError("owned bridge exited before readiness")
                     try:
                         status, paired = request(base + "/api/session")
                         if status != 200 or paired.get("machine_id") != machine:
                             raise RuntimeError("bridge port does not belong to this fixture")
-                        break
+                        return child
                     except (urllib.error.URLError, ConnectionError):
                         if time.monotonic() >= deadline:
                             raise TimeoutError("owned bridge readiness timed out")
                         threading.Event().wait(0.05)
+
+            def stop(child):
+                if child.poll() is None:
+                    child.terminate()
+                    try:
+                        child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        child.kill()
+                        child.wait(timeout=5)
+
+            def restart():
+                # Same port, env and data dir: the bridge keeps its machine identity across restarts.
+                stop(current["process"])
+                current["process"] = spawn()
+
+            admin.restart = restart
+            try:
+                current["process"] = spawn()
                 yield base, admin.server_port, fixture
             finally:
                 fixture.release.set()
-                if process is not None and process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=5)
+                if "process" in current:
+                    stop(current["process"])
                 for server in (peer, admin):
                     server.shutdown()
                 for thread in threads:
@@ -231,7 +256,7 @@ def running_fixture(binary):
                         raise RuntimeError("fixture listener failed to stop")
 
 
-def self_test(base, fixture):
+def self_test(base, admin, fixture):
     _, agents = request(base + "/api/agents")
     row = agents["agents"][0]
     binding = {key: row[key] for key in ("machine_id", "pane_id", "native_session_ref")}
@@ -252,6 +277,11 @@ def self_test(base, fixture):
     assert unavailable["source"] == "scrollback" and unavailable.get("conversation_id") is None
     fixture.change({"history": True})
     assert request(base + "/api/agents/s-journey/conversation")[1]["conversation_id"]
+    machine = request(base + "/api/session")[1]["machine_id"]
+    status, _ = request(f"http://127.0.0.1:{admin}/", {"restart_bridge": True})
+    assert status == 200
+    assert request(base + "/api/session")[1]["machine_id"] == machine
+    assert request(base + "/api/agents")[1]["agents"][0]["native_session_ref"]
     print("Actual-bridge fixture self-test passed", flush=True)
 
 
@@ -265,7 +295,7 @@ def main():
     subprocess.run(["cargo", "build", "--locked", "--manifest-path", "services/bridge/Cargo.toml"], cwd=ROOT, check=True)
     with running_fixture(ROOT / "services/bridge/target/debug/cappuccino-bridge") as (base, admin, fixture):
         if args.self_test:
-            self_test(base, fixture)
+            self_test(base, admin, fixture)
             return
         adb = ["adb", "-s", args.serial]
         if subprocess.check_output(adb + ["get-state"], text=True).strip() != "device":
