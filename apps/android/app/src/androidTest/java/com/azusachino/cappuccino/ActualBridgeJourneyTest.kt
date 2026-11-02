@@ -214,4 +214,86 @@ class ActualBridgeJourneyTest {
       store.remove(profile.id)
     }
   }
+
+  /** A bridge restart recovers the selected agent and never replays the accepted prompt. */
+  @Test
+  fun bridgeRestartRecoversSelectionWithoutReplayingInput() {
+    val arguments = InstrumentationRegistry.getArguments()
+    val bridgePort = requireNotNull(arguments.getString("bridgePort")).toInt()
+    val fixturePort = requireNotNull(arguments.getString("fixturePort")).toInt()
+    val endpoint = Endpoint.parse("http://127.0.0.1:$bridgePort", allowLocalHttp = true)
+    val machine = runBlocking { BridgeClient(endpoint).verify() }
+    val profile =
+      MachineProfile("restart-${UUID.randomUUID()}", "Restart bridge", endpoint, machine)
+    val store = ProfileStore(instrumentation.targetContext)
+    store.save(profile)
+    val vm = main {
+      ConnectedViewModel(store, { BridgeClient(it) }, { delay(200) }, SavedStateHandle())
+    }
+    try {
+      fixture(
+        fixturePort,
+        """{"native":"A","screen":"plain","history":true,"outage":false,"clear_journal":true}""",
+      )
+      main {
+        vm.setForeground(true)
+        vm.selectProfile(profile.id)
+      }
+      awaitState(vm) { it.agents.isNotEmpty() }
+      val row = runBlocking { BridgeClient(endpoint).agents(machine).single() }
+      main { vm.selectAgent(row) }
+      awaitState(vm) {
+        it.canMutate &&
+          it.selectedAgent?.nativeSessionRef == row.nativeSessionRef &&
+          it.conversationId != null
+      }
+      main { vm.submitPrompt("Before restart") }
+      runBlocking {
+        withTimeout(12_000) {
+          while (fixture(fixturePort).getJSONArray("journal").length() < 1) delay(100)
+        }
+      }
+
+      // The owned bridge is stopped and started on the same port; the fixture answers only after
+      // the new bridge is ready.
+      fixture(fixturePort, """{"restart_bridge":true}""")
+      main { vm.retry() }
+      awaitState(vm) {
+        it.connection == ConnectionState.Connected &&
+          it.canMutate &&
+          it.selectedAgent?.nativeSessionRef == row.nativeSessionRef &&
+          it.conversationId != null
+      }
+      assertEquals(
+        "restart never replays the accepted prompt",
+        1,
+        fixture(fixturePort).getJSONArray("journal").length(),
+      )
+      assertNull(vm.state.value.stream.pendingPrompt)
+    } finally {
+      main { vm.setForeground(false) }
+      store.remove(profile.id)
+    }
+  }
+
+  private fun awaitState(vm: ConnectedViewModel, predicate: (ConnectedUiState) -> Boolean) {
+    runBlocking { withTimeout(12_000) { vm.state.first { predicate(it) } } }
+  }
+
+  private fun fixture(port: Int, body: String? = null): JSONObject {
+    val connection = URL("http://127.0.0.1:$port/").openConnection() as HttpURLConnection
+    connection.connectTimeout = 5000
+    connection.readTimeout = 15000
+    try {
+      if (body != null) {
+        connection.requestMethod = "POST"
+        connection.doOutput = true
+        connection.outputStream.use { it.write(body.toByteArray()) }
+      }
+      assertEquals(200, connection.responseCode)
+      return JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+    } finally {
+      connection.disconnect()
+    }
+  }
 }
