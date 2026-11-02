@@ -65,9 +65,13 @@ Rules that decide whether an observation becomes a message:
 4. **Downtime is a gap, not a backlog.** If the bridge was not running when a
    completion happened, nothing is sent on restart. The status records the gap
    (`watching_since`) so the owner can see it.
-5. **Bounded state.** Recipient dedupe state keeps the last 200 keys per machine.
-   Pending messages are capped at 50; when the cap is hit the oldest is dropped
-   and a dropped counter increases.
+5. **Bounded state.** Dedupe state covers agents seen in the last two minutes;
+   the agent list itself bounds the count. Pending messages are capped at 50;
+   when the cap is hit the oldest is dropped and a dropped counter increases.
+6. **Brief gaps keep the baseline.** An agent missing from polls for up to two
+   minutes keeps its baseline, so a completion that happens during a short herdr
+   gap is still reported when the agent returns. A herdr error or an unparseable
+   snapshot changes nothing at all.
 
 ## Message
 

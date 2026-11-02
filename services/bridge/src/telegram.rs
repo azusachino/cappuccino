@@ -275,21 +275,32 @@ struct Key {
 struct Seen {
     completion_seq: Option<u64>,
     blocked: bool,
+    last_seen: Instant,
 }
 
-/// Turns successive agent snapshots into notices. Pure: no clock, no network.
+/// How long an agent missing from polls keeps its baseline. A brief herdr gap
+/// must not re-baseline an agent and swallow a completion that happened during it.
+const ABSENCE_GRACE: Duration = Duration::from_secs(120);
+
+/// Turns successive agent snapshots into notices. Pure apart from the `Instant`
+/// it is given; no network.
 ///
 /// The first sighting of an agent (and any new native session reference, pane
 /// replacement or sequence regression) sets a baseline and produces nothing. An
-/// agent that drops out of the snapshot is forgotten, so it baselines again when
-/// it returns.
+/// agent missing from polls for longer than `ABSENCE_GRACE` is forgotten, so it
+/// baselines again when it returns.
 #[derive(Default)]
 pub struct Tracker {
     seen: HashMap<Key, Seen>,
 }
 
 impl Tracker {
+    #[cfg(test)]
     pub fn observe(&mut self, rows: &[AgentRow]) -> Vec<Notice> {
+        self.observe_at(rows, Instant::now())
+    }
+
+    pub fn observe_at(&mut self, rows: &[AgentRow], at: Instant) -> Vec<Notice> {
         let mut notices = Vec::new();
         let mut live = HashSet::new();
         for row in rows {
@@ -310,14 +321,16 @@ impl Tracker {
                     Seen {
                         completion_seq: row.completion_seq,
                         blocked,
+                        last_seen: at,
                     },
                 );
                 continue;
             };
+            seen.last_seen = at;
             let current = row.completion_seq;
             let regressed = matches!(
                 (seen.completion_seq, current),
-                (Some(before), Some(now)) if now < before
+                (Some(before), Some(seq)) if seq < before
             );
             if regressed {
                 seen.completion_seq = current;
@@ -325,7 +338,7 @@ impl Tracker {
                 continue;
             }
             match (seen.completion_seq, current) {
-                (Some(before), Some(now)) if now > before => {
+                (Some(before), Some(seq)) if seq > before => {
                     notices.push(Notice {
                         kind: Kind::Completion,
                         agent: row.agent.clone(),
@@ -343,7 +356,9 @@ impl Tracker {
             }
             seen.blocked = blocked;
         }
-        self.seen.retain(|key, _| live.contains(key));
+        self.seen.retain(|key, seen| {
+            live.contains(key) || at.duration_since(seen.last_seen) <= ABSENCE_GRACE
+        });
         notices
     }
 }
@@ -429,15 +444,31 @@ impl Telegram {
     }
 
     /// Queues the notices this snapshot produces, filtered by the owner's events.
+    #[cfg(test)]
     pub fn observe(&mut self, rows: &[AgentRow]) {
+        self.observe_at(rows, Instant::now());
+    }
+
+    fn observe_at(&mut self, rows: &[AgentRow], at: Instant) {
         if self.is_misconfigured() {
             return;
         }
-        for notice in self.tracker.observe(rows) {
+        for notice in self.tracker.observe_at(rows, at) {
             if self.settings.events.contains(&notice.kind.event()) {
                 let text = message(&self.settings.machine_label, &notice);
-                self.enqueue(text, Instant::now());
+                self.enqueue(text, at);
             }
+        }
+    }
+
+    /// Applies one poll result. `None` (herdr unreachable) and a snapshot that does
+    /// not parse change nothing, so an outage never re-baselines an agent.
+    pub fn ingest(&mut self, snapshot: Option<&Value>, machine_id: &str, at: Instant) {
+        let Some(result) = snapshot else {
+            return;
+        };
+        if let Ok(rows) = crate::agents::map_agents(result, machine_id) {
+            self.observe_at(&rows, at);
         }
     }
 
@@ -554,12 +585,10 @@ pub async fn watch(machine_id: String, settings: Settings, shared: Shared) {
     let mut ticker = tokio::time::interval(POLL_INTERVAL);
     loop {
         ticker.tick().await;
-        if let Ok(result) = crate::herdr::agent_list().await {
-            if let Ok(rows) = crate::agents::map_agents(&result, &machine_id) {
-                telegram.observe(&rows);
-            }
-        }
-        telegram.flush(Instant::now()).await;
+        let snapshot = crate::herdr::agent_list().await.ok();
+        let now = Instant::now();
+        telegram.ingest(snapshot.as_ref(), &machine_id, now);
+        telegram.flush(now).await;
     }
 }
 
@@ -701,16 +730,6 @@ mod tests {
             .is_empty());
         let notices = tracker.observe(&[row("p1", Some("new"), "idle", Some(1))]);
         assert_eq!(notices.len(), 1);
-    }
-
-    #[test]
-    fn agent_that_drops_out_baselines_again_when_it_returns() {
-        let mut tracker = Tracker::default();
-        tracker.observe(&[row("p1", Some("n1"), "idle", Some(1))]);
-        tracker.observe(&[]);
-        assert!(tracker
-            .observe(&[row("p1", Some("n1"), "idle", Some(7))])
-            .is_empty());
     }
 
     #[test]
@@ -948,5 +967,72 @@ mod tests {
     #[test]
     fn unreadable_token_file_is_an_error_without_detail() {
         assert!(read_token(Path::new("/does/not/exist")).is_err());
+    }
+
+    #[test]
+    fn short_absence_keeps_the_baseline_across_a_missed_poll() {
+        let start = Instant::now();
+        let at = |secs: u64| start + Duration::from_secs(secs);
+        let mut tracker = Tracker::default();
+        tracker.observe_at(&[row("p1", Some("n1"), "idle", Some(1))], at(0));
+        assert!(tracker.observe_at(&[], at(10)).is_empty(), "missed poll");
+        let notices = tracker.observe_at(&[row("p1", Some("n1"), "idle", Some(2))], at(20));
+        assert_eq!(
+            notices,
+            vec![Notice {
+                kind: Kind::Completion,
+                agent: "pi".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn absence_longer_than_the_grace_baselines_again() {
+        let start = Instant::now();
+        let mut tracker = Tracker::default();
+        tracker.observe_at(&[row("p1", Some("n1"), "idle", Some(1))], start);
+        let gone = start + ABSENCE_GRACE + Duration::from_secs(1);
+        tracker.observe_at(&[], gone);
+        let back = gone + Duration::from_secs(1);
+        assert!(tracker
+            .observe_at(&[row("p1", Some("n1"), "idle", Some(2))], back)
+            .is_empty());
+    }
+
+    #[test]
+    fn completion_on_one_agent_does_not_touch_another() {
+        let mut tracker = Tracker::default();
+        tracker.observe(&[
+            row("p1", Some("a"), "idle", Some(1)),
+            row("p2", Some("b"), "idle", Some(1)),
+        ]);
+        let notices = tracker.observe(&[
+            row("p1", Some("a"), "idle", Some(2)),
+            row("p2", Some("b"), "idle", Some(1)),
+        ]);
+        assert_eq!(notices.len(), 1);
+    }
+
+    #[test]
+    fn missing_completion_sequence_never_alerts() {
+        let mut tracker = Tracker::default();
+        tracker.observe(&[row("p1", Some("n1"), "idle", None)]);
+        assert!(tracker
+            .observe(&[row("p1", Some("n1"), "working", None)])
+            .is_empty());
+        assert!(tracker
+            .observe(&[row("p1", Some("n1"), "idle", None)])
+            .is_empty());
+    }
+
+    #[test]
+    fn a_herdr_outage_changes_nothing_so_the_next_completion_still_counts() {
+        let mut telegram = telegram_for("http://127.0.0.1:1", vec![Event::Completion]);
+        let at = Instant::now();
+        telegram.observe_at(&[row("p1", Some("n1"), "idle", Some(1))], at);
+        telegram.ingest(None, "m", at);
+        telegram.ingest(Some(&json!({})), "m", at);
+        telegram.observe_at(&[row("p1", Some("n1"), "idle", Some(2))], at);
+        assert_eq!(telegram.pending.len(), 1);
     }
 }
