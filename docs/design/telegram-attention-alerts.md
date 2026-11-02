@@ -8,7 +8,7 @@ failure handling, and the operations an owner runs.
 
 ## Scope
 
-- One owner, one private Telegram chat with the bot.
+- One owner, one Telegram group chat with the bot (owner decision; see below).
 - Sent by the bridge, on the machine that observes the agents. The phone is not
   involved, so alerts arrive while the app is closed.
 - Generic attention only: the agent finished a work cycle, or it is waiting for
@@ -28,9 +28,9 @@ secret kept outside the repository:
 ```toml
 [telegram]
 enabled = false                     # off by default; the bridge reports the route as unconfigured
-chat_id = "<owner chat id>"         # a private chat with the bot, not a group
+chat_id = "<group chat id>"         # the group the bot posts to; membership checked first
 token_file = "<path to secret file>" # read at start; never a literal token and never a CLI argument
-events = ["completion", "needs_answer"]
+events = ["completion", "needs_answer", "route_failure"]
 ```
 
 - The token is read from `token_file` at startup and on an explicit reload. It
@@ -142,17 +142,26 @@ restarts an agent to create an event.
 - Real Telegram delivery only after owner approval, as the completion design
   already requires.
 
-## Decisions needed from the owner
+## Owner decisions (2026-11-02)
 
-1. **Event set.** Recommended: `completion` and `needs_answer`. Alternatives:
-   completion only, or also bridge route failures sent to the same chat.
-2. **Token storage.** Recommended: the secret manager renders a file on the host
-   (the workstation pattern), with `token_file` pointing at it. Alternative: a
-   plain file under the user's config directory with mode 0600.
-3. **Chat target.** Recommended: a private chat with the bot. Alternative: a
-   group chat, which adds membership and privacy questions.
-4. **Downtime.** Recommended: no catch-up after a restart; show the gap. Alternative:
-   send a single summary such as "3 completions while the bridge was down",
-   which needs a count-only message format.
-5. **Working-directory name.** Recommended: leave it out, since it can reveal
-   private project names. Alternative: include the folder name only.
+1. **Events:** `completion`, `needs_answer`, and route failures. Route failure
+   messages are fixed text with the outcome code only, for example
+   `[cappuccino] telegram route rejected (HTTP 403)`. They never include the
+   token, the URL, the chat ID or any response body.
+2. **Token storage:** the secret manager renders the file on the host;
+   `token_file` points at it. The bridge never writes the file.
+3. **Downtime:** no catch-up after a restart. The status shows
+   `events_unobserved_since`.
+4. **Chat target:** a group chat. This needs three checks before the build:
+   - Membership: every member of the group can read the messages. The owner
+     must confirm who is in the group, and that no one outside the owner's
+     trust circle is a member.
+   - Content: the machine label and agent kind become visible to every member.
+     The owner must confirm that is acceptable, or change the label to a
+     neutral name such as the machine's role.
+   - Bot privacy mode: a bot in a group only sees commands by default. The
+     bridge only sends, so this does not change delivery, but the bot must be
+     a member with permission to post.
+
+Still open: whether to include the working-directory name. The recommendation
+stays to leave it out, since it can reveal private project names.
