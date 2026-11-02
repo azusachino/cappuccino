@@ -769,6 +769,7 @@ mod tests {
                 iroh_enabled: false,
                 iroh_relay_url: None,
                 tailnet_url: None,
+                telegram: None,
             },
             Duration::from_millis(100),
         );

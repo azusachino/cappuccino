@@ -27,6 +27,8 @@ pub struct BridgeConfig {
     /// Optional Tailnet address (`tailnet.url` in config, or auto-detected).
     /// Included in pairing payloads for dual-transport fallback.
     pub tailnet_url: Option<String>,
+    /// Telegram attention alerts (`[telegram]`). `None` when disabled (the default).
+    pub telegram: Option<crate::telegram::Settings>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -102,6 +104,7 @@ struct ConfigFile {
     serve: Option<ServeConfig>,
     iroh: Option<IrohFileConfig>,
     tailnet: Option<TailnetFileConfig>,
+    telegram: Option<crate::telegram::File>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -184,6 +187,7 @@ impl BridgeConfig {
             iroh_enabled: false,
             iroh_relay_url: None,
             tailnet_url: None,
+            telegram: None,
         }
     }
 
@@ -261,6 +265,9 @@ impl BridgeConfig {
                 }
                 if let Some(tailnet) = file.tailnet {
                     config.tailnet_url = tailnet.url;
+                }
+                if let Some(telegram) = file.telegram {
+                    config.telegram = crate::telegram::settings(telegram)?;
                 }
             }
         }

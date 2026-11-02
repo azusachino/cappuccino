@@ -64,7 +64,7 @@ Rules that decide whether an observation becomes a message:
 3. **Idle text is not completion.** Only a `completion_seq` advance counts.
 4. **Downtime is a gap, not a backlog.** If the bridge was not running when a
    completion happened, nothing is sent on restart. The status records the gap
-   (`events_unobserved_since`) so the owner can see it.
+   (`watching_since`) so the owner can see it.
 5. **Bounded state.** Recipient dedupe state keeps the last 200 keys per machine.
    Pending messages are capped at 50; when the cap is hit the oldest is dropped
    and a dropped counter increases.
@@ -91,7 +91,7 @@ The agent kind is the reported kind (for example `pi`). Nothing else is added.
 | --- | --- | --- |
 | Accepted (2xx) | Mark delivered | `last_delivered_at` |
 | Rate limited (429) | Wait the advertised `retry_after`, at most 3 tries | `rate_limited` until it clears |
-| Rejected (4xx, bad token or chat) | Stop sending; do not retry | `rejected` with the Telegram error code, never the token |
+| Rejected (4xx, bad token or chat) | Stop sending; do not retry | `rejected` with the HTTP status; no route-failure message (the chat itself refused) |
 | Server error (5xx) | One retry after 30 seconds | `failing` |
 | Timeout or connection reset | Mark as **uncertain**; do not retry automatically | `uncertain` with the count |
 
@@ -109,7 +109,7 @@ any secret:
 
 ```text
 telegram: enabled | disabled | misconfigured | rejected | failing | rate_limited
-last_delivered_at, uncertain_count, dropped_count, events_unobserved_since
+last_delivered_at, uncertain_count, dropped_count, watching_since, last_http_status
 ```
 
 The existing `telegram_notifications` capability stays `false` until a route is
@@ -146,12 +146,12 @@ restarts an agent to create an event.
 
 1. **Events:** `completion`, `needs_answer`, and route failures. Route failure
    messages are fixed text with the outcome code only, for example
-   `[cappuccino] telegram route rejected (HTTP 403)`. They never include the
+   `[cappuccino] <label> · telegram route failing (HTTP 500)`, sent only when the route starts failing. They never include the
    token, the URL, the chat ID or any response body.
 2. **Token storage:** the secret manager renders the file on the host;
    `token_file` points at it. The bridge never writes the file.
 3. **Downtime:** no catch-up after a restart. The status shows
-   `events_unobserved_since`.
+   `watching_since`.
 4. **Chat target:** a private group whose only members are the owner and the
    bot. The owner keeps it that way; the bridge does not check membership, and
    the group is not expected to change. The bot keeps Telegram's default privacy
