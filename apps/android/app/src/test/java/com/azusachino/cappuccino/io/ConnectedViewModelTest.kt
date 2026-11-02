@@ -1103,6 +1103,48 @@ class ConnectedViewModelTest {
     }
 
   @Test
+  fun relaunchRestoresOnlyTheSelectionWithNoPendingPromptsOrSendState() =
+    runTest(dispatcher) {
+      val handle = SavedStateHandle()
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID = machine
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
+
+          override suspend fun conversationSnapshot(sessionId: String) =
+            ConversationSnapshot(emptyList(), "canonical_log", savedId, machine)
+
+          override fun stream(sessionId: String): Flow<StreamEvent> = flow {
+            kotlinx.coroutines.awaitCancellation()
+          }
+        }
+      viewModel = ConnectedViewModel(store, { transport }, {}, handle)
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      advanceUntilIdle()
+      assertEquals(agent, viewModel.state.value.selectedAgent)
+      // The process can die at any point; only the selection identifiers are ever written.
+      val selectionKeys =
+        setOf(
+          ConnectedViewModel.SELECTED_PROFILE,
+          ConnectedViewModel.SELECTED_MACHINE,
+          ConnectedViewModel.SELECTED_LOCATOR,
+          ConnectedViewModel.SELECTED_NATIVE_REF,
+        )
+      assertTrue(handle.keys().all { it in selectionKeys })
+
+      val relaunched = ConnectedViewModel(store, { transport }, {}, handle)
+      relaunched.setForeground(true)
+      advanceUntilIdle()
+      assertEquals(agent, relaunched.state.value.selectedAgent)
+      assertNull(relaunched.state.value.stream.pendingPrompt)
+      assertTrue(relaunched.state.value.promptSends.isEmpty())
+    }
+
+  @Test
   fun lateSendFailureDoesNotLeakIntoReplacementConversation() =
     runTest(dispatcher) {
       val response = CompletableDeferred<Unit>()
