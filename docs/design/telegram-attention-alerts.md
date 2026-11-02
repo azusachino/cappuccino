@@ -28,7 +28,7 @@ secret kept outside the repository:
 ```toml
 [telegram]
 enabled = false                     # off by default; the bridge reports the route as unconfigured
-chat_id = "<group chat id>"         # the group the bot posts to; membership checked first
+chat_id = "<group chat id>"         # the private group with only the owner and the bot
 token_file = "<path to secret file>" # read at start; never a literal token and never a CLI argument
 events = ["completion", "needs_answer", "route_failure"]
 ```
@@ -152,16 +152,11 @@ restarts an agent to create an event.
    `token_file` points at it. The bridge never writes the file.
 3. **Downtime:** no catch-up after a restart. The status shows
    `events_unobserved_since`.
-4. **Chat target:** a group chat. This needs three checks before the build:
-   - Membership: every member of the group can read the messages. The owner
-     must confirm who is in the group, and that no one outside the owner's
-     trust circle is a member.
-   - Content: the machine label and agent kind become visible to every member.
-     The owner must confirm that is acceptable, or change the label to a
-     neutral name such as the machine's role.
-   - Bot privacy mode: a bot in a group only sees commands by default. The
-     bridge only sends, so this does not change delivery, but the bot must be
-     a member with permission to post.
+4. **Chat target:** a private group whose only members are the owner and the
+   bot. The owner keeps it that way; the bridge does not check membership, and
+   the group is not expected to change. The bot keeps Telegram's default privacy
+   mode, since the bridge only sends. A changed chat ID is handled like any other
+   rejected route.
 
 Still open: whether to include the working-directory name. The recommendation
 stays to leave it out, since it can reveal private project names.
