@@ -174,6 +174,64 @@ class MachinesJourneyTest {
     assertEquals(STATUS_TEXT.length, layout.getLineEnd(layout.lineCount - 1))
   }
 
+  @Test
+  fun reconnectButtonFollowsEachConnectionStateAndReconnectNowRedials() {
+    val machine =
+      MachineProfile(
+        "retrying",
+        "Retrying bridge",
+        Endpoint.parse("https://c.example"),
+        UUID.randomUUID(),
+      )
+    val state =
+      mutableStateOf(
+        ConnectedUiState(
+          profiles = listOf(machine),
+          machines = mapOf(machine.id to MachineConnection(ConnectionState.Disconnected)),
+        )
+      )
+    val actions = TestActions(state)
+    compose.activity.setContent {
+      CappuccinoTheme {
+        val s by state
+        CappuccinoScreen(s, actions) { _, _ -> }
+      }
+    }
+    openMachines()
+    compose.waitForIdle()
+
+    // Not connected: the reconnect button is offered.
+    compose.onNodeWithContentDescription("Reconnect Retrying bridge").assertIsDisplayed()
+
+    // Connecting: the slot shows progress, so no button is offered.
+    setConnection(state, MachineConnection(ConnectionState.Connecting))
+    compose.onNodeWithContentDescription("Reconnect Retrying bridge").assertDoesNotExist()
+
+    // Recovering: the subtitle names the retry, and still no button.
+    setConnection(
+      state,
+      MachineConnection(ConnectionState.Recovering, reconnectAttempt = 2),
+    )
+    compose.onNodeWithText("Reconnecting · attempt 2", substring = true).assertIsDisplayed()
+    compose.onNodeWithContentDescription("Reconnect Retrying bridge").assertDoesNotExist()
+
+    // Connected: nothing to reconnect.
+    setConnection(state, MachineConnection(ConnectionState.Connected))
+    compose.onNodeWithContentDescription("Reconnect Retrying bridge").assertDoesNotExist()
+
+    // Reconnect now is in the menu for any state and calls the action once.
+    compose.onNodeWithContentDescription("Machine actions").performClick()
+    compose.onNodeWithText("Reconnect now").performClick()
+    compose.waitUntil(timeoutMillis = 5_000) { actions.refreshCalls > 0 }
+    compose.waitForIdle()
+    assertEquals(1, actions.refreshCalls)
+  }
+
+  private fun setConnection(state: MutableState<ConnectedUiState>, connection: MachineConnection) {
+    val id = state.value.profiles.single().id
+    state.value = state.value.copy(machines = mapOf(id to connection))
+  }
+
   private fun statusLayout(): TextLayoutResult {
     // Match the status Text itself: the merged tree resolves to the clickable row, whose layout is
     // not the status.
