@@ -1179,6 +1179,32 @@ mod tests {
     }
 
     #[test]
+    fn a_brief_gap_keeps_the_number_and_absence_gives_a_new_one() {
+        let start = Instant::now();
+        let mut tracker = Tracker::default();
+        tracker.observe_at(&[row("p1", Some("n1"), "idle", Some(1))], start);
+        tracker.observe_at(&[], start + Duration::from_secs(10));
+        let back = start + Duration::from_secs(20);
+        let notices = tracker.observe_at(&[row("p1", Some("n1"), "idle", Some(2))], back);
+        assert_eq!(notices[0].number, 1, "a brief gap keeps the number");
+
+        let gone = back + ABSENCE_GRACE + Duration::from_secs(1);
+        tracker.observe_at(&[], gone);
+        let again = gone + Duration::from_secs(1);
+        assert!(tracker
+            .observe_at(&[row("p1", Some("n1"), "idle", Some(3))], again)
+            .is_empty());
+        let notices = tracker.observe_at(
+            &[row("p1", Some("n1"), "idle", Some(4))],
+            again + Duration::from_secs(1),
+        );
+        assert_eq!(
+            notices[0].number, 2,
+            "absence past the grace gives a new number"
+        );
+    }
+
+    #[test]
     fn completion_on_one_agent_does_not_touch_another() {
         let mut tracker = Tracker::default();
         tracker.observe(&[
