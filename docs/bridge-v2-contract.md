@@ -122,9 +122,33 @@ Learned from `herdr-web-ui/server/prompt.ts`:
 
 ---
 
-## 4. Cappuccino Bridge V2 API Contract
+## 4. Cappuccino Bridge V2 API Contract (draft)
 
-### 4.1 HTTP REST Endpoints
+Status: draft. The shipped wire is protocol **1**: `GET /api/session` returns `"protocol": 1`
+and a `capabilities` object of booleans. The shapes in §4.1 are the draft target for protocol 2
+and are not shipped. Additive fields stay on the current version (§4.0).
+
+### 4.0 Version and capability negotiation (draft)
+
+Rules that apply when the first breaking change needs a new protocol number:
+
+- **Version range.** The client declares the range it speaks, `protocol_min` to `protocol_max`,
+  in the `X-Cappuccino-Protocol: <min>-<max>` request header on the handshake. The bridge answers
+  `protocol` with the highest version both sides support. With no overlap it answers HTTP 426 and
+  `{"event":"error","code":"protocol","supported":[<min>,<max>]}`, and the client tells the owner
+  to update the bridge or the app.
+- **Capabilities.** The bridge advertises `capabilities` as now, an object of booleans keyed by
+  name. The client may send `required`, a list of capability names it cannot run without. The
+  bridge answers `missing_required` with any it lacks. The client fails closed on a non-empty
+  `missing_required` and shows which capabilities are missing.
+- **Unknown keys are ignored** on both sides, and are never an error.
+- **Additive within a version.** Fields may be added, never repurposed or removed. A change of
+  meaning or removal needs a new protocol number.
+- **Optional blocks.** A block such as `telegram` (route and events) is optional. A client treats
+  an absent block as unknown, not unsupported.
+- **Reject out-of-range versions.** A client rejects a `protocol` value outside its range.
+
+### 4.1 HTTP REST Endpoints (draft shapes)
 
 #### `GET /api/session`
 
