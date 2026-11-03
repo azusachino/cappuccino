@@ -33,6 +33,7 @@ enabled = false                                                  # set true afte
 chat_id = "<numeric group id, negative for groups>"
 token_file = "/Users/<you>/.config/harus/cappuccino-telegram-token" # absolute path; no ~
 machine_label = "<name for this machine, 1-40 printable characters>"
+show_pane_names = false     # set true only if you trust every process in your panes (step 3)
 events = ["completion", "needs_answer", "route_failure"]
 ```
 
@@ -42,17 +43,21 @@ events = ["completion", "needs_answer", "route_failure"]
 - Keep `enabled = false` until the token file exists. Enabling with a missing file
   reports `misconfigured` and sends nothing.
 
-## 3. Name each agent session (optional, recommended)
+## 3. Name each agent session (optional)
 
-Messages read `claude #2 finished a work cycle` by default. Numbers are per agent kind
-and reset when the bridge restarts. To make a session recognisable, name its pane in herdr:
+Messages read `claude #2 finished a work cycle`. Numbers are per agent kind and reset
+when the bridge restarts. To also show the herdr pane name, set `show_pane_names = true`
+in the `[telegram]` table and name the pane:
 
 ```sh
 herdr agent rename <pane id> <name>     # for example: herdr agent rename w1:pA1 telegram
 ```
 
-A named pane shows as `claude #2 (telegram)`. Names are not inherited across sessions,
-so name each new session you want to track. Leave a pane unnamed and it stays generic.
+A named pane then shows as `claude #2 (telegram)`. Names are not inherited across
+sessions, so name each new session you want to track.
+
+Turn the option on only if you trust every process that runs in your panes. Any process
+in a pane can rename it, and the name is sent to Telegram once the option is on.
 
 ## 4. Restart and verify the route
 

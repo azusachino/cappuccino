@@ -51,6 +51,7 @@ pub struct File {
     pub token_file: Option<PathBuf>,
     pub machine_label: Option<String>,
     pub events: Option<Vec<String>>,
+    pub show_pane_names: Option<StrictBool>,
 }
 
 /// Validated settings for an enabled route. The token itself is read from
@@ -61,6 +62,8 @@ pub struct Settings {
     pub token_file: PathBuf,
     pub machine_label: String,
     pub events: Vec<Event>,
+    /// Off by default. Any process in a pane can rename it, so the name is shown only when the owner opts in.
+    pub show_pane_names: bool,
 }
 
 /// `Ok(None)` when the route is disabled. Shape errors fail startup; a missing or
@@ -105,6 +108,7 @@ pub fn settings(file: File) -> Result<Option<Settings>, String> {
         token_file,
         machine_label: label.to_string(),
         events,
+        show_pane_names: file.show_pane_names.unwrap_or(StrictBool(false)).0,
     }))
 }
 
@@ -405,13 +409,14 @@ impl Tracker {
 }
 
 /// The plain text sent for a notice. Never includes a transcript, a path or a
-/// native reference, and is capped at 200 characters.
-pub fn message(machine: &str, notice: &Notice) -> String {
+/// native reference, and is capped at 200 characters. The pane name is added only
+/// when the owner opted in with `show_pane_names`.
+pub fn message(machine: &str, notice: &Notice, show_names: bool) -> String {
     let verb = match notice.kind {
         Kind::Completion => "finished a work cycle",
         Kind::NeedsAnswer => "is waiting for an answer",
     };
-    let agent = match &notice.name {
+    let agent = match notice.name.as_ref().filter(|_| show_names) {
         Some(name) => format!("{} #{} ({name})", notice.agent, notice.number),
         None => format!("{} #{}", notice.agent, notice.number),
     };
@@ -500,7 +505,11 @@ impl Telegram {
         }
         for notice in self.tracker.observe_at(rows, at) {
             if self.settings.events.contains(&notice.kind.event()) {
-                let text = message(&self.settings.machine_label, &notice);
+                let text = message(
+                    &self.settings.machine_label,
+                    &notice,
+                    self.settings.show_pane_names,
+                );
                 self.enqueue(text, at);
             }
         }
@@ -880,6 +889,17 @@ mod tests {
     }
 
     #[test]
+    fn pane_names_are_off_unless_opted_in() {
+        let base = "enabled = true\nchat_id = \"-100\"\ntoken_file = \"/tmp/t\"\nmachine_label = \"mini\"\n";
+        let default = settings(file(base)).unwrap().unwrap();
+        assert!(!default.show_pane_names);
+        let opted_in = settings(file(&format!("{base}show_pane_names = true")))
+            .unwrap()
+            .unwrap();
+        assert!(opted_in.show_pane_names);
+    }
+
+    #[test]
     fn messages_are_plain_and_capped() {
         let notice = Notice {
             kind: Kind::Completion,
@@ -888,7 +908,7 @@ mod tests {
             name: None,
         };
         assert_eq!(
-            message("mini", &notice),
+            message("mini", &notice, false),
             "[cappuccino] mini · pi #3 finished a work cycle"
         );
         let named = Notice {
@@ -898,8 +918,13 @@ mod tests {
             name: Some("telegram".into()),
         };
         assert_eq!(
-            message("MacMini", &named),
+            message("MacMini", &named, true),
             "[cappuccino] MacMini · claude #2 (telegram) finished a work cycle"
+        );
+        assert_eq!(
+            message("MacMini", &named, false),
+            "[cappuccino] MacMini · claude #2 finished a work cycle",
+            "the name stays out unless the owner opted in"
         );
         let long = Notice {
             kind: Kind::NeedsAnswer,
@@ -907,7 +932,7 @@ mod tests {
             number: 1,
             name: None,
         };
-        let text = message("mini", &long);
+        let text = message("mini", &long, false);
         assert_eq!(text.chars().count(), MAX_TEXT_CHARS);
         assert!(text.ends_with('…'));
     }
@@ -1014,6 +1039,7 @@ mod tests {
             token_file: PathBuf::from("/unused"),
             machine_label: "mini".into(),
             events,
+            show_pane_names: false,
         };
         Telegram::new(
             settings,
@@ -1101,6 +1127,7 @@ mod tests {
             token_file: PathBuf::from("/does/not/exist"),
             machine_label: "mini".into(),
             events: vec![Event::Completion],
+            show_pane_names: false,
         };
         let mut telegram = Telegram::new(
             settings,
