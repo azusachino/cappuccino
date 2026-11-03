@@ -14,42 +14,39 @@ class BridgeDetailsTest {
     """"event":"paired","machine_id":"00000000-0000-0000-0000-000000000001","plugin":"cappuccino-bridge""""
 
   @Test
-  fun legacyHandshakeIsUnknownRatherThanUnsupported() {
-    val details = parseBridgeDetails(parseJsonObject("{$prefix,\"protocol\":1}"))
-    assertNull(details.version)
-    assertNull(details.capabilities)
-    assertEquals(1L, details.protocol)
-  }
-
-  @Test
-  fun advertisedFalseIsDistinctFromMissingAndTrue() {
+  fun offeredAndAgreedCapabilitiesAreTrueOnlyWhenAgreed() {
     val details =
       parseBridgeDetails(
         parseJsonObject(
-          "{$prefix,\"protocol\":1,\"bridge_version\":\"0.1.0\",\"capabilities\":{\"live_output\":true,\"prompt_input\":false}}"
+          "{$prefix,\"protocol\":2,\"bridge_version\":\"0.2.0\",\"capabilities\":{\"live_output\":1,\"prompt_input\":1},\"agreed\":{\"live_output\":1}}"
         )
       )
-    assertEquals("0.1.0", details.version)
+    assertEquals("0.2.0", details.version)
     assertEquals(true, details.capabilities?.get("live_output"))
     assertEquals(false, details.capabilities?.get("prompt_input"))
     assertNull(details.capabilities?.get("prompt_answers"))
   }
 
   @Test(expected = ProtocolException::class)
+  fun aHandshakeWithoutCapabilitiesIsRejected() {
+    parseBridgeDetails(parseJsonObject("{$prefix,\"protocol\":2}"))
+  }
+
+  @Test(expected = ProtocolException::class)
   fun malformedCapabilitiesAreRejected() {
     parseBridgeDetails(
-      parseJsonObject("{$prefix,\"protocol\":1,\"capabilities\":{\"prompt_input\":\"yes\"}}")
+      parseJsonObject("{$prefix,\"protocol\":2,\"capabilities\":\"yes\",\"agreed\":{}}")
     )
   }
 
   @Test
   fun incompatibleProtocolExplainsTheConflict() {
     try {
-      parseBridgeDetails(parseJsonObject("{$prefix,\"protocol\":2}"))
-      throw AssertionError("Incompatible protocol must fail closed")
+      parsePairedFromDetails("{$prefix,\"protocol\":1}")
+      throw AssertionError("Protocol v1 must fail closed")
     } catch (error: ProtocolException) {
-      assertTrue(error.message!!.contains("protocol v2"))
-      assertTrue(error.message!!.contains("requires v1"))
+      assertTrue(error.message!!.contains("protocol v1"))
+      assertTrue(error.message!!.contains("requires v2"))
     }
   }
 
@@ -58,7 +55,7 @@ class BridgeDetailsTest {
     val details =
       parseBridgeDetails(
         parseJsonObject(
-          "{$prefix,\"protocol\":1,\"telegram\":{\"route\":\"enabled\",\"events\":[\"completion\"]}}"
+          "{$prefix,\"protocol\":2,\"capabilities\":{},\"agreed\":{},\"telegram\":{\"route\":\"enabled\",\"events\":[\"completion\"]}}"
         )
       )
     assertEquals("enabled", details.telegramRoute)
@@ -67,7 +64,10 @@ class BridgeDetailsTest {
 
   @Test
   fun missingTelegramBlockMeansTelegramDoesNotCover() {
-    val details = parseBridgeDetails(parseJsonObject("{$prefix,\"protocol\":1}"))
+    val details =
+      parseBridgeDetails(
+        parseJsonObject("{$prefix,\"protocol\":2,\"capabilities\":{},\"agreed\":{}}")
+      )
     assertNull(details.telegramRoute)
     assertTrue(details.telegramEvents.isEmpty())
     assertFalse(telegramCovers(details, "completion"))
@@ -79,8 +79,8 @@ class BridgeDetailsTest {
       telegramCovers(
         BridgeDetails(
           UUID.fromString("00000000-0000-0000-0000-000000000001"),
-          "0.1.1",
-          1,
+          "0.2.0",
+          2,
           null,
           route,
           events,
@@ -95,4 +95,7 @@ class BridgeDetailsTest {
     assertFalse(covered(null, listOf("completion"), "completion"))
     assertFalse(telegramCovers(null, "completion"))
   }
+
+  private fun parsePairedFromDetails(json: String) =
+    com.azusachino.cappuccino.core.parsePaired(parseJsonObject(json))
 }

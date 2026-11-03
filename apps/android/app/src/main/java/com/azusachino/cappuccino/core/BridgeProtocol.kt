@@ -32,7 +32,23 @@ class StreamRetryBudget(private val maximumRetries: Int = 4) {
 
 class ProtocolException(message: String) : Exception(message), BridgeAnswered
 
-const val BRIDGE_PROTOCOL_VERSION: Long = 1L
+const val BRIDGE_PROTOCOL_VERSION: Long = 2L
+
+/** Header that carries the agreed protocol version on every v2 call after the handshake. */
+const val PROTOCOL_HEADER = "X-Cappuccino-Protocol"
+
+/** Capabilities this app implements; each is declared at version 1 in the handshake. */
+val CLIENT_CAPABILITIES =
+  listOf(
+    "agent_discovery",
+    "live_output",
+    "conversation_history",
+    "prompt_input",
+    "prompt_answers",
+    "agent_control",
+    "mutation_binding",
+    "completion_signals",
+  )
 
 /**
  * Marks an error raised after the bridge answered (a status, a rejection or a response that failed
@@ -133,7 +149,7 @@ class Endpoint private constructor(val base: URI, val iroh: IrohEndpointAddr? = 
 
   fun stream(sessionId: String): URI =
     URI.create(
-      "${if (base.scheme == "https") "wss" else "ws"}://${base.rawAuthority}/api/stream?session=${encodeQuery(sessionId)}"
+      "${if (base.scheme == "https") "wss" else "ws"}://${base.rawAuthority}/api/v2/stream?session=${encodeQuery(sessionId)}"
     )
 
   private fun encodeQuery(value: String): String =
@@ -279,8 +295,8 @@ fun parsePaired(json: JsonObject): UUID {
   if (json.string("event") != "paired" || json.string("plugin") != BRIDGE_PLUGIN_ID)
     throw ProtocolException("Unsupported bridge session response")
   val protocol = json.long("protocol")
-  if (protocol != 1L)
-    throw ProtocolException("Incompatible bridge protocol v$protocol; app requires v1")
+  if (protocol != 2L)
+    throw ProtocolException("Incompatible bridge protocol v$protocol; app requires v2")
   return uuid(json.string("machine_id"))
 }
 

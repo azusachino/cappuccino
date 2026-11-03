@@ -32,17 +32,13 @@ internal fun parseBridgeDetails(json: JsonObject): BridgeDetails {
     ((telegram?.fields?.get("events") as? JsonValue.Array)?.value ?: emptyList()).mapNotNull {
       (it as? JsonValue.StringValue)?.value
     }
-  val capabilities =
-    when (val value = json.fields["capabilities"]) {
-      null,
-      JsonValue.Null -> null
-      is JsonValue.Object ->
-        value.value.fields.mapValues { (key, flag) ->
-          (flag as? JsonValue.BooleanValue)?.value
-            ?: throw ProtocolException("Invalid bridge capability: $key")
-        }
-      else -> throw ProtocolException("Invalid bridge capabilities")
-    }
+  // The bridge offers each capability as name -> version. A capability is usable only when it is
+  // also agreed, so the map answers true for agreed names, false for offered-but-not-agreed ones.
+  val offered =
+    (json.fields["capabilities"] as? JsonValue.Object)?.value?.fields?.keys
+      ?: throw ProtocolException("Invalid bridge capabilities")
+  val agreed = (json.fields["agreed"] as? JsonValue.Object)?.value?.fields?.keys.orEmpty()
+  val capabilities = offered.associateWith { it in agreed }
   return BridgeDetails(
     machine,
     json.optionalString("bridge_version"),
