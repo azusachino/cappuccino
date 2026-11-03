@@ -143,16 +143,16 @@ In order of enforcement:
    authenticator the reserved `auth` section in `services/bridge/src/config.rs`
    was kept for, and its settings live there.
 
-**Limits (slice 5).** Named constants in `services/bridge/src/iroh_transport.rs`
-and `main.rs`, not config: they bound resource use, and nothing here is
-per-machine tuning.
+**Limits (slice 5).** Each value below is a default. Every one can be overridden in
+the `[tuning]` table of the bridge config; see `services/bridge/src/tuning.rs` and the
+bridge README for the keys.
 
 | Limit | Value | Enforced by | Justification |
 | --- | --- | --- | --- |
-| Request body | 2 MiB (`MAX_REQUEST_BODY_BYTES`) | `RequestBodyLimitLayer` on every route; over-limit is 413 | Equal to the apps' own ceiling for any HTTP body (`MAX_HTTP_BODY_BYTES` on Android, `maxHTTPBodyBytes` on Apple): a client never sends a body the bridge refuses for a reason it cannot see. Prompt text is the only large request body. Declared length is refused unread; streamed bodies stop at the cap. |
+| Request body | 2 MiB (`tuning.max_request_body_bytes`) | `RequestBodyLimitLayer` on every route; over-limit is 413 | Equal to the apps' own ceiling for any HTTP body (`MAX_HTTP_BODY_BYTES` on Android, `maxHTTPBodyBytes` on Apple): a client never sends a body the bridge refuses for a reason it cannot see. Prompt text is the only large request body. Declared length is refused unread; streamed bodies stop at the cap. |
 | Streams per tunnel connection | 32 (`MAX_TUNNEL_STREAMS`) | QUIC `max_concurrent_bidi_streams` | Above the phone's normal request concurrency. Extra opens wait. QUIC returns credit in batches, so a waiting open resumes after a batch of streams finish, not after one. |
-| Tunnel connections per EndpointId | 4 (`MAX_TUNNEL_CONNECTIONS_PER_ID`) | Tracking in `serve_tunnel`; excess closed | A paired phone uses one or two connections. |
-| Tunnel connections overall | 16 (`MAX_TUNNEL_CONNECTIONS`) | Same | Caps the total for one bridge. |
+| Tunnel connections per EndpointId | 16 (`max_tunnel_connections_per_id`) | Tracking in `serve_tunnel`; excess closed | A paired phone uses one or two connections. |
+| Tunnel connections overall | 64 (`max_tunnel_connections`) | Same | Caps the total for one bridge. |
 | Unpaired pair exchanges at once | 4 (`MAX_PAIR_CONNECTIONS`) | Semaphore in `serve_pair`; excess closed at once | A pair exchange can hold a task up to about 20 s, so this caps pinned tasks. |
 | Pair attempts per EndpointId | 5 per 60 s (`PAIR_ATTEMPTS_PER_WINDOW`, `PAIR_ATTEMPT_WINDOW`) | Per-id window in `redeem`; every attempt counts, match or not | A wrong guess burns nothing, so the rate limit protects resources, not the code. |
 | Handshakes in flight | 32 (`MAX_PENDING_HANDSHAKES`) | Accept loop waits before spawning | Bounds tasks that exist before the ALPN is known. |

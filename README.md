@@ -4,324 +4,123 @@
   <img src="docs/assets/icon.png" width="128" alt="Cappuccino icon" />
 </p>
 
-<h1 align="center">Cappuccino</h1>
-
 <p align="center">
   <a href="#license"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0 license" /></a>
-  <img src="https://img.shields.io/badge/platform-Android%20%7C%20iOS-black" alt="Android and iOS" />
+  <img src="https://img.shields.io/badge/platform-iPhone%20%7C%20Android-black" alt="iPhone and Android" />
   <img src="https://img.shields.io/badge/Herdr-0.9.0%2B-4C4F69" alt="Herdr 0.9.0 or later" />
-  <img src="https://img.shields.io/badge/agents-Pi%20%7C%20Claude%20Code%20%7C%20Agy-8839EF" alt="Supported agents" />
 </p>
 
 Cappuccino is a native iPhone and Android app for the coding agents already
-running in [Herdr](https://github.com/herdrdev/herdr) panes on your own machines. It lists
-those agents, shows their conversations, and lets you send a prompt, stop a
-run, start a new session, or answer an approval. It does not start, stop or
-replace the agents. A small Rust bridge, installed as a Herdr plugin, serves
-the apps using an **iroh-first peer-to-peer transport** (paired directly via
-terminal QR code over QUIC and TLS 1.3), with your private Tailnet as a fallback.
+running in [Herdr](https://github.com/herdrdev/herdr) panes on your machines. It
+shows each agent's conversation and lets you send a prompt, stop a run, start a
+new session, or answer an approval. It does not start, stop or replace agents.
 
-## Contents
-
-- [Why](#why)
-- [What you can do](#what-you-can-do)
-- [How it works](#how-it-works)
-- [Design and trade-offs](#design-and-trade-offs)
-- [Getting started](#getting-started)
-- [Limitations](#limitations)
-- [Documentation](#documentation)
-- [Development](#development)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Why
-
-Long-running agents keep working after you leave the terminal, but checking
-on them from a phone usually means a remote terminal app. Cappuccino reads
-the agent's own session record and the pane's screen instead, so the phone
-shows a conversation rather than a terminal. The agent keeps running when the
-phone disconnects, and reconnecting shows the same session.
+A small Rust bridge, installed as a Herdr plugin, serves the apps over
+**iroh** (peer-to-peer, paired with a QR code) and, as a fallback, your Tailnet.
 
 ## What you can do
 
-- **Machines:** pair each Herdr machine by scanning its QR code (`cappuccino-bridge pair`)
-  over iroh, or add its Tailnet bridge URL. Each machine lists its agents. An unreachable
-  machine shows its own error and does not block the others.
-- **Agents and status:** see each agent's name, working directory, branch (where
-  the repository is known) and state (idle, working or blocked), as Herdr reports them.
-- **Conversations:** read the canonical transcript for Pi, Claude Code and
-  Agy. If an agent has no session file the bridge can resolve, the app shows
-  the pane's terminal scrollback instead, labeled as scrollback and read-only.
-- **Prompts:** send text to an agent. It arrives as typed input, not as a
-  queued delivery with a receipt.
-- **Stop:** send Escape to interrupt the current run. Offered while the agent
-  is working.
-- **New session:** type `/new` into an idle Pi, Claude Code or Agy session.
-  The bridge refuses it while the agent is working or blocked.
-- **Approvals and questions:** answer tool approval prompts and Claude Code's
-  AskUserQuestion forms. The bridge reads them from the bottom of the screen
-  and presses the matching key. An answer is refused if the prompt on screen
-  has changed.
-- **Slash commands:** a message that starts with an agent command, such as
-  `/model opus`, asks for confirmation before it is sent. Commands like
-  `/model` drop the agent's prompt cache, and `/new` ends the conversation, so
-  each one needs an explicit yes.
-- **Session stats:** the composer shows the model, thinking level, context
-  tokens and window, and the share of input read from the prompt cache. Pi and
-  Claude Code also report the context window when it is known. Agy reports
-  token counts without a model.
-- **Saved conversations (Android):** recent conversations stay on the device
-  so you can read them offline. A saved view is read-only, shows when it was
-  captured, and offers no actions.
-- **Notifications (Android):** a foreground service watches the configured
-  machines and alerts you when an agent finishes or waits for input. The iPhone
-  app has no notifications.
+- **Machines:** pair each Herdr machine by scanning its QR code, or add its
+  Tailnet URL. An unreachable machine does not block the others.
+- **Agents:** see each agent's name, working directory, branch and state
+  (idle, working or blocked).
+- **Conversations:** read the transcript for Pi, Claude Code and Agy. When no
+  session file is available, the app shows the pane's scrollback, read-only.
+- **Prompts, stop and new session:** type into the agent's pane. Stop sends
+  Escape. `/new` starts a fresh session only while the agent is idle.
+- **Approvals and questions:** answer tool approvals and Claude Code's
+  question forms. An answer is refused if the prompt on screen has changed.
+- **Slash commands:** commands such as `/model` or `/new` need an explicit
+  confirmation before they are sent.
+- **Session stats:** model, thinking level, context tokens and prompt-cache use.
+- **Saved conversations (Android and iPhone):** recent conversations are kept
+  on the device and open read-only.
+- **Notifications (Android):** a foreground service alerts you when an agent
+  finishes or waits for input.
+- **Telegram alerts (optional, bridge):** the bridge can post a plain-text
+  message to a private group on completion or when an agent needs an answer.
+  Off by default. See [Telegram alerts setup](docs/telegram-alerts-setup.md).
 
 ## How it works
 
 ```text
 phone (iPhone or Android)
-  │
-  ├── [Primary] iroh peer-to-peer (QUIC / TLS 1.3, N0 Tokyo relay fallback)
-  │      └── paired via terminal QR code (`cappuccino-bridge pair`)
-  │
-  └── [Fallback] Tailnet HTTPS / WebSocket
-         └── tailscale serve  https://<machine>.<tailnet>.ts.net  ->  127.0.0.1:7392
-  │
-  ▼
+  ├── iroh (QUIC, TLS 1.3, paired by QR code)          primary
+  └── Tailnet HTTPS -> tailscale serve -> 127.0.0.1    fallback
+        │
+        ▼
 cappuccino-bridge (loopback 127.0.0.1:7392)
-  │  NDJSON over the Herdr socket
+  │  Herdr socket
   ▼
-Herdr  ->  agent panes (Pi, Claude Code, Agy)
+Herdr -> agent panes (Pi, Claude Code, Agy)
 ```
 
-The bridge is a Rust program that Herdr starts through its plugin manifest.
-It runs a loopback HTTP and WebSocket server alongside an iroh peer-to-peer endpoint.
-For each request it asks Herdr, over Herdr's local socket, for the agent list,
-pane text or a prompt operation. For a conversation it reads the agent's session
-file, after checking that the path Herdr reports is inside that agent's session
-store.
+Clients start with `POST /api/v2/handshake`, then send
+`X-Cappuccino-Protocol: 2` on each call. Capabilities are negotiated per
+handshake, and the app acts only on those both sides agree to. The contract is
+in [docs/bridge-v2-contract.md](docs/bridge-v2-contract.md).
 
-The mobile app connects **iroh-first**: it dials the bridge directly over QUIC
-using ed25519 public keys, negotiating direct UDP hole punching with fallback to N0's
-public relay network (Tokyo `aps1`). If iroh is unavailable, the app falls back to the machine's
-Tailnet URL (`tailscale serve`). Stop and New session only type into the existing
-pane, so neither starts nor ends a process.
+Prompts and stop reach the pane as typed input. Herdr does not report delivery,
+so the app shows no receipt.
 
-## Design and trade-offs
+## Setup
 
-- **iroh-first peer authentication, tailnet as fallback.** iroh connections are
-  end-to-end encrypted with ed25519 endpoint keys (`EndpointId`) and require an
-  explicit cryptographic pairing handshake (`cappuccino-bridge pair`) with
-  rotating single-use tokens. For tailnet fallback, the tailnet remains the boundary:
-  the bridge binds strictly to loopback and relies on `tailscale serve` for tailnet
-  ingress. Public HTTP ingress is never supported.
-- **A Herdr plugin, not a separate daemon.** Herdr's plugin system starts the
-  bridge and provides its status, stop and log actions. The bridge is not
-  loaded into Herdr or into an agent. Herdr and the agent own process lifetime,
-  so the app never launches or kills an agent.
-- **Reading prompts off the screen, failing closed.** The bridge does not
-  integrate with each agent's prompt flow. It reads the visible prompt, gives it
-  a single-use id, and checks the bottom of the screen for it. It refuses an
-  answer for a stale or reused id, and it asks you to confirm any slash command
-  before sending it.
-- **Prompt text is terminal input.** A prompt is written to the pane with
-  Enter. Herdr does not report which Pi queue accepted it, so the app does not
-  claim a delivery receipt.
-- **Native apps, shared behavior.** The iPhone and Android apps are written
-  separately in Swift and Kotlin. They share behavior through a common set of
-  fixtures and the behavior spec, not through shared code.
+1. **Bridge on each Herdr machine.** Install, link and check the plugin as
+   described in [services/bridge/README.md](services/bridge/README.md). Herdr
+   0.9.0 or later is required.
+2. **Pair.** Start the bridge and run `cappuccino-bridge pair`. The QR code and
+   iroh options are in [docs/iroh-setup.md](docs/iroh-setup.md).
+3. **iPhone app.** Run `make setup`, then `make dev` with a USB-connected phone.
+   iOS 17.5 or later. Install steps, the free-account re-signing limit and
+   SideStore are in [docs/install-iphone.md](docs/install-iphone.md).
+4. **Android app.** Open `apps/android/` in Android Studio, or run
+   `make build-android` for a debug APK. Android 13 (API 33) or later. Only
+   debug builds are provided.
+5. **Pair the phone.** Tap `+` in the app and scan the QR code. Or enter the
+   Tailnet URL from step 2.
 
-### Claude Code notes
-
-- **Transcript:** the bridge reads Claude Code's project session files, under
-  `CLAUDE_CONFIG_DIR` when that is set, otherwise under `~/.claude`.
-- **Approvals and questions:** Claude Code writes an AskUserQuestion to its
-  transcript only after it is answered. While the form waits, the bridge reads
-  it from the screen, and it does the same for tool approvals.
-- **New session:** `/new` starts a fresh conversation in the same process.
-- **Context window:** 200K for Claude 3 models, Haiku 4.5, Sonnet 4.5, Opus 4.5,
-  Opus 4.1, Opus 4.0 and Sonnet 4.0. Every other model is 1M. A count above
-  200K shows that the larger window applies.
-- **Commands:** slash commands are confirmed before they are sent, as above.
-
-## Getting started
-
-### Requirements
-
-- Herdr 0.9.0 or later. The plugin manifest sets this minimum, and the bridge
-  is tested against Herdr 0.9.3.
-- Tailscale on each Herdr machine and on each phone, on the same tailnet.
-- A Rust toolchain (`cargo`) on each Herdr machine, to build the bridge.
-- iPhone app: macOS 26 or later with Xcode 26 or later (Swift 6.2), and
-  [mise](https://mise.jdx.dev). The app targets iOS 17 and later.
-- Android app: JDK 21 and an Android SDK with platform API 37 and build-tools
-  36.0.0. The app runs on Android 13 (API 33) and later.
-
-### 1. Prepare each agent's Herdr integration
-
-The bridge can only read a Pi conversation after Herdr's integration has
-reported the session. Install the integration in the config directory that
-the running Pi process uses (`<pi-config-dir>` below, for example a custom `PI_CODING_AGENT_DIR`):
-
-```sh
-env PI_CODING_AGENT_DIR="<pi-config-dir>" herdr integration install pi
-env PI_CODING_AGENT_DIR="<pi-config-dir>" herdr integration status
-```
-
-Then run Pi's `/reload` while it is idle, as described in the
-[integration prerequisite](services/bridge/README.md#agent-integration-prerequisite).
-Use the supported integration for other agent types.
-
-### 2. Install and link the bridge on each Herdr machine
-
-From the root of this repository:
-
-```sh
-cargo install --path services/bridge --locked
-herdr plugin link "$PWD/services/bridge"
-herdr plugin list
-herdr plugin action invoke status --plugin cappuccino-bridge
-```
-
-Install the binary first. Linking the plugin does not build it. Cargo's bin
-directory (normally `~/.cargo/bin`) must be on the `PATH` that Herdr passes to
-plugin commands. The `status` action confirms this.
-
-### 3. Start the bridge and pair over iroh
-
-Ensure `[iroh] enabled = true` in `~/.config/cappuccino-bridge/config.toml`, then start
-the bridge. Run the pairing command to print the pairing QR code in your terminal:
-
-```sh
-cappuccino-bridge pair
-```
-
-If you also want Tailscale Serve fallback, `start` and `status` automatically check
-Tailscale Serve and add the entry if it is missing. The entry maps
-`https://<machine>.<tailnet>.ts.net` to the loopback port. The
-[iroh setup guide](docs/iroh-setup.md) covers iroh transports, relays, and pairing.
-
-### Optional: Telegram alerts
-
-The bridge can post one plain-text message to a private Telegram group when an agent
-finishes a work cycle or waits for an answer. It is off by default. See
-[telegram alerts setup](docs/telegram-alerts-setup.md).
-
-### 4. Build and install the iPhone app
-
-```sh
-make setup
-make dev
-```
-
-xtool builds the app, signs it with your own Apple ID and installs it on a USB-connected
-iPhone. `make ipa` builds an unsigned `.ipa` (`apps/ios/xtool/Cappuccino.ipa`) for SideStore or
-AltStore to re-sign. Running from Xcode is the fallback. The one-time xtool setup and every
-route are in [the iPhone install guide](docs/install-iphone.md). With free provisioning, the
-installed app must be re-signed about every seven days. There is no App Store or TestFlight build.
-
-### 5. Build and install the Android app
-
-Open `apps/android/` in Android Studio and run the app on your phone. To build
-the debug APK without Android Studio, run `make build-android`. The APK is
-written to `apps/android/app/build/outputs/apk/debug/app-debug.apk`. Only debug
-builds are provided.
-
-### 6. Pair or add a machine
-
-In the app, tap `+` on the top bar (or "Pair Machine" on the empty state), point your
-phone camera at the terminal QR code from step 3, and tap **Scan QR Code**. The app
-pairs and connects immediately over iroh.
-
-If connecting via Tailnet instead, tap "Connect via Tailnet URL instead" and provide
-the `https://…ts.net` address from step 3. Each saved machine is bound to the
-machine ID the bridge reports.
+Bridge limits and timeouts are configurable under `[tuning]`; defaults are in
+[services/bridge/README.md](services/bridge/README.md#configuration-and-security).
 
 ## Limitations
 
-- **iroh reconnectivity after long network loss or sleep.** In iroh, peer connections
-  rely on active QUIC sessions and UDP NAT hole-punch states. If a mobile device loses
-  network connectivity for an extended period (prolonged backgrounding, deep OS sleep / Doze,
-  airplane mode, or switching cellular/Wi-Fi interfaces), NAT traversal mappings expire
-  and the QUIC session drops. When returning online, re-establishing direct peer
-  connectivity can take several seconds to over a minute while iroh detects the dead path,
-  queries relay nodes, and renegotiates a direct punch or performs an endpoint rebuild.
-  The app automatically redials and falls back to Tailnet when configured, but pure-iroh
-  setups must wait for the peer dial cycle to complete.
-- The Tailnet fallback transport relies on the tailnet boundary and loopback-only
-  binding (no app-level authentication). iroh transport enforces cryptographic mutual
-  authentication via ed25519 EndpointIds.
-- Prompts are terminal input. Nudge and Follow-up queue selection and delivery
-  receipts are not implemented.
-- Approvals are answered from the screen. There is no typed approval gate, no
-  reusable grants, and no reconciliation of pending requests after a
-  reconnect.
-- Canonical history is read from each agent's session file, and that path must
-  be reported by Herdr. An agent without a usable reported session shows the
-  read-only scrollback fallback.
-- Live parity with an owner's active session has not been verified. The
-  automated UI journeys use synthetic transcripts.
-- The bridge is not supervised after startup. No Herdr shutdown hook stops it,
-  so use the plugin stop action.
-- There are no push or Telegram alerts. The iPhone app has no notifications and
-  no saved conversations.
-- The Android app is available only as a debug build. Release signing and
-  physical-phone installation are separate work.
-- The Mac app was retired. Herdr covers the desktop.
-
-For the tested behavior and its limits, see [verification](docs/verification.md).
+- **iroh after a long network loss.** A phone that sleeps or changes network can
+  take up to a minute to re-establish a direct path. The app falls back to the
+  Tailnet URL when one is configured.
+- **Tailnet fallback has no app-level authentication.** The bridge binds to
+  loopback only, and `tailscale serve` is the boundary.
+- **Approvals are read from the screen.** There are no typed approval grants and
+  no reconciliation of pending requests after a reconnect.
+- **History depends on the session file.** An agent without a session path that
+  Herdr reports shows the read-only scrollback fallback.
+- **The bridge is not supervised after startup.** Use the plugin's stop action.
+- **The iPhone app has no notifications.** Telegram alerts come from the bridge.
+- **Android is a debug build only.** Release signing is not set up.
+- **Live Telegram alerts are not yet verified end to end.** A test message reached
+  the group; the setup guide lists the remaining checks.
+- **The Mac app is retired.** Herdr covers the desktop.
 
 ## Documentation
 
-- [docs/intent.md](docs/intent.md): the confirmed product intent and owner
-  decisions.
-- [docs/plan.md](docs/plan.md): the current issue slices and what is next.
-- [docs/architecture.md](docs/architecture.md): components, bridge routes and
-  the Herdr input boundary.
-- [docs/behavior-spec.md](docs/behavior-spec.md): the provisional behavior
-  contract shared by the two apps.
-- [docs/user-stories.md](docs/user-stories.md): the MVP stories and setup for
-  two Herdr machines.
-- [docs/install-iphone.md](docs/install-iphone.md): installing the iPhone app
-  with xtool, SideStore or the Xcode fallback, and the free Apple ID limits.
-- [docs/verification.md](docs/verification.md): what has been exercised and
-  the current limits.
-- [docs/development.md](docs/development.md): toolchains, gates and CI for
-  contributors.
-- [docs/bridge-v2-contract.md](docs/bridge-v2-contract.md): the bridge HTTP and WebSocket contract, including the answer, prompt-id and command-confirmation rules.
-- [docs/telegram-alerts-setup.md](docs/telegram-alerts-setup.md): owner setup
-  and checks for the optional Telegram alerts.
-- [services/bridge/README.md](services/bridge/README.md): bridge installation,
-  lifecycle, API, configuration and security notes.
-- [docs/design/](docs/design): current design notes for the apps, including
-  [agent completion notifications](docs/design/agent-completion-notifications.md),
-  [Android Material 3](docs/design/android-material3.md),
-  [conversation rework](docs/design/conversation-rework.md),
-  [offline conversation identity](docs/design/offline-conversation-identity.md),
-  [Pi phone reader](docs/design/pi-phone-reader.md) and
-  [Herdr and Pi capability audit](docs/design/herdr-pi-capability-audit.md).
-- [docs/research/](docs/research): source studies and research notes behind
-  the design, including [discovery](docs/research/discovery.md).
-- [docs/licenses/](docs/licenses): notices for bundled third-party fonts and
-  derived code.
-- [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md): style, gates
-  and ownership rules.
-
-## Contributing
-
-Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md)
-for setup, style and the validation gates, and [docs/development.md](docs/development.md)
-for toolchain pins and CI. Keep scope within the product intent in
-[docs/intent.md](docs/intent.md): Cappuccino reads and relays agents that you
-already own; it does not start, stop or replace them.
+- [docs/intent.md](docs/intent.md): product intent and owner decisions
+- [docs/architecture.md](docs/architecture.md): components and the Herdr input boundary
+- [docs/bridge-v2-contract.md](docs/bridge-v2-contract.md): HTTP and WebSocket contract
+- [services/bridge/README.md](services/bridge/README.md): bridge install, API, configuration
+- [docs/iroh-setup.md](docs/iroh-setup.md): pairing and relays
+- [docs/install-iphone.md](docs/install-iphone.md): iPhone install paths
+- [docs/telegram-alerts-setup.md](docs/telegram-alerts-setup.md): Telegram alerts setup
+- [docs/verification.md](docs/verification.md): what has been tested, and the limits
+- [docs/development.md](docs/development.md): toolchains, gates and CI
+- [CHANGELOG.md](CHANGELOG.md): release notes
 
 ## Development
 
-Contributor setup, repository layout, toolchain pins, make targets, gates,
-scoped toolchain selection and task-owned devices are in
-[docs/development.md](docs/development.md). Style and contribution rules are
-in [CONTRIBUTING.md](CONTRIBUTING.md).
+Run `make check` for the focused platform gates and `make validate` before a
+pull request. Style and contribution rules are in
+[CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
+
+Cappuccino reads and relays agents you already run. Keep changes within
+[docs/intent.md](docs/intent.md): the apps must not start, stop or replace agents.
 
 ## License
 

@@ -81,6 +81,63 @@ the selected Pi session's identity.
 
 Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, optional TOML config file, then environment (`CAPP_BRIDGE_HOST`, `CAPP_BRIDGE_PORT`, `CAPP_BRIDGE_DATA_DIR`, `CAPP_BRIDGE_SERVE_AUTO_APPLY`). Non-loopback binds and enabled reserved auth are rejected.
 
+Top-level file keys: `bind`, `port`, `data_dir`, plus the `[serve]`, `[iroh]`, `[tailnet]`, `[telegram]` and reserved `[auth]` sections.
+
+Operational limits and timeouts live in `[tuning]`. Every key is optional and defaults to the value shown. Unknown keys and `0` fail startup. The file is the only source: there are no environment overrides for these. Read the note on the request body limit before raising it.
+
+```toml
+[tuning]
+# The phone apps read responses up to 2 MiB too (MAX_HTTP_BODY_BYTES on Android,
+# maxHTTPBodyBytes on Apple) and do not learn a changed value. Raise it only with them.
+max_request_body_bytes = 2097152
+
+[tuning.herdr]
+request_timeout_ms = 10000          # connect, write and read bound per Herdr request
+max_response_line_bytes = 4194304   # largest Herdr response; larger fails explicitly
+
+[tuning.stream]
+ping_interval_secs = 30   # idle stream ping, to notice a vanished phone
+poll_interval_ms = 400    # pane re-read interval while a stream is open
+pane_lines = 2000         # lines read per stream poll
+screen_lines = 80        # lines read to find a question or approval on screen
+stats_pane_lines = 30    # lines read for rate-limit and model hints
+scrollback_lines = 200   # lines read when a session has no canonical transcript
+answer_key_gap_ms = 250  # pause between keys when answering a multi-step question
+
+[tuning.iroh]
+max_tunnel_streams = 32                 # concurrent streams per tunnel connection
+max_tunnel_connections = 64             # live tunnel connections across all phones
+max_tunnel_connections_per_id = 16      # live tunnel connections per paired phone
+max_pair_connections = 4                # unpaired pairing exchanges served at once
+pair_attempts_per_window = 5           # pairing attempts per remote id ...
+pair_attempt_window_secs = 60          # ... within this window
+max_pending_handshakes = 32            # QUIC/TLS handshakes in flight
+pair_exchange_timeout_secs = 10        # one pairing exchange
+stopped_timeout_secs = 5               # wait for a peer to stop reading a closing stream
+online_wait_secs = 10                  # how long the pairing QR waits for the iroh endpoint to come online
+
+[tuning.lifecycle]
+start_timeout_secs = 5     # `start` waits this long for the bridge to answer
+stop_timeout_secs = 3      # `stop` waits this long for the bridge to exit
+control_timeout_ms = 500   # control-socket read and write bound
+poll_interval_ms = 50      # lifecycle poll interval while waiting
+probe_timeout_ms = 250     # connect and read bound for the health probe
+
+[tuning.telegram]
+request_timeout_secs = 10       # per Telegram API request
+max_retry_after_secs = 60       # longest retry_after honoured from a 429
+max_rate_limit_tries = 3        # sends attempted before a rate-limited alert is dropped
+server_retry_delay_secs = 30    # wait after a 5xx before retrying
+poll_interval_secs = 5          # how often the alert queue is flushed
+max_pending = 50                # queued alerts; the oldest is dropped beyond this
+absence_grace_secs = 120        # how long a missing agent keeps its baseline
+max_text_chars = 200            # alert text length
+max_label_chars = 40            # machine_label length
+max_name_chars = 40             # pane name length, when show_pane_names is on
+```
+
+Limits that clients depend on stay fixed in code: the `/api/v2` paths and framing, the pairing code window (`PAIR_WINDOW_SECS`), the pairing request size, the QR rendering, and the file formats.
+
 Paths, on macOS and Linux alike:
 
 - Config file: `CAPP_BRIDGE_CONFIG`, else `$XDG_CONFIG_HOME/cappuccino-bridge/config.toml`, else `~/.config/cappuccino-bridge/config.toml`.
