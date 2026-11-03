@@ -1,6 +1,6 @@
 # Agent completion notifications
 
-Status: Android completion and input alerts run from a local foreground monitor. Telegram delivery is not implemented; the rules below apply if it is built.
+Status: Android completion and input alerts run from a local foreground monitor. Telegram delivery is not implemented; the rules below apply if it is built. The owner workflow (configuration, triggers, failures, operations) is in [telegram attention alerts](telegram-attention-alerts.md).
 
 ## Owner intent and boundaries
 
