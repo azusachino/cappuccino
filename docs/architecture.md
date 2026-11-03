@@ -39,6 +39,8 @@ The `serve.auto_apply` setting defaults to true. With `false`, or `CAPP_BRIDGE_S
 
 Config precedence is defaults, then optional TOML config (`CAPP_BRIDGE_CONFIG`, else `$XDG_CONFIG_HOME/cappuccino-bridge/config.toml`, else `~/.config/cappuccino-bridge/config.toml`), then supported environment overrides. Bind addresses must stay on loopback. See the [bridge setup and commands](../services/bridge/README.md).
 
+Optional Telegram alerts are a send-only `[telegram]` table in the same file. The bridge posts plain-text completion and needs-answer notices to one group, and never reads Telegram updates. Design: [telegram attention alerts](design/telegram-attention-alerts.md). Setup: [telegram alerts setup](telegram-alerts-setup.md).
+
 ## Delivery acceptance remains open
 
 The behavior spec records the owner-accepted Nudge, Follow-up and receipt contract. That contract is not shipped behavior. Herdr's terminal input acknowledgement alone does not establish which Pi queue accepted text, whether it survives a restart, or whether the target session occupant stayed the same. These capabilities stay unimplemented until a supported integration and verified acceptance evidence exist. Do not revive the superseded companion-daemon or pairing design, and do not add a Pi extension without approval.

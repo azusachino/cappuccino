@@ -202,6 +202,12 @@ Tailscale Serve and add the entry if it is missing. The entry maps
 `https://<machine>.<tailnet>.ts.net` to the loopback port. The
 [iroh setup guide](docs/iroh-setup.md) covers iroh transports, relays, and pairing.
 
+### Optional: Telegram alerts
+
+The bridge can post one plain-text message to a private Telegram group when an agent
+finishes a work cycle or waits for an answer. It is off by default. See
+[telegram alerts setup](docs/telegram-alerts-setup.md).
+
 ### 4. Build and install the iPhone app
 
 ```sh
@@ -284,6 +290,8 @@ For the tested behavior and its limits, see [verification](docs/verification.md)
 - [docs/development.md](docs/development.md): toolchains, gates and CI for
   contributors.
 - [docs/bridge-v2-contract.md](docs/bridge-v2-contract.md): the bridge HTTP and WebSocket contract, including the answer, prompt-id and command-confirmation rules.
+- [docs/telegram-alerts-setup.md](docs/telegram-alerts-setup.md): owner setup
+  and checks for the optional Telegram alerts.
 - [services/bridge/README.md](services/bridge/README.md): bridge installation,
   lifecycle, API, configuration and security notes.
 - [docs/design/](docs/design): current design notes for the apps, including

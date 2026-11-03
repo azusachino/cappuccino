@@ -35,8 +35,12 @@ secret kept outside the repository:
 enabled = false                     # off by default; the bridge reports the route as unconfigured
 chat_id = "<group chat id>"         # the private group with only the owner and the bot
 token_file = "<path to secret file>" # read at start; never a literal token and never a CLI argument
+machine_label = "<owner's name for this machine>" # required when enabled; 1-40 printable characters
 events = ["completion", "needs_answer", "route_failure"]
 ```
+
+The owner's setup steps (token in harus-nix, config, herdr naming, verification)
+are in [telegram alerts setup](../telegram-alerts-setup.md).
 
 - The token is read from `token_file` at startup and on an explicit reload. It
   is never logged, never returned in status, and never passed on the command
@@ -83,12 +87,18 @@ Rules that decide whether an observation becomes a message:
 Plain text, no Markdown or HTML parsing, at most 200 characters:
 
 ```text
-[cappuccino] <machine label> · <agent kind> finished a work cycle
-[cappuccino] <machine label> · <agent kind> is waiting for an answer
+[cappuccino] <machine label> · <agent kind> #<n> finished a work cycle
+[cappuccino] <machine label> · <agent kind> #<n> (<pane name>) is waiting for an answer
 ```
 
-The machine label is the owner's own name for the machine, not the hostname.
-The agent kind is the reported kind (for example `pi`). Nothing else is added.
+- The machine label is the owner's own name for the machine, not the hostname.
+- The agent kind is the reported kind (for example `pi`).
+- `#<n>` is a per-kind session number, from 1. It is assigned at first sighting of a
+  session and resets when the bridge restarts. It is not a session identifier.
+- `(<pane name>)` appears only when the owner has named the herdr pane, up to 40
+  characters. The bridge never uses the terminal title or a generated name.
+
+Nothing else is added: no pane id, session id, path, transcript or prompt text.
 
 ## Delivery and failure
 
