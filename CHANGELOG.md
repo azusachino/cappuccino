@@ -2,9 +2,21 @@
 
 All notable changes to Cappuccino are documented in this file.
 
-## 0.1.1 - 2026-11-03
+## 0.2.0 - 2026-11-03
 
-Bridge, Android and iOS ship together at 0.1.1. Android `versionCode` 2; iOS build 2.
+Bridge, Android and iOS ship together at 0.2.0. Android `versionCode` 3; iOS build 3.
+
+### Breaking
+
+- **Protocol v2 cutover.** Every client handshakes first with `POST /api/v2/handshake`, then
+  sends `X-Cappuccino-Protocol: 2` on each call. Phones on 0.1.x cannot talk to a 0.2.0 bridge,
+  and a 0.2.0 phone reports "This bridge predates protocol v2" against an older bridge.
+- **Retired paths removed:** `GET /api/session`, `GET /api/agents`, `GET /api/agents/{id}/conversation`,
+  `POST /api/agents/{id}/prompt`, `POST /api/agents/{id}/control`, `GET /api/transcript` and
+  `GET /api/stream`. Their v2 paths live under `/api/v2/`. See
+  [the v2 contract](docs/bridge-v2-contract.md).
+- Capabilities are negotiated per handshake: each side lists name -> version, and the phone gates
+  actions on the `agreed` map.
 
 ### Added
 
