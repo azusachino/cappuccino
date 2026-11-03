@@ -8,14 +8,6 @@ use std::time::Duration;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
-/// Shared timeout for connect/write/read. This is a safety ceiling for local
-/// IPC, not a measured latency target or a preemptive CPU-time limit.
-const REQUEST_DEADLINE: Duration = Duration::from_secs(10);
-
-/// Maximum response payload bytes, excluding LF. A safety ceiling rather
-/// than a measured transcript maximum; oversized responses fail explicitly.
-const MAX_RESPONSE_LINE_BYTES: usize = 4 * 1024 * 1024;
-
 /// Injected bounds used by tests: a short deadline and a small line cap.
 #[cfg(test)]
 const TEST_DEADLINE: Duration = Duration::from_millis(150);
@@ -32,8 +24,8 @@ struct RequestLimits {
 impl RequestLimits {
     fn production() -> Self {
         Self {
-            deadline: REQUEST_DEADLINE,
-            max_response_line_bytes: MAX_RESPONSE_LINE_BYTES,
+            deadline: Duration::from_millis(crate::tuning::active().herdr.request_timeout_ms),
+            max_response_line_bytes: crate::tuning::active().herdr.max_response_line_bytes,
         }
     }
 

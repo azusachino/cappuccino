@@ -1,8 +1,6 @@
 use super::notice::Kind;
 use super::notice::Notice;
 
-pub(super) const MAX_TEXT_CHARS: usize = 200;
-
 /// The plain text sent for a notice. Never includes a transcript, a path or a
 /// native reference, and is capped at 200 characters. The pane name is added only
 /// when the owner opted in with `show_pane_names`.
@@ -25,10 +23,13 @@ pub(super) fn route_failure_message(machine: &str, status: u16) -> String {
 }
 
 pub(super) fn cap(text: String) -> String {
-    if text.chars().count() <= MAX_TEXT_CHARS {
+    if text.chars().count() <= crate::tuning::active().telegram.max_text_chars {
         return text;
     }
-    let mut capped: String = text.chars().take(MAX_TEXT_CHARS - 1).collect();
+    let mut capped: String = text
+        .chars()
+        .take(crate::tuning::active().telegram.max_text_chars - 1)
+        .collect();
     capped.push('…');
     capped
 }
@@ -71,7 +72,10 @@ mod tests {
             name: None,
         };
         let text = message("mini", &long, false);
-        assert_eq!(text.chars().count(), MAX_TEXT_CHARS);
+        assert_eq!(
+            text.chars().count(),
+            crate::tuning::active().telegram.max_text_chars
+        );
         assert!(text.ends_with('…'));
     }
 }

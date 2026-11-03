@@ -13,6 +13,7 @@ pub struct BridgeConfig {
     pub bind: String,
     pub port: u16,
     pub data_dir: PathBuf,
+    pub tuning: crate::tuning::Tuning,
     pub auth: AuthConfig,
     /// Status/startup apply the `tailscale serve` entry automatically when
     /// true (default); false never touches Tailscale (safe verification).
@@ -100,6 +101,7 @@ struct ConfigFile {
     bind: Option<String>,
     port: Option<u16>,
     data_dir: Option<PathBuf>,
+    tuning: Option<crate::tuning::Tuning>,
     auth: Option<AuthConfig>,
     serve: Option<ServeConfig>,
     iroh: Option<IrohFileConfig>,
@@ -182,6 +184,7 @@ impl BridgeConfig {
                 std::env::var("XDG_STATE_HOME").ok().as_deref(),
                 &home_dir(),
             ),
+            tuning: crate::tuning::Tuning::default(),
             auth: AuthConfig::default(),
             serve_auto_apply: true,
             iroh_enabled: false,
@@ -200,7 +203,7 @@ impl BridgeConfig {
             std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
             &home_dir(),
         );
-        Self::load_from_with_serve(
+        let config = Self::load_from_with_serve(
             Some(&path),
             std::env::var("CAPP_BRIDGE_HOST").ok().as_deref(),
             std::env::var("CAPP_BRIDGE_PORT").ok().as_deref(),
@@ -208,7 +211,11 @@ impl BridgeConfig {
             std::env::var("CAPP_BRIDGE_SERVE_AUTO_APPLY")
                 .ok()
                 .as_deref(),
-        )
+        )?;
+        // Every command that loads the config (start, stop, status, pair, serve)
+        // is one process, so the tuning is installed once here.
+        crate::tuning::install(config.tuning.clone())?;
+        Ok(config)
     }
 
     /// Pure form for tests: no process-env reads (tests run in parallel and
@@ -249,6 +256,10 @@ impl BridgeConfig {
                 if let Some(data_dir) = file.data_dir {
                     config.data_dir = data_dir;
                 }
+                if let Some(tuning) = file.tuning {
+                    tuning.validate()?;
+                    config.tuning = tuning;
+                }
                 if let Some(auth) = file.auth {
                     config.auth = auth;
                 }
@@ -267,7 +278,10 @@ impl BridgeConfig {
                     config.tailnet_url = tailnet.url;
                 }
                 if let Some(telegram) = file.telegram {
-                    config.telegram = crate::telegram::settings(telegram)?;
+                    config.telegram = crate::telegram::settings(
+                        telegram,
+                        config.tuning.telegram.max_label_chars,
+                    )?;
                 }
             }
         }
@@ -336,6 +350,33 @@ mod tests {
             BridgeConfig::load_from(Some(path.to_str().unwrap()), None, Some("7401"), None)
                 .unwrap();
         assert_eq!(config.port, 7401);
+    }
+
+    #[test]
+    fn tuning_comes_from_file_and_rejects_zero() {
+        assert_eq!(
+            BridgeConfig::defaults().tuning,
+            crate::tuning::Tuning::default()
+        );
+        let dir = std::env::temp_dir().join(format!("cap-cfg-body-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[tuning]\nmax_request_body_bytes = 4096\n[tuning.herdr]\nrequest_timeout_ms = 500\n",
+        )
+        .unwrap();
+        let config =
+            BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None).unwrap();
+        assert_eq!(config.tuning.max_request_body_bytes, 4096);
+        assert_eq!(config.tuning.herdr.request_timeout_ms, 500);
+        std::fs::write(&path, "[tuning.stream]\npoll_interval_ms = 0\n").unwrap();
+        let error =
+            BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None).unwrap_err();
+        assert!(
+            error.contains("tuning.stream.poll_interval_ms must be greater than 0"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -19,14 +19,13 @@ pub(super) struct Seen {
 
 /// How long an agent missing from polls keeps its baseline. A brief herdr gap
 /// must not re-baseline an agent and swallow a completion that happened during it.
-pub(super) const ABSENCE_GRACE: Duration = Duration::from_secs(120);
 
 /// Turns successive agent snapshots into notices. Pure apart from the `Instant`
 /// it is given; no network.
 ///
 /// The first sighting of an agent (and any new native session reference, pane
 /// replacement or sequence regression) sets a baseline and produces nothing. An
-/// agent missing from polls for longer than `ABSENCE_GRACE` is forgotten, so it
+/// agent missing from polls for longer than the configured absence grace is forgotten, so it
 /// baselines again when it returns.
 #[derive(Default)]
 pub struct Tracker {
@@ -106,7 +105,9 @@ impl Tracker {
             seen.blocked = blocked;
         }
         self.seen.retain(|key, seen| {
-            live.contains(key) || at.duration_since(seen.last_seen) <= ABSENCE_GRACE
+            live.contains(key)
+                || at.duration_since(seen.last_seen)
+                    <= Duration::from_secs(crate::tuning::active().telegram.absence_grace_secs)
         });
         notices
     }
@@ -282,7 +283,9 @@ mod tests {
         let start = Instant::now();
         let mut tracker = Tracker::default();
         tracker.observe_at(&[row("p1", Some("n1"), "idle", Some(1))], start);
-        let gone = start + ABSENCE_GRACE + Duration::from_secs(1);
+        let gone = start
+            + Duration::from_secs(crate::tuning::active().telegram.absence_grace_secs)
+            + Duration::from_secs(1);
         tracker.observe_at(&[], gone);
         let back = gone + Duration::from_secs(1);
         assert!(tracker
@@ -300,7 +303,9 @@ mod tests {
         let notices = tracker.observe_at(&[row("p1", Some("n1"), "idle", Some(2))], back);
         assert_eq!(notices[0].number, 1, "a brief gap keeps the number");
 
-        let gone = back + ABSENCE_GRACE + Duration::from_secs(1);
+        let gone = back
+            + Duration::from_secs(crate::tuning::active().telegram.absence_grace_secs)
+            + Duration::from_secs(1);
         tracker.observe_at(&[], gone);
         let again = gone + Duration::from_secs(1);
         assert!(tracker

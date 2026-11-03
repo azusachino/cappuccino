@@ -3,10 +3,6 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 pub(super) const API_BASE: &str = "https://api.telegram.org";
-pub(super) const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-pub(super) const MAX_RATE_LIMIT_TRIES: u32 = 3;
-pub(super) const MAX_RETRY_AFTER_SECS: u64 = 60;
-pub(super) const SERVER_RETRY_DELAY: Duration = Duration::from_secs(30);
 
 /// The result of one send, as far as the bridge can tell.
 #[derive(Debug, PartialEq, Eq)]
@@ -62,7 +58,8 @@ impl Sender {
                     .and_then(|body| body["parameters"]["retry_after"].as_u64())
                     .unwrap_or(1);
                 Outcome::RateLimited {
-                    retry_after: retry_after.min(MAX_RETRY_AFTER_SECS),
+                    retry_after: retry_after
+                        .min(crate::tuning::active().telegram.max_retry_after_secs),
                 }
             }
             500..=599 => Outcome::Failing(status),

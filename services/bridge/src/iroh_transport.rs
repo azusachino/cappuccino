@@ -47,33 +47,18 @@ const CLOSE_LIMIT: u32 = 3;
 const CLOSE_PAIR_BUSY: u32 = 4;
 const CLOSE_PAIR_DONE: u32 = 0;
 
-/// Limits. Named constants rather than config: they bound resource use for a
-/// single-owner bridge and are not per-machine tuning knobs. Design:
-/// docs/design/public-exposure-iroh.md ("Limits").
-/// Concurrent bi-streams per tunnel connection, enforced by QUIC flow control:
-/// the phone's extra opens wait for a stream to finish.
-pub const MAX_TUNNEL_STREAMS: u32 = 32;
-/// Live tunnel connections per paired EndpointId; the excess is closed.
-pub const MAX_TUNNEL_CONNECTIONS_PER_ID: usize = 16;
-/// Live tunnel connections across all paired EndpointIds.
-pub const MAX_TUNNEL_CONNECTIONS: usize = 64;
-/// Unpaired `cappuccino-pair/1` connections served at once; the excess is closed.
-pub const MAX_PAIR_CONNECTIONS: usize = 4;
-/// Pairing attempts allowed per remote EndpointId in any PAIR_ATTEMPT_WINDOW.
-pub const PAIR_ATTEMPTS_PER_WINDOW: usize = 5;
-pub const PAIR_ATTEMPT_WINDOW: Duration = Duration::from_secs(60);
-/// Connections still in the QUIC/TLS handshake; the accept loop waits when full,
-/// so a flood of half-open handshakes cannot pin unbounded tasks.
-pub const MAX_PENDING_HANDSHAKES: usize = 32;
-/// Length of a pairing code's window. The code rotates at each boundary.
+/// Limits come from `[tuning.iroh]` (see tuning.rs for defaults and meaning).
+fn limits() -> &'static crate::tuning::Iroh {
+    &crate::tuning::active().iroh
+}
+
+/// Length of a pairing code's window. The code rotates at each boundary. Fixed
+/// because the pairing page's countdown and the phone's copy assume it.
 pub const PAIR_WINDOW_SECS: u64 = 60;
 /// Domain separator for the pairing code HMAC.
 const PAIR_CODE_DOMAIN: &[u8] = b"cappuccino-pair/1";
 /// A code is 64 hex characters; anything longer is refused before comparison.
 const PAIR_REQUEST_MAX: usize = 128;
-const PAIR_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
-const STOPPED_TIMEOUT: Duration = Duration::from_secs(5);
-const ONLINE_WAIT: Duration = Duration::from_secs(10);
 const SECRET_KEY_FILE: &str = "iroh-secret.key";
 const ALLOWLIST_FILE: &str = "iroh-allowlist.json";
 pub const ADMIN_SOCKET_FILE: &str = "iroh-admin.sock";
@@ -124,7 +109,7 @@ struct PairingState {
     /// Windows whose code a successful pairing has used. Only the current and
     /// previous windows can still be redeemed, so older entries are pruned.
     burned: BTreeSet<u64>,
-    /// Admitted pairing attempts per remote id within PAIR_ATTEMPT_WINDOW.
+    /// Admitted pairing attempts per remote id within the pair attempt window.
     pair_attempts: BTreeMap<EndpointId, Vec<Instant>>,
 }
 
@@ -241,7 +226,7 @@ impl Pairing {
                 pair_attempts: BTreeMap::new(),
             }),
             live: Mutex::new(Vec::new()),
-            pair_slots: tokio::sync::Semaphore::new(MAX_PAIR_CONNECTIONS),
+            pair_slots: tokio::sync::Semaphore::new(limits().max_pair_connections),
             audit: default_audit_sink(),
         })
     }
@@ -355,11 +340,11 @@ impl Pairing {
     fn track(&self, id: EndpointId, handle: WeakConnectionHandle) -> Result<(), &'static str> {
         let mut live = self.live.lock().unwrap();
         live.retain(|(_, weak)| weak.upgrade().is_some());
-        if live.len() >= MAX_TUNNEL_CONNECTIONS {
+        if live.len() >= limits().max_tunnel_connections {
             return Err("tunnel_connections");
         }
         if live.iter().filter(|(tracked, _)| *tracked == id).count()
-            >= MAX_TUNNEL_CONNECTIONS_PER_ID
+            >= limits().max_tunnel_connections_per_id
         {
             return Err("tunnel_connections_per_id");
         }
@@ -411,11 +396,13 @@ fn admit_attempt(
     now: Instant,
 ) -> bool {
     attempts.retain(|_, times| {
-        times.retain(|at| now.duration_since(*at) < PAIR_ATTEMPT_WINDOW);
+        times.retain(|at| {
+            now.duration_since(*at) < Duration::from_secs(limits().pair_attempt_window_secs)
+        });
         !times.is_empty()
     });
     let times = attempts.entry(id).or_default();
-    if times.len() >= PAIR_ATTEMPTS_PER_WINDOW {
+    if times.len() >= limits().pair_attempts_per_window {
         return false;
     }
     times.push(now);
@@ -543,7 +530,7 @@ pub async fn start(
     let hub = Arc::new(IrohHub {
         endpoint: endpoint.clone(),
         pairing: Arc::clone(&pairing),
-        online_wait: ONLINE_WAIT,
+        online_wait: Duration::from_secs(limits().online_wait_secs),
         tailnet_url,
     });
     spawn_accept_loop(endpoint, pairing, target);
@@ -558,7 +545,7 @@ fn configure(
     pairing: &Arc<Pairing>,
 ) -> iroh::endpoint::Builder {
     let transport = QuicTransportConfig::builder()
-        .max_concurrent_bidi_streams(VarInt::from_u32(MAX_TUNNEL_STREAMS))
+        .max_concurrent_bidi_streams(VarInt::from_u32(limits().max_tunnel_streams))
         .build();
     builder
         .secret_key(key)
@@ -568,7 +555,7 @@ fn configure(
 }
 
 fn spawn_accept_loop(endpoint: Endpoint, pairing: Arc<Pairing>, target: Target) {
-    let handshakes = Arc::new(tokio::sync::Semaphore::new(MAX_PENDING_HANDSHAKES));
+    let handshakes = Arc::new(tokio::sync::Semaphore::new(limits().max_pending_handshakes));
     tokio::spawn(async move {
         while let Some(incoming) = endpoint.accept().await {
             // Waits (rather than spawning) while the handshake pool is full.
@@ -639,7 +626,11 @@ async fn pipe(mut send: SendStream, mut recv: RecvStream, target: Target) {
         match tokio::io::copy(&mut tcp_read, &mut send).await {
             Ok(_) => {
                 let _ = send.finish();
-                let _ = tokio::time::timeout(STOPPED_TIMEOUT, send.stopped()).await;
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(limits().stopped_timeout_secs),
+                    send.stopped(),
+                )
+                .await;
             }
             Err(_) => {
                 let _ = send.reset(VarInt::from_u32(0));
@@ -670,12 +661,24 @@ async fn serve_pair(conn: Connection, pairing: Arc<Pairing>) {
         };
         send.write_all(reply).await.ok()?;
         send.finish().ok()?;
-        let _ = tokio::time::timeout(STOPPED_TIMEOUT, send.stopped()).await;
+        let _ = tokio::time::timeout(
+            Duration::from_secs(limits().stopped_timeout_secs),
+            send.stopped(),
+        )
+        .await;
         Some(())
     };
-    let _ = tokio::time::timeout(PAIR_EXCHANGE_TIMEOUT, exchange).await;
+    let _ = tokio::time::timeout(
+        Duration::from_secs(limits().pair_exchange_timeout_secs),
+        exchange,
+    )
+    .await;
     // Let the dialer close first so the reply is not cut off by our close.
-    let _ = tokio::time::timeout(PAIR_EXCHANGE_TIMEOUT, conn.closed()).await;
+    let _ = tokio::time::timeout(
+        Duration::from_secs(limits().pair_exchange_timeout_secs),
+        conn.closed(),
+    )
+    .await;
     conn.close(VarInt::from_u32(CLOSE_PAIR_DONE), b"");
 }
 
@@ -1615,7 +1618,7 @@ mod tests {
 
         // The echo stub replies only after EOF, so every stream stays open.
         let mut held = Vec::new();
-        for _ in 0..MAX_TUNNEL_STREAMS {
+        for _ in 0..limits().max_tunnel_streams {
             let (mut send, recv) = timeout_io(conn.open_bi()).await;
             send.write_all(b"held").await.unwrap();
             held.push((send, recv));
@@ -1630,12 +1633,12 @@ mod tests {
         assert!(
             !waiting.is_finished(),
             "stream {} opened beyond the cap",
-            MAX_TUNNEL_STREAMS + 1
+            limits().max_tunnel_streams + 1
         );
 
         // QUIC returns stream credit in batches: one finished stream is not
         // enough to admit the waiting open, but a batch of them is.
-        for (mut send, mut recv) in held.drain(..MAX_TUNNEL_STREAMS as usize / 2) {
+        for (mut send, mut recv) in held.drain(..limits().max_tunnel_streams as usize / 2) {
             send.finish().unwrap();
             assert_eq!(timeout_io(recv.read_to_end(64)).await, b"held");
         }
@@ -1657,7 +1660,7 @@ mod tests {
         pair_client(&bridge, &client).await;
 
         let mut live = Vec::new();
-        for _ in 0..MAX_TUNNEL_CONNECTIONS_PER_ID {
+        for _ in 0..limits().max_tunnel_connections_per_id {
             let conn = client
                 .connect(bridge.addr.clone(), ALPN_TUNNEL)
                 .await
@@ -1677,11 +1680,14 @@ mod tests {
         let bridge = spawn_bridge(echo).await;
         let mut live = Vec::new();
         let mut clients = Vec::new();
-        while live.len() < MAX_TUNNEL_CONNECTIONS {
+        while live.len() < limits().max_tunnel_connections {
             let client = client_endpoint().await;
             bridge.clock.advance(PAIR_WINDOW_SECS);
             pair_client(&bridge, &client).await;
-            for _ in 0..MAX_TUNNEL_CONNECTIONS_PER_ID.min(MAX_TUNNEL_CONNECTIONS - live.len()) {
+            for _ in 0..limits()
+                .max_tunnel_connections_per_id
+                .min(limits().max_tunnel_connections - live.len())
+            {
                 let conn = client
                     .connect(bridge.addr.clone(), ALPN_TUNNEL)
                     .await
@@ -1705,7 +1711,7 @@ mod tests {
         // Hold each pair connection without opening its exchange stream, so the
         // exchange waits and keeps its slot until the timeout.
         let mut held = Vec::new();
-        for _ in 0..MAX_PAIR_CONNECTIONS {
+        for _ in 0..limits().max_pair_connections {
             let client = client_endpoint().await;
             let conn = client
                 .connect(bridge.addr.clone(), ALPN_PAIR)
@@ -1740,7 +1746,7 @@ mod tests {
         let bridge = spawn_bridge(1).await;
         let token = code(&bridge);
         let abuser = client_endpoint().await;
-        for _ in 0..PAIR_ATTEMPTS_PER_WINDOW {
+        for _ in 0..limits().pair_attempts_per_window {
             assert_eq!(pair(&abuser, &bridge.addr, "wrong").await, "ERR\n");
         }
         // Over budget for this id: even the right token is refused.
@@ -1765,7 +1771,7 @@ mod tests {
         let id = EndpointId::from(SecretKey::generate().public());
         let mut attempts = BTreeMap::new();
         let start = Instant::now();
-        for _ in 0..PAIR_ATTEMPTS_PER_WINDOW {
+        for _ in 0..limits().pair_attempts_per_window {
             assert!(admit_attempt(&mut attempts, id, start));
         }
         assert!(!admit_attempt(
@@ -1776,7 +1782,7 @@ mod tests {
         assert!(admit_attempt(
             &mut attempts,
             id,
-            start + PAIR_ATTEMPT_WINDOW
+            start + Duration::from_secs(limits().pair_attempt_window_secs)
         ));
     }
 

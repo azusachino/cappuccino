@@ -1,8 +1,6 @@
 use super::config::Event;
 use crate::agents::AgentRow;
 
-pub(super) const MAX_NAME_CHARS: usize = 40;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Completion,
@@ -39,7 +37,7 @@ pub(super) fn pane_name(row: &AgentRow) -> Option<String> {
         .trim()
         .chars()
         .filter(|c| !c.is_control() && !is_invisible_format(*c))
-        .take(MAX_NAME_CHARS)
+        .take(crate::tuning::active().telegram.max_name_chars)
         .collect();
     let name = name.trim();
     (!name.is_empty()).then(|| name.to_string())
@@ -68,7 +66,10 @@ mod tests {
         named.session_id = "  \u{7}  ".into();
         assert_eq!(pane_name(&named), None, "blank after cleanup");
         named.session_id = "x".repeat(200);
-        assert_eq!(pane_name(&named).unwrap().chars().count(), MAX_NAME_CHARS);
+        assert_eq!(
+            pane_name(&named).unwrap().chars().count(),
+            crate::tuning::active().telegram.max_name_chars
+        );
         named.session_id = "\u{202E}gnimrahc\u{200B}".into();
         assert_eq!(
             pane_name(&named),

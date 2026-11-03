@@ -20,6 +20,7 @@ mod state;
 mod stats;
 mod telegram;
 mod transcript;
+mod tuning;
 
 use axum::Router;
 use std::sync::{
@@ -108,7 +109,7 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
         None
     };
 
-    let app = build_app(state, iroh_hub);
+    let app = build_app(state, iroh_hub, config.tuning.max_request_body_bytes);
 
     let listener = tokio::net::TcpListener::bind((bind.as_str(), port))
         .await
@@ -144,22 +145,19 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
     }
 }
 
-/// Largest request body the bridge reads. Equal to the apps' own ceiling for
-/// any HTTP body (`MAX_HTTP_BODY_BYTES` on Android, `maxHTTPBodyBytes` on
-/// Apple), so a client never sends a body the bridge would refuse for a
-/// reason the client cannot see. Prompts are the only large request body.
-const MAX_REQUEST_BODY_BYTES: usize = 2 * 1024 * 1024;
-
 fn build_app(
     state: Arc<routes::BridgeState>,
     iroh_hub: Option<Arc<iroh_transport::IrohHub>>,
+    max_request_body_bytes: usize,
 ) -> Router {
     let app = Router::new().merge(protocol::routes());
     let app = iroh_transport::with_routes(app, iroh_hub);
     app.layer(compression::json_layer())
         .layer(axum::middleware::from_fn(auth_middleware))
-        .layer(axum::middleware::from_fn(log_body_limit))
-        .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BODY_BYTES))
+        .layer(axum::middleware::from_fn(move |request, next| {
+            log_body_limit(max_request_body_bytes, request, next)
+        }))
+        .layer(RequestBodyLimitLayer::new(max_request_body_bytes))
         .with_state(state)
 }
 
@@ -173,13 +171,14 @@ async fn auth_middleware(
 /// The HTTP listener has no transport identity, so this line carries no
 /// EndpointId; it records that a body hit the cap.
 async fn log_body_limit(
+    max_request_body_bytes: usize,
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     let response = next.run(request).await;
     if response.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
         println!(
-            "cappuccino-bridge: audit limit_hit limit=request_body max_bytes={MAX_REQUEST_BODY_BYTES}"
+            "cappuccino-bridge: audit limit_hit limit=request_body max_bytes={max_request_body_bytes}"
         );
     }
     response
@@ -192,9 +191,12 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
+    // Matches the default in tuning.rs; the test only needs a fixed limit.
+    const MAX_REQUEST_BODY_BYTES: usize = 2 * 1024 * 1024;
+
     fn app() -> Router {
         let state = Arc::new(routes::BridgeState::new("test-machine".into()));
-        build_app(state, None)
+        build_app(state, None, MAX_REQUEST_BODY_BYTES)
     }
 
     fn prompt_request(body: Body, content_length: Option<usize>) -> Request<Body> {
@@ -205,6 +207,17 @@ mod tests {
             builder = builder.header("content-length", length.to_string());
         }
         builder.body(body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn configured_body_limit_replaces_the_default() {
+        let state = Arc::new(routes::BridgeState::new("test-machine".into()));
+        let app = build_app(state, None, 16);
+        let response = app
+            .oneshot(prompt_request(Body::empty(), Some(17)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     #[tokio::test]
