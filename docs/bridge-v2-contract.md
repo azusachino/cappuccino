@@ -162,7 +162,37 @@ Rules:
 - **Migration.** Protocol 1 keeps `GET /api/session` and its boolean flags. A protocol 2 bridge
   serves both until every shipped client has moved to the handshake.
 
-### 4.1 HTTP REST Endpoints (draft shapes)
+### 4.1 Workflow and endpoint map (v2 target)
+
+Workflow, in order:
+
+1. The phone calls `POST /api/v2/handshake` with its range and capabilities. Nothing else is
+   called before this succeeds.
+2. The phone checks that `machine_id` is the paired machine. A different id stops the
+   connection.
+3. Every later request carries `X-Cappuccino-Protocol: 2`. A request without it, or with another
+   value, gets HTTP 426.
+4. An action is offered only when its capability was agreed. The bridge answers HTTP 409 for an
+   action whose capability was not agreed.
+
+| Method | Path (v2) | Capability | Replaces (v1, shipped) |
+| --- | --- | --- | --- |
+| `POST` | `/api/v2/handshake` | none | `GET /api/session` (identity and flags) |
+| `GET` | `/api/v2/agents` | `agent_discovery` | `GET /api/agents` |
+| `GET` | `/api/v2/agents/{session}/conversation` | `conversation_history` | `GET /api/agents/{sessionId}/conversation` |
+| `GET` | `/api/v2/transcript?session=` | `conversation_history` | `GET /api/transcript` |
+| `POST` | `/api/v2/agents/{session}/prompt` | `prompt_input` | `POST /api/agents/{sessionId}/prompt` |
+| `POST` | `/api/v2/agents/{session}/control` | `agent_control` | `POST /api/agents/{sessionId}/control` |
+| `WS` | `/api/v2/stream?session=` | `live_output` | `GET /api/stream` |
+
+The capability names come from the shipped flags: `agent_discovery`, `live_output`,
+`conversation_history`, `prompt_input`, `prompt_answers`, `agent_control`, `mutation_binding`,
+`completion_signals`, plus the Telegram status block, which is advisory.
+
+The v1 paths keep working under `/api/` unchanged while protocol 1 clients exist. The cutover
+removes them only after both mobile clients use v2.
+
+### 4.2 HTTP REST Endpoints (draft shapes)
 
 #### `POST /api/handshake`
 
