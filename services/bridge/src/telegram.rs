@@ -278,12 +278,21 @@ fn pane_name(row: &AgentRow) -> Option<String> {
     }
     let name: String = row
         .session_id
+        .trim()
         .chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !c.is_control() && !is_invisible_format(*c))
         .take(MAX_NAME_CHARS)
         .collect();
-    let name = name.trim().to_string();
-    (!name.is_empty()).then_some(name)
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Zero-width and bidi-control characters: they hide or reorder text in an alert.
+fn is_invisible_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -811,6 +820,63 @@ mod tests {
         assert_eq!(pane_name(&named), None, "blank after cleanup");
         named.session_id = "x".repeat(200);
         assert_eq!(pane_name(&named).unwrap().chars().count(), MAX_NAME_CHARS);
+        named.session_id = "\u{202E}gnimrahc\u{200B}".into();
+        assert_eq!(
+            pane_name(&named),
+            Some("gnimrahc".into()),
+            "bidi and zero-width removed"
+        );
+        named.session_id = format!("{}telegram", " ".repeat(50));
+        assert_eq!(
+            pane_name(&named),
+            Some("telegram".into()),
+            "trimmed before the cap"
+        );
+    }
+
+    #[test]
+    fn tracker_fills_the_name_and_numbers_per_kind() {
+        let mut tracker = Tracker::default();
+        let mut pi = row("p1", Some("n1"), "idle", Some(1));
+        pi.session_id = "pi-name".into();
+        let mut claude = row("p2", Some("n2"), "idle", Some(1));
+        claude.agent = "claude".into();
+        tracker.observe(&[pi, claude]);
+
+        let mut pi = row("p1", Some("n1"), "idle", Some(2));
+        pi.session_id = "pi-name".into();
+        let mut claude = row("p2", Some("n2"), "idle", Some(2));
+        claude.agent = "claude".into();
+        let notices = tracker.observe(&[pi, claude]);
+        assert_eq!(notices.len(), 2);
+        let pi_notice = notices.iter().find(|n| n.agent == "pi").unwrap();
+        assert_eq!(
+            (pi_notice.number, pi_notice.name.as_deref()),
+            (1, Some("pi-name"))
+        );
+        let claude_notice = notices.iter().find(|n| n.agent == "claude").unwrap();
+        assert_eq!(
+            (claude_notice.number, claude_notice.name.as_deref()),
+            (1, None)
+        );
+    }
+
+    #[test]
+    fn rows_without_a_native_reference_do_not_use_a_number() {
+        let mut tracker = Tracker::default();
+        tracker.observe(&[row("p9", None, "idle", Some(1))]);
+        tracker.observe(&[row("p1", Some("n1"), "idle", Some(1))]);
+        let notices = tracker.observe(&[row("p1", Some("n1"), "idle", Some(2))]);
+        assert_eq!(notices[0].number, 1);
+    }
+
+    #[test]
+    fn a_sequence_regression_keeps_the_number() {
+        let mut tracker = Tracker::default();
+        tracker.observe(&[row("p1", Some("n1"), "idle", Some(5))]);
+        tracker.observe(&[row("p1", Some("n1"), "idle", Some(3))]);
+        let notices = tracker.observe(&[row("p1", Some("n1"), "idle", Some(4))]);
+        assert_eq!(notices[0].number, 1);
     }
 
     #[test]

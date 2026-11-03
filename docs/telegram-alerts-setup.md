@@ -68,7 +68,7 @@ curl -s http://127.0.0.1:7392/api/session | jq .telegram
 ```
 
 The status shows `route`, `last_delivered_at`, `uncertain_count`, `dropped_count` and
-`last_http_status`. No secret is printed. Routes:
+`last_http_status` and `watching_since`. No secret is printed. Routes:
 
 | Route | Meaning |
 | --- | --- |
@@ -88,6 +88,7 @@ The bridge's send path is exercised by a real agent finishing a cycle, not by th
 Run it through the Telegram API with the token kept out of argv and history:
 
 ```sh
+mkdir -p .tmp
 T="$(cat ~/.config/harus/cappuccino-telegram-token)"
 printf 'url = "https://api.telegram.org/bot%s/sendMessage"\nrequest = "POST"\ndata-urlencode = "chat_id=<group id>"\ndata-urlencode = "text=[cappuccino] test · <machine label>"\n' "$T" \
   | curl -s --max-time 10 -K - -o .tmp/telegram-test.json

@@ -32,7 +32,7 @@ secret kept outside the repository:
 
 ```toml
 [telegram]
-enabled = false                      # off by default; the bridge reports the route as unconfigured
+enabled = false                      # off by default; the bridge reports the route as disabled
 chat_id = "<group chat id>"          # the private group with only the owner and the bot
 token_file = "<path to secret file>" # read at start; never a literal token and never a CLI argument
 machine_label = "<owner's name>"     # required when enabled; 1-40 printable characters
@@ -99,6 +99,9 @@ Plain text, no Markdown or HTML parsing, at most 200 characters:
   characters. The bridge never uses the terminal title or a generated name.
 
 Nothing else is added: no pane id, session id, path, transcript or prompt text.
+The owner-set name is also the bridge's `session_id` for that agent, so anything
+that can read `/api/agents` can see it too. Anything that can rename a pane can
+also set the name, so the name is only as trusted as the pane it is set on.
 
 ## Delivery and failure
 
