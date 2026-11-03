@@ -50,6 +50,12 @@ impl Telegram {
             pending: VecDeque::new(),
         };
         telegram.status.watching_since = Some(unix_now());
+        telegram.status.events = telegram
+            .settings
+            .events
+            .iter()
+            .map(|event| event.name())
+            .collect();
         telegram.status.route = if telegram.token.is_some() {
             Route::Enabled
         } else {

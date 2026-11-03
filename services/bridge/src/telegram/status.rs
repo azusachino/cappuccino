@@ -36,6 +36,8 @@ pub struct Status {
     pub dropped_count: u64,
     pub watching_since: Option<u64>,
     pub last_http_status: Option<u16>,
+    /// Event names the owner enabled, as the phone matches them (`completion`, `needs_answer`, ...).
+    pub events: Vec<&'static str>,
 }
 
 impl Status {
@@ -46,6 +48,7 @@ impl Status {
             "uncertain_count": self.uncertain_count,
             "dropped_count": self.dropped_count,
             "watching_since": self.watching_since,
+            "events": self.events,
             "last_http_status": self.last_http_status,
         })
     }
@@ -53,3 +56,20 @@ impl Status {
 
 /// Status shared with the HTTP handlers.
 pub type Shared = Arc<Mutex<Status>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_reports_the_enabled_event_names() {
+        let status = Status {
+            events: vec!["completion", "needs_answer"],
+            ..Status::default()
+        };
+        assert_eq!(
+            status.to_json()["events"],
+            json!(["completion", "needs_answer"])
+        );
+    }
+}

@@ -2,7 +2,9 @@ package com.azusachino.cappuccino.io
 
 import com.azusachino.cappuccino.core.ProtocolException
 import com.azusachino.cappuccino.core.parseJsonObject
+import java.util.UUID
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -49,5 +51,48 @@ class BridgeDetailsTest {
       assertTrue(error.message!!.contains("protocol v2"))
       assertTrue(error.message!!.contains("requires v1"))
     }
+  }
+
+  @Test
+  fun telegramRouteAndEventsAreReadFromTheHandshake() {
+    val details =
+      parseBridgeDetails(
+        parseJsonObject(
+          "{$prefix,\"protocol\":1,\"telegram\":{\"route\":\"enabled\",\"events\":[\"completion\"]}}"
+        )
+      )
+    assertEquals("enabled", details.telegramRoute)
+    assertEquals(listOf("completion"), details.telegramEvents)
+  }
+
+  @Test
+  fun missingTelegramBlockMeansTelegramDoesNotCover() {
+    val details = parseBridgeDetails(parseJsonObject("{$prefix,\"protocol\":1}"))
+    assertNull(details.telegramRoute)
+    assertTrue(details.telegramEvents.isEmpty())
+    assertFalse(telegramCovers(details, "completion"))
+  }
+
+  @Test
+  fun telegramCoversOnlyAWorkingRouteForAnEventItSends() {
+    fun covered(route: String?, events: List<String>, event: String) =
+      telegramCovers(
+        BridgeDetails(
+          UUID.fromString("00000000-0000-0000-0000-000000000001"),
+          "0.1.1",
+          1,
+          null,
+          route,
+          events,
+        ),
+        event,
+      )
+    assertTrue(covered("enabled", listOf("completion"), "completion"))
+    assertFalse(covered("enabled", listOf("completion"), "needs_answer"))
+    assertFalse(covered("failing", listOf("completion"), "completion"))
+    assertFalse(covered("rejected", listOf("completion"), "completion"))
+    assertFalse(covered("disabled", emptyList(), "completion"))
+    assertFalse(covered(null, listOf("completion"), "completion"))
+    assertFalse(telegramCovers(null, "completion"))
   }
 }

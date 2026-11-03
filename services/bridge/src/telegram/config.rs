@@ -13,6 +13,15 @@ pub enum Event {
 }
 
 impl Event {
+    /// The name the owner writes in `events` and the phone reads from status.
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Event::Completion => "completion",
+            Event::NeedsAnswer => "needs_answer",
+            Event::RouteFailure => "route_failure",
+        }
+    }
+
     fn parse(text: &str) -> Result<Event, String> {
         match text {
             "completion" => Ok(Event::Completion),

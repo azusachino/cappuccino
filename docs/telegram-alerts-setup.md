@@ -120,3 +120,16 @@ message is sent for it on restart; `watching_since` shows when watching started.
   new number when it returns.
 - Alerts depend on herdr's `completion_seq`. If herdr stops reporting it, completions
   go silent and the status does not say so yet.
+
+## Phone notifications while Telegram is on
+
+The Android app keeps its own completion and needs-input alerts. When a machine's
+bridge has Telegram on, the phone skips its own alert for each event the Telegram
+route sends, so you get one message per event, not two. The phone reads this from
+the handshake it makes on every poll: `telegram.route` must be `enabled`, and the
+event must be in `telegram.events`. Any other route state (`failing`, `rejected`,
+`disabled`, `misconfigured`) brings the phone's own alerts back on the next poll.
+
+The bridge reports the route and the enabled events in `GET /api/session` under
+`telegram`. Nothing secret is included. iOS has no completion notifications yet, so
+it is unaffected.
