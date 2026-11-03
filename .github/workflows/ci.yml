@@ -124,7 +124,6 @@ jobs:
     timeout-minutes: 25
     env:
       ANDROID_SERIAL: emulator-5554
-      GRADLE_OPTS: -Dorg.gradle.caching=true
     defaults:
       run:
         shell: bash
@@ -136,10 +135,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      # Replace setup-java's dependency-only cache; do not cache Gradle twice.
-      - uses: gradle/actions/setup-gradle@v5
-        with:
-          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+          cache: gradle
       - name: Check Android toolchain
         run: |
           java -version
