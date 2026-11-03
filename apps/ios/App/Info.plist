@@ -2,9 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Merged over xtool's generated plist. Keep the version equal to MARKETING_VERSION in project.yml. -->
+  <!-- Merged over xtool's generated plist. The version comes from project.yml (MARKETING_VERSION, CURRENT_PROJECT_VERSION); do not hard-code it here. -->
   <key>CFBundleShortVersionString</key>
-  <string>0.1.1</string>
+  <string>$(MARKETING_VERSION)</string>
+  <key>CFBundleVersion</key>
+  <string>$(CURRENT_PROJECT_VERSION)</string>
   <!-- Match the Xcode build: a scene manifest, and all iPhone orientations (xtool otherwise locks portrait). -->
   <key>UIApplicationSceneManifest</key>
   <dict>
