@@ -6,14 +6,21 @@ on:
   push:
     branches: [main]
   pull_request:
+    # No required status checks are configured. Revisit this filter if that changes.
+    paths-ignore:
+      - README.md
+      - AGENTS.md
+      - CLAUDE.md
+      - CONTRIBUTING.md
+      - 'docs/**'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:
@@ -76,6 +83,7 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           version: 2026.10.2
+          install_args: xcodegen rumdl
           persist_github_token: false
       - name: Create and boot task-owned simulator
         id: simulator
@@ -134,6 +142,14 @@ jobs:
           java -version
           apps/android/gradlew --no-daemon --version
       - run: make validate-android
+      # The synthetic Android journey builds this Rust bridge too. Reuse the
+      # bridge job's cache without writing another large cache from Android.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/bridge
+          shared-key: bridge
+          save-if: false
       - name: Enable KVM on this disposable CI runner
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -179,6 +195,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: services/bridge
+          shared-key: bridge
       - run: make check-bridge
 
   docs:
@@ -191,6 +208,7 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           version: 2026.10.2
+          install_args: rumdl
       - name: Check documentation formatting
         run: make md-check
 
