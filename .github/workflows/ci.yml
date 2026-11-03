@@ -83,7 +83,6 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           version: 2026.10.2
-          install_args: xcodegen rumdl
           persist_github_token: false
       - name: Create and boot task-owned simulator
         id: simulator
@@ -212,7 +211,6 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           version: 2026.10.2
-          install_args: rumdl
       - name: Check documentation formatting
         run: make md-check
 
