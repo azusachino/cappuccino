@@ -20,6 +20,7 @@ const MAX_RATE_LIMIT_TRIES: u32 = 3;
 const MAX_RETRY_AFTER_SECS: u64 = 60;
 const SERVER_RETRY_DELAY: Duration = Duration::from_secs(30);
 const MAX_LABEL_CHARS: usize = 40;
+const MAX_NAME_CHARS: usize = 40;
 
 /// Events an owner can enable in `[telegram] events`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -263,6 +264,24 @@ impl Kind {
 pub struct Notice {
     pub kind: Kind,
     pub agent: String,
+    /// The owner's herdr pane name, when one is set. Never the pane id.
+    pub name: Option<String>,
+}
+
+/// The herdr pane name the owner set, or `None`. The bridge uses the pane id as
+/// `session_id` when no name is set, so a session id equal to the pane id is not a name.
+fn pane_name(row: &AgentRow) -> Option<String> {
+    if row.session_id == row.pane_id {
+        return None;
+    }
+    let name: String = row
+        .session_id
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_NAME_CHARS)
+        .collect();
+    let name = name.trim().to_string();
+    (!name.is_empty()).then_some(name)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -342,6 +361,7 @@ impl Tracker {
                     notices.push(Notice {
                         kind: Kind::Completion,
                         agent: row.agent.clone(),
+                        name: pane_name(row),
                     });
                     seen.completion_seq = current;
                 }
@@ -352,6 +372,7 @@ impl Tracker {
                 notices.push(Notice {
                     kind: Kind::NeedsAnswer,
                     agent: row.agent.clone(),
+                    name: pane_name(row),
                 });
             }
             seen.blocked = blocked;
@@ -370,7 +391,11 @@ pub fn message(machine: &str, notice: &Notice) -> String {
         Kind::Completion => "finished a work cycle",
         Kind::NeedsAnswer => "is waiting for an answer",
     };
-    cap(format!("[cappuccino] {machine} · {} {verb}", notice.agent))
+    let agent = match &notice.name {
+        Some(name) => format!("{} ({name})", notice.agent),
+        None => notice.agent.clone(),
+    };
+    cap(format!("[cappuccino] {machine} · {agent} {verb}"))
 }
 
 fn route_failure_message(machine: &str, status: u16) -> String {
@@ -607,7 +632,7 @@ mod tests {
     fn row(pane: &str, native: Option<&str>, status: &str, completion: Option<u64>) -> AgentRow {
         AgentRow {
             machine_id: "m".into(),
-            session_id: format!("s-{pane}"),
+            session_id: pane.into(),
             pane_id: pane.into(),
             label: "label".into(),
             agent: "pi".into(),
@@ -682,7 +707,8 @@ mod tests {
             notices,
             vec![Notice {
                 kind: Kind::Completion,
-                agent: "pi".into()
+                agent: "pi".into(),
+                name: None,
             }]
         );
         assert!(tracker
@@ -699,7 +725,8 @@ mod tests {
             first,
             vec![Notice {
                 kind: Kind::NeedsAnswer,
-                agent: "pi".into()
+                agent: "pi".into(),
+                name: None,
             }]
         );
         assert!(tracker
@@ -744,18 +771,42 @@ mod tests {
     }
 
     #[test]
+    fn pane_name_is_only_an_owner_set_name() {
+        let mut named = row("w1:p2", None, "idle", None);
+        named.session_id = "telegram".into();
+        assert_eq!(pane_name(&named), Some("telegram".into()));
+        let unnamed = row("w1:p2", None, "idle", None);
+        assert_eq!(pane_name(&unnamed), None, "pane id is not a name");
+        named.session_id = "  \u{7}  ".into();
+        assert_eq!(pane_name(&named), None, "blank after cleanup");
+        named.session_id = "x".repeat(200);
+        assert_eq!(pane_name(&named).unwrap().chars().count(), MAX_NAME_CHARS);
+    }
+
+    #[test]
     fn messages_are_plain_and_capped() {
         let notice = Notice {
             kind: Kind::Completion,
             agent: "pi".into(),
+            name: None,
         };
         assert_eq!(
             message("mini", &notice),
             "[cappuccino] mini · pi finished a work cycle"
         );
+        let named = Notice {
+            kind: Kind::Completion,
+            agent: "claude".into(),
+            name: Some("telegram".into()),
+        };
+        assert_eq!(
+            message("MacMini", &named),
+            "[cappuccino] MacMini · claude (telegram) finished a work cycle"
+        );
         let long = Notice {
             kind: Kind::NeedsAnswer,
             agent: "a".repeat(400),
+            name: None,
         };
         let text = message("mini", &long);
         assert_eq!(text.chars().count(), MAX_TEXT_CHARS);
@@ -981,7 +1032,8 @@ mod tests {
             notices,
             vec![Notice {
                 kind: Kind::Completion,
-                agent: "pi".into()
+                agent: "pi".into(),
+                name: None,
             }]
         );
     }

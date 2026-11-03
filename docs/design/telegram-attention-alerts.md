@@ -13,7 +13,10 @@ failure handling, and the operations an owner runs.
   involved, so alerts arrive while the app is closed.
 - Generic attention only: the agent finished a work cycle, or it is waiting for
   an answer. No transcript, tool output, prompt text, working-directory path, pane
-  or session identifier, and no approve/deny buttons.
+  id, or session identifier, and no approve/deny buttons. The one exception is the
+  herdr pane name the owner set, shown in parentheses after the agent kind
+  (`claude (telegram)`). The bridge never uses the terminal title or a generated
+  name, and omits the name when none is set.
 - Off by default. Nothing is sent until the owner configures a token and chat.
 
 Out of scope: Android push or FCM, Telegram-side approval controls, multiple
