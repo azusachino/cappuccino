@@ -102,7 +102,7 @@ Plain text, no Markdown or HTML parsing, at most 200 characters:
 
 Nothing else is added: no pane id, session id, path, transcript or prompt text.
 When the name is shown, it is the bridge's `session_id` for that agent, so anything
-that can read `/api/agents` sees it too. Any process in a pane can rename that pane
+that can read `/api/v2/agents` sees it too. Any process in a pane can rename that pane
 with `herdr agent rename`, so the name is only as trusted as the pane it is set on.
 That is why it is opt-in.
 

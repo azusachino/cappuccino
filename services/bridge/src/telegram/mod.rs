@@ -14,5 +14,5 @@ mod tracker;
 mod worker;
 
 pub use config::{settings, File, Settings};
-pub use status::{Route, Shared, Status};
+pub use status::{Shared, Status};
 pub use worker::watch;

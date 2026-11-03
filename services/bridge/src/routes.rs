@@ -72,43 +72,6 @@ pub fn error_response(status: StatusCode, code: &str, message: &str) -> Response
         .into_response()
 }
 
-pub async fn session(State(state): State<Arc<BridgeState>>) -> Response {
-    let telegram = state
-        .telegram
-        .lock()
-        .map(|status| status.clone())
-        .unwrap_or_default();
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/json")],
-        json!({
-            "event": "paired",
-            "telegram": telegram.to_json(),
-            "machine_id": state.machine_id,
-            "machine_name": state.machine_name,
-            "protocol": 1,
-            "plugin": "cappuccino-bridge",
-            "bridge_version": env!("CARGO_PKG_VERSION"),
-            // Endpoint support, not a promise that every agent can use it or is healthy.
-            "capabilities": {
-                "agent_discovery": true,
-                "live_output": true,
-                "conversation_history": true,
-                "prompt_input": true,
-                "prompt_answers": true,
-                "agent_control": true,
-                "mutation_binding": true,
-                "completion_signals": true,
-                // Advertised only once a message has actually been delivered.
-                "telegram_notifications": telegram.last_delivered_at.is_some(),
-                "telegram_notifications_configured": telegram.route != crate::telegram::Route::Disabled,
-            },
-        })
-        .to_string(),
-    )
-        .into_response()
-}
-
 pub async fn agents(State(state): State<Arc<BridgeState>>) -> Response {
     match herdr::agent_list().await {
         Ok(result) => match agents::map_agents(&result, &state.machine_id) {
@@ -907,27 +870,5 @@ mod tests {
         assert_eq!(new_session_command("agy"), Some("/new"));
         assert_eq!(new_session_command("antigravity-cli"), Some("/new"));
         assert_eq!(new_session_command("codex"), None);
-    }
-
-    #[tokio::test]
-    async fn machine_name_is_additive_metadata_not_machine_identity() {
-        let mut state = BridgeState::new("stable-machine-id".to_string());
-        state.machine_name = Some("Owner's Mac".to_string());
-        let response = session(State(Arc::new(state))).await;
-        let body = axum::body::to_bytes(response.into_body(), 4096)
-            .await
-            .unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(value["machine_name"], "Owner's Mac");
-        assert_eq!(value["machine_id"], "stable-machine-id");
-        assert_eq!(value["protocol"], 1);
-        assert_eq!(value["bridge_version"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(value["capabilities"]["agent_discovery"], true);
-        assert_eq!(value["capabilities"]["live_output"], true);
-        assert_eq!(value["capabilities"]["conversation_history"], true);
-        assert_eq!(value["capabilities"]["prompt_input"], true);
-        assert_eq!(value["capabilities"]["prompt_answers"], true);
-        assert_eq!(value["capabilities"]["agent_control"], true);
-        assert_eq!(value["capabilities"]["mutation_binding"], true);
     }
 }

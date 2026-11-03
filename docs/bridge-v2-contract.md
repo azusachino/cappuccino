@@ -124,8 +124,7 @@ Learned from `herdr-web-ui/server/prompt.ts`:
 
 ## 4. Cappuccino Bridge v2 contract
 
-Status: v2 is the cutover for release 0.2.0. Until that release, the bridge serves v1 and v2
-side by side.
+Status: shipped in 0.2.0. The bridge serves v2 only; the v1 paths listed in §4.3 are removed.
 
 ### 4.0 What v2 changes
 

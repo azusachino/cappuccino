@@ -10,7 +10,6 @@ mod conversation;
 mod herdr;
 mod iroh_transport;
 mod lifecycle;
-mod modules;
 mod mutation;
 mod prompt;
 mod protocol;
@@ -22,7 +21,6 @@ mod stats;
 mod telegram;
 mod transcript;
 
-use axum::routing::get;
 use axum::Router;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -156,12 +154,7 @@ fn build_app(
     state: Arc<routes::BridgeState>,
     iroh_hub: Option<Arc<iroh_transport::IrohHub>>,
 ) -> Router {
-    let mut app = Router::new()
-        .route("/api/session", get(routes::session))
-        .merge(protocol::routes());
-    for module in modules::all() {
-        app = app.merge((module.router)());
-    }
+    let app = Router::new().merge(protocol::routes());
     let app = iroh_transport::with_routes(app, iroh_hub);
     app.layer(compression::json_layer())
         .layer(axum::middleware::from_fn(auth_middleware))
@@ -205,8 +198,9 @@ mod tests {
     }
 
     fn prompt_request(body: Body, content_length: Option<usize>) -> Request<Body> {
-        let mut builder = Request::post("/api/agents/session-1/prompt")
-            .header("content-type", "application/json");
+        let mut builder = Request::post("/api/v2/agents/session-1/prompt")
+            .header("content-type", "application/json")
+            .header("x-cappuccino-protocol", "2");
         if let Some(length) = content_length {
             builder = builder.header("content-length", length.to_string());
         }

@@ -1,6 +1,6 @@
 id = "cappuccino-bridge"
 name = "Cappuccino bridge"
-version = "0.1.1"
+version = "0.2.0"
 min_herdr_version = "0.9.0"
 description = "Loopback bridge plugin for the Cappuccino phone client: agent list, Pi/Claude/Agy transcripts, pane-line stream (no auth; tailnet/loopback is the boundary)"
 platforms = ["macos", "linux"]

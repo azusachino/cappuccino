@@ -390,7 +390,7 @@ async fn spawn_bridge_with(
             let identity_path = root.path.join("data/machine-id");
             if let Ok(expected) = std::fs::read_to_string(identity_path) {
                 if let Ok(exchange) =
-                    probe::get(&probe_options(&bridge.base_url()), "/api/session").await
+                    probe::get(&probe_options(&bridge.base_url()), "/api/v2/handshake").await
                 {
                     if exchange.status == 200
                         && exchange.body["machine_id"].as_str() == Some(expected.trim())
@@ -445,10 +445,10 @@ fn probe_options(base_url: &str) -> ProbeOptions {
 // Positive mutation journeys explicitly select the mock's current binding. New A3
 // stale/legacy tests use raw probe::post_json with a captured body, never this helper.
 async fn selected_binding(options: &ProbeOptions) -> Value {
-    let session = probe::get(options, "/api/session")
+    let session = probe::get(options, "/api/v2/handshake")
         .await
         .expect("session metadata");
-    let agents = probe::get(options, "/api/agents")
+    let agents = probe::get(options, "/api/v2/agents")
         .await
         .expect("agent metadata");
     let row = &agents.body["agents"][0];
@@ -560,7 +560,7 @@ async fn session_shape_and_agents_with_mock_herdr() {
 async fn agents_unreachable_is_502_error_envelope() {
     let root = TempRoot::new("noherdr");
     let mut bridge = spawn_bridge(&root, None).await;
-    let exchange = probe::get(&probe_options(&bridge.base_url()), "/api/agents")
+    let exchange = probe::get(&probe_options(&bridge.base_url()), "/api/v2/agents")
         .await
         .expect("agents request");
     assert_eq!(exchange.status, 502);
@@ -577,7 +577,7 @@ async fn transcript_fail_closed_all_modes() {
     let mut bridge = spawn_bridge(&root, None).await;
     let exchange = probe::get(
         &probe_options(&bridge.base_url()),
-        "/api/transcript?session=s-probe",
+        "/api/v2/transcript?session=s-probe",
     )
     .await
     .expect("transcript request");
@@ -593,7 +593,7 @@ async fn transcript_fail_closed_all_modes() {
     let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
     let exchange = probe::get(
         &probe_options(&bridge.base_url()),
-        "/api/transcript?session=s-probe",
+        "/api/v2/transcript?session=s-probe",
     )
     .await
     .expect("transcript request");
@@ -622,7 +622,7 @@ async fn transcript_fail_closed_all_modes() {
     .await;
     let exchange = probe::get(
         &probe_options(&bridge.base_url()),
-        "/api/transcript?session=s-probe",
+        "/api/v2/transcript?session=s-probe",
     )
     .await
     .expect("transcript request");
@@ -662,7 +662,7 @@ async fn agent_conversation_returns_structured_turns() {
 
     let exchange = probe::get(
         &probe_options(&bridge.base_url()),
-        "/api/agents/s-probe/conversation",
+        "/api/v2/agents/s-probe/conversation",
     )
     .await
     .expect("conversation request");
@@ -670,7 +670,7 @@ async fn agent_conversation_returns_structured_turns() {
     assert_eq!(exchange.status, 200, "payload: {}", exchange.body);
     assert_eq!(exchange.body["source"], "canonical_log");
     assert_eq!(exchange.body["session_id"], "s-probe");
-    let paired = probe::get(&probe_options(&bridge.base_url()), "/api/session")
+    let paired = probe::get(&probe_options(&bridge.base_url()), "/api/v2/handshake")
         .await
         .unwrap();
     assert_eq!(exchange.body["machine_id"], paired.body["machine_id"]);
@@ -682,7 +682,7 @@ async fn agent_conversation_returns_structured_turns() {
     .unwrap();
     let modern = probe::get(
         &probe_options(&bridge.base_url()),
-        "/api/agents/s-probe/conversation",
+        "/api/v2/agents/s-probe/conversation",
     )
     .await
     .unwrap();
@@ -732,7 +732,7 @@ async fn submit_agent_prompt_delivers_input() {
     });
     let exchange = bound_post(
         &probe_options(&bridge.base_url()),
-        "/api/agents/s-probe/prompt",
+        "/api/v2/agents/s-probe/prompt",
         &body,
     )
     .await
@@ -748,7 +748,7 @@ async fn submit_agent_prompt_delivers_input() {
     });
     let err_exchange = bound_post(
         &probe_options(&bridge.base_url()),
-        "/api/agents/s-probe/prompt",
+        "/api/v2/agents/s-probe/prompt",
         &empty_body,
     )
     .await
@@ -761,7 +761,7 @@ async fn submit_agent_prompt_delivers_input() {
     let send = |body: Value| {
         let options = options.clone();
         async move {
-            bound_post(&options, "/api/agents/s-probe/prompt", &body)
+            bound_post(&options, "/api/v2/agents/s-probe/prompt", &body)
                 .await
                 .expect("prompt request")
         }
@@ -821,10 +821,10 @@ async fn all_mutation_variants_reject_unbound_malformed_and_stale_requests_witho
         "../../../fixtures/mutation-session-binding.json"
     ))
     .unwrap();
-    let paired = probe::get(&options, "/api/session").await.unwrap();
-    assert_eq!(paired.body["capabilities"]["mutation_binding"], true);
+    let paired = probe::get(&options, "/api/v2/handshake").await.unwrap();
+    assert_eq!(paired.body["agreed"]["mutation_binding"], 1);
     for (endpoint, body) in mutation_variants() {
-        let path = format!("/api/agents/s-probe/{endpoint}");
+        let path = format!("/api/v2/agents/s-probe/{endpoint}");
         for case in fixture["invalid"].as_array().unwrap() {
             let mut invalid = body.clone();
             invalid
@@ -872,7 +872,7 @@ async fn all_mutation_variants_reject_unbound_malformed_and_stale_requests_witho
         .unwrap()
         .to_uppercase());
     assert_eq!(
-        probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+        probe::post_json(&options, "/api/v2/agents/s-probe/prompt", &body)
             .await
             .unwrap()
             .status,
@@ -929,7 +929,7 @@ async fn unavailable_malformed_missing_and_ambiguous_catalogs_fail_closed() {
         ),
     ] {
         herdr.set_response("agent.list", response);
-        let result = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+        let result = probe::post_json(&options, "/api/v2/agents/s-probe/prompt", &body)
             .await
             .unwrap();
         assert_eq!(result.status, status, "{}", result.body);
@@ -951,12 +951,12 @@ async fn replacement_before_final_check_rejects_without_spending_the_prompt_nonc
     let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
     let options = probe_options(&bridge.base_url());
     let mut body = json!({"type": "answer_prompt", "action": "cancel", "prompt_id": "p-old", "expected_session": selected_binding(&options).await});
-    let stale = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+    let stale = probe::post_json(&options, "/api/v2/agents/s-probe/prompt", &body)
         .await
         .unwrap();
     body["prompt_id"] = json!(on_screen_id(&stale.body));
     herdr.replace_after_list(1, "/synthetic/native-B.jsonl");
-    let refused = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+    let refused = probe::post_json(&options, "/api/v2/agents/s-probe/prompt", &body)
         .await
         .unwrap();
     assert_eq!(refused.status, 409);
@@ -965,7 +965,7 @@ async fn replacement_before_final_check_rejects_without_spending_the_prompt_nonc
     // Restore the fixture's original reported binding solely to inspect nonce spending.
     // This is not proof that a reported reference is an incarnation token.
     herdr.set_agent_session(Some("/synthetic/native-A.jsonl"));
-    let answer = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+    let answer = probe::post_json(&options, "/api/v2/agents/s-probe/prompt", &body)
         .await
         .unwrap();
     assert_eq!(answer.status, 200, "{}", answer.body);
@@ -983,12 +983,12 @@ async fn multi_step_answer_stops_on_replacement_with_partial_outcome_unknown() {
     let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
     let options = probe_options(&bridge.base_url());
     let mut body = json!({"type": "answer_question", "prompt_id": "p-old", "answers": [{"selected": [0], "other": "synthetic"}], "expected_session": selected_binding(&options).await});
-    let stale = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+    let stale = probe::post_json(&options, "/api/v2/agents/s-probe/prompt", &body)
         .await
         .unwrap();
     body["prompt_id"] = json!(on_screen_id(&stale.body));
     herdr.replace_after_write("/synthetic/native-B.jsonl");
-    let partial = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+    let partial = probe::post_json(&options, "/api/v2/agents/s-probe/prompt", &body)
         .await
         .unwrap();
     assert_eq!(partial.status, 502, "{}", partial.body);
@@ -1000,7 +1000,7 @@ async fn multi_step_answer_stops_on_replacement_with_partial_outcome_unknown() {
     );
     assert!(herdr.requests("pane.send_text").is_empty());
     assert_eq!(
-        probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+        probe::post_json(&options, "/api/v2/agents/s-probe/prompt", &body)
             .await
             .unwrap()
             .body["code"],
@@ -1020,7 +1020,7 @@ async fn post_final_check_replacement_remains_explicitly_unfenced() {
     let options = probe_options(&bridge.base_url());
     let body = json!({"type": "prompt", "text": "synthetic input", "expected_session": selected_binding(&options).await});
     herdr.replace_after_list(2, "/synthetic/native-B.jsonl");
-    let result = probe::post_json(&options, "/api/agents/s-probe/prompt", &body)
+    let result = probe::post_json(&options, "/api/v2/agents/s-probe/prompt", &body)
         .await
         .unwrap();
     assert_eq!(
@@ -1049,7 +1049,7 @@ async fn control_route_sends_each_agents_own_keys_and_refuses_busy_new_sessions(
         async move {
             bound_post(
                 &options,
-                &format!("/api/agents/{session}/control"),
+                &format!("/api/v2/agents/{session}/control"),
                 &json!({"action": action}),
             )
             .await
@@ -1144,7 +1144,7 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
     let post = |body: Value| {
         let options = options.clone();
         async move {
-            bound_post(&options, "/api/agents/s-probe/prompt", &body)
+            bound_post(&options, "/api/v2/agents/s-probe/prompt", &body)
                 .await
                 .expect("prompt request")
         }
@@ -1315,7 +1315,7 @@ async fn session_requires_nonempty_machine_id() {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut buf = [0u8; 1024];
                 let _ = stream.read(&mut buf).await;
-                let body = r#"{"event":"paired","protocol":1,"plugin":"p"}"#;
+                let body = r#"{"event":"paired","protocol":2,"plugin":"p"}"#;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
@@ -1405,13 +1405,13 @@ async fn an_answered_prompt_is_resolved_not_announced_again() {
     tokio::time::sleep(Duration::from_millis(1200)).await;
     let probe = json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "cancel"});
     let id = on_screen_id(
-        &bound_post(&options, "/api/agents/s-probe/prompt", &probe)
+        &bound_post(&options, "/api/v2/agents/s-probe/prompt", &probe)
             .await
             .expect("probe")
             .body,
     );
     let reject = json!({"type": "answer_prompt", "prompt_id": id, "action": "select_option", "option_id": "reject"});
-    let answered = bound_post(&options, "/api/agents/s-probe/prompt", &reject)
+    let answered = bound_post(&options, "/api/v2/agents/s-probe/prompt", &reject)
         .await
         .expect("answer");
     assert_eq!(answered.status, 200, "payload: {}", answered.body);
@@ -1498,10 +1498,17 @@ async fn upstream_failure_after_prompt_reports_error_and_closes_without_idle() {
         let tcp = tokio::net::TcpStream::connect(("127.0.0.1", bridge.port))
             .await
             .unwrap();
-        let url = format!("ws://127.0.0.1:{}/api/stream?session=s-probe", bridge.port);
-        let (mut socket, _) = tokio_tungstenite::client_async_with_config(url, tcp, None)
-            .await
-            .unwrap();
+        let url = format!(
+            "ws://127.0.0.1:{}/api/v2/stream?session=s-probe",
+            bridge.port
+        );
+        let (mut socket, _) = tokio_tungstenite::client_async_with_config(
+            probe::ws_request(&url).unwrap(),
+            tcp,
+            None,
+        )
+        .await
+        .unwrap();
         loop {
             let event = next_source_event(&mut socket)
                 .await
@@ -1552,10 +1559,17 @@ async fn unavailable_or_malformed_initial_status_never_becomes_idle() {
         let tcp = tokio::net::TcpStream::connect(("127.0.0.1", bridge.port))
             .await
             .unwrap();
-        let url = format!("ws://127.0.0.1:{}/api/stream?session=s-probe", bridge.port);
-        let (mut socket, _) = tokio_tungstenite::client_async_with_config(url, tcp, None)
-            .await
-            .unwrap();
+        let url = format!(
+            "ws://127.0.0.1:{}/api/v2/stream?session=s-probe",
+            bridge.port
+        );
+        let (mut socket, _) = tokio_tungstenite::client_async_with_config(
+            probe::ws_request(&url).unwrap(),
+            tcp,
+            None,
+        )
+        .await
+        .unwrap();
         let mut saw_error = false;
         while let Some(event) = next_source_event(&mut socket).await {
             assert!(!saw_error, "no events after source error: {event}");
@@ -1635,7 +1649,7 @@ async fn ws_malformed_frame_fails_loudly() {
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let app = Router::new().route("/api/stream", get_route(bad_ws));
+    let app = Router::new().route("/api/v2/stream", get_route(bad_ws));
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
@@ -1699,7 +1713,7 @@ async fn require_h2_fails_on_http1_downgrade() {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut buf = [0u8; 1024];
                 let _ = stream.read(&mut buf).await;
-                let body = r#"{"event":"paired","machine_id":"m","protocol":1,"plugin":"p"}"#;
+                let body = r#"{"event":"paired","machine_id":"m","protocol":2,"plugin":"p"}"#;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
@@ -1974,7 +1988,7 @@ async fn spawn_frame_server(frames: Vec<Value>) -> (String, TaskTracker) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = Router::new().route(
-        "/api/stream",
+        "/api/v2/stream",
         get_route(
             move |upgrade: WebSocketUpgrade| async move { stream_frames(upgrade, frames).await },
         ),
@@ -2051,7 +2065,7 @@ async fn binary_data_frame_is_rejected() {
     }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let app = Router::new().route("/api/stream", get_route(binary_ws));
+    let app = Router::new().route("/api/v2/stream", get_route(binary_ws));
     let tracker = TaskTracker::default();
     tracker
         .spawn(async move {
@@ -2255,7 +2269,7 @@ async fn clean_close_frame_is_observed_as_closed() {
     }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let app = Router::new().route("/api/stream", get_route(clean_close_ws));
+    let app = Router::new().route("/api/v2/stream", get_route(clean_close_ws));
     let tracker = TaskTracker::default();
     tracker
         .spawn(async move {
@@ -2360,7 +2374,7 @@ async fn ping_then_abrupt_peer_close_is_propagated() {
     }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let app = Router::new().route("/api/stream", get_route(ping_drop_ws));
+    let app = Router::new().route("/api/v2/stream", get_route(ping_drop_ws));
     let tracker = TaskTracker::default();
     tracker
         .spawn(async move {

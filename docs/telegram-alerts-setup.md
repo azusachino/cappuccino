@@ -69,7 +69,7 @@ cd vendor/cappuccino
 cargo install --path services/bridge --locked   # only after updating the repo
 cappuccino-bridge stop
 cappuccino-bridge start
-curl -s http://127.0.0.1:7392/api/session | jq .telegram
+curl -s -X POST -H "Content-Type: application/json" -H "X-Cappuccino-Protocol: 2" -d '{"protocol_min":2,"protocol_max":2}' http://127.0.0.1:7392/api/v2/handshake | jq .telegram
 ```
 
 The status shows `route`, `last_delivered_at`, `uncertain_count`, `dropped_count` and
@@ -130,6 +130,6 @@ the handshake it makes on every poll: `telegram.route` must be `enabled`, and th
 event must be in `telegram.events`. Any other route state (`failing`, `rejected`,
 `disabled`, `misconfigured`) brings the phone's own alerts back on the next poll.
 
-The bridge reports the route and the enabled events in `GET /api/session` under
+The bridge reports the route and the enabled events in `POST /api/v2/handshake` under
 `telegram`. Nothing secret is included. iOS has no completion notifications yet, so
 it is unaffected.

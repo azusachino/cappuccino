@@ -334,3 +334,37 @@ mod http_tests {
         assert_eq!(body["code"], "bad_request");
     }
 }
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    use axum::{
+        body::{to_bytes, Body},
+        http::Request,
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn handshake_reports_the_machine_name_as_metadata_not_identity() {
+        let mut state = BridgeState::new("stable-machine-id".to_string());
+        state.machine_name = Some("Owner's Mac".to_string());
+        let response = routes()
+            .with_state(Arc::new(state))
+            .oneshot(
+                Request::post("/api/v2/handshake")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"protocol_min": 2, "protocol_max": 2}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["machine_name"], "Owner's Mac");
+        assert_eq!(value["machine_id"], "stable-machine-id");
+        assert_eq!(value["protocol"], 2);
+        assert_eq!(value["bridge_version"], env!("CARGO_PKG_VERSION"));
+    }
+}
