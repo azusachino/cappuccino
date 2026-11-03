@@ -32,10 +32,10 @@ secret kept outside the repository:
 
 ```toml
 [telegram]
-enabled = false                     # off by default; the bridge reports the route as unconfigured
-chat_id = "<group chat id>"         # the private group with only the owner and the bot
+enabled = false                      # off by default; the bridge reports the route as unconfigured
+chat_id = "<group chat id>"          # the private group with only the owner and the bot
 token_file = "<path to secret file>" # read at start; never a literal token and never a CLI argument
-machine_label = "<owner's name for this machine>" # required when enabled; 1-40 printable characters
+machine_label = "<owner's name>"     # required when enabled; 1-40 printable characters
 events = ["completion", "needs_answer", "route_failure"]
 ```
 
