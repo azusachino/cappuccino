@@ -20,3 +20,5 @@ target/
 **/target-*/**
 *.stub-key
 apps/ios/Config/Signing.local.xcconfig
+__pycache__/
+*.pyc
