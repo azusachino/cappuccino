@@ -391,7 +391,7 @@ struct ConnectionDetailsSheet: View {
             "Bridge version",
             value: state?.details.map { "\($0.version ?? "Unknown")(v\($0.protocolVersion))" }
               ?? "Not advertised")
-          LabeledContent("App version", value: "0.1.0(v1)")
+          LabeledContent("App version", value: "0.1.1(v1)")
         }
         Section("Capabilities") {
           if let capabilities = state?.details?.capabilities {

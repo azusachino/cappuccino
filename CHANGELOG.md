@@ -2,6 +2,26 @@
 
 All notable changes to Cappuccino are documented in this file.
 
+## 0.1.1 - 2026-11-03
+
+Bridge, Android and iOS ship together at 0.1.1. Android `versionCode` 2; iOS build 2.
+
+### Added
+
+- **Telegram attention alerts** (bridge): an optional, send-only route that posts one plain-text message to a private group when an agent finishes a work cycle or waits for an answer. Off by default; setup in `docs/telegram-alerts-setup.md`.
+- Alerts carry a per-kind session number (`claude #2`), and the herdr pane name when the owner sets `show_pane_names = true`.
+
+### Changed
+
+- Android and iOS reconnect now redials the machine's transport, shows the retry reason on the machine row, and restarts an attempt when a machine is opened.
+- iOS: transcript bubbles with timestamps, a per-agent history sheet, a composer menu, a reconnecting banner, and the transport each machine last used.
+
+### Fixed
+
+- Bridge: Telegram baselines survive brief herdr gaps; invisible and bidi characters are stripped from pane names.
+- Android: a second add or pair while one is running is ignored; reconnect joins in-flight refreshes instead of starting another.
+- iOS: history matches by machine and agent kind; prompts and agent control carry the session binding; the app icon is in the xtool IPA.
+
 ## 0.1.0 - 2026-10-30
 
 Initial release of Cappuccino: a companion client for remote coding agents, pairing native Android and Apple apps with the `cappuccino-bridge` daemon over Tailscale and iroh peer-to-peer transport.

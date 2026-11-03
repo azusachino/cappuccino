@@ -64,7 +64,7 @@ import SwiftUI
 
   private static var version: String {
     let base =
-      Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
+      Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.1"
     return "\(base)(v1)"
   }
 }

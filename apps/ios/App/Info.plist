@@ -4,7 +4,7 @@
 <dict>
   <!-- Merged over xtool's generated plist. Keep the version equal to MARKETING_VERSION in project.yml. -->
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>0.1.1</string>
   <!-- Match the Xcode build: a scene manifest, and all iPhone orientations (xtool otherwise locks portrait). -->
   <key>UIApplicationSceneManifest</key>
   <dict>
