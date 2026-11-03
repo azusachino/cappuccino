@@ -47,7 +47,7 @@ extension FixtureBridge: BridgeMachineServing {
       machine: BridgeMachine(id: Self.machineID, name: "Fixture Mac", version: "0.1.0"),
       details: BridgeDetails(
         machineID: Self.machineID, machineName: "Fixture Mac", version: "0.1.0",
-        protocolVersion: 1,
+        protocolVersion: 2,
         capabilities: ["agent_control": true, "prompt_input": true, "prompt_answers": true]))
   }
 

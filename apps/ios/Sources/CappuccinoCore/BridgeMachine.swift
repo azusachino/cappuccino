@@ -18,6 +18,6 @@ public struct VerifiedMachine: Equatable, Sendable {
   public let machine: BridgeMachine
   public let details: BridgeDetails
 
-  /// The machine's own name from /api/session, if it reported one.
+  /// The machine's own name from the v2 handshake, if it reported one.
   public var name: String? { details.machineName }
 }

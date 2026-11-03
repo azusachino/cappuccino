@@ -19,7 +19,7 @@ private actor ControlledDiscovery: BridgeMachineServing {
     return VerifiedMachine(
       machine: BridgeMachine(id: id, name: nil, version: nil),
       details: BridgeDetails(
-        machineID: id, machineName: nil, version: nil, protocolVersion: 1,
+        machineID: id, machineName: nil, version: nil, protocolVersion: 2,
         capabilities: ["agent_control": true]))
   }
 

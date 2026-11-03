@@ -6,6 +6,22 @@ import Foundation
 /// error envelope. Loopback by default; tailscale-serve exposure is a
 /// deployment decision, not a client change.
 public struct BridgeClient: Sendable {
+  /// Protocol version this app speaks, sent on every v2 call after the handshake.
+  static let protocolVersion = "2"
+  static let protocolHeader = "X-Cappuccino-Protocol"
+  /// Capabilities this app implements; each is declared at version 1 in the handshake.
+  static let clientCapabilities = [
+    "agent_discovery", "live_output", "conversation_history", "prompt_input",
+    "prompt_answers", "agent_control", "mutation_binding", "completion_signals",
+  ]
+  static var handshakeBody: [String: Any] {
+    [
+      "protocol_min": 2,
+      "protocol_max": 2,
+      "capabilities": Dictionary(uniqueKeysWithValues: clientCapabilities.map { ($0, 1) }),
+    ]
+  }
+
   public let baseURL: URL
   public let timeout: TimeInterval
   /// Injectable so hermetic tests can stub the transport via URLProtocol.
@@ -25,9 +41,11 @@ public struct BridgeClient: Sendable {
     return PairedMachine(machineID: verified.machine.id.uuidString.lowercased())
   }
 
-  /// Verifies /api/session and keeps its advertisements, so a connection can gate its actions.
+  /// Runs the v2 handshake and keeps the agreed capabilities, so a connection can gate its actions.
   public func verifyMachine(baseURL: URL, expectedID: UUID? = nil) async throws -> VerifiedMachine {
-    let json = BridgeJSON(try await get(baseURL.appendingPathComponent("/api/session")))
+    let json = BridgeJSON(
+      try await post(
+        baseURL.appendingPathComponent("/api/v2/handshake"), body: BridgeClient.handshakeBody))
     let details = try parseBridgeDetails(json)
     guard expectedID == nil || details.machineID == expectedID else {
       throw BridgeError.protocolError("Bridge machine identity changed")
@@ -43,7 +61,7 @@ public struct BridgeClient: Sendable {
   }
 
   public func listAgents(baseURL: URL, expectedMachineID: UUID?) async throws -> [AgentRow] {
-    let event = try await get(baseURL.appendingPathComponent("/api/agents"))
+    let event = try await get(baseURL.appendingPathComponent("/api/v2/agents"))
     guard event["event"] as? String == "agents",
       let rawMachineID = event["machine_id"] as? String,
       let machineID = UUID(uuidString: rawMachineID),
@@ -81,7 +99,7 @@ public struct BridgeClient: Sendable {
   /// `available: false` answer is a normal no-op (this machine has no
   /// canonical pi transcript to reload from).
   public func fetchDurableReload(base url: URL, session: String) async throws {
-    let endpoint = url.appendingPathComponent("/api/transcript?session=\(session)")
+    let endpoint = url.appendingPathComponent("/api/v2/transcript?session=\(session)")
     _ = try await get(endpoint)
   }
 
@@ -162,6 +180,7 @@ public struct BridgeClient: Sendable {
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue(BridgeClient.protocolVersion, forHTTPHeaderField: BridgeClient.protocolHeader)
     request.timeoutInterval = timeout
     do {
       request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -188,6 +207,7 @@ public struct BridgeClient: Sendable {
   private func get(_ url: URL) async throws -> [String: Any] {
     var request = URLRequest(url: url)
     request.timeoutInterval = timeout
+    request.setValue(BridgeClient.protocolVersion, forHTTPHeaderField: BridgeClient.protocolHeader)
     let (data, http) = try await boundedFetch(request)
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
       throw BridgeError.protocolError(
@@ -296,7 +316,7 @@ extension BridgeClient {
   func agentURL(_ base: URL, session: String, _ leaf: String) -> URL {
     let component =
       session.addingPercentEncoding(withAllowedCharacters: Self.locatorCharacters) ?? session
-    return URL(string: "/api/agents/\(component)/\(leaf)", relativeTo: base)!.absoluteURL
+    return URL(string: "/api/v2/agents/\(component)/\(leaf)", relativeTo: base)!.absoluteURL
   }
 
   private static let locatorCharacters = CharacterSet.alphanumerics.union(

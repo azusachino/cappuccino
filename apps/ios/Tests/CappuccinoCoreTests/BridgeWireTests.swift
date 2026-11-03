@@ -12,42 +12,38 @@ struct BridgeWireTests {
     try BridgeJSON.parse(Data(text.utf8))
   }
 
-  @Test func legacyHandshakeIsUnknownRatherThanUnsupported() throws {
-    let details = try parseBridgeDetails(json("{\(prefix),\"protocol\":1}"))
-    #expect(details.version == nil)
-    #expect(details.capabilities == nil)
-    #expect(details.protocolVersion == 1)
-  }
-
-  @Test func advertisedFalseIsDistinctFromMissingAndTrue() throws {
+  @Test func agreedCapabilitiesAreTrueAndOfferedOnesNotAgreedAreFalse() throws {
     let details = try parseBridgeDetails(
       json(
-        "{\(prefix),\"protocol\":1,\"bridge_version\":\"0.1.0\",\"machine_name\":\"  Mini \",\"capabilities\":{\"live_output\":true,\"prompt_input\":false}}"
+        "{\(prefix),\"protocol\":2,\"bridge_version\":\"0.2.0\",\"machine_name\":\"  Mini \",\"capabilities\":{\"live_output\":1,\"prompt_input\":1},\"agreed\":{\"live_output\":1}}"
       ))
-    #expect(details.version == "0.1.0")
+    #expect(details.version == "0.2.0")
     #expect(details.machineName == "Mini")
     #expect(details.capabilities?["live_output"] == true)
     #expect(details.capabilities?["prompt_input"] == false)
     #expect(details.capabilities?["prompt_answers"] == nil)
   }
 
-  @Test func malformedCapabilitiesAreRejected() {
+  @Test func aHandshakeWithoutCapabilitiesIsRejected() {
     #expect(throws: BridgeError.self) {
-      try parseBridgeDetails(
-        json("{\(prefix),\"protocol\":1,\"capabilities\":{\"prompt_input\":\"yes\"}}"))
-    }
-    #expect(throws: BridgeError.self) {
-      try parseBridgeDetails(json("{\(prefix),\"protocol\":1,\"capabilities\":true}"))
+      try parseBridgeDetails(json("{\(prefix),\"protocol\":2}"))
     }
   }
 
-  @Test func incompatibleProtocolExplainsTheConflict() {
+  @Test func malformedCapabilitiesAreRejected() {
+    #expect(throws: BridgeError.self) {
+      try parseBridgeDetails(json("{\(prefix),\"protocol\":2,\"capabilities\":true,\"agreed\":{}}"))
+    }
+  }
+
+  @Test func protocolOneIsRefusedAndTheMessageNamesTheRequirement() {
     do {
-      _ = try parseBridgeDetails(json("{\(prefix),\"protocol\":2}"))
-      Issue.record("incompatible protocol must fail closed")
+      _ = try parseBridgeDetails(
+        json("{\(prefix),\"protocol\":1,\"capabilities\":{},\"agreed\":{}}"))
+      Issue.record("protocol 1 must fail closed")
     } catch let error as BridgeError {
-      #expect(error.message.contains("protocol 2"))
-      #expect(error.message.contains("requires 1"))
+      #expect(error.message.contains("protocol 1"))
+      #expect(error.message.contains("requires 2"))
     } catch {
       Issue.record("unexpected error \(error)")
     }
