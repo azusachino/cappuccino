@@ -91,7 +91,7 @@ class BackgroundPollerTest {
     server.enqueue(
       MockResponse.Builder()
         .body(
-          """{"event":"paired","machine_id":"$machine","protocol":1,"plugin":"cappuccino-bridge"}"""
+          """{"event":"paired","machine_id":"$machine","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"""
         )
         .build()
     )
@@ -117,8 +117,8 @@ class BackgroundPollerTest {
       assertEquals(1, iroh.polls.size)
       assertEquals(2, iroh.polls.single().streamsOpened)
       assertEquals(1, iroh.polls.single().closes)
-      assertEquals("/api/session", server.takeRequest().url.encodedPath)
-      assertEquals("/api/agents", server.takeRequest().url.encodedPath)
+      assertEquals("/api/v2/handshake", server.takeRequest().url.encodedPath)
+      assertEquals("/api/v2/agents", server.takeRequest().url.encodedPath)
       // The poll never uses the shared connection cache or the endpoint lifecycle.
       assertEquals(0, iroh.sharedOpens)
       assertEquals(0, iroh.drops)
@@ -176,7 +176,7 @@ class BackgroundPollerTest {
       val verified = poller(iroh).poll(dual) { bridge -> bridge.verify(machine) }
       assertEquals(machine, verified)
       assertEquals(1, iroh.polls.single().closes)
-      assertEquals("/api/session", server.takeRequest().url.encodedPath)
+      assertEquals("/api/v2/handshake", server.takeRequest().url.encodedPath)
     }
   }
 

@@ -97,35 +97,27 @@ public struct BridgeDetails: Equatable, Sendable {
   public let capabilities: [String: Bool]?
 }
 
-/// Checks `/api/session`'s identity and protocol, then reads its advertisements.
+/// Checks the v2 handshake's identity and protocol, then reads its agreed capabilities.
 func parseBridgeDetails(_ json: BridgeJSON) throws -> BridgeDetails {
   guard try json.string("event") == "paired", try json.string("plugin") == bridgePluginID else {
     throw BridgeError.protocolError("Unsupported bridge session response")
   }
   let protocolVersion = try json.long("protocol")
-  guard protocolVersion == 1 else {
+  guard protocolVersion == 2 else {
     throw BridgeError.protocolError(
-      "Incompatible bridge protocol \(protocolVersion); app requires 1")
+      "Incompatible bridge protocol \(protocolVersion); app requires 2")
   }
   guard let machineID = UUID(uuidString: try json.string("machine_id")) else {
     throw BridgeError.protocolError("Invalid machine identity")
   }
-  let capabilities: [String: Bool]?
-  switch json.fields["capabilities"] {
-  case nil, is NSNull:
-    capabilities = nil
-  case let object as [String: Any]:
-    var flags: [String: Bool] = [:]
-    for (key, value) in object {
-      guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else {
-        throw BridgeError.protocolError("Invalid bridge capability: \(key)")
-      }
-      flags[key] = flag.boolValue
-    }
-    capabilities = flags
-  default:
+  // The bridge offers each capability as name -> version. A capability is usable only when it is
+  // also agreed, so the map is true for agreed names and false for offered-but-not-agreed ones.
+  guard let offered = json.fields["capabilities"] as? [String: Any] else {
     throw BridgeError.protocolError("Invalid bridge capabilities")
   }
+  let agreed = Set((json.fields["agreed"] as? [String: Any] ?? [:]).keys)
+  let capabilities: [String: Bool]? = Dictionary(
+    uniqueKeysWithValues: offered.keys.map { ($0, agreed.contains($0)) })
   let name = try json.optionalString("machine_name")?.trimmingCharacters(
     in: .whitespacesAndNewlines)
   return BridgeDetails(

@@ -100,10 +100,12 @@ class AgentNotificationService : Service() {
                   while (isActive) {
                     var anyActive = false
                     try {
-                      val agents =
+                      // The handshake runs on every poll, so the Telegram route it reports is
+                      // current. While Telegram covers an event, this phone stays quiet for it.
+                      val (agents, telegram) =
                         transports.backgroundPoll(profile.endpoint) { bridge ->
                           bridge.verify(profile.machineId)
-                          bridge.agents(profile.machineId)
+                          bridge.agents(profile.machineId) to bridge.bridgeDetails
                         }
                       consecutiveErrors = 0
                       anyActive = agents.any { it.working || it.status == "blocked" }
@@ -112,6 +114,7 @@ class AgentNotificationService : Service() {
                       }
                       completions.observe(profile.machineId, agents).forEach { event ->
                         lastActivityTimestamp = System.currentTimeMillis()
+                        if (telegramCovers(telegram, "completion")) return@forEach
                         post(
                           preferences,
                           "done:${event.key}",
@@ -138,16 +141,17 @@ class AgentNotificationService : Service() {
                           current[pane] = key
                           if (blocked[pane] != key) {
                             lastActivityTimestamp = System.currentTimeMillis()
-                            post(
-                              preferences,
-                              key,
-                              "Agent needs input",
-                              "${profile.label}: ${agent.agent} is waiting for input",
-                              profile.id,
-                              pane,
-                              reference,
-                              agent.agent,
-                            )
+                            if (!telegramCovers(telegram, "needs_answer"))
+                              post(
+                                preferences,
+                                key,
+                                "Agent needs input",
+                                "${profile.label}: ${agent.agent} is waiting for input",
+                                profile.id,
+                                pane,
+                                reference,
+                                agent.agent,
+                              )
                           }
                         }
                       }

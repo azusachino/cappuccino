@@ -25,7 +25,7 @@ toolchain for building from source.
   → automatic with `serve.auto_apply` at its default: the status/startup
   lifecycle applies `tailscale serve --bg --https=443
   http://127.0.0.1:7392` and prints the tailnet URL
-  (`https://<host>.<tailnet>.ts.net/api/session` answers JSON). One-time
+  (`POST https://<host>.<tailnet>.ts.net/api/v2/handshake` answers JSON). One-time
   prerequisite: `tailscale set --operator=$USER` (never sudo). Set
   `serve.auto_apply=false` (config or `CAPP_BRIDGE_SERVE_AUTO_APPLY=0`) for
   verification/no-mutation mode — then run the printed manual command.

@@ -132,7 +132,7 @@ import SwiftUI
 
   private var canSend: Bool {
     session.isLive && session.selectedAgent != nil
-      && session.capabilities?["prompt_input"] != false
+      && session.capabilities?["prompt_input"] == true
   }
 
   /// Continue and the agent commands are prompts; New session needs agent control.

@@ -147,7 +147,16 @@ class BridgeClient(
 
   override suspend fun verify(expectedMachine: UUID?): UUID =
     withContext(Dispatchers.IO) {
-      val json = parseJsonObject(get("api/session"))
+      // The handshake comes before every other call. A bridge without /api/v2 is older than this
+      // app.
+      val json =
+        try {
+          parseJsonObject(post("api/v2/handshake", handshakeBody()))
+        } catch (error: BridgeHttpStatusException) {
+          if (error.code == 404)
+            throw ProtocolException("This bridge predates protocol v2. Update cappuccino-bridge.")
+          throw error
+        }
       val machine = parsePaired(json)
       if (expectedMachine != null && machine != expectedMachine)
         throw ProtocolException("Machine identity changed")
@@ -157,15 +166,30 @@ class BridgeClient(
       machine
     }
 
+  /** The protocol range this app speaks and the capabilities it implements at version 1. */
+  private fun handshakeBody(): String =
+    kotlinx.serialization.json
+      .buildJsonObject {
+        put("protocol_min", kotlinx.serialization.json.JsonPrimitive(BRIDGE_PROTOCOL_VERSION))
+        put("protocol_max", kotlinx.serialization.json.JsonPrimitive(BRIDGE_PROTOCOL_VERSION))
+        put(
+          "capabilities",
+          kotlinx.serialization.json.buildJsonObject {
+            CLIENT_CAPABILITIES.forEach { put(it, kotlinx.serialization.json.JsonPrimitive(1)) }
+          },
+        )
+      }
+      .toString()
+
   override suspend fun agents(machine: UUID): List<AgentRow> =
-    withContext(Dispatchers.IO) { parseAgents(parseJsonObject(get("api/agents")), machine) }
+    withContext(Dispatchers.IO) { parseAgents(parseJsonObject(get("api/v2/agents")), machine) }
 
   override suspend fun conversation(sessionId: String): List<ConversationTurn> =
     conversationSnapshot(sessionId).turns
 
   override suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
     withContext(Dispatchers.IO) {
-      val json = parseJsonObject(get("api/agents/$sessionId/conversation"))
+      val json = parseJsonObject(get("api/v2/agents/$sessionId/conversation"))
       if (json.string("session_id") != sessionId)
         throw ProtocolException("Conversation belongs to a different locator")
       val source = json.string("source")
@@ -223,7 +247,7 @@ class BridgeClient(
           put("text", kotlinx.serialization.json.JsonPrimitive(text))
           if (confirmed) put("confirmed", kotlinx.serialization.json.JsonPrimitive(true))
         }
-      post("api/agents/$sessionId/prompt", body.toString())
+      post("api/v2/agents/$sessionId/prompt", body.toString())
     }
 
   override suspend fun controlAgent(
@@ -238,7 +262,7 @@ class BridgeClient(
           put("action", kotlinx.serialization.json.JsonPrimitive(action))
           put("expected_session", bindingJson(binding))
         }
-      post("api/agents/$sessionId/control", body.toString())
+      post("api/v2/agents/$sessionId/control", body.toString())
     }
 
   override suspend fun answerQuestions(
@@ -271,7 +295,7 @@ class BridgeClient(
             ),
           )
         }
-      post("api/agents/$sessionId/prompt", body.toString())
+      post("api/v2/agents/$sessionId/prompt", body.toString())
     }
 
   override suspend fun answerPrompt(
@@ -293,7 +317,7 @@ class BridgeClient(
           optionId?.let { put("option_id", kotlinx.serialization.json.JsonPrimitive(it)) }
           action?.let { put("action", kotlinx.serialization.json.JsonPrimitive(it)) }
         }
-      post("api/agents/$sessionId/prompt", body.toString())
+      post("api/v2/agents/$sessionId/prompt", body.toString())
     }
 
   private suspend fun requireMutation(binding: MutationBinding, capability: String) {
@@ -313,7 +337,11 @@ class BridgeClient(
   override fun stream(sessionId: String): Flow<StreamEvent> = callbackFlow {
     // callbackFlow's default buffer (64) is the only local buffering; there is no unbounded
     // queue. An overflow closes the stream with a typed error rather than dropping an event.
-    val request = Request.Builder().url(endpoint.stream(sessionId).toString()).build()
+    val request =
+      Request.Builder()
+        .url(endpoint.stream(sessionId).toString())
+        .header(PROTOCOL_HEADER, BRIDGE_PROTOCOL_VERSION.toString())
+        .build()
     val socket =
       client.newWebSocket(
         request,
@@ -352,7 +380,12 @@ class BridgeClient(
   }
 
   private suspend fun get(path: String): String = suspendCancellableCoroutine { continuation ->
-    val request = Request.Builder().url(endpoint.route(path).toString()).get().build()
+    val request =
+      Request.Builder()
+        .url(endpoint.route(path).toString())
+        .get()
+        .header(PROTOCOL_HEADER, BRIDGE_PROTOCOL_VERSION.toString())
+        .build()
     val call = client.newCall(request)
     continuation.invokeOnCancellation { call.cancel() }
     call.enqueue(
@@ -380,7 +413,12 @@ class BridgeClient(
   private suspend fun post(path: String, jsonBody: String): String =
     suspendCancellableCoroutine { continuation ->
       val body = jsonBody.toRequestBody("application/json".toMediaType())
-      val request = Request.Builder().url(endpoint.route(path).toString()).post(body).build()
+      val request =
+        Request.Builder()
+          .url(endpoint.route(path).toString())
+          .post(body)
+          .header(PROTOCOL_HEADER, BRIDGE_PROTOCOL_VERSION.toString())
+          .build()
       // An ambiguous POST must not be retried by OkHttp or followed to another endpoint.
       val call =
         client

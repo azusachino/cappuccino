@@ -25,7 +25,9 @@ public struct URLSessionWebSocketConnector: BridgeWebSocketConnecting {
     if url.scheme?.lowercased() == irohURLScheme {
       return try await IrohWebSocketConnector().connect(url: url)
     }
-    let task = URLSession.shared.webSocketTask(with: url)
+    var request = URLRequest(url: url)
+    request.setValue(BridgeClient.protocolVersion, forHTTPHeaderField: BridgeClient.protocolHeader)
+    let task = URLSession.shared.webSocketTask(with: request)
     task.resume()
     return URLSessionWebSocketConnection(task: task)
   }
@@ -54,7 +56,7 @@ public enum BridgeStream {
       throw BridgeError.protocolError(
         "stream URL scheme must be http or https, got '\(scheme)'")
     }
-    components.path = "/api/stream"
+    components.path = "/api/v2/stream"
     if let session {
       components.queryItems = [URLQueryItem(name: "session", value: session)]
     }

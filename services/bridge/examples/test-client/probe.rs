@@ -19,6 +19,8 @@ use hyper_util::client::legacy::{connect::HttpConnector, Client, Error as HyperE
 use hyper_util::rt::TokioExecutor;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -139,11 +141,17 @@ async fn collect_capped(body: hyper::body::Incoming) -> Result<Bytes, String> {
 async fn send_with(
     client: &Client<HttpConnector, Full<Bytes>>,
     url: Uri,
+    payload: Option<Vec<u8>>,
 ) -> Result<(Version, StatusCode, Value), String> {
-    let request = Request::builder()
-        .uri(url)
-        .body(Full::new(Bytes::new()))
-        .map_err(|error| format!("build request: {error}"))?;
+    let builder = Request::builder().uri(url).header(PROTOCOL_HEADER, "2");
+    let request = match payload {
+        Some(bytes) => builder
+            .method("POST")
+            .header("content-type", "application/json")
+            .body(Full::new(Bytes::from(bytes))),
+        None => builder.body(Full::new(Bytes::new())),
+    }
+    .map_err(|error| format!("build request: {error}"))?;
     let response = client
         .request(request)
         .await
@@ -156,15 +164,41 @@ async fn send_with(
     Ok((version, status, body))
 }
 
-/// One GET with the configured preference and fallback policy.
+/// Protocol v2 handshake path. The handshake is a POST with the range and capabilities below.
+const HANDSHAKE_PATH: &str = "/api/v2/handshake";
+/// Header that carries the agreed protocol version on every v2 call.
+const PROTOCOL_HEADER: &str = "x-cappuccino-protocol";
+
+fn handshake_body() -> Value {
+    json!({
+        "protocol_min": 2,
+        "protocol_max": 2,
+        "capabilities": {
+            "agent_discovery": 1,
+            "live_output": 1,
+            "conversation_history": 1,
+            "prompt_input": 1,
+            "prompt_answers": 1,
+            "agent_control": 1,
+            "mutation_binding": 1,
+            "completion_signals": 1
+        }
+    })
+}
+
+/// One GET with the configured preference and fallback policy. The handshake is sent as a POST.
 pub async fn get(options: &ProbeOptions, path: &str) -> Result<HttpExchange, String> {
+    let payload = (path == HANDSHAKE_PATH).then(|| handshake_body().to_string().into_bytes());
     let url: Uri = format!("{}{}", options.base_url.trim_end_matches('/'), path)
         .parse()
         .map_err(|error| format!("bad URL: {error}"))?;
     let require = options.preference == HttpPreference::RequireH2;
     if require || options.preference == HttpPreference::PreferH2 {
-        match tokio::time::timeout(options.timeout, send_with(shared_client(true), url.clone()))
-            .await
+        match tokio::time::timeout(
+            options.timeout,
+            send_with(shared_client(true), url.clone(), payload.clone()),
+        )
+        .await
         {
             Ok(Ok((version, status, body))) => {
                 if require && version != Version::HTTP_2 {
@@ -196,10 +230,12 @@ pub async fn get(options: &ProbeOptions, path: &str) -> Result<HttpExchange, Str
             }
         }
     }
-    let (version, status, body) =
-        tokio::time::timeout(options.timeout, send_with(shared_client(false), url))
-            .await
-            .map_err(|_| "request timed out".to_string())??;
+    let (version, status, body) = tokio::time::timeout(
+        options.timeout,
+        send_with(shared_client(false), url, payload),
+    )
+    .await
+    .map_err(|_| "request timed out".to_string())??;
     if require {
         return Err("require-h2: only HTTP/1.1 was reachable".into());
     }
@@ -227,6 +263,7 @@ pub async fn post_json(
         .method("POST")
         .uri(url)
         .header("content-type", "application/json")
+        .header(PROTOCOL_HEADER, "2")
         .body(Full::new(Bytes::from(body_bytes)))
         .map_err(|error| format!("build request: {error}"))?;
 
@@ -440,7 +477,7 @@ pub async fn ws_stream_probe(
             .base_url
             .trim_end_matches('/')
             .replacen("http", "ws", 1),
-        format!("/api/stream?session={}", urlencode(session))
+        format!("/api/v2/stream?session={}", urlencode(session))
     );
     let addr: std::net::SocketAddr = url
         .strip_prefix("ws://")
@@ -451,9 +488,10 @@ pub async fn ws_stream_probe(
         .map_err(|_| "ws connect timed out".to_string())?
         .map_err(|error| format!("ws connect: {error}"))?;
     let tcp_done_us = started.elapsed().as_micros();
+    let request = ws_request(url.as_str())?;
     let (stream, _response) = tokio::time::timeout(
         options.timeout,
-        tokio_tungstenite::client_async_with_config(url.as_str(), tcp, Some(ws_config())),
+        tokio_tungstenite::client_async_with_config(request, tcp, Some(ws_config())),
     )
     .await
     .map_err(|_| "ws handshake timed out".to_string())?
@@ -676,15 +714,15 @@ pub async fn run_checks(options: &ProbeOptions) -> Result<CheckReport, String> {
 async fn run_checks_inner(options: &ProbeOptions) -> Result<CheckReport, String> {
     let mut report = CheckReport::default();
 
-    let session = get(options, "/api/session").await?;
+    let session = get(options, "/api/v2/handshake").await?;
     require(session.status == StatusCode::OK, "session: expected 200")?;
     require(
         session.body["event"] == json!("paired"),
         "session: expected event 'paired'",
     )?;
     require(
-        session.body["protocol"] == json!(1),
-        "session: expected protocol 1",
+        session.body["protocol"] == json!(2),
+        "handshake: expected protocol 2",
     )?;
     require(
         session.body["plugin"]
@@ -706,7 +744,7 @@ async fn run_checks_inner(options: &ProbeOptions) -> Result<CheckReport, String>
         session.protocol,
     );
 
-    let agents = get(options, "/api/agents").await?;
+    let agents = get(options, "/api/v2/agents").await?;
     require(agents.status == StatusCode::OK, "agents: expected 200")?;
     require(
         agents.body["event"] == json!("agents"),
@@ -733,7 +771,11 @@ async fn run_checks_inner(options: &ProbeOptions) -> Result<CheckReport, String>
         .session
         .clone()
         .unwrap_or_else(|| "__probe__".into());
-    let transcript = get(options, &format!("/api/transcript?session={probe_session}")).await?;
+    let transcript = get(
+        options,
+        &format!("/api/v2/transcript?session={probe_session}"),
+    )
+    .await?;
     match transcript.status {
         StatusCode::OK => {
             let available = transcript.body["available"] == json!(true);
@@ -1011,22 +1053,29 @@ async fn run_bench_inner(
     }
 
     // Choose the transport once, honestly: prefer h2, report the fallback.
-    let session = get(options, "/api/session").await?;
+    let session = get(options, "/api/v2/handshake").await?;
     validate_session_parts(&session.status, &session.body)?;
 
-    let url: Uri = format!("{}/api/session", options.base_url.trim_end_matches('/'))
-        .parse()
-        .map_err(|error| format!("bad URL: {error}"))?;
+    let url: Uri = format!(
+        "{}/api/v2/handshake",
+        options.base_url.trim_end_matches('/')
+    )
+    .parse()
+    .map_err(|error| format!("bad URL: {error}"))?;
     let transport_is_http1 = session.h2_fallback;
 
     let (_, cpu_before, rss_unit) = rusage_snapshot()?;
     let rss_first_sample = current_rss_kib()?;
     let mut rss_samples = vec![rss_first_sample];
 
+    let handshake_bytes = Bytes::from(handshake_body().to_string());
     let make_request = || {
         Request::builder()
+            .method("POST")
             .uri(url.clone())
-            .body(Full::new(Bytes::new()))
+            .header("content-type", "application/json")
+            .header(PROTOCOL_HEADER, "2")
+            .body(Full::new(handshake_bytes.clone()))
             .map_err(|error| format!("build request: {error}"))
     };
 
@@ -1187,17 +1236,17 @@ async fn run_bench_inner(
     })
 }
 
-/// Validates a measured /api/session exchange: status, event shape, protocol
+/// Validates a measured /api/v2/handshake exchange: status, event shape, protocol
 /// and machine_id. Applied to every measured response, not just the first.
 fn validate_session_parts(status: &StatusCode, body: &Value) -> Result<(), String> {
     if *status != StatusCode::OK {
-        return Err(format!("bench: /api/session returned {status}"));
+        return Err(format!("bench: /api/v2/handshake returned {status}"));
     }
     if body["event"] != json!("paired") {
-        return Err("bench: /api/session body is not a paired event".into());
+        return Err("bench: /api/v2/handshake body is not a paired event".into());
     }
-    if body["protocol"] != json!(1) {
-        return Err("bench: /api/session protocol != 1".into());
+    if body["protocol"] != json!(2) {
+        return Err("bench: /api/v2/handshake protocol != 2".into());
     }
     if body["machine_id"].as_str().unwrap_or("").is_empty() {
         return Err("bench: session missing nonempty machine_id".into());
@@ -1286,3 +1335,16 @@ impl std::fmt::Display for BenchReport {
 }
 
 // Split helpers above use futures_util traits directly.
+
+/// A WebSocket upgrade request for a v2 stream, carrying the agreed protocol header.
+pub fn ws_request(
+    url: &str,
+) -> Result<tokio_tungstenite::tungstenite::handshake::client::Request, String> {
+    let mut request = url
+        .into_client_request()
+        .map_err(|error| format!("ws request: {error}"))?;
+    request
+        .headers_mut()
+        .insert(PROTOCOL_HEADER, HeaderValue::from_static("2"));
+    Ok(request)
+}

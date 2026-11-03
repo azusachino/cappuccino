@@ -60,21 +60,21 @@ final class StubURLProtocol: URLProtocol {
       StubURLProtocol.handler = { request in
         let path = request.url!.path
         reads.withLock { $0.append(path) }
-        if path == "/api/session" {
+        if path == "/api/v2/handshake" {
           return (
             200,
             Data(
-              #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"cappuccino-bridge"}"#
+              #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"#
                 .utf8)
           )
         }
-        #expect(path == "/api/agents")
+        #expect(path == "/api/v2/agents")
         return (200, Data(payload.utf8))
       }
       #expect(
         try await stubbedClient().verifyBinding(base: base, machineID: machine, agent: agent)
           == accepted)
-      #expect(reads.withLock { $0 } == ["/api/session", "/api/agents"])
+      #expect(reads.withLock { $0 } == ["/api/v2/handshake", "/api/v2/agents"])
     }
     StubURLProtocol.handler = { _ in
       Issue.record("Missing native identity must not trigger a guessed binding")
@@ -100,11 +100,11 @@ final class StubURLProtocol: URLProtocol {
 
   @Test func pairReturnsMachineFromSessionEndpoint() async throws {
     StubURLProtocol.handler = { request in
-      #expect(request.url?.path == "/api/session")
+      #expect(request.url?.path == "/api/v2/handshake")
       #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
       return (
         200,
-        #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"cappuccino-bridge"}"#
+        #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"#
           .data(using: .utf8)!
       )
     }
@@ -116,8 +116,8 @@ final class StubURLProtocol: URLProtocol {
   @Test func rejectsInvalidPairingAndUnexpectedMachineIdentity() async {
     let base = URL(string: "https://machine.example")!
     for payload in [
-      #"{"event":"paired","machine_id":"invalid","protocol":1,"plugin":"cappuccino-bridge"}"#,
-      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":2,"plugin":"cappuccino-bridge"}"#,
+      #"{"event":"paired","machine_id":"invalid","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"#,
+      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":3,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"#,
       #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":true,"plugin":"cappuccino-bridge"}"#,
       #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"wrong"}"#,
     ] {
@@ -130,7 +130,7 @@ final class StubURLProtocol: URLProtocol {
       (
         200,
         Data(
-          #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"cappuccino-bridge"}"#
+          #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"#
             .utf8)
       )
     }
@@ -246,7 +246,7 @@ final class StubURLProtocol: URLProtocol {
 
   @Test func fetchConversationReturnsTurns() async throws {
     StubURLProtocol.handler = { request in
-      #expect(request.url?.path == "/api/agents/s-aurora/conversation")
+      #expect(request.url?.path == "/api/v2/agents/s-aurora/conversation")
       return (
         200,
         #"{"session_id":"s-aurora","source":"canonical_log","turns":[{"id":"t1","role":"user","text":"hello"}]}"#
@@ -263,7 +263,7 @@ final class StubURLProtocol: URLProtocol {
     let base = URL(string: "http://127.0.0.1:7392")!
     let recorder = BodyRecorder()
     StubURLProtocol.handler = { request in
-      #expect(request.url?.path == "/api/agents/s-aurora/prompt")
+      #expect(request.url?.path == "/api/v2/agents/s-aurora/prompt")
       #expect(request.httpMethod == "POST")
       recorder.bodies.append(requestBody(request))
       return (200, #"{"status":"delivered"}"#.data(using: .utf8)!)
@@ -304,7 +304,7 @@ final class StubURLProtocol: URLProtocol {
 
   @Test func answerPromptSendsSelection() async throws {
     StubURLProtocol.handler = { request in
-      #expect(request.url?.path == "/api/agents/s-aurora/prompt")
+      #expect(request.url?.path == "/api/v2/agents/s-aurora/prompt")
       #expect(request.httpMethod == "POST")
       return (200, #"{"status":"delivered"}"#.data(using: .utf8)!)
     }

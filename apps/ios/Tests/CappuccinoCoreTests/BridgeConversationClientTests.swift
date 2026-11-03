@@ -19,7 +19,7 @@ extension BridgeClientTests {
   @Test func conversationIdentityFollowsTheLocatorNotTheIdentity() async throws {
     let digest = String(repeating: "a", count: 64)
     StubURLProtocol.handler = { request in
-      #expect(request.url?.path == "/api/agents/chosen/conversation")
+      #expect(request.url?.path == "/api/v2/agents/chosen/conversation")
       return (
         200,
         Data(
@@ -74,7 +74,7 @@ extension BridgeClientTests {
 
   @Test func locatorWithColonIsOnePercentEncodedPathComponent() async throws {
     StubURLProtocol.handler = { request in
-      #expect(request.url?.path == "/api/agents/w1:p3K/conversation")
+      #expect(request.url?.path == "/api/v2/agents/w1:p3K/conversation")
       #expect(request.url?.absoluteString.contains("w1%3Ap3K") == true)
       return (200, Data(#"{"session_id":"w1:p3K","source":"scrollback","turns":[]}"#.utf8))
     }
@@ -98,7 +98,7 @@ extension BridgeClientTests {
   @Test func answersEveryQuestionInOneStructuredSubmission() async throws {
     let recorder = BodyRecorder()
     StubURLProtocol.handler = { request in
-      #expect(request.url?.path == "/api/agents/s-1/prompt")
+      #expect(request.url?.path == "/api/v2/agents/s-1/prompt")
       #expect(request.httpMethod == "POST")
       recorder.bodies.append(requestBody(request))
       return (200, Data(#"{"event":"question_answered"}"#.utf8))
@@ -139,7 +139,7 @@ extension BridgeClientTests {
   @Test func controlsAgentOnlyWhenTheBridgeAdvertisesIt() async throws {
     let recorder = BodyRecorder()
     StubURLProtocol.handler = { request in
-      #expect(request.url?.path == "/api/agents/s-1/control")
+      #expect(request.url?.path == "/api/v2/agents/s-1/control")
       #expect(request.httpMethod == "POST")
       recorder.bodies.append(requestBody(request))
       return (200, Data(#"{"event":"control_sent"}"#.utf8))

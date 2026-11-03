@@ -101,7 +101,7 @@ class BridgeProtocolTest {
       parsePaired(
         obj(
           "event" to s("paired"),
-          "protocol" to n(1),
+          "protocol" to n(2),
           "machine_id" to s(machine.toString()),
           "plugin" to s(BRIDGE_PLUGIN_ID),
         )
@@ -111,7 +111,7 @@ class BridgeProtocolTest {
       parsePaired(
         obj(
           "event" to s("paired"),
-          "protocol" to n(2),
+          "protocol" to n(1),
           "machine_id" to s(machine.toString()),
           "plugin" to s(BRIDGE_PLUGIN_ID),
         )

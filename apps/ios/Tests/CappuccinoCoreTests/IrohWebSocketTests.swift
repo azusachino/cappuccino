@@ -71,11 +71,11 @@ private actor ScriptedWebSocketStream: IrohStreaming {
     let connector = IrohWebSocketConnector(open: { _ in stream }, key: { key })
 
     let socket = try await connector.connect(
-      url: URL(string: "cappiroh://peer/api/stream?session=s1")!)
+      url: URL(string: "cappiroh://peer/api/v2/stream?session=s1")!)
     #expect(try await socket.receiveText() == "hi")
 
     let request = String(decoding: await stream.written, as: UTF8.self)
-    #expect(request.hasPrefix("GET /api/stream?session=s1 HTTP/1.1\r\nHost: peer\r\n"))
+    #expect(request.hasPrefix("GET /api/v2/stream?session=s1 HTTP/1.1\r\nHost: peer\r\n"))
     #expect(request.contains("Sec-WebSocket-Key: \(key)\r\n"))
   }
 
@@ -83,14 +83,14 @@ private actor ScriptedWebSocketStream: IrohStreaming {
     let wrong = ScriptedWebSocketStream(reply: handshake(accept: "AAAAAAAAAAAAAAAAAAAAAAAAAAA="))
     let badAccept = IrohWebSocketConnector(open: { _ in wrong }, key: { key })
     await #expect(throws: WebSocketWireError.badAccept) {
-      _ = try await badAccept.connect(url: URL(string: "cappiroh://peer/api/stream")!)
+      _ = try await badAccept.connect(url: URL(string: "cappiroh://peer/api/v2/stream")!)
     }
 
     let refused = ScriptedWebSocketStream(
       reply: handshake(status: "401 Unauthorized", accept: accept))
     let rejected = IrohWebSocketConnector(open: { _ in refused }, key: { key })
     await #expect(throws: WebSocketWireError.handshakeRejected(401)) {
-      _ = try await rejected.connect(url: URL(string: "cappiroh://peer/api/stream")!)
+      _ = try await rejected.connect(url: URL(string: "cappiroh://peer/api/v2/stream")!)
     }
   }
 }

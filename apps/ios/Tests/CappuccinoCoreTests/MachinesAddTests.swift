@@ -12,7 +12,7 @@ private struct VerifyingDiscovery: BridgeMachineServing {
     VerifiedMachine(
       machine: BridgeMachine(id: machine, name: name, version: nil),
       details: BridgeDetails(
-        machineID: machine, machineName: name, version: nil, protocolVersion: 1,
+        machineID: machine, machineName: name, version: nil, protocolVersion: 2,
         capabilities: nil))
   }
 

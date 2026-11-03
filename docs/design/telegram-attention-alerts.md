@@ -13,7 +13,12 @@ failure handling, and the operations an owner runs.
   involved, so alerts arrive while the app is closed.
 - Generic attention only: the agent finished a work cycle, or it is waiting for
   an answer. No transcript, tool output, prompt text, working-directory path, pane
-  or session identifier, and no approve/deny buttons.
+  id, or session identifier, and no approve/deny buttons. One exception: a
+  per-kind session number appears after the agent kind (`claude #2`). The bridge
+  assigns it at first sighting of a session, counts from 1, and resets on restart.
+  It is not an identifier. The herdr pane name appears in parentheses only when the
+  owner sets `show_pane_names = true`; it is off by default. The bridge never uses
+  the terminal title or a generated name.
 - Off by default. Nothing is sent until the owner configures a token and chat.
 
 Out of scope: Android push or FCM, Telegram-side approval controls, multiple
@@ -27,11 +32,16 @@ secret kept outside the repository:
 
 ```toml
 [telegram]
-enabled = false                     # off by default; the bridge reports the route as unconfigured
-chat_id = "<group chat id>"         # the private group with only the owner and the bot
+enabled = false                      # off by default; the bridge reports the route as disabled
+chat_id = "<group chat id>"          # the private group with only the owner and the bot
 token_file = "<path to secret file>" # read at start; never a literal token and never a CLI argument
+machine_label = "<owner's name>"     # required when enabled; 1-40 printable characters
+show_pane_names = false              # opt-in: add the herdr pane name to messages
 events = ["completion", "needs_answer", "route_failure"]
 ```
+
+The owner's setup steps (token in harus-nix, config, herdr naming, verification)
+are in [telegram alerts setup](../telegram-alerts-setup.md).
 
 - The token is read from `token_file` at startup and on an explicit reload. It
   is never logged, never returned in status, and never passed on the command
@@ -78,12 +88,23 @@ Rules that decide whether an observation becomes a message:
 Plain text, no Markdown or HTML parsing, at most 200 characters:
 
 ```text
-[cappuccino] <machine label> · <agent kind> finished a work cycle
-[cappuccino] <machine label> · <agent kind> is waiting for an answer
+[cappuccino] <machine label> · <agent kind> #<n> finished a work cycle
+[cappuccino] <machine label> · <agent kind> #<n> (<pane name>) is waiting for an answer
 ```
 
-The machine label is the owner's own name for the machine, not the hostname.
-The agent kind is the reported kind (for example `pi`). Nothing else is added.
+- The machine label is the owner's own name for the machine, not the hostname.
+- The agent kind is the reported kind (for example `pi`).
+- `#<n>` is a per-kind session number, from 1. It is assigned at first sighting of a
+  session and resets when the bridge restarts. It is not a session identifier.
+- `(<pane name>)` appears only when `show_pane_names = true` and the herdr pane has
+  a name, up to 40 characters after removing control and invisible formatting
+  characters. The bridge never uses the terminal title or a generated name.
+
+Nothing else is added: no pane id, session id, path, transcript or prompt text.
+When the name is shown, it is the bridge's `session_id` for that agent, so anything
+that can read `/api/v2/agents` sees it too. Any process in a pane can rename that pane
+with `herdr agent rename`, so the name is only as trusted as the pane it is set on.
+That is why it is opt-in.
 
 ## Delivery and failure
 

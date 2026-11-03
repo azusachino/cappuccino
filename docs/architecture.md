@@ -10,13 +10,13 @@ Native phone clients reach selected machine-local Herdr APIs through a separate 
 
 ## Bridge routes
 
-- `GET /api/session`: reachability, machine identity, version and a capability advertisement.
-- `GET /api/agents`: maps Herdr `agent.list` metadata, including unnamed panes.
-- `GET /api/agents/{sessionId}/conversation`: the canonical transcript for Pi, Claude Code or Agy when Herdr reports a usable session. Otherwise the pane's recent scrollback, labeled `scrollback`. Returns active model metadata, context tokens, and upstream provider rate limit quotas in `stats`.
-- `POST /api/agents/{sessionId}/prompt`: sends prompt text into the pane, or answers a visible approval or question card. Text that starts with an agent command is refused with `409 confirm_command` unless the owner confirmed it. Interactive terminal commands (like `/status`) are blocked in mobile clients to prevent unescapable curses locks.
-- `POST /api/agents/{sessionId}/control`: `interrupt` sends Escape; `new_session` types the agent's `/new` command and is refused while the agent is working or blocked.
-- `GET /api/transcript`: resolves the Herdr-reported session path and fails closed unless it is inside the canonical session store.
-- `WS /api/stream`: the read-only pane-line stream.
+- `POST /api/v2/handshake`: reachability, machine identity, version and a capability advertisement.
+- `GET /api/v2/agents`: maps Herdr `agent.list` metadata, including unnamed panes.
+- `GET /api/v2/agents/{sessionId}/conversation`: the canonical transcript for Pi, Claude Code or Agy when Herdr reports a usable session. Otherwise the pane's recent scrollback, labeled `scrollback`. Returns active model metadata, context tokens, and upstream provider rate limit quotas in `stats`.
+- `POST /api/v2/agents/{sessionId}/prompt`: sends prompt text into the pane, or answers a visible approval or question card. Text that starts with an agent command is refused with `409 confirm_command` unless the owner confirmed it. Interactive terminal commands (like `/status`) are blocked in mobile clients to prevent unescapable curses locks.
+- `POST /api/v2/agents/{sessionId}/control`: `interrupt` sends Escape; `new_session` types the agent's `/new` command and is refused while the agent is working or blocked.
+- `GET /api/v2/transcript`: resolves the Herdr-reported session path and fails closed unless it is inside the canonical session store.
+- `WS /api/v2/stream`: the read-only pane-line stream.
 - `GET /pair`: only when `iroh.enabled` is true (otherwise 404). Issues a fresh single-use pairing token on each load and renders it as an inline-SVG QR code plus the copy-paste payload. Loopback only, like every route; it is reachable from the tailnet only through Tailscale Serve.
 
 The prompt and control routes type into an existing pane. They do not start or stop a process, use Pi's queue API, or prove that a phone transcript matches a live canonical session.
@@ -38,6 +38,8 @@ The manifest invokes the installed `cappuccino-bridge` command for `start`, `sto
 The `serve.auto_apply` setting defaults to true. With `false`, or `CAPP_BRIDGE_SERVE_AUTO_APPLY=0`, the bridge runs no Tailscale command and only prints the manual exposure command. Invalid values fail closed.
 
 Config precedence is defaults, then optional TOML config (`CAPP_BRIDGE_CONFIG`, else `$XDG_CONFIG_HOME/cappuccino-bridge/config.toml`, else `~/.config/cappuccino-bridge/config.toml`), then supported environment overrides. Bind addresses must stay on loopback. See the [bridge setup and commands](../services/bridge/README.md).
+
+Optional Telegram alerts are a send-only `[telegram]` table in the same file. The bridge posts plain-text completion and needs-answer notices to one group, and never reads Telegram updates. Design: [telegram attention alerts](design/telegram-attention-alerts.md). Setup: [telegram alerts setup](telegram-alerts-setup.md).
 
 ## Delivery acceptance remains open
 

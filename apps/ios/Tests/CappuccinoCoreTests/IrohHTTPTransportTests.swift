@@ -81,14 +81,14 @@ private actor ReplyingStream: IrohStreaming {
       return stream
     }
 
-    var request = URLRequest(url: URL(string: "cappiroh://peer-post/api/agents/s1/prompt")!)
+    var request = URLRequest(url: URL(string: "cappiroh://peer-post/api/v2/agents/s1/prompt")!)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = Data("{\"type\":\"prompt\",\"text\":\"hi\"}".utf8)
     _ = try await BridgeSession.shared.data(for: request)
 
     let sent = String(decoding: await stream.request, as: UTF8.self)
-    #expect(sent.hasPrefix("POST /api/agents/s1/prompt HTTP/1.1\r\n"))
+    #expect(sent.hasPrefix("POST /api/v2/agents/s1/prompt HTTP/1.1\r\n"))
     #expect(sent.hasSuffix("{\"type\":\"prompt\",\"text\":\"hi\"}"))
   }
 

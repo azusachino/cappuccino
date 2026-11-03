@@ -2,6 +2,38 @@
 
 All notable changes to Cappuccino are documented in this file.
 
+## 0.2.0 - 2026-11-03
+
+Bridge, Android and iOS ship together at 0.2.0. Android `versionCode` 3; iOS build 3.
+
+### Breaking
+
+- **Protocol v2 cutover.** Every client handshakes first with `POST /api/v2/handshake`, then
+  sends `X-Cappuccino-Protocol: 2` on each call. Phones on 0.1.x cannot talk to a 0.2.0 bridge,
+  and a 0.2.0 phone reports "This bridge predates protocol v2" against an older bridge.
+- **Retired paths removed:** `GET /api/session`, `GET /api/agents`, `GET /api/agents/{id}/conversation`,
+  `POST /api/agents/{id}/prompt`, `POST /api/agents/{id}/control`, `GET /api/transcript` and
+  `GET /api/stream`. Their v2 paths live under `/api/v2/`. See
+  [the v2 contract](docs/bridge-v2-contract.md).
+- Capabilities are negotiated per handshake: each side lists name -> version, and the phone gates
+  actions on the `agreed` map.
+
+### Added
+
+- **Telegram attention alerts** (bridge): an optional, send-only route that posts one plain-text message to a private group when an agent finishes a work cycle or waits for an answer. Off by default; setup in `docs/telegram-alerts-setup.md`.
+- Alerts carry a per-kind session number (`claude #2`), and the herdr pane name when the owner sets `show_pane_names = true`.
+
+### Changed
+
+- Android and iOS reconnect now redials the machine's transport, shows the retry reason on the machine row, and restarts an attempt when a machine is opened.
+- iOS: transcript bubbles with timestamps, a per-agent history sheet, a composer menu, a reconnecting banner, and the transport each machine last used.
+
+### Fixed
+
+- Bridge: Telegram baselines survive brief herdr gaps; invisible and bidi characters are stripped from pane names.
+- Android: a second add or pair while one is running is ignored; reconnect joins in-flight refreshes instead of starting another.
+- iOS: history matches by machine and agent kind; prompts and agent control carry the session binding; the app icon is in the xtool IPA.
+
 ## 0.1.0 - 2026-10-30
 
 Initial release of Cappuccino: a companion client for remote coding agents, pairing native Android and Apple apps with the `cappuccino-bridge` daemon over Tailscale and iroh peer-to-peer transport.

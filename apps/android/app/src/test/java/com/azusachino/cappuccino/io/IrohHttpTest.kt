@@ -27,10 +27,10 @@ class IrohHttpTest {
       server.enqueue(MockResponse.Builder().body("{\"ok\":true}").build())
       server.start()
       client(server.port)
-        .newCall(Request.Builder().url("http://iroh.invalid/api/session").build())
+        .newCall(Request.Builder().url("http://iroh.invalid/api/v2/handshake").build())
         .execute()
         .use { response -> assertEquals("{\"ok\":true}", response.body.string()) }
-      assertEquals("/api/session", server.takeRequest().url.encodedPath)
+      assertEquals("/api/v2/handshake", server.takeRequest().url.encodedPath)
     }
   }
 
@@ -54,7 +54,7 @@ class IrohHttpTest {
       val socket =
         client(server.port)
           .newWebSocket(
-            Request.Builder().url("http://iroh.invalid/api/stream").build(),
+            Request.Builder().url("http://iroh.invalid/api/v2/stream").build(),
             object : WebSocketListener() {
               override fun onMessage(webSocket: WebSocket, text: String) {
                 message = text

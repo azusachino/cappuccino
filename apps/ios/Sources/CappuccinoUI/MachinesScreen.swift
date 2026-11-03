@@ -1,6 +1,12 @@
 import CappuccinoCore
 import SwiftUI
 
+/// The app version from the bundle, set by `project.yml` (`MARKETING_VERSION`).
+private let appVersionLabel: String = {
+  let base = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+  return "\(base ?? "Unknown")(v1)"
+}()
+
 /// Machines: each saved bridge with its connection state and agents. Selecting an agent
 /// opens its conversation; selecting never starts, stops or replaces an agent.
 @MainActor public struct MachinesScreen: View {
@@ -391,7 +397,7 @@ struct ConnectionDetailsSheet: View {
             "Bridge version",
             value: state?.details.map { "\($0.version ?? "Unknown")(v\($0.protocolVersion))" }
               ?? "Not advertised")
-          LabeledContent("App version", value: "0.1.0(v1)")
+          LabeledContent("App version", value: appVersionLabel)
         }
         Section("Capabilities") {
           if let capabilities = state?.details?.capabilities {

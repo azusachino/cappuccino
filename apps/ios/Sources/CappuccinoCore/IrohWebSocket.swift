@@ -93,6 +93,7 @@ public struct IrohWebSocketConnector: BridgeWebSocketConnecting {
     let request = [
       "GET \(target) HTTP/1.1", "Host: \(url.host ?? "")", "Upgrade: websocket",
       "Connection: Upgrade", "Sec-WebSocket-Key: \(clientKey)", "Sec-WebSocket-Version: 13",
+      "\(BridgeClient.protocolHeader): \(BridgeClient.protocolVersion)",
       "", "",
     ].joined(separator: "\r\n")
     try await stream.write(Data(request.utf8))

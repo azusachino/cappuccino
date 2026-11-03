@@ -27,7 +27,7 @@ accepted A3 criteria. Read-only searches found no existing matching binding issu
 ## Wire contract
 
 Keep protocol 1, current endpoints and current successful response meanings.
-Advertise `capabilities.mutation_binding: true` in `GET /api/session` only when
+Advertise `capabilities.mutation_binding: true` in `POST /api/v2/handshake` only when
 all mutation variants enforce the following contract. It means pre-dispatch
 binding checks, not atomic native enforcement.
 
@@ -47,9 +47,9 @@ Every mutation body carries the same required object:
 
 Apply it to both existing routes:
 
-- `POST /api/agents/{sessionId}/prompt`: `prompt`, `answer_prompt` (selection or
+- `POST /api/v2/agents/{sessionId}/prompt`: `prompt`, `answer_prompt` (selection or
   cancel), and `answer_question`.
-- `POST /api/agents/{sessionId}/control`: `interrupt` and `new_session`; here
+- `POST /api/v2/agents/{sessionId}/control`: `interrupt` and `new_session`; here
   `action` replaces the example's `type`/`text` fields.
 
 The URI remains the advertised locator. Machine identity uses UUID equality,

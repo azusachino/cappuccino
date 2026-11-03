@@ -220,10 +220,12 @@ fn http_ok(port: u16) -> bool {
         return false;
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
-    if stream
-        .write_all(b"GET /api/session HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        .is_err()
-    {
+    let body = r#"{"protocol_min":2,"protocol_max":2}"#;
+    let request = format!(
+        "POST /api/v2/handshake HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }
     let mut status = String::new();

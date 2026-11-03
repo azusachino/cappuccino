@@ -18,7 +18,7 @@ private actor RoutedDiscovery: BridgeMachineServing {
     return VerifiedMachine(
       machine: BridgeMachine(id: machine, name: nil, version: nil),
       details: BridgeDetails(
-        machineID: machine, machineName: nil, version: nil, protocolVersion: 1,
+        machineID: machine, machineName: nil, version: nil, protocolVersion: 2,
         capabilities: [:]))
   }
 

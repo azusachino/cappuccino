@@ -1,0 +1,86 @@
+use super::config::Event;
+use crate::agents::AgentRow;
+
+pub(super) const MAX_NAME_CHARS: usize = 40;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Completion,
+    NeedsAnswer,
+}
+
+impl Kind {
+    pub(super) fn event(self) -> Event {
+        match self {
+            Kind::Completion => Event::Completion,
+            Kind::NeedsAnswer => Event::NeedsAnswer,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Notice {
+    pub kind: Kind,
+    pub agent: String,
+    /// Per-kind session number, assigned at first sighting. Resets on bridge restart.
+    pub number: u32,
+    /// The owner's herdr pane name, when one is set. Never the pane id.
+    pub name: Option<String>,
+}
+
+/// The herdr pane name the owner set, or `None`. The bridge uses the pane id as
+/// `session_id` when no name is set, so a session id equal to the pane id is not a name.
+pub(super) fn pane_name(row: &AgentRow) -> Option<String> {
+    if row.session_id == row.pane_id {
+        return None;
+    }
+    let name: String = row
+        .session_id
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control() && !is_invisible_format(*c))
+        .take(MAX_NAME_CHARS)
+        .collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Zero-width and bidi-control characters: they hide or reorder text in an alert.
+pub(super) fn is_invisible_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::telegram::test_support::*;
+
+#[test]
+fn pane_name_is_only_an_owner_set_name() {
+    let mut named = row("w1:p2", None, "idle", None);
+    named.session_id = "telegram".into();
+    assert_eq!(pane_name(&named), Some("telegram".into()));
+    let unnamed = row("w1:p2", None, "idle", None);
+    assert_eq!(pane_name(&unnamed), None, "pane id is not a name");
+    named.session_id = "  \u{7}  ".into();
+    assert_eq!(pane_name(&named), None, "blank after cleanup");
+    named.session_id = "x".repeat(200);
+    assert_eq!(pane_name(&named).unwrap().chars().count(), MAX_NAME_CHARS);
+    named.session_id = "\u{202E}gnimrahc\u{200B}".into();
+    assert_eq!(
+        pane_name(&named),
+        Some("gnimrahc".into()),
+        "bidi and zero-width removed"
+    );
+    named.session_id = format!("{}telegram", " ".repeat(50));
+    assert_eq!(
+        pane_name(&named),
+        Some("telegram".into()),
+        "trimmed before the cap"
+    );
+}
+
+}

@@ -30,15 +30,15 @@ same base URL for both transports.
 
 | Method / route | Transport | Behavior |
 | --- | --- | --- |
-| `GET /api/session` | HTTP | reachability, machine identity, version and capability advertisement |
-| `GET /api/agents` | HTTP | Herdr `agent.list` mapping; names/pane IDs are locators, not proven native Pi session IDs |
-| `GET /api/transcript?session=…` | HTTP | resolves Herdr-reported `agent_session`; fails closed when missing or outside Pi's canonical session store |
-| `GET /api/agents/{sessionId}/conversation` | HTTP | canonical transcript for Pi, Claude Code or Agy; labeled `scrollback` when no usable session is reported |
-| `POST /api/agents/{sessionId}/prompt` | HTTP | prompt text (commands need `confirmed`) or an answer to a visible card |
-| `POST /api/agents/{sessionId}/control` | HTTP | `interrupt` (Escape) or `new_session` (`/new`, refused while the agent is busy) |
-| `/api/stream?session=…` | WebSocket | read-only pane-line append/reset events with visible gaps |
+| `POST /api/v2/handshake` | HTTP | reachability, machine identity, version and capability advertisement |
+| `GET /api/v2/agents` | HTTP | Herdr `agent.list` mapping; names/pane IDs are locators, not proven native Pi session IDs |
+| `GET /api/v2/transcript?session=…` | HTTP | resolves Herdr-reported `agent_session`; fails closed when missing or outside Pi's canonical session store |
+| `GET /api/v2/agents/{sessionId}/conversation` | HTTP | canonical transcript for Pi, Claude Code or Agy; labeled `scrollback` when no usable session is reported |
+| `POST /api/v2/agents/{sessionId}/prompt` | HTTP | prompt text (commands need `confirmed`) or an answer to a visible card |
+| `POST /api/v2/agents/{sessionId}/control` | HTTP | `interrupt` (Escape) or `new_session` (`/new`, refused while the agent is busy) |
+| `/api/v2/stream?session=…` | WebSocket | read-only pane-line append/reset events with visible gaps |
 
-`GET /api/session` adds optional `bridge_version` (the Cargo package version) and a boolean `capabilities` object: `agent_discovery`, `live_output`, `conversation_history`, `prompt_input`, `prompt_answers`, `agent_control`, `mutation_binding` and `completion_signals`. `telegram_notifications` is reported `false`. These advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Missing fields mean not reported; `false` explicitly means unsupported. Protocol remains 1 and existing identity validation is unchanged. Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog.
+`POST /api/v2/handshake` is the only entry point. It returns `machine_id`, `machine_name`, `bridge_version` and `protocol` (2), plus `capabilities` (each offered capability mapped to its version) and `agreed` (the capabilities both sides speak, at the lower version). The phone gates actions on `agreed`, not on `capabilities`. Capabilities advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Identity validation is unchanged. The negotiation rules are in [the v2 contract](../../docs/bridge-v2-contract.md). Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog. `telegram_notifications` is `true` only after a Telegram alert has been delivered, and `telegram_notifications_configured` is `true` while the Telegram route is not disabled. Telegram route status is under `telegram` in the same response, with `route` and the enabled `events`; setup is in [Telegram alerts setup](../../docs/telegram-alerts-setup.md).
 
 Both mutation endpoints require `expected_session` with the selected `machine_id`
 (UUID), `pane_id` and opaque `native_session_ref`, including every answer/cancel
@@ -57,7 +57,7 @@ These checks use fresh Herdr metadata and the verified pane, but are **not atomi
 fencing**: replacement after the final observation can still receive input.
 Native admission and process-incarnation guarantees remain unproven.
 
-The bridge exposes `/api/agents/{sessionId}/conversation`, `POST /api/agents/{sessionId}/prompt` for prompt text and validated prompt-card answers, and `POST /api/agents/{sessionId}/control` for `interrupt` and `new_session`; this is not native Pi queue selection or a correlated delivery receipt. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
+The bridge exposes `/api/v2/agents/{sessionId}/conversation`, `POST /api/v2/agents/{sessionId}/prompt` for prompt text and validated prompt-card answers, and `POST /api/v2/agents/{sessionId}/control` for `interrupt` and `new_session`; this is not native Pi queue selection or a correlated delivery receipt. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
 
 Pi conversation tool parts optionally include `is_error`, directly from the matching Pi `toolResult.isError`. Unknown-ID results remain unattached; missing flags remain absent rather than claiming success. This additive field preserves protocol 1 and existing clients. The Android reader uses it to expose failed results by default, not a keyword heuristic.
 
@@ -218,7 +218,7 @@ export CAPP_BRIDGE_SERVE_AUTO_APPLY=0
 export CAPP_BRIDGE_PORT=17392
 target/release/cappuccino-bridge start
 target/release/cappuccino-bridge status
-curl -fsS http://127.0.0.1:17392/api/session
+curl -fsS -X POST -H "Content-Type: application/json" -H "X-Cappuccino-Protocol: 2" -d '{"protocol_min":2,"protocol_max":2}' http://127.0.0.1:17392/api/v2/handshake
 target/release/cappuccino-bridge logs
 target/release/cappuccino-bridge stop
 # Remove $TMP_STATE only after stop succeeded and the port is closed.
@@ -253,8 +253,8 @@ suppression or skipped tests.
 an example target on purpose: `cargo run` and `cargo install` defaults of the
 bridge crate stay unchanged.
 
-- `check` mode: `GET /api/session` (paired/protocol 1/plugin/nonempty
-  machine_id), `GET /api/agents` (verified shapes against actual post-S1/S2
+- `check` mode: `POST /api/v2/handshake` (paired/protocol 2/plugin/nonempty
+  machine_id), `GET /api/v2/agents` (verified shapes against actual post-S1/S2
   source: `event`, arrays, 502 `herdr_unreachable` envelope), a fail-closed
   transcript probe (502 error envelope, or a coherent 200: `available:true`
   requires a nonempty `transcript_path`, `available:false` a null path), and

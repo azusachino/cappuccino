@@ -50,7 +50,7 @@ struct FakeBridgeConnector: BridgeWebSocketConnecting {
   let socket: FakeBridgeWebSocket
 
   func connect(url: URL) async throws -> BridgeWebSocket {
-    #expect(url.path.hasSuffix("/api/stream"))
+    #expect(url.path.hasSuffix("/api/v2/stream"))
     #expect(url.query?.contains("session=cap-spike-agent") == true)
     return socket
   }
@@ -63,7 +63,7 @@ struct FakeBridgeConnector: BridgeWebSocketConnecting {
     #expect(endpoint.scheme == "ws")
     #expect(endpoint.host == "127.0.0.1")
     #expect(endpoint.port == 7392)
-    #expect(endpoint.path == "/api/stream")
+    #expect(endpoint.path == "/api/v2/stream")
     #expect(endpoint.query?.contains("session=s") == true)
   }
 
@@ -72,7 +72,7 @@ struct FakeBridgeConnector: BridgeWebSocketConnecting {
       from: URL(string: "https://host.tailnet.ts.net")!, session: "cap-spike-agent")
     #expect(endpoint.scheme == "wss")
     #expect(endpoint.host == "host.tailnet.ts.net")
-    #expect(endpoint.path == "/api/stream")
+    #expect(endpoint.path == "/api/v2/stream")
     #expect(endpoint.query?.contains("session=cap-spike-agent") == true)
   }
 

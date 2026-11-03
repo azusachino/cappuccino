@@ -47,17 +47,29 @@ class BridgeClientTest {
     server.enqueue(response)
   }
 
-  private fun advertisement(flags: String = "\"mutation_binding\":true") =
-    MockResponse.Builder()
+  /**
+   * Flags are `"name":true` (offered and agreed) or `"name":false` (offered, not agreed). A name
+   * that is not listed is not offered at all.
+   */
+  private fun advertisement(flags: String = "\"mutation_binding\":true"): MockResponse {
+    val pairs =
+      flags
+        .split(",")
+        .filter { it.isNotBlank() }
+        .map { it.substringBefore(":").trim('"') to (it.substringAfter(":") == "true") }
+    val offered = pairs.joinToString(",") { "\"${it.first}\":1" }
+    val agreed = pairs.filter { it.second }.joinToString(",") { "\"${it.first}\":1" }
+    return MockResponse.Builder()
       .body(
-        """{"event":"paired","machine_id":"$machine","protocol":1,"plugin":"cappuccino-bridge","capabilities":{$flags}}"""
+        """{"event":"paired","machine_id":"$machine","protocol":2,"plugin":"cappuccino-bridge","capabilities":{$offered},"agreed":{$agreed}}"""
       )
       .build()
+  }
 
   private fun takeBoundPost(server: MockWebServer): mockwebserver3.RecordedRequest {
     val handshake = server.takeRequest()
-    assertEquals("GET", handshake.method)
-    assertEquals("/api/session", handshake.url.encodedPath)
+    assertEquals("POST", handshake.method)
+    assertEquals("/api/v2/handshake", handshake.url.encodedPath)
     val request = server.takeRequest()
     assertEquals("POST", request.method)
     val json = kotlinx.serialization.json.Json.parseToJsonElement(request.body!!.utf8()).jsonObject
@@ -73,7 +85,7 @@ class BridgeClientTest {
   fun transparentlyNegotiatesAndDecodesGzipWithoutChangingIdentity() = runBlocking {
     MockWebServer().use { server ->
       val payload =
-        """{"event":"paired","machine_id":"$machine","protocol":1,"plugin":"cappuccino-bridge"}"""
+        """{"event":"paired","machine_id":"$machine","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"""
       val bytes = java.io.ByteArrayOutputStream()
       java.util.zip.GZIPOutputStream(bytes).use { it.write(payload.toByteArray(Charsets.UTF_8)) }
       server.enqueue(
@@ -120,7 +132,7 @@ class BridgeClientTest {
       server.enqueue(
         MockResponse.Builder()
           .body(
-            """{"event":"paired","machine_id":"$machine","protocol":1,"plugin":"cappuccino-bridge"}"""
+            """{"event":"paired","machine_id":"$machine","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"""
           )
           .build()
       )
@@ -135,8 +147,8 @@ class BridgeClientTest {
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
       assertEquals(machine, client.verify())
       assertEquals("unnamed-pane", client.agents(machine).single().sessionId)
-      assertEquals("/api/session", server.takeRequest().url.encodedPath)
-      assertEquals("/api/agents", server.takeRequest().url.encodedPath)
+      assertEquals("/api/v2/handshake", server.takeRequest().url.encodedPath)
+      assertEquals("/api/v2/agents", server.takeRequest().url.encodedPath)
       assertNull(server.takeRequest(10, TimeUnit.MILLISECONDS))
     }
   }
@@ -417,7 +429,7 @@ class BridgeClientTest {
       val snapshot = client.conversationSnapshot("chosen")
       assertEquals(id, snapshot.conversationId)
       assertEquals("canonical_log", snapshot.source)
-      assertEquals("/api/agents/chosen/conversation", server.takeRequest().url.encodedPath)
+      assertEquals("/api/v2/agents/chosen/conversation", server.takeRequest().url.encodedPath)
     }
   }
 
@@ -461,7 +473,7 @@ class BridgeClientTest {
       assertEquals(1, turns.size)
       assertEquals("t1", turns[0].id)
       val req = server.takeRequest()
-      assertEquals("/api/agents/s-1/conversation", req.url.encodedPath)
+      assertEquals("/api/v2/agents/s-1/conversation", req.url.encodedPath)
     }
   }
 
@@ -474,7 +486,7 @@ class BridgeClientTest {
 
       client.submitPrompt("s-1", "hello world", binding = binding)
       val req1 = takeBoundPost(server)
-      assertEquals("/api/agents/s-1/prompt", req1.url.encodedPath)
+      assertEquals("/api/v2/agents/s-1/prompt", req1.url.encodedPath)
       assertEquals("POST", req1.method)
       val body1 = req1.body?.utf8().orEmpty()
       assertTrue(body1.contains(""""text":"hello world""""))
@@ -489,7 +501,7 @@ class BridgeClientTest {
       enqueueMutation(server, MockResponse.Builder().body("""{"status":"delivered"}""").build())
       client.answerPrompt("s-1", "p-1", 0, "opt-1", "select_option", binding)
       val req2 = takeBoundPost(server)
-      assertEquals("/api/agents/s-1/prompt", req2.url.encodedPath)
+      assertEquals("/api/v2/agents/s-1/prompt", req2.url.encodedPath)
       assertEquals("POST", req2.method)
       val body2 = req2.body?.utf8() ?: ""
       assertTrue(body2.contains(""""prompt_id":"p-1""""))
@@ -521,8 +533,8 @@ class BridgeClientTest {
         .exceptionOrNull()
       assertTrue(gatewayFailure is java.io.IOException)
       assertFalse(gatewayFailure is BridgeHttpRejectionException)
-      assertEquals("/api/agents/s-1/prompt", takeBoundPost(server).url.encodedPath)
-      assertEquals("/api/agents/s-1/prompt", takeBoundPost(server).url.encodedPath)
+      assertEquals("/api/v2/agents/s-1/prompt", takeBoundPost(server).url.encodedPath)
+      assertEquals("/api/v2/agents/s-1/prompt", takeBoundPost(server).url.encodedPath)
     }
   }
 
@@ -590,7 +602,7 @@ class BridgeClientTest {
         )
       client.answerQuestions("s-1", "q-toolu_1", answers, binding)
       val request = takeBoundPost(server)
-      assertEquals("/api/agents/s-1/prompt", request.url.encodedPath)
+      assertEquals("/api/v2/agents/s-1/prompt", request.url.encodedPath)
       assertEquals(
         """{"expected_session":{"machine_id":"$machine","pane_id":"${binding.paneId}","native_session_ref":"${binding.nativeSessionRef}"},"type":"answer_question","prompt_id":"q-toolu_1","answers":[{"selected":[1]},{"selected":[0,2],"other":"a \"bird\""}]}""",
         request.body?.utf8(),
@@ -619,7 +631,7 @@ class BridgeClientTest {
           assertTrue(
             runCatching { action() }.exceptionOrNull() is BridgeMutationUnsupportedException
           )
-          assertEquals("GET", server.takeRequest().method)
+          assertEquals("POST", server.takeRequest().method)
         }
       }
       assertEquals(8, server.requestCount)
@@ -714,14 +726,14 @@ class BridgeClientTest {
           "a bridge that declines bound controls must not receive them",
           error is BridgeMutationUnsupportedException,
         )
-        assertEquals("GET", server.takeRequest().method)
+        assertEquals("POST", server.takeRequest().method)
       }
       assertEquals("read-only compatibility sends no POST", 3, server.requestCount)
       server.enqueue(advertisement("\"agent_control\":true,\"mutation_binding\":true"))
       server.enqueue(MockResponse.Builder().body("""{"event":"control_sent"}""").build())
       client.controlAgent("s-1", "interrupt", binding)
       val req = takeBoundPost(server)
-      assertEquals("/api/agents/s-1/control", req.url.encodedPath)
+      assertEquals("/api/v2/agents/s-1/control", req.url.encodedPath)
       val json = kotlinx.serialization.json.Json.parseToJsonElement(req.body!!.utf8()).jsonObject
       assertEquals(kotlinx.serialization.json.JsonPrimitive("interrupt"), json["action"])
       assertEquals(2, json.size)
