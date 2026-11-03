@@ -19,6 +19,7 @@ const STREAM_PING_INTERVAL: std::time::Duration = std::time::Duration::from_secs
 pub struct BridgeState {
     pub machine_id: String,
     pub machine_name: Option<String>,
+    pub telegram: crate::telegram::Shared,
 }
 
 impl BridgeState {
@@ -26,6 +27,7 @@ impl BridgeState {
         BridgeState {
             machine_id,
             machine_name: host_name(),
+            telegram: Arc::new(std::sync::Mutex::new(crate::telegram::Status::default())),
         }
     }
 }
@@ -71,11 +73,17 @@ pub fn error_response(status: StatusCode, code: &str, message: &str) -> Response
 }
 
 pub async fn session(State(state): State<Arc<BridgeState>>) -> Response {
+    let telegram = state
+        .telegram
+        .lock()
+        .map(|status| status.clone())
+        .unwrap_or_default();
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/json")],
         json!({
             "event": "paired",
+            "telegram": telegram.to_json(),
             "machine_id": state.machine_id,
             "machine_name": state.machine_name,
             "protocol": 1,
@@ -91,8 +99,9 @@ pub async fn session(State(state): State<Arc<BridgeState>>) -> Response {
                 "agent_control": true,
                 "mutation_binding": true,
                 "completion_signals": true,
-                "telegram_notifications": false,
-                "telegram_notifications_configured": false,
+                // Advertised only once a message has actually been delivered.
+                "telegram_notifications": telegram.last_delivered_at.is_some(),
+                "telegram_notifications_configured": telegram.route != crate::telegram::Route::Disabled,
             },
         })
         .to_string(),

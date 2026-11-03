@@ -18,6 +18,7 @@ mod reconcile;
 mod routes;
 mod state;
 mod stats;
+mod telegram;
 mod transcript;
 
 use axum::routing::get;
@@ -78,7 +79,14 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
         ));
     }
     let machine_id = agents::machine_id(&config.data_dir)?;
-    let state = Arc::new(routes::BridgeState::new(machine_id));
+    let state = Arc::new(routes::BridgeState::new(machine_id.clone()));
+    if let Some(settings) = config.telegram.clone() {
+        tokio::spawn(telegram::watch(
+            machine_id,
+            settings,
+            state.telegram.clone(),
+        ));
+    }
     let iroh_hub = if config.iroh_enabled {
         let target = iroh_transport::Target {
             host: bind.clone(),
