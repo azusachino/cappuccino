@@ -13,9 +13,11 @@ failure handling, and the operations an owner runs.
   involved, so alerts arrive while the app is closed.
 - Generic attention only: the agent finished a work cycle, or it is waiting for
   an answer. No transcript, tool output, prompt text, working-directory path, pane
-  id, or session identifier, and no approve/deny buttons. The one exception is the
-  herdr pane name the owner set, shown in parentheses after the agent kind
-  (`claude (telegram)`). The bridge never uses the terminal title or a generated
+  id, or session identifier, and no approve/deny buttons. Two exceptions. The
+  herdr pane name the owner set appears in parentheses (`claude #2 (telegram)`).
+  A per-kind session number appears after the agent kind (`claude #2`). The bridge
+  assigns it at first sighting of a session, counts from 1, and resets on restart.
+  It is not an identifier. The bridge never uses the terminal title or a generated
   name, and omits the name when none is set.
 - Off by default. Nothing is sent until the owner configures a token and chat.
 

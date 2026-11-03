@@ -264,6 +264,8 @@ impl Kind {
 pub struct Notice {
     pub kind: Kind,
     pub agent: String,
+    /// Per-kind session number, assigned at first sighting. Resets on bridge restart.
+    pub number: u32,
     /// The owner's herdr pane name, when one is set. Never the pane id.
     pub name: Option<String>,
 }
@@ -295,6 +297,7 @@ struct Seen {
     completion_seq: Option<u64>,
     blocked: bool,
     last_seen: Instant,
+    number: u32,
 }
 
 /// How long an agent missing from polls keeps its baseline. A brief herdr gap
@@ -311,6 +314,8 @@ const ABSENCE_GRACE: Duration = Duration::from_secs(120);
 #[derive(Default)]
 pub struct Tracker {
     seen: HashMap<Key, Seen>,
+    /// Highest number handed out per agent kind.
+    counts: HashMap<String, u32>,
 }
 
 impl Tracker {
@@ -335,12 +340,16 @@ impl Tracker {
             let blocked = row.status == "blocked";
             live.insert(key.clone());
             let Some(seen) = self.seen.get_mut(&key) else {
+                let count = self.counts.entry(row.agent.clone()).or_insert(0);
+                *count += 1;
+                let number = *count;
                 self.seen.insert(
                     key,
                     Seen {
                         completion_seq: row.completion_seq,
                         blocked,
                         last_seen: at,
+                        number,
                     },
                 );
                 continue;
@@ -361,6 +370,7 @@ impl Tracker {
                     notices.push(Notice {
                         kind: Kind::Completion,
                         agent: row.agent.clone(),
+                        number: seen.number,
                         name: pane_name(row),
                     });
                     seen.completion_seq = current;
@@ -372,6 +382,7 @@ impl Tracker {
                 notices.push(Notice {
                     kind: Kind::NeedsAnswer,
                     agent: row.agent.clone(),
+                    number: seen.number,
                     name: pane_name(row),
                 });
             }
@@ -392,8 +403,8 @@ pub fn message(machine: &str, notice: &Notice) -> String {
         Kind::NeedsAnswer => "is waiting for an answer",
     };
     let agent = match &notice.name {
-        Some(name) => format!("{} ({name})", notice.agent),
-        None => notice.agent.clone(),
+        Some(name) => format!("{} #{} ({name})", notice.agent, notice.number),
+        None => format!("{} #{}", notice.agent, notice.number),
     };
     cap(format!("[cappuccino] {machine} · {agent} {verb}"))
 }
@@ -708,6 +719,7 @@ mod tests {
             vec![Notice {
                 kind: Kind::Completion,
                 agent: "pi".into(),
+                number: 1,
                 name: None,
             }]
         );
@@ -726,6 +738,7 @@ mod tests {
             vec![Notice {
                 kind: Kind::NeedsAnswer,
                 agent: "pi".into(),
+                number: 1,
                 name: None,
             }]
         );
@@ -771,6 +784,23 @@ mod tests {
     }
 
     #[test]
+    fn each_new_session_gets_the_next_number() {
+        let mut tracker = Tracker::default();
+        tracker.observe(&[
+            row("p1", Some("n1"), "idle", Some(1)),
+            row("p2", Some("n2"), "idle", Some(1)),
+        ]);
+        let first = tracker.observe(&[row("p1", Some("n1"), "idle", Some(2))]);
+        assert_eq!(first[0].number, 1);
+        let second = tracker.observe(&[row("p2", Some("n2"), "idle", Some(2))]);
+        assert_eq!(second[0].number, 2);
+        // A new session in the same pane is a new native reference, so it gets a new number.
+        tracker.observe(&[row("p1", Some("n3"), "idle", Some(1))]);
+        let third = tracker.observe(&[row("p1", Some("n3"), "idle", Some(2))]);
+        assert_eq!(third[0].number, 3);
+    }
+
+    #[test]
     fn pane_name_is_only_an_owner_set_name() {
         let mut named = row("w1:p2", None, "idle", None);
         named.session_id = "telegram".into();
@@ -788,24 +818,27 @@ mod tests {
         let notice = Notice {
             kind: Kind::Completion,
             agent: "pi".into(),
+            number: 3,
             name: None,
         };
         assert_eq!(
             message("mini", &notice),
-            "[cappuccino] mini · pi finished a work cycle"
+            "[cappuccino] mini · pi #3 finished a work cycle"
         );
         let named = Notice {
             kind: Kind::Completion,
             agent: "claude".into(),
+            number: 2,
             name: Some("telegram".into()),
         };
         assert_eq!(
             message("MacMini", &named),
-            "[cappuccino] MacMini · claude (telegram) finished a work cycle"
+            "[cappuccino] MacMini · claude #2 (telegram) finished a work cycle"
         );
         let long = Notice {
             kind: Kind::NeedsAnswer,
             agent: "a".repeat(400),
+            number: 1,
             name: None,
         };
         let text = message("mini", &long);
@@ -1033,6 +1066,7 @@ mod tests {
             vec![Notice {
                 kind: Kind::Completion,
                 agent: "pi".into(),
+                number: 1,
                 name: None,
             }]
         );
