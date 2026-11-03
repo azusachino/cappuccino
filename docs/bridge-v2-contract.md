@@ -125,41 +125,102 @@ Learned from `herdr-web-ui/server/prompt.ts`:
 ## 4. Cappuccino Bridge V2 API Contract (draft)
 
 Status: draft. The shipped wire is protocol **1**: `GET /api/session` returns `"protocol": 1`
-and a `capabilities` object of booleans. The shapes in §4.1 are the draft target for protocol 2
-and are not shipped. Additive fields stay on the current version (§4.0).
+and a `capabilities` object of booleans. Protocol 2 is the draft target. It adds a handshake
+that runs before any other endpoint is called. Additive fields stay on the current version
+(§4.0).
 
-### 4.0 Version and capability negotiation (draft)
+### 4.0 Handshake and capability negotiation (draft)
 
-Rules that apply when the first breaking change needs a new protocol number:
+The client negotiates with the bridge first. No other endpoint may be called until the
+handshake has succeeded.
 
-- **Version range.** The client declares the range it speaks, `protocol_min` to `protocol_max`,
-  in the `X-Cappuccino-Protocol: <min>-<max>` request header on the handshake. The bridge answers
-  `protocol` with the highest version both sides support. With no overlap it answers HTTP 426 and
-  `{"event":"error","code":"protocol","supported":[<min>,<max>]}`, and the client tells the owner
+1. **Handshake.** The client calls `POST /api/handshake` with its supported protocol range and
+   the capabilities it implements. Each capability is a name mapped to the highest version the
+   client supports.
+2. **Agreement.** The bridge replies with the protocol it chose and the capabilities both sides
+   share. A shared capability is agreed at the lower of the two versions. A capability the
+   client lists as `required` but the bridge lacks makes the handshake fail.
+3. **Calls.** Every later request carries `X-Cappuccino-Protocol: <agreed protocol>`. The
+   bridge rejects a request that lacks the header, or carries a different value, with HTTP 426.
+4. **Gated endpoints.** An endpoint that needs a capability answers HTTP 409 with
+   `{"event":"error","code":"capability_not_agreed","capability":"<name>"}` when that capability
+   was not agreed. The client hides the action rather than calling it.
+
+Rules:
+
+- **Maps, not lists, for capabilities.** Each capability is a key with a version number. A list
+  cannot carry per-capability versions and cannot be extended without ambiguity. A key that is
+  absent means unsupported.
+- **Unknown keys are ignored** on both sides and are never an error.
+- **Range mismatch.** With no overlapping protocol version, the handshake answers HTTP 426 with
+  `{"event":"error","code":"protocol","supported":[<min>,<max>]}`. The client tells the owner
   to update the bridge or the app.
-- **Capabilities.** The bridge advertises `capabilities` as now, an object of booleans keyed by
-  name. The client may send `required`, a list of capability names it cannot run without. The
-  bridge answers `missing_required` with any it lacks. The client fails closed on a non-empty
-  `missing_required` and shows which capabilities are missing.
-- **Unknown keys are ignored** on both sides, and are never an error.
 - **Additive within a version.** Fields may be added, never repurposed or removed. A change of
   meaning or removal needs a new protocol number.
-- **Optional blocks.** A block such as `telegram` (route and events) is optional. A client treats
-  an absent block as unknown, not unsupported.
-- **Reject out-of-range versions.** A client rejects a `protocol` value outside its range.
+- **Optional blocks.** A block such as `telegram` (route and events) is optional. A client
+  treats an absent block as unknown, not unsupported.
+- **Migration.** Protocol 1 keeps `GET /api/session` and its boolean flags. A protocol 2 bridge
+  serves both until every shipped client has moved to the handshake.
 
 ### 4.1 HTTP REST Endpoints (draft shapes)
 
-#### `GET /api/session`
+#### `POST /api/handshake`
 
-Returns machine identity, protocol version, and bridge capabilities.
+Request, sent before any other call:
+
+```json
+{
+  "protocol_min": 1,
+  "protocol_max": 2,
+  "capabilities": {
+    "stream": 1,
+    "turns": 1,
+    "prompts": 1,
+    "approvals": 1
+  },
+  "required": ["stream"]
+}
+```
+
+Response, when agreed:
 
 ```json
 {
   "event": "paired",
   "machine_id": "ced25706-f528-456e-b340-4fad8a6c8c88",
   "protocol": 2,
-  "capabilities": ["stream", "turns", "prompts", "approvals"]
+  "capabilities": {
+    "stream": 1,
+    "turns": 1,
+    "prompts": 1,
+    "approvals": 0
+  },
+  "agreed": {
+    "stream": 1,
+    "turns": 1,
+    "prompts": 1
+  }
+}
+```
+
+`approvals: 0` means the bridge does not offer it. `approvals` is then absent from `agreed`.
+A `required` capability the bridge lacks answers HTTP 409 with
+`{"event":"error","code":"capability_missing","capability":"<name>"}`.
+
+#### `GET /api/session` (protocol 1, shipped)
+
+Returns machine identity, protocol version, and the boolean capability flags. Protocol 2
+clients use `POST /api/handshake` instead.
+
+```json
+{
+  "event": "paired",
+  "machine_id": "ced25706-f528-456e-b340-4fad8a6c8c88",
+  "protocol": 1,
+  "capabilities": {
+    "agent_discovery": true,
+    "prompt_input": false
+  }
 }
 ```
 
