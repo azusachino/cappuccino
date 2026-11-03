@@ -122,294 +122,104 @@ Learned from `herdr-web-ui/server/prompt.ts`:
 
 ---
 
-## 4. Cappuccino Bridge V2 API Contract (draft)
+## 4. Cappuccino Bridge v2 contract
 
-Status: draft. The shipped wire is protocol **1**: `GET /api/session` returns `"protocol": 1`
-and a `capabilities` object of booleans. Protocol 2 is the draft target. It adds a handshake
-that runs before any other endpoint is called. Additive fields stay on the current version
-(§4.0).
+Status: v2 is the cutover for release 0.2.0. Until that release, the bridge serves v1 and v2
+side by side.
 
-### 4.0 Handshake and capability negotiation (draft)
+### 4.0 What v2 changes
 
-The client negotiates with the bridge first. No other endpoint may be called until the
-handshake has succeeded.
+v2 changes three things and nothing else:
 
-1. **Handshake.** The client calls `POST /api/handshake` with its supported protocol range and
-   the capabilities it implements. Each capability is a name mapped to the highest version the
-   client supports.
-2. **Agreement.** The bridge replies with the protocol it chose and the capabilities both sides
-   share. A shared capability is agreed at the lower of the two versions. A capability the
-   client lists as `required` but the bridge lacks makes the handshake fail.
-3. **Calls.** Every later request carries `X-Cappuccino-Protocol: <agreed protocol>`. The
-   bridge rejects a request that lacks the header, or carries a different value, with HTTP 426.
-4. **Gated endpoints.** An endpoint that needs a capability answers HTTP 409 with
-   `{"event":"error","code":"capability_not_agreed","capability":"<name>"}` when that capability
-   was not agreed. The client hides the action rather than calling it.
+- **How a client connects.** A client handshakes before any other call (§4.1).
+- **Which paths it calls.** Endpoints move under `/api/v2/` (§4.3).
+- **How versions are checked.** Each v2 call carries the agreed protocol version (§4.1).
 
-Rules:
+The payloads of the endpoints do not change. Their shapes are the shipped ones in
+[services/bridge/README.md](../services/bridge/README.md).
 
-- **Maps, not lists, for capabilities.** Each capability is a key with a version number. A list
-  cannot carry per-capability versions and cannot be extended without ambiguity. A key that is
-  absent means unsupported.
-- **Unknown keys are ignored** on both sides and are never an error.
-- **Range mismatch.** With no overlapping protocol version, the handshake answers HTTP 426 with
-  `{"event":"error","code":"protocol","supported":[<min>,<max>]}`. The client tells the owner
-  to update the bridge or the app.
-- **Additive within a version.** Fields may be added, never repurposed or removed. A change of
-  meaning or removal needs a new protocol number.
-- **Optional blocks.** A block such as `telegram` (route and events) is optional. A client
-  treats an absent block as unknown, not unsupported.
-- **Migration.** Protocol 1 keeps `GET /api/session` and its boolean flags. A protocol 2 bridge
-  serves both until every shipped client has moved to the handshake.
+### 4.1 Workflow
 
-### 4.1 Workflow and endpoint map (v2 target)
+1. The phone calls `POST /api/v2/handshake` with its protocol range and the capabilities it
+   implements. Nothing else is called before this succeeds.
+2. The phone checks that `machine_id` in the response is the paired machine. A different id
+   stops the connection.
+3. Every later v2 request carries `X-Cappuccino-Protocol: 2`. A request without it, or with
+   another value, gets HTTP 426.
+4. The bridge keeps no record of an agreement. The client offers only the actions whose
+   capability is in `agreed`.
 
-Workflow, in order:
+### 4.2 Handshake
 
-1. The phone calls `POST /api/v2/handshake` with its range and capabilities. Nothing else is
-   called before this succeeds.
-2. The phone checks that `machine_id` is the paired machine. A different id stops the
-   connection.
-3. Every later request carries `X-Cappuccino-Protocol: 2`. A request without it, or with another
-   value, gets HTTP 426.
-4. An action is offered only when its capability was agreed. The bridge answers HTTP 409 for an
-   action whose capability was not agreed.
-
-| Method | Path (v2) | Capability | Replaces (v1, shipped) |
-| --- | --- | --- | --- |
-| `POST` | `/api/v2/handshake` | none | `GET /api/session` (identity and flags) |
-| `GET` | `/api/v2/agents` | `agent_discovery` | `GET /api/agents` |
-| `GET` | `/api/v2/agents/{session}/conversation` | `conversation_history` | `GET /api/agents/{sessionId}/conversation` |
-| `GET` | `/api/v2/transcript?session=` | `conversation_history` | `GET /api/transcript` |
-| `POST` | `/api/v2/agents/{session}/prompt` | `prompt_input` | `POST /api/agents/{sessionId}/prompt` |
-| `POST` | `/api/v2/agents/{session}/control` | `agent_control` | `POST /api/agents/{sessionId}/control` |
-| `WS` | `/api/v2/stream?session=` | `live_output` | `GET /api/stream` |
-
-The capability names come from the shipped flags: `agent_discovery`, `live_output`,
-`conversation_history`, `prompt_input`, `prompt_answers`, `agent_control`, `mutation_binding`,
-`completion_signals`, plus the Telegram status block, which is advisory.
-
-The v1 paths keep working under `/api/` unchanged while protocol 1 clients exist. The cutover
-removes them only after both mobile clients use v2.
-
-### 4.2 HTTP REST Endpoints (draft shapes)
-
-#### `POST /api/handshake`
-
-Request, sent before any other call:
+Request:
 
 ```json
 {
   "protocol_min": 1,
   "protocol_max": 2,
-  "capabilities": {
-    "stream": 1,
-    "turns": 1,
-    "prompts": 1,
-    "approvals": 1
-  },
-  "required": ["stream"]
+  "capabilities": {"live_output": 1, "agent_control": 1, "prompt_input": 1},
+  "required": ["live_output"]
 }
 ```
 
-Response, when agreed:
+- `capabilities` maps each name to the highest version the client speaks. A value of 0 or an
+  absent key means unsupported. Unknown keys are ignored.
+- `required` lists capabilities the client cannot run without.
+
+Response (HTTP 200):
 
 ```json
 {
   "event": "paired",
   "machine_id": "ced25706-f528-456e-b340-4fad8a6c8c88",
+  "machine_name": "MacMini",
+  "plugin": "cappuccino-bridge",
+  "bridge_version": "0.2.0",
   "protocol": 2,
-  "capabilities": {
-    "stream": 1,
-    "turns": 1,
-    "prompts": 1,
-    "approvals": 0
-  },
-  "agreed": {
-    "stream": 1,
-    "turns": 1,
-    "prompts": 1
-  }
+  "capabilities": {"agent_discovery": 1, "live_output": 1, "agent_control": 1},
+  "agreed": {"live_output": 1, "agent_control": 1},
+  "telegram": {"route": "enabled", "events": ["completion", "needs_answer", "route_failure"]}
 }
 ```
 
-`approvals: 0` means the bridge does not offer it. `approvals` is then absent from `agreed`.
-A `required` capability the bridge lacks answers HTTP 409 with
-`{"event":"error","code":"capability_missing","capability":"<name>"}`.
+- `agreed` holds each capability both sides speak, at the lower version.
+- `telegram` is advisory status. A client treats an absent block as unknown.
 
-#### `GET /api/session` (protocol 1, shipped)
+Refusals, all with the envelope `{"event": "error", "code": ...}`:
 
-Returns machine identity, protocol version, and the boolean capability flags. Protocol 2
-clients use `POST /api/handshake` instead.
+| HTTP | Code | When | Extra fields |
+| --- | --- | --- | --- |
+| 426 | `protocol` | The range does not include version 2 | `"supported": [2, 2]` |
+| 409 | `capability_missing` | A `required` capability is not offered | `"capabilities": ["<name>", ...]` |
+| 400 | `bad_request` | The body does not match the request shape | |
 
-```json
-{
-  "event": "paired",
-  "machine_id": "ced25706-f528-456e-b340-4fad8a6c8c88",
-  "protocol": 1,
-  "capabilities": {
-    "agent_discovery": true,
-    "prompt_input": false
-  }
-}
-```
+### 4.3 Endpoint map
 
-#### `GET /api/agents`
+| Method | Path (v2) | Capability | v1 path retired at cutover |
+| --- | --- | --- | --- |
+| `POST` | `/api/v2/handshake` | none | `GET /api/session` |
+| `GET` | `/api/v2/agents` | `agent_discovery` | `GET /api/agents` |
+| `GET` | `/api/v2/agents/{sessionId}/conversation` | `conversation_history` | `GET /api/agents/{sessionId}/conversation` |
+| `GET` | `/api/v2/transcript?session=` | `conversation_history` | `GET /api/transcript` |
+| `POST` | `/api/v2/agents/{sessionId}/prompt` | `prompt_input` | `POST /api/agents/{sessionId}/prompt` |
+| `POST` | `/api/v2/agents/{sessionId}/control` | `agent_control` | `POST /api/agents/{sessionId}/control` |
+| `GET` (WebSocket) | `/api/v2/stream?session=` | `live_output` | `GET /api/stream` |
 
-Returns active agents, their execution status, git branch, and pending interactive prompts.
+Pairing and transport sit outside `/api/`, and each has its own version:
 
-```json
-{
-  "agents": [
-    {
-      "session_id": "cap-lead",
-      "pane_id": "w1:p3K",
-      "agent": "agy",
-      "label": "agy --dangerously-sk",
-      "cwd": "/Users/azusachino/Projects/project-github/harus-workstation",
-      "status": "working",
-      "active_branch": "main",
-      "pending_prompt": null
-    }
-  ]
-}
-```
+| Surface | Version | Role |
+| --- | --- | --- |
+| `GET /pair` | unversioned page | Owner-facing pairing page, served only when iroh is enabled. It shows the QR payload and is not part of the phone API. |
+| ALPN `cappuccino-pair/1` | ALPN | Pairing-code exchange between a phone and a bridge. Unchanged in 0.2.0, so existing pairings keep working. |
+| ALPN `cappuccino/1` | ALPN | Tunnel that carries the HTTP contract as-is, v2 paths included. This is transport framing, not the API version, so it is unchanged. |
 
-#### `GET /api/agents/:sessionId/conversation`
+### 4.4 Versioning rules
 
-Returns paginated, structured conversation turns (markdown-ready), along with model info, context tokens, and provider rate limit quotas.
-
-```json
-{
-  "session_id": "cap-lead",
-  "source": "canonical_log",
-  "stats": {
-    "model": "claude-haiku-5-5",
-    "thinking_level": "high",
-    "context_tokens": 110000,
-    "context_window": 1000000,
-    "cache_percent": 89,
-    "rate_limits": {
-      "provider": "anthropic",
-      "plan_tier": null,
-      "windows": [
-        {
-          "window": "5h",
-          "used_percent": 2,
-          "resets_at": null,
-          "resets_in": null
-        },
-        {
-          "window": "7d",
-          "used_percent": 81,
-          "resets_at": null,
-          "resets_in": "17h43m"
-        }
-      ],
-      "status": "warning"
-    }
-  },
-  "turns": [
-    {
-      "id": "t-001",
-      "role": "user",
-      "timestamp": "2026-10-07T23:30:00Z",
-      "text": "Check git status"
-    },
-    {
-      "id": "t-002",
-      "role": "agent",
-      "timestamp": "2026-10-07T23:30:05Z",
-      "parts": [
-        {
-          "type": "tool_call",
-          "name": "run_command",
-          "input": {"CommandLine": "git status -s"},
-          "output": "M docs/architecture.md"
-        },
-        {
-          "type": "text",
-          "text": "The working tree has modifications in `docs/architecture.md`."
-        }
-      ]
-    }
-  ]
-}
-```
-
-#### `POST /api/agents/:sessionId/prompt`
-
-Submits a user prompt or answers an interactive prompt card.
-
-Text that starts with an agent command (`/` then a word, ending at a space or the end of the text, such as `/model opus`) is refused with `409 confirm_command` and nothing is typed, unless the request has `"confirmed": true`. Clients ask the owner first, because commands can cost far more than a message: `/model` drops the prompt cache, and `/new` ends the conversation. A path such as `/Users/me/notes.md` is ordinary text.
-
-```json
-// Prompt submission
-{
-  "type": "prompt",
-  "text": "run make check"
-}
-
-// Or answering an approval card
-{
-  "type": "answer_prompt",
-  "prompt_id": "prompt-hash-123",
-  "action": "select_option",
-  "option_index": 0
-}
-```
-
-`action` is `select_option` or `cancel`. A selection must name exactly one option on the card through `option_index`, `option_id`, or both in agreement; a missing, unknown, out-of-range or contradictory choice is refused with `400 bad_answer` and nothing is typed. Ids are single-use: after an answer or cancel is typed, the same id is `409 stale_prompt`. Only the bottom 25 non-empty screen lines can hold an approval or choice menu, and an approval needs its numbered choices, so prompt text quoted in output is not a card.
-
----
-
-### 4.2 WebSocket Stream (`WS /api/stream?session=:sessionId`)
-
-Clients open a single persistent WebSocket to stream live execution.
-
-#### Message Types Sent by Bridge
-
-1. **`stream_open`**: Confirms connection and current state generation.
-2. **`agent_status`**: Replaces the single status slot on the client (does NOT touch history).
-
-   ```json
-   {
-     "event": "agent_status",
-     "state": "working",
-     "detail": "Running make check..."
-   }
-   ```
-
-3. **`turn_chunk`**: Incremental text/markdown for the active assistant turn.
-
-   ```json
-   {
-     "event": "turn_chunk",
-     "turn_id": "t-003",
-     "role": "agent",
-     "delta": "All tests passed successfully."
-   }
-   ```
-
-4. **`prompt_request`**: Dispatched when agent hits an interactive question or tool approval.
-
-   ```json
-   {
-     "event": "prompt_request",
-     "prompt": {
-       "id": "p-987",
-       "kind": "confirm",
-       "title": "Permission Required",
-       "options": ["Allow", "Deny"]
-     }
-   }
-   ```
-
-5. **`prompt_resolved`**: Closes the pending prompt card once answered or dismissed.
-
----
-
----
+- **Additive within v2.** Fields may be added, never repurposed or removed.
+- **Breaking changes need v3.** A change of meaning or a removal gets a new protocol number and a
+  new path prefix.
+- **Retired paths return 404.** After cutover, unversioned `/api/...` paths are removed, not
+  redirected.
 
 ## 5. Antigravity (`agy`) Session Model & Interaction Protocol
 

@@ -13,6 +13,7 @@ mod lifecycle;
 mod modules;
 mod mutation;
 mod prompt;
+mod protocol;
 mod questions;
 mod reconcile;
 mod routes;
@@ -155,7 +156,9 @@ fn build_app(
     state: Arc<routes::BridgeState>,
     iroh_hub: Option<Arc<iroh_transport::IrohHub>>,
 ) -> Router {
-    let mut app = Router::new().route("/api/session", get(routes::session));
+    let mut app = Router::new()
+        .route("/api/session", get(routes::session))
+        .merge(protocol::routes());
     for module in modules::all() {
         app = app.merge((module.router)());
     }
