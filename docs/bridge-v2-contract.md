@@ -74,9 +74,7 @@ The Interceptor sits inside `cappuccino-bridge` between Herdr's low-level pane/P
 
 Instead of guessing turns from screen dumps, read canonical session files when available:
 
-- **Pi**: `~/.pi/agent/sessions/<cwd-slug>/<session>.jsonl`
-- **Claude Code**: `~/.claude/projects/<project-slug>/<session>.jsonl`
-- **Codex**: rollout jsonl files.
+- Per-agent stores, identities and record rules are in §5.
 - **Fallback (Generic shell/agent)**: Strip ANSI sequences, split on prompt echo (`^[❯>▸]`), and group output into user and agent turns.
 
 ### 3.2 Pipeline B: Screen-State Prompt & Approval Engine (Interactive Interceptor)
@@ -188,7 +186,7 @@ Refusals, all with the envelope `{"event": "error", "code": ...}`:
 
 | HTTP | Code | When | Extra fields |
 | --- | --- | --- | --- |
-| 426 | `protocol` | The range does not include version 2 | `"supported": [2, 2]` |
+| 426 | `protocol` | The range does not include version 2 | `"supported_protocol_min": 2, "supported_protocol_max": 2` |
 | 409 | `capability_missing` | A `required` capability is not offered | `"capabilities": ["<name>", ...]` |
 | 400 | `bad_request` | The body does not match the request shape | |
 
@@ -220,23 +218,39 @@ Pairing and transport sit outside `/api/`, and each has its own version:
 - **Retired paths return 404.** After cutover, unversioned `/api/...` paths are removed, not
   redirected.
 
-## 5. Antigravity (`agy`) Session Model & Interaction Protocol
+## 5. Agent session stores
 
-Antigravity (`agy`) is the agent actively powering this environment and running across Herdr panes.
+Each agent writes its own session file on the machine that runs it. The bridge reads that file, maps it to turns, and returns turns to the phone. This section records, per agent, where the file is, how records and sessions are identified, and how records become turns. Interaction flows (prompting, approvals, questions) are in §6.
 
-### 5.1 Storage & Session File Resolution
+### 5.1 Pi
 
-- **Base Directory**: `~/.gemini/antigravity-cli/`
-- **Session Identification**: A session has a unique UUID (e.g. `691371cf-798b-47d6-ae99-ff7e3a0a23a5`).
-- **Transcript Logs**:
-  - Located at `~/.gemini/antigravity-cli/brain/<session-id>/.system_generated/logs/transcript.jsonl`.
-  - Compact NDJSON containing incremental entries. Each line represents a step:
-    - `"type": "USER_INPUT"`, `"source": "USER_EXPLICIT"`
-    - `"type": "PLANNER_RESPONSE"`, `"source": "MODEL"` with `"tool_calls": [...]` and `"content": "..."`
-- **Resolution in Bridge**:
-  - Herdr reports `session_id` via `agent.get`.
-  - The bridge locates `~/.gemini/antigravity-cli/brain/<session-id>/.system_generated/logs/transcript.jsonl`.
-  - Parses structured turns directly without any terminal screen guessing.
+- **Store:** `~/.pi/agent/sessions/<cwd-slug>/<session>.jsonl`. `[pi] agent_dir` in the bridge config, when set to an absolute path, replaces the store with `<agent_dir>/sessions`. `PI_CODING_AGENT_DIR` in the bridge's own environment is a fallback only.
+- **Identity:** the session header carries `id`. Each entry carries `id` and `parentId`, which form a tree.
+- **Resolution:** the path Herdr reports must sit inside a configured store.
+- **Active branch (P1):** the path from the file's last entry up to the root through `parentId`. This matches Pi's own load rule, because the leaf is not stored in the file.
+- **Compaction (P2):** a `compaction` entry shows as a divider with its summary collapsed. Earlier entries stay visible.
+- **Context edits (P3):** a `context_edit` with `replacement: null` leaves its target visible, with an "omitted from model context" marker.
+- **Custom messages (P4):** a `custom_message` shows only when its `display` flag is true.
+- **Not shown:** `custom`, `label`, `session_info` and `usage` entries.
+
+### 5.2 Claude Code
+
+- **Store:** `~/.claude/projects/<project-slug>/<session>.jsonl`, under `CLAUDE_CONFIG_DIR` when that is set.
+- **Identity:** every record carries a `uuid`. The session id comes from the file name.
+- **Skipped:** records marked `isSidechain` or `isMeta`, and harness notices.
+- **Tool results** attach to the `tool_use` with the same id, within the same read. A result whose call falls outside the read is dropped.
+- **Compaction** was observed as appended records. No file rewrite has been observed.
+
+### 5.3 Agy
+
+- **Store:** `~/.gemini/antigravity-cli/brain/<session-id>/.system_generated/logs/transcript.jsonl`.
+- **Identity:** the session id is a UUID that Herdr reports through `agent.get` as `session_id`. Each line is one step, keyed by `step_index`.
+- **Step types:** `USER_INPUT` (source `USER_EXPLICIT`) and `PLANNER_RESPONSE` (source `MODEL`, with `tool_calls` and `content`).
+- **Resolution:** the bridge parses structured turns from this file. It never guesses turns from the terminal screen.
+
+### 5.4 Other agents
+
+- Codex rollout files appeared in an earlier draft of §3.1. No Codex reader is implemented, so none is specified here.
 
 ---
 
@@ -453,9 +467,7 @@ Status: proposed. The decisions below come from the design review; none is imple
 
 ### 9.6 Record-to-turn rules
 
-- **Pi.** Active branch = the path from the file's last entry up to the root through `parentId` (P1). `compaction` becomes a divider with its summary collapsed, and earlier entries stay visible (P2). A `context_edit` with `replacement: null` leaves its target visible with an "omitted from model context" marker (P3). `custom_message` is shown only when `display` is true (P4). `custom`, `label`, `session_info` and `usage` are not shown.
-- **Claude.** Current parser rules. Records marked `isSidechain` or `isMeta`, and harness notices, are skipped. Compaction was observed as appended records, not rewrites.
-- **Agy.** Current parser rules, keyed by `step_index`.
+- Per-agent record rules are in §5.1 to §5.3.
 
 ### 9.7 Budgets
 

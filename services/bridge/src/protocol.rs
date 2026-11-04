@@ -97,7 +97,7 @@ fn error(status: StatusCode, body: Value) -> Response {
 fn protocol_refused() -> Response {
     error(
         StatusCode::UPGRADE_REQUIRED,
-        json!({"event": "error", "code": "protocol", "supported": [VERSION, VERSION]}),
+        json!({"event": "error", "code": "protocol", "supported_protocol_min": VERSION, "supported_protocol_max": VERSION}),
     )
 }
 
@@ -311,7 +311,8 @@ mod http_tests {
         let (status, body) = post_handshake(json!({"protocol_min": 1, "protocol_max": 1})).await;
         assert_eq!(status, StatusCode::UPGRADE_REQUIRED);
         assert_eq!(body["code"], "protocol");
-        assert_eq!(body["supported"], json!([2, 2]));
+        assert_eq!(body["supported_protocol_min"], 2);
+        assert_eq!(body["supported_protocol_max"], 2);
     }
 
     #[tokio::test]
