@@ -33,7 +33,7 @@ Based on installed Herdr 0.9.3 and reference implementations in herdr-web-ui `se
 4. `agent.get { session_id }`: returns detailed agent metadata:
    - `cwd`: working directory.
    - `agent_status`: `idle` vs `working`.
-   - `agent_session`: native session file path / id (for Pi, Claude, Codex).
+   - `agent_session`: native session file path / id (for Pi and Claude Code).
 5. `pane.read { pane_id, source, format, strip_ansi, lines }`: reads visible viewport or recent scrollback (`recent` / `recent_unwrapped`).
 6. `agent.prompt { pane_id, text, wait }`: writes text + Enter to the agent PTY.
 7. `pane.send-keys { pane_id, keys }`: sends logical keystrokes (`up`, `down`, `enter`, `escape`, `space`, `tab`).
@@ -187,7 +187,7 @@ Refusals, all with the envelope `{"event": "error", "code": ...}`:
 | HTTP | Code | When | Extra fields |
 | --- | --- | --- | --- |
 | 426 | `protocol` | The range does not include version 2 | `"supported_protocol_min": 2, "supported_protocol_max": 2` |
-| 409 | `capability_missing` | A `required` capability is not offered | `"capabilities": ["<name>", ...]` |
+| 409 | `capability_missing` | A `required` capability is not offered | `"missing_capabilities": ["<name>", ...]` |
 | 400 | `bad_request` | The body does not match the request shape | |
 
 ### 4.3 Endpoint map
@@ -218,6 +218,15 @@ Pairing and transport sit outside `/api/`, and each has its own version:
 - **Retired paths return 404.** After cutover, unversioned `/api/...` paths are removed, not
   redirected.
 
+### 4.5 Field naming rule
+
+Every request and response field must say what it means on its own.
+
+- No bare numbers or positional arrays as values. A version, count or choice carries a key that names it.
+- An array is allowed only when its key names the items, for example `options`, `events` or `missing_capabilities`.
+- An item is identified by its id, never by its position in a list.
+- A new field follows this rule. A field that breaks it is fixed only with the breaking-change process in §4.4.
+
 ## 5. Agent session stores
 
 Each agent writes its own session file on the machine that runs it. The bridge reads that file, maps it to turns, and returns turns to the phone. This section records, per agent, where the file is, how records and sessions are identified, and how records become turns. Interaction flows (prompting, approvals, questions) are in §6.
@@ -247,10 +256,6 @@ Each agent writes its own session file on the machine that runs it. The bridge r
 - **Identity:** the session id is a UUID that Herdr reports through `agent.get` as `session_id`. Each line is one step, keyed by `step_index`.
 - **Step types:** `USER_INPUT` (source `USER_EXPLICIT`) and `PLANNER_RESPONSE` (source `MODEL`, with `tool_calls` and `content`).
 - **Resolution:** the bridge parses structured turns from this file. It never guesses turns from the terminal screen.
-
-### 5.4 Other agents
-
-- Codex rollout files appeared in an earlier draft of §3.1. No Codex reader is implemented, so none is specified here.
 
 ---
 

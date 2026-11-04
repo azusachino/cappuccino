@@ -123,7 +123,7 @@ async fn handshake(State(state): State<Arc<BridgeState>>, Json(body): Json<Value
         Err(Refusal::MissingRequired(missing)) => {
             return error(
                 StatusCode::CONFLICT,
-                json!({"event": "error", "code": "capability_missing", "capabilities": missing}),
+                json!({"event": "error", "code": "capability_missing", "missing_capabilities": missing}),
             )
         }
     };
@@ -325,7 +325,7 @@ mod http_tests {
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(body["code"], "capability_missing");
-        assert_eq!(body["capabilities"], json!(["future_thing"]));
+        assert_eq!(body["missing_capabilities"], json!(["future_thing"]));
     }
 
     #[tokio::test]
