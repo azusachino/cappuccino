@@ -126,6 +126,26 @@ extension BridgeClientTests {
     #expect(answers?[1]["free_text"] as? String == "a \"bird\"")
   }
 
+  @Test func conversationPageSendsOneCursorAndReadsTheTokens() async throws {
+    StubURLProtocol.handler = { request in
+      #expect(request.url?.path == "/api/v2/agents/s-1/conversation/sync")
+      #expect(request.url?.query == "after=AB")
+      return (
+        200,
+        Data(
+          #"{"mode":"append","upserts":[{"id":"t2","role":"agent","parts":[]}],"after_token":"AF","caught_up":false}"#
+            .utf8)
+      )
+    }
+    let page = try await client().conversationPage(
+      base: base, session: "s-1", agent: nil, machineID: machineID, after: "AB", before: nil)
+    #expect(page.sync.afterToken == "AF")
+    #expect(page.sync.hasAfter)
+    #expect(!page.sync.hasBefore)
+    #expect(!page.sync.caughtUp)
+    #expect(page.sync.upserts.map(\.id) == ["t2"])
+  }
+
   @Test func refusalReasonFromTheEnvelopeReachesTheOwner() async {
     StubURLProtocol.handler = { _ in
       (

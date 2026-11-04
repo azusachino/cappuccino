@@ -21,13 +21,13 @@ struct RecentHistoryTests {
   }
 
   @Test func messagesAreBoundedInOriginalOrderWithoutMutatingInput() {
-    let input = (0...220).map { turn("t\($0)", text: "reply \($0)") }
+    let input = (0..<(maximumRecentMessages + 21)).map { turn("t\($0)", text: "reply \($0)") }
     let recent = boundedConversation(input)
-    #expect(recent.turns.count == 200)
+    #expect(recent.turns.count == maximumRecentMessages)
     #expect(recent.omittedMessages == 21)
     #expect(recent.turns.first?.id == "t21")
-    #expect(recent.turns.last?.id == "t220")
-    #expect(input.count == 221)
+    #expect(recent.turns.last?.id == "t\(maximumRecentMessages + 20)")
+    #expect(input.count == maximumRecentMessages + 21)
   }
 
   @Test func toolLimitAppliesEvenInsideOneMessageAndRetainsProseAndStatus() {
@@ -95,25 +95,27 @@ struct RecentHistoryTests {
   }
 
   @Test func omittedToolsIncludeOperationsLostOutsideTheMessageWindow() {
-    let input = (0..<350).map { turn("t\($0)", parts: [tool("tool\($0)")]) }
+    let input = (0..<(maximumRecentMessages + 150)).map {
+      turn("t\($0)", parts: [tool("tool\($0)")])
+    }
     let recent = boundedConversation(input)
     let names = recent.turns.flatMap(\.parts).compactMap { part -> String? in
       if case .toolCall(let call) = part { return call.name }
       return nil
     }
     #expect(names.count == 100)
-    #expect(recent.omittedTools == 250)
+    #expect(recent.omittedTools == 550)
     #expect(recent.omittedMessages == 150)
-    #expect(names.first == "tool250")
-    #expect(names.last == "tool349")
-    #expect(names.count + recent.omittedTools == 350)
-    #expect(input.count == 350)
+    #expect(names.first == "tool550")
+    #expect(names.last == "tool\(maximumRecentMessages + 149)")
+    #expect(names.count + recent.omittedTools == maximumRecentMessages + 150)
+    #expect(input.count == maximumRecentMessages + 150)
   }
 
   @Test func omittedToolsAreCountedEvenWhenAllAreOutsideTheRetainedWindow() {
     let input =
       [turn("old-tool", parts: [tool("read", output: nil)])]
-      + (0..<201).map { turn("text\($0)", text: "reply") }
+      + (0..<(maximumRecentMessages + 1)).map { turn("text\($0)", text: "reply") }
     let recent = boundedConversation(input)
     #expect(recent.omittedTools == 1)
     #expect(

@@ -242,7 +242,27 @@ extension BridgeClient {
   public func conversationSnapshot(
     base url: URL, session: String, agent: String? = nil, machineID: UUID? = nil
   ) async throws -> ConversationSnapshot {
-    let json = BridgeJSON(try await get(agentURL(url, session: session, "conversation/sync")))
+    try await conversationPage(
+      base: url, session: session, agent: agent, machineID: machineID
+    ).snapshot
+  }
+
+  /// One sync request: the newest page (no token), a catch-up after a forward token, or backfill
+  /// before a backward token. The page carries the tokens the replicated log keeps (contract §7).
+  public func conversationPage(
+    base url: URL, session: String, agent: String? = nil, machineID: UUID? = nil,
+    after: String? = nil, before: String? = nil
+  ) async throws -> ConversationPage {
+    guard after == nil || before == nil else {
+      throw BridgeError.protocolError("Sync takes one of after or before")
+    }
+    var endpoint = agentURL(url, session: session, "conversation/sync")
+    if let token = after ?? before {
+      var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: true)!
+      components.queryItems = [URLQueryItem(name: after != nil ? "after" : "before", value: token)]
+      endpoint = components.url!
+    }
+    let json = BridgeJSON(try await get(endpoint))
     // The sync response names no machine or session: the caller's verified machine is the
     // identity, and the locator is the one requested.
     let source = try json.string("mode") == "scrollback" ? "scrollback" : "canonical_log"
@@ -266,9 +286,18 @@ extension BridgeClient {
     } else {
       stats = nil
     }
-    return ConversationSnapshot(
-      turns: try parseConversationTurns(json), source: source, conversationID: identity,
-      machineID: machineID, stats: stats)
+    let turns = try parseConversationTurns(json)
+    return ConversationPage(
+      snapshot: ConversationSnapshot(
+        turns: turns, source: source, conversationID: identity, machineID: machineID, stats: stats),
+      sync: SyncPage(
+        mode: try json.string("mode"), upserts: turns,
+        afterToken: try json.optionalString("after_token"),
+        hasAfter: json.fields["after_token"] != nil,
+        beforeToken: try json.optionalString("before_token"),
+        hasBefore: json.fields["before_token"] != nil,
+        caughtUp: json.fields["caught_up"] as? Bool ?? true,
+        conversationID: identity))
   }
 
   /// Owner control (`interrupt` or `new_session`). A bridge that advertises
