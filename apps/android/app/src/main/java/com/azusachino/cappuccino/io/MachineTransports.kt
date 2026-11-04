@@ -150,6 +150,12 @@ internal class RoutedBridge(private val router: MachineRouter<BridgeTransport>) 
     it.conversationSnapshot(sessionId)
   }
 
+  override suspend fun conversationPage(
+    sessionId: String,
+    after: String?,
+    before: String?,
+  ): ConversationPage = call { it.conversationPage(sessionId, after, before) }
+
   override suspend fun submitPrompt(
     sessionId: String,
     text: String,

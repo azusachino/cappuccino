@@ -54,6 +54,9 @@ data class ConversationSnapshot(
   val stats: SessionStats? = null,
 )
 
+/** One sync response: the snapshot the screen shows, and the page the replicated log applies. */
+data class ConversationPage(val snapshot: ConversationSnapshot, val sync: SyncPage)
+
 /** A quota window such as 5h or 7d and its current consumption. */
 data class RateLimitWindow(
   val window: String,
@@ -97,6 +100,31 @@ interface BridgeTransport {
 
   suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
     ConversationSnapshot(conversation(sessionId), "canonical_log")
+
+  /**
+   * One sync request: the newest page (both null), or catch-up after a forward token, or backfill
+   * before a backward token. Transports without tokens answer a whole snapshot as one page.
+   */
+  suspend fun conversationPage(
+    sessionId: String,
+    after: String? = null,
+    before: String? = null,
+  ): ConversationPage {
+    val snapshot = conversationSnapshot(sessionId)
+    return ConversationPage(
+      snapshot,
+      SyncPage(
+        mode = if (snapshot.source == "scrollback") "scrollback" else "append",
+        upserts = snapshot.turns,
+        afterToken = null,
+        hasAfter = false,
+        beforeToken = null,
+        hasBefore = false,
+        caughtUp = true,
+        conversationId = snapshot.conversationId,
+      ),
+    )
+  }
 
   /** Sends [text]; [confirmed] says the owner approved the agent command it starts with. */
   suspend fun submitPrompt(
@@ -194,10 +222,24 @@ class BridgeClient(
     conversationSnapshot(sessionId).turns
 
   override suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
+    conversationPage(sessionId, after = null, before = null).snapshot
+
+  override suspend fun conversationPage(
+    sessionId: String,
+    after: String?,
+    before: String?,
+  ): ConversationPage =
     withContext(Dispatchers.IO) {
+      require(after == null || before == null) { "Sync takes one of after or before" }
       // The sync response names no machine: it is the verified bridge's, so take that identity.
       val machine = bridgeDetails?.machineId ?: verify()
-      val json = parseJsonObject(get("api/v2/agents/$sessionId/conversation/sync"))
+      val query =
+        when {
+          after != null -> "?after=${encodeToken(after)}"
+          before != null -> "?before=${encodeToken(before)}"
+          else -> ""
+        }
+      val json = parseJsonObject(get("api/v2/agents/$sessionId/conversation/sync$query"))
       val source =
         if (json.optionalString("mode") == "scrollback") "scrollback" else "canonical_log"
       val identity = json.optionalString("conversation_id")
@@ -232,8 +274,25 @@ class BridgeClient(
             rateLimits,
           )
         }
-      ConversationSnapshot(parseConversationResponse(json), source, identity, machine, stats)
+      val turns = parseConversationResponse(json)
+      ConversationPage(
+        snapshot = ConversationSnapshot(turns, source, identity, machine, stats),
+        sync =
+          SyncPage(
+            mode = json.string("mode"),
+            upserts = turns,
+            afterToken = json.optionalString("after_token"),
+            hasAfter = json.fields.containsKey("after_token"),
+            beforeToken = json.optionalString("before_token"),
+            hasBefore = json.fields.containsKey("before_token"),
+            caughtUp = (json.fields["caught_up"] as? JsonValue.BooleanValue)?.value ?: true,
+            conversationId = identity,
+          ),
+      )
     }
+
+  /** Tokens are opaque hex, but they still go in a query, so they are encoded like any value. */
+  private fun encodeToken(token: String): String = java.net.URLEncoder.encode(token, "UTF-8")
 
   override suspend fun submitPrompt(
     sessionId: String,

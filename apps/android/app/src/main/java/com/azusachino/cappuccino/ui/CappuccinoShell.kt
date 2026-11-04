@@ -922,8 +922,10 @@ fun CappuccinoScreen(
                                 ) { turn ->
                                   if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
                                     Text(
-                                      "Older messages aren't loaded.",
-                                      Modifier.padding(vertical = 12.dp),
+                                      "Older messages aren't loaded. Load older",
+                                      Modifier.padding(vertical = 12.dp).clickable {
+                                        actions.loadOlderConversation()
+                                      },
                                       style = MaterialTheme.typography.bodySmall,
                                       color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )

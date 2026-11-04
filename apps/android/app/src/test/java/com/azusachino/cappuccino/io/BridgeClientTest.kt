@@ -489,6 +489,33 @@ class BridgeClientTest {
   }
 
   @Test
+  fun conversationPageSendsOneCursorAndReadsTheTokens() = runBlocking {
+    MockWebServer().use { server ->
+      server.enqueue(advertisement())
+      server.enqueue(
+        MockResponse.Builder()
+          .body(
+            """{"mode":"append","upserts":[{"id":"t2","role":"agent","text":"hi"}],"after_token":"AF","before_token":null,"caught_up":false}"""
+          )
+          .build()
+      )
+      server.start()
+      val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
+      val page = client.conversationPage("s-1", after = "AB")
+      assertEquals("/api/v2/handshake", server.takeRequest().url.encodedPath)
+      val req = server.takeRequest()
+      assertEquals("/api/v2/agents/s-1/conversation/sync", req.url.encodedPath)
+      assertEquals("after=AB", req.url.encodedQuery)
+      assertEquals("AF", page.sync.afterToken)
+      assertTrue(page.sync.hasAfter)
+      assertTrue(page.sync.hasBefore)
+      assertNull(page.sync.beforeToken)
+      assertFalse(page.sync.caughtUp)
+      assertEquals(listOf("t2"), page.sync.upserts.map { it.id })
+    }
+  }
+
+  @Test
   fun submitsPromptAndAnswersPrompt() = runBlocking {
     MockWebServer().use { server ->
       enqueueMutation(server, MockResponse.Builder().body("""{"status":"delivered"}""").build())

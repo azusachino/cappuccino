@@ -9,6 +9,7 @@ import com.azusachino.cappuccino.core.PromptCard
 import com.azusachino.cappuccino.core.PromptOption
 import com.azusachino.cappuccino.core.StreamEntry
 import com.azusachino.cappuccino.core.StreamEvent
+import com.azusachino.cappuccino.core.SyncPage
 import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
@@ -564,6 +565,82 @@ class ConnectedViewModelTest {
       advanceUntilIdle()
       assertEquals(secondProfile.id, viewModel.state.value.activeProfileId)
       assertEquals(listOf(newAgent), viewModel.state.value.agents)
+    }
+
+  @Test
+  fun catchUpFollowsTheForwardCursorAndBackfillFollowsTheBackwardOne() =
+    runTest(dispatcher) {
+      val queries = mutableListOf<Pair<String?, String?>>()
+      fun turn(id: String) = ConversationTurn(id, "agent", null, id, emptyList())
+      val pages =
+        mapOf(
+          null to
+            SyncPage(
+              "append",
+              listOf(turn("t5"), turn("t6")),
+              "A1",
+              true,
+              "B1",
+              true,
+              true,
+              savedId,
+            ),
+          "A1" to SyncPage("append", listOf(turn("t7")), "A2", true, null, false, false, savedId),
+          "A2" to SyncPage("append", listOf(turn("t8")), "A3", true, null, false, true, savedId),
+          "B1" to
+            SyncPage(
+              "append",
+              listOf(turn("t3"), turn("t4")),
+              null,
+              false,
+              null,
+              true,
+              true,
+              savedId,
+            ),
+        )
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID = machine
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
+
+          override suspend fun conversationPage(
+            sessionId: String,
+            after: String?,
+            before: String?,
+          ): ConversationPage {
+            queries += after to before
+            val page = pages.getValue(after ?: before)
+            return ConversationPage(
+              ConversationSnapshot(page.upserts, "canonical_log", savedId, machine),
+              page,
+            )
+          }
+
+          override fun stream(sessionId: String): Flow<StreamEvent> = flow {
+            kotlinx.coroutines.awaitCancellation()
+          }
+        }
+      viewModel = ConnectedViewModel(store, { transport }, {}, savedTarget())
+      viewModel.setForeground(true)
+      advanceUntilIdle()
+      // The first sync takes the newest page; a later load catches up from the forward token.
+      assertEquals(listOf(null to null), queries)
+      viewModel.loadConversation()
+      advanceUntilIdle()
+      assertEquals(
+        listOf("t5", "t6", "t7", "t8"),
+        viewModel.state.value.conversationTurns.map { it.id },
+      )
+      assertEquals(listOf(null to null, "A1" to null, "A2" to null), queries)
+      viewModel.loadOlderConversation()
+      advanceUntilIdle()
+      assertEquals(
+        listOf("t3", "t4", "t5", "t6", "t7", "t8"),
+        viewModel.state.value.conversationTurns.map { it.id },
+      )
+      assertEquals(listOf(null to null, "A1" to null, "A2" to null, null to "B1"), queries)
     }
 
   @Test
