@@ -13,18 +13,26 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Question {
+    /// Stable within the form: a hash of the header and the question text.
+    pub id: String,
     pub header: String,
     pub question: String,
     pub multi_select: bool,
+    /// The option under the form's cursor; `None` when the cursor is on Submit or free text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlighted_option_id: Option<String>,
     pub options: Vec<PromptOption>,
 }
 
+/// One answer on the wire: the question it answers, the option ids chosen, and
+/// one line of free text when the form's "Type something" is used.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Answer {
+    pub question_id: String,
     #[serde(default)]
-    pub selected: Vec<usize>,
+    pub selected_option_ids: Vec<String>,
     #[serde(default)]
-    pub other: Option<String>,
+    pub free_text: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,11 +179,14 @@ pub fn form(screen: &str) -> Option<Form> {
         .or(tabs.last())
         .map(|(header, _)| header.clone())
         .unwrap_or_default();
+    let question = question.join(" ");
     Some(Form {
         question: Question {
+            id: crate::prompt::hashed_id("q", &[&header, &question]),
             header,
-            question: question.join(" "),
+            question,
             multi_select,
+            highlighted_option_id: None,
             options: rows
                 .into_iter()
                 .enumerate()
@@ -203,23 +214,24 @@ pub fn card(form: &Form) -> PromptCard {
     let labels: Vec<PromptOption> = question.options.clone();
     let prompt_id = compute_prompt_id(&question.question, Some(&tabs), &labels);
     let answered = form.tabs.iter().filter(|(_, answered)| *answered).count();
-    let progress = (form.tabs.len() > 1).then(|| {
-        format!(
-            "Question {} of {}",
-            (answered + 1).min(form.tabs.len()),
-            form.tabs.len()
-        )
-    });
+    let mut question = question.clone();
+    question.highlighted_option_id = question
+        .options
+        .get(form.cursor.saturating_sub(1))
+        .map(|option| option.id.clone());
+    let multi_question = form.tabs.len() > 1;
     PromptCard {
         prompt_id,
         card_type: QUESTION.to_string(),
         title: question.question.clone(),
-        message: progress,
+        message: None,
         tool_name: Some("AskUserQuestion".to_string()),
         command: None,
         options: Vec::new(),
-        selected_index: 0,
-        questions: vec![question.clone()],
+        default_option_id: None,
+        questions: vec![question],
+        question_number: multi_question.then(|| (answered + 1).min(form.tabs.len())),
+        question_count: multi_question.then_some(form.tabs.len()),
     }
 }
 
@@ -268,8 +280,10 @@ pub fn review(screen: &str) -> Option<PromptCard> {
         tool_name: Some("AskUserQuestion".to_string()),
         command: None,
         options,
-        selected_index: 0,
+        default_option_id: Some("submit".to_string()),
         questions: Vec::new(),
+        question_number: None,
+        question_count: None,
     })
 }
 
@@ -280,20 +294,28 @@ fn digit(index: usize) -> String {
 /// The keys and text that answer the question on screen, or why the answer doesn't fit it.
 pub fn answer_steps(form: &Form, answer: &Answer) -> Result<Vec<Step>, String> {
     let question = &form.question;
+    if answer.question_id != question.id {
+        return Err("the answer names a question that is not on screen".to_string());
+    }
     let count = question.options.len();
-    let other = match answer.other.as_deref().map(str::trim) {
+    let other = match answer.free_text.as_deref().map(str::trim) {
         Some(text) if text.chars().any(char::is_control) => {
             return Err("own text must be one line".to_string())
         }
         Some(text) if !text.is_empty() => Some(text.to_string()),
         _ => None,
     };
-    let mut selected = answer.selected.clone();
+    let mut selected = Vec::new();
+    for option_id in &answer.selected_option_ids {
+        let index = question
+            .options
+            .iter()
+            .position(|option| option.id == *option_id)
+            .ok_or_else(|| "no such option".to_string())?;
+        selected.push(index);
+    }
     selected.sort_unstable();
     selected.dedup();
-    if selected.iter().any(|&index| index >= count) {
-        return Err("no such option".to_string());
-    }
     let keys = |keys: &[&str]| Step::Keys(keys.iter().map(|key| key.to_string()).collect());
     let mut steps = Vec::new();
     if !question.multi_select {
@@ -398,10 +420,21 @@ Ready to submit your answers?
         Step::Keys(keys.iter().map(|key| key.to_string()).collect())
     }
 
-    fn answer(selected: &[usize], other: Option<&str>) -> Answer {
+    /// Builds the wire answer for option positions on `form`. A position off the form becomes
+    /// an unknown id, so the answer is refused.
+    fn answer(form: &Form, selected: &[usize], other: Option<&str>) -> Answer {
         Answer {
-            selected: selected.to_vec(),
-            other: other.map(str::to_string),
+            question_id: form.question.id.clone(),
+            selected_option_ids: selected
+                .iter()
+                .map(|&index| {
+                    form.question
+                        .options
+                        .get(index)
+                        .map_or_else(|| format!("missing-{index}"), |option| option.id.clone())
+                })
+                .collect(),
+            free_text: other.map(str::to_string),
         }
     }
 
@@ -424,12 +457,18 @@ Ready to submit your answers?
         );
         let color = card(&form);
         assert_eq!(color.card_type, QUESTION);
-        assert_eq!(color.message.as_deref(), Some("Question 1 of 2"));
+        assert_eq!(
+            (color.question_number, color.question_count),
+            (Some(1), Some(2))
+        );
 
         let pets = form_of(PETS);
         assert!(pets.question.multi_select);
         assert_eq!(pets.question.header, "Pets");
-        assert_eq!(card(&pets).message.as_deref(), Some("Question 2 of 2"));
+        assert_eq!(
+            (card(&pets).question_number, card(&pets).question_count),
+            (Some(2), Some(2))
+        );
         assert_ne!(card(&pets).prompt_id, card(&form).prompt_id);
     }
 
@@ -482,12 +521,12 @@ Ready to submit your answers?
         let color = form_of(COLOR);
         // "Blue", then the form moves to Pets.
         assert_eq!(
-            answer_steps(&color, &answer(&[1], None)).unwrap(),
+            answer_steps(&color, &answer(&color, &[1], None)).unwrap(),
             vec![keys(&["2"])]
         );
         // "Teal" as own text.
         assert_eq!(
-            answer_steps(&color, &answer(&[], Some(" Teal "))).unwrap(),
+            answer_steps(&color, &answer(&color, &[], Some(" Teal "))).unwrap(),
             vec![keys(&["4"]), Step::Text("Teal".into()), keys(&["enter"])]
         );
     }
@@ -496,7 +535,11 @@ Ready to submit your answers?
     fn multi_select_toggles_then_leaves_by_its_submit_row() {
         // "Cat, Fish, a bird", then the Submit row to the review.
         assert_eq!(
-            answer_steps(&form_of(PETS), &answer(&[2, 0], Some("a bird"))).unwrap(),
+            answer_steps(
+                &form_of(PETS),
+                &answer(&form_of(PETS), &[2, 0], Some("a bird"))
+            )
+            .unwrap(),
             vec![
                 keys(&["1"]),
                 keys(&["3"]),
@@ -509,7 +552,7 @@ Ready to submit your answers?
         );
         // "A, zz" through the lone form's Submit row.
         assert_eq!(
-            answer_steps(&form_of(TAGS), &answer(&[0], Some("zz"))).unwrap(),
+            answer_steps(&form_of(TAGS), &answer(&form_of(TAGS), &[0], Some("zz"))).unwrap(),
             vec![
                 keys(&["1"]),
                 keys(&["3"]),
@@ -524,7 +567,7 @@ Ready to submit your answers?
             .replace("❯ 1. [ ] A", "  1. [ ] A")
             .replace("  2. [ ] B", "❯ 2. [ ] B");
         assert_eq!(
-            answer_steps(&form_of(&moved), &answer(&[1], None)).unwrap(),
+            answer_steps(&form_of(&moved), &answer(&form_of(&moved), &[1], None)).unwrap(),
             vec![keys(&["2"]), keys(&["down", "down"]), keys(&["enter"])]
         );
         assert!(form_of(&PETS.replace("1. [ ] Cat", "1. [✔] Cat")).ticked);
@@ -535,7 +578,7 @@ Ready to submit your answers?
         let form = form_of(&on_submit);
         assert_eq!(form.cursor, 4);
         assert_eq!(
-            answer_steps(&form, &answer(&[0], Some("zz"))).unwrap(),
+            answer_steps(&form, &answer(&form, &[0], Some("zz"))).unwrap(),
             vec![
                 keys(&["1"]),
                 keys(&["3"]),
@@ -551,10 +594,10 @@ Ready to submit your answers?
     fn answers_that_do_not_fit_are_refused() {
         let color = form_of(COLOR);
         let pets = form_of(PETS);
-        assert!(answer_steps(&color, &answer(&[0, 1], None)).is_err());
-        assert!(answer_steps(&color, &answer(&[0], Some("x"))).is_err());
-        assert!(answer_steps(&color, &answer(&[5], None)).is_err());
-        assert!(answer_steps(&color, &answer(&[], Some("two\nlines"))).is_err());
-        assert!(answer_steps(&pets, &answer(&[], Some("   "))).is_err());
+        assert!(answer_steps(&color, &answer(&color, &[0, 1], None)).is_err());
+        assert!(answer_steps(&color, &answer(&color, &[0], Some("x"))).is_err());
+        assert!(answer_steps(&color, &answer(&color, &[5], None)).is_err());
+        assert!(answer_steps(&color, &answer(&color, &[], Some("two\nlines"))).is_err());
+        assert!(answer_steps(&pets, &answer(&pets, &[], Some("   "))).is_err());
     }
 }

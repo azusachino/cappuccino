@@ -565,75 +565,8 @@ async fn agents_unreachable_is_502_error_envelope() {
         .expect("agents request");
     assert_eq!(exchange.status, 502);
     assert_eq!(exchange.body["event"], json!("error"));
-    assert_eq!(exchange.body["code"], json!("herdr_unreachable"));
+    assert_eq!(exchange.body["code"], json!("upstream_unavailable"));
     bridge.stop().expect("bridge stop");
-    root.remove();
-}
-
-#[tokio::test]
-async fn transcript_fail_closed_all_modes() {
-    // Mode 1: herdr unreachable -> HTTP 502 error envelope.
-    let root = TempRoot::new("tx502");
-    let mut bridge = spawn_bridge(&root, None).await;
-    let exchange = probe::get(
-        &probe_options(&bridge.base_url()),
-        "/api/v2/transcript?session=s-probe",
-    )
-    .await
-    .expect("transcript request");
-    assert_eq!(exchange.status, 502);
-    assert_eq!(exchange.body["event"], json!("error"));
-    bridge.stop().expect("bridge stop");
-    root.remove();
-
-    // Mode 2: herdr reachable, agent has no path-kind agent_session ->
-    // HTTP 200 with available:false and a null path.
-    let root = TempRoot::new("tx200");
-    let herdr = MockHerdr::start(&root);
-    let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
-    let exchange = probe::get(
-        &probe_options(&bridge.base_url()),
-        "/api/v2/transcript?session=s-probe",
-    )
-    .await
-    .expect("transcript request");
-    assert_eq!(exchange.status, 200);
-    assert_eq!(exchange.body["available"], json!(false));
-    assert!(exchange.body["transcript_path"].is_null());
-    bridge.stop().expect("bridge stop");
-    herdr.stop().await;
-    root.remove();
-
-    // Mode 3: an available transcript — a path-kind agent_session inside the
-    // Pi store (PI_CODING_AGENT_SESSION_DIR scoped to the temp root) must
-    // yield HTTP 200 with available:true and a nonempty transcript_path.
-    let root = TempRoot::new("tx-avail");
-    let sessions = root.path.join("sessions");
-    std::fs::create_dir(&sessions).unwrap();
-    let transcript = sessions.join("s-probe.jsonl");
-    std::fs::write(&transcript, b"{\"line\":1}\n").unwrap();
-    let herdr = MockHerdr::start(&root);
-    herdr.set_agent_session(Some(&transcript.to_string_lossy()));
-    let mut bridge = spawn_bridge_with(
-        &root,
-        Some(&herdr.socket_path),
-        &[("PI_CODING_AGENT_SESSION_DIR", sessions.to_str().unwrap())],
-    )
-    .await;
-    let exchange = probe::get(
-        &probe_options(&bridge.base_url()),
-        "/api/v2/transcript?session=s-probe",
-    )
-    .await
-    .expect("transcript request");
-    assert_eq!(exchange.status, 200, "payload: {}", exchange.body);
-    assert_eq!(exchange.body["available"], json!(true));
-    let path = exchange.body["transcript_path"]
-        .as_str()
-        .expect("available:true must carry a path");
-    assert!(!path.is_empty());
-    bridge.stop().expect("bridge stop");
-    herdr.stop().await;
     root.remove();
 }
 
@@ -739,7 +672,7 @@ async fn submit_agent_prompt_delivers_input() {
     .expect("prompt request");
 
     assert_eq!(exchange.status, 200, "payload: {}", exchange.body);
-    assert_eq!(exchange.body["event"], "prompt_sent");
+    assert_eq!(exchange.body["event"], "prompt_typed");
 
     // 2. Reject empty prompt
     let empty_body = json!({
@@ -799,11 +732,11 @@ fn mutation_variants() -> Vec<(&'static str, Value)> {
         ),
         (
             "prompt",
-            json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "select_option", "option_index": 0}),
+            json!({"type": "answer_prompt", "prompt_id": "p-old", "option_id": "opt-0"}),
         ),
         (
             "prompt",
-            json!({"type": "answer_question", "prompt_id": "p-old", "answers": [{"selected": [0]}]}),
+            json!({"type": "answer_question", "prompt_id": "p-old", "answers": [pick(COLOR_QUESTION, &[0], None)]}),
         ),
         ("control", json!({"action": "interrupt"})),
         ("control", json!({"action": "new_session"})),
@@ -822,7 +755,10 @@ async fn all_mutation_variants_reject_unbound_malformed_and_stale_requests_witho
     ))
     .unwrap();
     let paired = probe::get(&options, "/api/v2/handshake").await.unwrap();
-    assert_eq!(paired.body["agreed"]["mutation_binding"], 1);
+    assert_eq!(
+        paired.body["agreed_capabilities"]["agent_control"]["version"],
+        1
+    );
     for (endpoint, body) in mutation_variants() {
         let path = format!("/api/v2/agents/s-probe/{endpoint}");
         for case in fixture["invalid"].as_array().unwrap() {
@@ -982,7 +918,7 @@ async fn multi_step_answer_stops_on_replacement_with_partial_outcome_unknown() {
     herdr.set_screen(PETS_SCREEN);
     let mut bridge = spawn_bridge(&root, Some(&herdr.socket_path)).await;
     let options = probe_options(&bridge.base_url());
-    let mut body = json!({"type": "answer_question", "prompt_id": "p-old", "answers": [{"selected": [0], "other": "synthetic"}], "expected_session": selected_binding(&options).await});
+    let mut body = json!({"type": "answer_question", "prompt_id": "p-old", "answers": [pick(PETS_QUESTION, &[0], Some("synthetic"))], "expected_session": selected_binding(&options).await});
     let stale = probe::post_json(&options, "/api/v2/agents/s-probe/prompt", &body)
         .await
         .unwrap();
@@ -992,7 +928,7 @@ async fn multi_step_answer_stops_on_replacement_with_partial_outcome_unknown() {
         .await
         .unwrap();
     assert_eq!(partial.status, 502, "{}", partial.body);
-    assert_eq!(partial.body["code"], "mutation_outcome_unknown");
+    assert_eq!(partial.body["code"], "outcome_unknown");
     assert_eq!(herdr.input(), vec![json!(["1"])]);
     assert_eq!(
         herdr.requests("pane.send_keys")[0]["observed_native_session"],
@@ -1128,11 +1064,25 @@ Ready to submit your answers?
   2. Cancel
 ";
 
+/// Question ids the bridge derives from the fixture forms (header and question text).
+const COLOR_QUESTION: &str = "q-9ee65439d604";
+const PETS_QUESTION: &str = "q-420dd5e9c110";
+
+/// The wire answer for option positions of question `question`. Option ids are `opt-<index>`.
+fn pick(question: &str, selected: &[usize], free_text: Option<&str>) -> Value {
+    json!({
+        "question_id": question,
+        "selected_option_ids": selected.iter().map(|index| format!("opt-{index}")).collect::<Vec<_>>(),
+        "free_text": free_text,
+    })
+}
+
 /// The card id a stale answer's 409 names as currently on screen.
 fn on_screen_id(body: &Value) -> String {
-    let message = body["message"].as_str().unwrap_or_default();
-    let id = message.rsplit("on screen ").next().unwrap_or_default();
-    id.trim_end_matches(')').trim().to_string()
+    body["on_screen_prompt_id"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[tokio::test]
@@ -1166,25 +1116,28 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
     const COLOR_SCREEN: &str =
         include_str!("../../../fixtures/claude/ask-user-question-screen.txt");
     herdr.set_screen(COLOR_SCREEN);
-    let stale = post(answer("p-old", json!([{"selected": [1]}]))).await;
+    let stale = post(answer("p-old", json!([pick(COLOR_QUESTION, &[1], None)]))).await;
     assert_eq!(stale.status, 409, "payload: {}", stale.body);
     assert_eq!(stale.body["code"], "stale_prompt");
     let color = on_screen_id(&stale.body);
     assert!(color.starts_with("p-"), "id from: {}", stale.body);
     assert_eq!(
-        post(answer(&color, json!([{"selected": [0, 1]}])))
+        post(answer(&color, json!([pick(COLOR_QUESTION, &[0, 1], None)])))
             .await
             .status,
         400
     );
     let two = post(answer(
         &color,
-        json!([{"selected": [1]}, {"selected": [0]}]),
+        json!([
+            pick(COLOR_QUESTION, &[1], None),
+            pick(COLOR_QUESTION, &[0], None)
+        ]),
     ))
     .await;
     assert_eq!(two.status, 400);
     assert_eq!(two.body["code"], "bad_answer");
-    let select = json!({"type": "answer_prompt", "prompt_id": color, "action": "select_option", "option_index": 1});
+    let select = json!({"type": "answer_prompt", "prompt_id": color, "option_id": "opt-1"});
     assert_eq!(
         post(select).await.status,
         400,
@@ -1197,22 +1150,25 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
 
     let from = herdr.input().len();
     assert_eq!(
-        post(answer(&color, json!([{"selected": [1]}])))
+        post(answer(&color, json!([pick(COLOR_QUESTION, &[1], None)])))
             .await
             .status,
         200
     );
     assert_eq!(sent_since(from), vec![json!(["2"])]);
     // A repeated tap is stale even while the terminal still shows the form.
-    let repeat = post(answer(&color, json!([{"selected": [1]}]))).await;
+    let repeat = post(answer(&color, json!([pick(COLOR_QUESTION, &[1], None)]))).await;
     assert_eq!(repeat.status, 409, "payload: {}", repeat.body);
     assert_eq!(sent_since(from), vec![json!(["2"])]);
     let color = on_screen(COLOR_SCREEN).await;
     let from = herdr.input().len();
     assert_eq!(
-        post(answer(&color, json!([{"other": " Teal "}])))
-            .await
-            .status,
+        post(answer(
+            &color,
+            json!([pick(COLOR_QUESTION, &[], Some(" Teal "))])
+        ))
+        .await
+        .status,
         200
     );
     assert_eq!(
@@ -1227,10 +1183,18 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
 
     // A multi-select toggles, types its own line, then leaves by its Submit row.
     herdr.set_screen(PETS_SCREEN);
-    let pets = on_screen_id(&post(answer(&color, json!([{"selected": [0]}]))).await.body);
+    let pets = on_screen_id(
+        &post(answer(&color, json!([pick(PETS_QUESTION, &[0], None)])))
+            .await
+            .body,
+    );
     assert_ne!(pets, color);
     let from = herdr.input().len();
-    let multi = post(answer(&pets, json!([{"selected": [0], "other": "a bird"}]))).await;
+    let multi = post(answer(
+        &pets,
+        json!([pick(PETS_QUESTION, &[0], Some("a bird"))]),
+    ))
+    .await;
     assert_eq!(multi.status, 200, "payload: {}", multi.body);
     assert_eq!(
         sent_since(from),
@@ -1245,18 +1209,23 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
     );
     // Ticks made in the terminal would be undone by relative toggles: refused.
     herdr.set_screen(&PETS_SCREEN.replace("1. [ ] Cat", "1. [✔] Cat"));
-    let ticked = on_screen_id(&post(answer(&pets, json!([{"selected": [0]}]))).await.body);
+    let ticked = on_screen_id(
+        &post(answer(&pets, json!([pick(PETS_QUESTION, &[0], None)])))
+            .await
+            .body,
+    );
     let from = herdr.input().len();
-    let refused = post(answer(&ticked, json!([{"selected": [1]}]))).await;
+    let refused = post(answer(&ticked, json!([pick(PETS_QUESTION, &[1], None)]))).await;
     assert_eq!(refused.status, 409, "payload: {}", refused.body);
     assert!(sent_since(from).is_empty());
 
     // The review acts on its digit alone; its Cancel row is 2.
     herdr.set_screen(REVIEW_SCREEN);
-    let review_stale = json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "select_option", "option_index": 0});
+    let review_stale =
+        json!({"type": "answer_prompt", "prompt_id": "p-old", "option_id": "submit"});
     let review = on_screen_id(&post(review_stale).await.body);
     let from = herdr.input().len();
-    let submit = json!({"type": "answer_prompt", "prompt_id": review, "action": "select_option", "option_index": 0});
+    let submit = json!({"type": "answer_prompt", "prompt_id": review, "option_id": "submit"});
     assert_eq!(post(submit).await.status, 200);
     assert_eq!(sent_since(from), vec![json!(["1"])]);
     let review = on_screen(REVIEW_SCREEN).await;
@@ -1267,15 +1236,16 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
 
     // A tool approval's first option allows the command: unclear choices are refused.
     herdr.set_screen("Approve tool call: run_command\n$ git push origin main\n1. Allow once\n2. Allow always\n3. Reject\n");
-    let approval_stale = json!({"type": "answer_prompt", "prompt_id": "p-old", "action": "select_option", "option_id": "reject"});
+    let approval_stale =
+        json!({"type": "answer_prompt", "prompt_id": "p-old", "option_id": "reject"});
     let approval = on_screen_id(&post(approval_stale).await.body);
     let from = herdr.input().len();
     for bad in [
         json!({"type": "answer_prompt", "prompt_id": approval}),
-        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option"}),
-        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_id": "reject_"}),
-        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_index": 3}),
-        json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_index": 0, "option_id": "reject"}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "option_id": "allow_always"}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "option_id": "reject_"}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "option_id": "opt-3"}),
+        json!({"type": "answer_prompt", "prompt_id": approval, "option_id": "reject", "action": "approve_all"}),
         json!({"type": "answer_prompt", "prompt_id": approval, "action": "approve", "option_index": 2}),
     ] {
         let refused = post(bad.clone()).await;
@@ -1286,7 +1256,7 @@ async fn question_and_review_cards_are_answered_with_the_forms_own_keys() {
         sent_since(from).is_empty(),
         "nothing is typed for refused answers"
     );
-    let reject = json!({"type": "answer_prompt", "prompt_id": approval, "action": "select_option", "option_index": 2, "option_id": "reject"});
+    let reject = json!({"type": "answer_prompt", "prompt_id": approval, "option_id": "opt-2", "option_id": "reject"});
     assert_eq!(post(reject).await.status, 200);
     assert_eq!(sent_since(from), vec![json!(["3", "enter"])]);
 
@@ -1315,7 +1285,7 @@ async fn session_requires_nonempty_machine_id() {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut buf = [0u8; 1024];
                 let _ = stream.read(&mut buf).await;
-                let body = r#"{"event":"paired","protocol":2,"plugin":"p"}"#;
+                let body = r#"{"event":"handshake_accepted","protocol_version":2,"plugin":"p"}"#;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
@@ -1410,7 +1380,7 @@ async fn an_answered_prompt_is_resolved_not_announced_again() {
             .expect("probe")
             .body,
     );
-    let reject = json!({"type": "answer_prompt", "prompt_id": id, "action": "select_option", "option_id": "reject"});
+    let reject = json!({"type": "answer_prompt", "prompt_id": id, "option_id": "reject"});
     let answered = bound_post(&options, "/api/v2/agents/s-probe/prompt", &reject)
         .await
         .expect("answer");
@@ -1499,7 +1469,7 @@ async fn upstream_failure_after_prompt_reports_error_and_closes_without_idle() {
             .await
             .unwrap();
         let url = format!(
-            "ws://127.0.0.1:{}/api/v2/stream?session=s-probe",
+            "ws://127.0.0.1:{}/api/v2/agents/s-probe/stream",
             bridge.port
         );
         let (mut socket, _) = tokio_tungstenite::client_async_with_config(
@@ -1560,7 +1530,7 @@ async fn unavailable_or_malformed_initial_status_never_becomes_idle() {
             .await
             .unwrap();
         let url = format!(
-            "ws://127.0.0.1:{}/api/v2/stream?session=s-probe",
+            "ws://127.0.0.1:{}/api/v2/agents/s-probe/stream",
             bridge.port
         );
         let (mut socket, _) = tokio_tungstenite::client_async_with_config(
@@ -1649,7 +1619,7 @@ async fn ws_malformed_frame_fails_loudly() {
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let app = Router::new().route("/api/v2/stream", get_route(bad_ws));
+    let app = Router::new().route("/api/v2/agents/{sessionId}/stream", get_route(bad_ws));
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
@@ -1713,7 +1683,7 @@ async fn require_h2_fails_on_http1_downgrade() {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut buf = [0u8; 1024];
                 let _ = stream.read(&mut buf).await;
-                let body = r#"{"event":"paired","machine_id":"m","protocol":2,"plugin":"p"}"#;
+                let body = r#"{"event":"handshake_accepted","machine_id":"m","protocol_version":2,"plugin":"p"}"#;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
@@ -1988,7 +1958,7 @@ async fn spawn_frame_server(frames: Vec<Value>) -> (String, TaskTracker) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = Router::new().route(
-        "/api/v2/stream",
+        "/api/v2/agents/{sessionId}/stream",
         get_route(
             move |upgrade: WebSocketUpgrade| async move { stream_frames(upgrade, frames).await },
         ),
@@ -2011,8 +1981,8 @@ fn stream_options(base: &str) -> ProbeOptions {
 #[tokio::test]
 async fn stream_reset_generation_regression_is_rejected() {
     let frames = vec![
-        json!({"event": "stream_open", "generation": 5}),
-        json!({"event": "stream_reset", "generation": 3}),
+        json!({"event": "stream_open", "stream_generation": 5}),
+        json!({"event": "stream_reset", "stream_generation": 3}),
     ];
     let (base, tracker) = spawn_frame_server(frames).await;
     let error = probe::ws_stream_probe(
@@ -2029,7 +1999,7 @@ async fn stream_reset_generation_regression_is_rejected() {
 #[tokio::test]
 async fn invalid_gap_shape_is_rejected() {
     let frames = vec![
-        json!({"event": "stream_open", "generation": 0}),
+        json!({"event": "stream_open", "stream_generation": 0}),
         json!({"event": "entries", "entries": [{
             "seq": 9, "id": "wrong-id", "kind": "gap",
             "text": "gap: missing entries 2-8", "branch": null, "complete": true }]}),
@@ -2056,7 +2026,7 @@ async fn binary_data_frame_is_rejected() {
         upgrade.on_upgrade(|mut socket: axum::extract::ws::WebSocket| async move {
             let _ = socket
                 .send(Message::Text(
-                    "{\"event\":\"stream_open\",\"generation\":0}".into(),
+                    "{\"event\":\"stream_open\",\"stream_generation\":0}".into(),
                 ))
                 .await;
             let _ = socket.send(Message::Binary(vec![0xde, 0xad].into())).await;
@@ -2065,7 +2035,7 @@ async fn binary_data_frame_is_rejected() {
     }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let app = Router::new().route("/api/v2/stream", get_route(binary_ws));
+    let app = Router::new().route("/api/v2/agents/{sessionId}/stream", get_route(binary_ws));
     let tracker = TaskTracker::default();
     tracker
         .spawn(async move {
@@ -2083,7 +2053,7 @@ async fn binary_data_frame_is_rejected() {
 #[tokio::test]
 async fn empty_entries_do_not_count_as_consumption() {
     let frames = vec![
-        json!({"event": "stream_open", "generation": 0}),
+        json!({"event": "stream_open", "stream_generation": 0}),
         json!({"event": "entries", "entries": []}),
     ];
     let (base, tracker) = spawn_frame_server(frames).await;
@@ -2260,7 +2230,7 @@ async fn clean_close_frame_is_observed_as_closed() {
         upgrade.on_upgrade(|mut socket: axum::extract::ws::WebSocket| async move {
             let _ = socket
                 .send(Message::Text(
-                    "{\"event\":\"stream_open\",\"generation\":0}".into(),
+                    "{\"event\":\"stream_open\",\"stream_generation\":0}".into(),
                 ))
                 .await;
             // Deliberate close handshake, then drop.
@@ -2269,7 +2239,10 @@ async fn clean_close_frame_is_observed_as_closed() {
     }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let app = Router::new().route("/api/v2/stream", get_route(clean_close_ws));
+    let app = Router::new().route(
+        "/api/v2/agents/{sessionId}/stream",
+        get_route(clean_close_ws),
+    );
     let tracker = TaskTracker::default();
     tracker
         .spawn(async move {
@@ -2299,8 +2272,8 @@ async fn clean_close_frame_is_observed_as_closed() {
 async fn repeated_stream_open_is_rejected_any_generation() {
     for generation in [2u64, 5, 9] {
         let frames = vec![
-            json!({"event": "stream_open", "generation": 5}),
-            json!({"event": "stream_open", "generation": generation}),
+            json!({"event": "stream_open", "stream_generation": 5}),
+            json!({"event": "stream_open", "stream_generation": generation}),
         ];
         let (base, tracker) = spawn_frame_server(frames).await;
         let error = probe::ws_stream_probe(
@@ -2363,7 +2336,7 @@ async fn ping_then_abrupt_peer_close_is_propagated() {
         upgrade.on_upgrade(|mut socket: axum::extract::ws::WebSocket| async move {
             let _ = socket
                 .send(Message::Text(
-                    "{\"event\":\"stream_open\",\"generation\":0}".into(),
+                    "{\"event\":\"stream_open\",\"stream_generation\":0}".into(),
                 ))
                 .await;
             // Ping the client, then drop the connection without a close
@@ -2374,7 +2347,7 @@ async fn ping_then_abrupt_peer_close_is_propagated() {
     }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let app = Router::new().route("/api/v2/stream", get_route(ping_drop_ws));
+    let app = Router::new().route("/api/v2/agents/{sessionId}/stream", get_route(ping_drop_ws));
     let tracker = TaskTracker::default();
     tracker
         .spawn(async move {

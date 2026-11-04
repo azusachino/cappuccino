@@ -6,11 +6,10 @@ use crate::{
     agents, conversation, herdr, mutation, prompt, questions, reconcile, stats, transcript,
 };
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Json, Path as AxumPath, Query, State};
+use axum::extract::{Json, Path as AxumPath, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct BridgeState {
@@ -90,48 +89,26 @@ pub async fn agents(State(state): State<Arc<BridgeState>>) -> Response {
         },
         Err(error) => error_response(
             StatusCode::BAD_GATEWAY,
-            "herdr_unreachable",
+            "upstream_unavailable",
             &error.to_string(),
         ),
-    }
-}
-
-pub async fn transcript(
-    State(state): State<Arc<BridgeState>>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Response {
-    let Some(session) = query.get("session").filter(|session| !session.is_empty()) else {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            "session is required",
-        );
-    };
-    match transcript::resolve_transcript(session, state.pi_agent_dir.as_deref()).await {
-        Ok(path) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "application/json")],
-            transcript::transcript_json(session, path.as_deref()).to_string(),
-        )
-            .into_response(),
-        Err(message) => error_response(StatusCode::BAD_GATEWAY, "protocol", &message),
     }
 }
 
 /// WS /api/stream?session=<locator>
 pub async fn stream(
     State(state): State<Arc<BridgeState>>,
-    Query(query): Query<HashMap<String, String>>,
+    AxumPath(session_id): AxumPath<String>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    let Some(session) = query.get("session").cloned() else {
+    if session_id.is_empty() {
         return error_response(
             StatusCode::BAD_REQUEST,
             "bad_request",
-            "session is required",
+            "sessionId is required",
         );
-    };
-    upgrade.on_upgrade(move |socket| stream_socket(state, session, socket))
+    }
+    upgrade.on_upgrade(move |socket| stream_socket(state, session_id, socket))
 }
 
 async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: WebSocket) {
@@ -168,7 +145,7 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
 
     if socket
         .send(Message::Text(
-            json!({"event": "stream_open", "session_id": session, "generation": generation})
+            json!({"event": "stream_open", "session_id": session, "stream_generation": generation})
                 .to_string()
                 .into(),
         ))
@@ -301,7 +278,7 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
         if ring.generation != generation {
             if socket
                 .send(Message::Text(
-                    json!({"event": "stream_reset", "generation": ring.generation})
+                    json!({"event": "stream_reset", "stream_generation": ring.generation})
                         .to_string()
                         .into(),
                 ))
@@ -315,7 +292,7 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
             generation = ring.generation;
         }
         if !new_entries.is_empty() {
-            let event = json!({"event": "entries", "entries": new_entries});
+            let event = json!({"event": "entries", "stream_generation": ring.generation, "entries": new_entries});
             if socket
                 .send(Message::Text(event.to_string().into()))
                 .await
@@ -328,14 +305,19 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
 }
 
 /// Spends the answered card's id before anything is typed; a racing or repeated answer is stale.
+/// A stale prompt answer. `on_screen_prompt_id` names the card on screen, or is null.
+fn stale_prompt(message: &str, on_screen_prompt_id: Option<&str>) -> Response {
+    crate::protocol::error(
+        StatusCode::CONFLICT,
+        "stale_prompt",
+        message,
+        json!({"on_screen_prompt_id": on_screen_prompt_id}),
+    )
+}
+
 fn claimed(pane_id: &str, prompt_id: &str) -> Option<Response> {
-    (!prompt::claim(pane_id, prompt_id)).then(|| {
-        error_response(
-            StatusCode::CONFLICT,
-            "stale_prompt",
-            "this prompt was already answered",
-        )
-    })
+    (!prompt::claim(pane_id, prompt_id))
+        .then(|| stale_prompt("this prompt was already answered", None))
 }
 
 async fn send_stream_unavailable(socket: &mut WebSocket) {
@@ -363,10 +345,16 @@ async fn resolve_pane(state: &Arc<BridgeState>, session: &str) -> Option<String>
 
 /// The question form on screen while `prompt_id` still names it, untouched by the terminal.
 async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form, Response> {
-    let stale = |message: &str| error_response(StatusCode::CONFLICT, "stale_prompt", message);
+    let stale = |message: &str| stale_prompt(message, None);
     let screen = herdr::pane_read_recent(pane_id, crate::tuning::active().stream.screen_lines)
         .await
-        .map_err(|err| error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string()))?;
+        .map_err(|err| {
+            error_response(
+                StatusCode::BAD_GATEWAY,
+                "upstream_unavailable",
+                &err.to_string(),
+            )
+        })?;
     let Some(form) = questions::form(&screen) else {
         return Err(stale("the question is no longer shown"));
     };
@@ -375,9 +363,10 @@ async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form,
         return Err(stale("this question was already answered"));
     };
     if shown != prompt_id {
-        return Err(stale(&format!(
-            "the question on screen has changed (on screen {shown})"
-        )));
+        return Err(stale_prompt(
+            "the question on screen has changed",
+            Some(&shown),
+        ));
     }
     // Toggles are relative: ticks made in the terminal would be undone.
     if form.ticked {
@@ -490,7 +479,7 @@ pub async fn agent_conversation(
                 }
                 Err(err) => error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "io_error",
+                    "internal_error",
                     &format!("cannot read transcript: {err}"),
                 ),
             }
@@ -522,9 +511,11 @@ pub async fn agent_conversation(
                         )
                             .into_response()
                     }
-                    Err(err) => {
-                        error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string())
-                    }
+                    Err(err) => error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "upstream_unavailable",
+                        &err.to_string(),
+                    ),
                 }
             } else {
                 error_response(
@@ -622,7 +613,7 @@ pub async fn control_agent(
         Ok(_) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json")],
-            json!({"event": "control_sent", "action": request.action, "session_id": session_id})
+            json!({"event": "control_typed", "action": request.action, "session_id": session_id})
                 .to_string(),
         )
             .into_response(),
@@ -681,7 +672,7 @@ pub async fn submit_agent_prompt(
                 Ok(_) => (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "application/json")],
-                    json!({"event": "prompt_sent", "session_id": session_id}).to_string(),
+                    json!({"event": "prompt_typed", "session_id": session_id}).to_string(),
                 )
                     .into_response(),
                 Err(_) => mutation::unknown(),
@@ -689,9 +680,8 @@ pub async fn submit_agent_prompt(
         }
         prompt::PromptSubmission::AnswerPrompt {
             prompt_id,
-            action,
-            option_index,
             option_id,
+            action,
         } => {
             let active_screen = match herdr::pane_read_recent(
                 &pane_id,
@@ -703,28 +693,23 @@ pub async fn submit_agent_prompt(
                 Err(err) => {
                     return error_response(
                         StatusCode::BAD_GATEWAY,
-                        "herdr_error",
+                        "upstream_unavailable",
                         &err.to_string(),
                     );
                 }
             };
 
             let Some(card) = prompt::shown(&pane_id, prompt::screen_card(&active_screen)) else {
-                return error_response(
-                    StatusCode::CONFLICT,
-                    "stale_prompt",
-                    "interactive prompt is no longer visible on screen",
-                );
+                return stale_prompt("interactive prompt is no longer visible on screen", None);
             };
 
             if card.prompt_id != prompt_id {
-                return error_response(
-                    StatusCode::CONFLICT,
-                    "stale_prompt",
+                return stale_prompt(
                     &format!(
                         "prompt id mismatch: expected {}, on screen {}",
                         prompt_id, card.prompt_id
                     ),
+                    Some(&card.prompt_id),
                 );
             }
 
@@ -755,41 +740,49 @@ pub async fn submit_agent_prompt(
                 return (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "application/json")],
-                    json!({"event": "prompt_answered", "action": "canceled", "prompt_id": prompt_id}).to_string(),
+                    json!({"event": "prompt_answered", "prompt_id": prompt_id, "outcome": "cancelled"}).to_string(),
                 )
                     .into_response();
             }
 
-            // Fail closed: an approval's first option allows the command, so a missing,
-            // unknown or contradictory choice must never fall back to an index.
-            if action.as_deref() != Some("select_option") {
+            // Fail closed: an approval's first option allows the command, so a missing or
+            // unknown choice must never fall back to a position.
+            if action.is_some() {
                 return error_response(
                     StatusCode::BAD_REQUEST,
                     "bad_answer",
-                    "action must be select_option or cancel",
+                    "action must be cancel when option_id is absent",
                 );
             }
-            let by_id = option_id
-                .as_ref()
-                .map(|id| card.options.iter().position(|o| o.id == *id));
-            let opt_idx = match (option_index, by_id) {
-                (_, Some(None)) => None,
-                (Some(idx), Some(Some(pos))) if idx != pos => None,
-                (Some(idx), _) => Some(idx),
-                (None, Some(pos)) => pos,
-                (None, None) => None,
-            };
-            let Some(opt_idx) = opt_idx.filter(|idx| *idx < card.options.len()) else {
+            let Some(option_id) = option_id else {
                 return error_response(
                     StatusCode::BAD_REQUEST,
                     "bad_answer",
-                    "option_index or option_id must name one option on the card",
+                    "option_id is required unless action is cancel",
+                );
+            };
+            let Some(index) = card
+                .options
+                .iter()
+                .position(|option| option.id == option_id)
+            else {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "bad_answer",
+                    "option_id must name one option on the card",
+                );
+            };
+            let Some(row) = prompt::screen_row(&card.card_type, &option_id, index) else {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "bad_answer",
+                    "option_id must name one option on the card",
                 );
             };
 
             // If numbered choice (1, 2, 3), press digit + enter. The review acts on the digit
             // alone; a following enter would land in the agent's input.
-            let key_digit = format!("{}", opt_idx + 1);
+            let key_digit = row.to_string();
             let keys: &[&str] = if card.card_type == questions::REVIEW {
                 &[&key_digit]
             } else {
@@ -809,7 +802,8 @@ pub async fn submit_agent_prompt(
                     json!({
                         "event": "prompt_answered",
                         "prompt_id": prompt_id,
-                        "selected_index": opt_idx,
+                        "outcome": "option",
+                        "option_id": option_id,
                     })
                     .to_string(),
                 )
@@ -871,7 +865,8 @@ pub async fn submit_agent_prompt(
             (
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, "application/json")],
-                json!({"event": "question_answered", "prompt_id": prompt_id}).to_string(),
+                json!({"event": "prompt_answered", "prompt_id": prompt_id, "outcome": "answered"})
+                    .to_string(),
             )
                 .into_response()
         }

@@ -37,8 +37,8 @@ PROTOCOL_HEADERS = {"X-Cappuccino-Protocol": "2"}
 HANDSHAKE = {
     "protocol_min": 2,
     "protocol_max": 2,
-    "capabilities": {
-        name: 1
+    "offered_capabilities": {
+        name: {"version": 1}
         for name in (
             "agent_discovery",
             "live_output",
@@ -46,7 +46,6 @@ HANDSHAKE = {
             "prompt_input",
             "prompt_answers",
             "agent_control",
-            "mutation_binding",
             "completion_signals",
         )
     },

@@ -29,7 +29,7 @@ fn bounded(value: &str) -> bool {
 pub fn unknown() -> Response {
     error_response(
         StatusCode::BAD_GATEWAY,
-        "mutation_outcome_unknown",
+        "outcome_unknown",
         "Input may have been applied; inspect current state before another action",
     )
 }

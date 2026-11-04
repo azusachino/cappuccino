@@ -310,7 +310,7 @@ When an agent without `--dangerously-skip-permissions` attempts a high-stakes co
 
 ### 6.3 Prompt answer responses
 
-The answer response is `{"event": "prompt_answered", "prompt_id": "...", "outcome": "option"}` or `"outcome": "cancelled"`. The field `outcome` replaces the earlier `action` field, so one word means one thing.
+The answer response is `{"event": "prompt_answered", "prompt_id": "...", "outcome": "option"}` or `"outcome": "cancelled"`. A question submission returns `"outcome": "answered"`. A question submission returns `"outcome": "answered"`. The field `outcome` replaces the earlier `action` field, so one word means one thing.
 
 ### 6.4 Prompt delivery
 

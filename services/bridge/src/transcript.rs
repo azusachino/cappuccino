@@ -213,17 +213,6 @@ impl ResolvedTranscript {
     }
 }
 
-/// Resolves one session locator (agent name or pane id) to its transcript.
-/// Returns Ok(Some(path)) for Pi, Claude or Agy, or Ok(None) if not available.
-pub async fn resolve_transcript(
-    session: &str,
-    pi_agent_dir: Option<&Path>,
-) -> Result<Option<PathBuf>, String> {
-    Ok(resolve_session_transcript(session, pi_agent_dir)
-        .await?
-        .map(|r| r.path().to_path_buf()))
-}
-
 /// Resolves session locator to a typed ResolvedTranscript (Pi, Claude or Agy).
 pub async fn resolve_session_transcript(
     session: &str,
@@ -356,23 +345,6 @@ async fn resolve_agy_transcript_for_pane(pane_id: &str) -> Option<PathBuf> {
         return None;
     }
     Some(path)
-}
-
-/// Shape returned by GET /api/transcript.
-pub fn transcript_json(session_id: &str, path: Option<&Path>) -> Value {
-    match path {
-        Some(path) => serde_json::json!({
-            "session_id": session_id,
-            "transcript_path": path.to_string_lossy(),
-            "available": true,
-        }),
-        None => serde_json::json!({
-            "session_id": session_id,
-            "transcript_path": Value::Null,
-            "available": false,
-            "reason": "no canonical pi transcript in the sessions store",
-        }),
-    }
 }
 
 #[cfg(test)]
@@ -694,7 +666,7 @@ mod tests {
             "HERDR_SOCKET_PATH",
             "/nonexistent/cappuccino-transcript.sock",
         );
-        let result = resolve_transcript("cap-spike-agent", None).await;
+        let result = resolve_session_transcript("cap-spike-agent", None).await;
         std::env::remove_var("HERDR_SOCKET_PATH");
         if let Some(saved) = saved {
             std::env::set_var("HERDR_SOCKET_PATH", saved);

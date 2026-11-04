@@ -46,7 +46,7 @@ HOME and XDG directories, using a task-owned Cargo root and auto-apply disabled.
 - After `stop`, the HTTP listener refuses connections and the control socket
   and control record are removed. State directories are mode `0700`; lock and
   log files are `0600`.
-- `POST /api/v2/handshake` returns `event: paired` JSON while the bridge runs.
+- `POST /api/v2/handshake` returns `event: "handshake_accepted"` JSON while the bridge runs.
 - No Tailscale command ran. No existing Herdr server, agent session or Serve
   configuration was touched.
 

@@ -32,18 +32,16 @@ same base URL for both transports.
 | --- | --- | --- |
 | `POST /api/v2/handshake` | HTTP | reachability, machine identity, version and capability advertisement |
 | `GET /api/v2/agents` | HTTP | Herdr `agent.list` mapping; names/pane IDs are locators, not proven native Pi session IDs |
-| `GET /api/v2/transcript?session=…` | HTTP | resolves Herdr-reported `agent_session`; fails closed when missing or outside Pi's canonical session store |
 | `GET /api/v2/agents/{sessionId}/conversation` | HTTP | canonical transcript for Pi, Claude Code or Agy; labeled `scrollback` when no usable session is reported |
 | `POST /api/v2/agents/{sessionId}/prompt` | HTTP | prompt text (commands need `confirmed`) or an answer to a visible card |
 | `POST /api/v2/agents/{sessionId}/control` | HTTP | `interrupt` (Escape) or `new_session` (`/new`, refused while the agent is busy) |
-| `/api/v2/stream?session=…` | WebSocket | read-only pane-line append/reset events with visible gaps |
+| `/api/v2/agents/{sessionId}/stream` | WebSocket | read-only pane-line events and status, each carrying `stream_generation` |
 
-`POST /api/v2/handshake` is the only entry point. It returns `machine_id`, `machine_name`, `bridge_version` and `protocol` (2), plus `capabilities` (each offered capability mapped to its version) and `agreed` (the capabilities both sides speak, at the lower version). The phone gates actions on `agreed`, not on `capabilities`. Capabilities advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Identity validation is unchanged. The negotiation rules are in [the v2 contract](../../docs/bridge-v2-contract.md). Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog. `telegram_notifications` is `true` only after a Telegram alert has been delivered, and `telegram_notifications_configured` is `true` while the Telegram route is not disabled. Telegram route status is under `telegram` in the same response, with `route` and the enabled `events`; setup is in [Telegram alerts setup](../../docs/telegram-alerts-setup.md).
+`POST /api/v2/handshake` is the only entry point. It returns `event: "handshake_accepted"`, `machine_id`, `machine_name`, `bridge_version` and `protocol_version` (2), plus `offered_capabilities` and `agreed_capabilities`. Each capability is `{"version": n}`. The phone gates actions on `agreed_capabilities`, not on `offered_capabilities`. Capabilities advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Identity validation is unchanged. The negotiation rules are in [the v2 contract](../../docs/bridge-v2-contract.md). Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog. `telegram_notifications` is `true` only after a Telegram alert has been delivered, and `telegram_notifications_configured` is `true` while the Telegram route is not disabled. Telegram route status is under `telegram` in the same response, with `route` and the enabled `events`; setup is in [Telegram alerts setup](../../docs/telegram-alerts-setup.md).
 
 Both mutation endpoints require `expected_session` with the selected `machine_id`
 (UUID), `pane_id` and opaque `native_session_ref`, including every answer/cancel
-variant. `mutation_binding: true` advertises this pre-dispatch contract. Clients
-must treat missing/false support as read-only, without an unbound fallback.
+variant. The binding is required on every mutation; it is not a capability.
 Older unbound requests receive 428 `session_binding_required`; malformed binding
 gets 400 `bad_session_binding`, and a changed/missing binding gets 409
 `stale_session` before input. Unavailable metadata fails closed with 503
