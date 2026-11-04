@@ -143,23 +143,42 @@ struct RecentHistoryTests {
 
   @Test func singleSelectTakesExactlyOneChoiceOrText() {
     let single = PromptQuestion(
-      header: "H", question: "Q?", multiSelect: false,
+      id: "q-1", header: "H", question: "Q?", multiSelect: false,
       options: [
         PromptOption(id: "opt-0", label: "A", description: nil),
         PromptOption(id: "opt-1", label: "B", description: nil),
       ])
-    #expect(answerComplete(single, QuestionAnswer(selected: [1], other: nil)))
-    #expect(answerComplete(single, QuestionAnswer(selected: [], other: "own")))
-    #expect(!answerComplete(single, QuestionAnswer(selected: [], other: nil)))
-    #expect(!answerComplete(single, QuestionAnswer(selected: [0], other: "own")))
-    #expect(!answerComplete(single, QuestionAnswer(selected: [0, 1], other: nil)))
+    #expect(
+      answerComplete(
+        single, QuestionAnswer(questionID: "q-1", selectedOptionIDs: ["opt-1"], freeText: nil)))
+    #expect(
+      answerComplete(
+        single, QuestionAnswer(questionID: "q-1", selectedOptionIDs: [], freeText: "own")))
+    #expect(
+      !answerComplete(
+        single, QuestionAnswer(questionID: "q-1", selectedOptionIDs: [], freeText: nil)))
+    #expect(
+      !answerComplete(
+        single, QuestionAnswer(questionID: "q-1", selectedOptionIDs: ["opt-0"], freeText: "own")))
+    #expect(
+      !answerComplete(
+        single,
+        QuestionAnswer(questionID: "q-1", selectedOptionIDs: ["opt-0", "opt-1"], freeText: nil)))
   }
 
   @Test func multiSelectTakesAtLeastOne() {
-    let multi = PromptQuestion(header: "H", question: "Q?", multiSelect: true, options: [])
-    #expect(answerComplete(multi, QuestionAnswer(selected: [0, 1], other: "own")))
-    #expect(answerComplete(multi, QuestionAnswer(selected: [], other: "own")))
-    #expect(!answerComplete(multi, QuestionAnswer(selected: [], other: nil)))
+    let multi = PromptQuestion(
+      id: "q-1", header: "H", question: "Q?", multiSelect: true, options: [])
+    #expect(
+      answerComplete(
+        multi,
+        QuestionAnswer(questionID: "q-1", selectedOptionIDs: ["opt-0", "opt-1"], freeText: "own")))
+    #expect(
+      answerComplete(
+        multi, QuestionAnswer(questionID: "q-1", selectedOptionIDs: [], freeText: "own")))
+    #expect(
+      !answerComplete(
+        multi, QuestionAnswer(questionID: "q-1", selectedOptionIDs: [], freeText: nil)))
   }
 }
 

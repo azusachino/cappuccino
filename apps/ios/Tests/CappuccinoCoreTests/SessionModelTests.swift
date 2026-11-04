@@ -26,7 +26,8 @@ private final class FakeBridge: AgentSessionServing, @unchecked Sendable {
     return binding
   }
 
-  func conversationSnapshot(base: URL, session: String, agent: String?) async throws
+  func conversationSnapshot(base: URL, session: String, agent: String?, machineID: UUID?)
+    async throws
     -> ConversationSnapshot
   {
     if let snapshotFactory { return try await snapshotFactory() }
@@ -60,7 +61,7 @@ private final class FakeBridge: AgentSessionServing, @unchecked Sendable {
   }
 
   func answerPrompt(
-    base: URL, session: String, binding: SessionBinding, promptID: String, optionIndex: Int?,
+    base: URL, session: String, binding: SessionBinding, promptID: String,
     optionID: String?, action: String?
   ) async throws {
     try await act("answer:\(promptID)", binding)
@@ -300,14 +301,14 @@ private struct InstantDiscovery: BridgeMachineServing {
     let refused = try await fixture(capabilities: ["prompt_answers": false])
     defer { refused.model.clearSelection() }
     await selectLive(refused)
-    await refused.model.answerPrompt("p-1", optionIndex: 0)
+    await refused.model.answerPrompt("p-1", optionID: "opt-0")
     #expect(refused.bridge.sent.isEmpty)
     #expect(refused.model.actionError == "Prompt answers unsupported by this bridge")
 
     let unknown = try await fixture(capabilities: [:])
     defer { unknown.model.clearSelection() }
     await selectLive(unknown)
-    await unknown.model.answerPrompt("p-1", optionIndex: 0)
+    await unknown.model.answerPrompt("p-1", optionID: "opt-0")
     #expect(unknown.bridge.sent == ["answer:p-1"])
   }
 
@@ -316,7 +317,8 @@ private struct InstantDiscovery: BridgeMachineServing {
     defer { fx.model.clearSelection() }
     await selectLive(fx)
     fx.bridge.failure = BridgeError.protocolError("answer it in the terminal")
-    await fx.model.answerQuestions("q-toolu_1", [QuestionAnswer(selected: [0], other: nil)])
+    await fx.model.answerQuestions(
+      "q-toolu_1", [QuestionAnswer(questionID: "q-1", selectedOptionIDs: ["opt-0"], freeText: nil)])
     #expect(fx.model.actionError == "answer it in the terminal")
     #expect(fx.model.streamError == nil)
   }
@@ -328,7 +330,8 @@ private struct InstantDiscovery: BridgeMachineServing {
     fx.bridge.latency = 50_000_000
     fx.bridge.failure = BridgeError.protocolError("late refusal")
     let action = Task {
-      await fx.model.answerQuestions("q", [QuestionAnswer(selected: [0], other: nil)])
+      await fx.model.answerQuestions(
+        "q", [QuestionAnswer(questionID: "q-1", selectedOptionIDs: ["opt-0"], freeText: nil)])
     }
     try await Task.sleep(nanoseconds: 10_000_000)
     fx.model.select(profileID: fx.profileID, agent: nil)
@@ -349,7 +352,7 @@ private struct InstantDiscovery: BridgeMachineServing {
   @Test func streamReducesPromptsAndStatusForTheSelectedAgent() async throws {
     let card = PromptCard(
       promptID: "p-1", type: "tool_approval", title: "Approve", message: nil, toolName: "bash",
-      command: "make test", options: [], selectedIndex: 0, questions: [])
+      command: "make test", options: [], defaultOptionID: nil, questions: [])
     let fx = try await fixture(
       events: [
         .open(sessionID: "s-1", generation: 1),
@@ -549,7 +552,8 @@ private struct InstantDiscovery: BridgeMachineServing {
   private var approval: PromptCard {
     PromptCard(
       promptID: "p-stale", type: "tool_approval", title: "Approve", message: nil,
-      toolName: "bash", command: "synthetic-command", options: [], selectedIndex: 0, questions: [])
+      toolName: "bash", command: "synthetic-command", options: [], defaultOptionID: nil,
+      questions: [])
   }
 
   private var liveEvents: [AgentStreamEvent] {

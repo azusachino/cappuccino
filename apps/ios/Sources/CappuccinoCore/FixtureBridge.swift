@@ -57,9 +57,9 @@ extension FixtureBridge: BridgeMachineServing {
 }
 
 extension FixtureBridge: AgentSessionServing {
-  public func conversationSnapshot(base: URL, session: String, agent: String?) async throws
-    -> ConversationSnapshot
-  {
+  public func conversationSnapshot(
+    base: URL, session: String, agent: String?, machineID: UUID?
+  ) async throws -> ConversationSnapshot {
     ConversationSnapshot(
       turns: Self.turns, source: "canonical_log", conversationID: nil,
       machineID: Self.machineID, stats: nil)
@@ -86,7 +86,7 @@ extension FixtureBridge: AgentSessionServing {
   ) async throws {}
 
   public func answerPrompt(
-    base: URL, session: String, binding: SessionBinding, promptID: String, optionIndex: Int?,
+    base: URL, session: String, binding: SessionBinding, promptID: String,
     optionID: String?, action: String?
   ) async throws {}
 

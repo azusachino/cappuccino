@@ -4,8 +4,8 @@ import Observation
 /// The calls the app model makes to one bridge. Each request gets a fresh client from the
 /// model's factory, as Android's ConnectedViewModel does.
 public protocol AgentSessionServing: Sendable {
-  func conversationSnapshot(base: URL, session: String, agent: String?) async throws
-    -> ConversationSnapshot
+  func conversationSnapshot(base: URL, session: String, agent: String?, machineID: UUID?)
+    async throws -> ConversationSnapshot
   func events(base: URL, session: String) -> AsyncThrowingStream<AgentStreamEvent, Error>
   func verifyBinding(base: URL, machineID: UUID, agent: AgentRow) async throws -> Bool
   func controlAgent(
@@ -16,7 +16,7 @@ public protocol AgentSessionServing: Sendable {
     base: URL, session: String, binding: SessionBinding, text: String, confirmed: Bool
   ) async throws
   func answerPrompt(
-    base: URL, session: String, binding: SessionBinding, promptID: String, optionIndex: Int?,
+    base: URL, session: String, binding: SessionBinding, promptID: String,
     optionID: String?, action: String?
   ) async throws
   func answerQuestions(
@@ -226,7 +226,7 @@ public final class SessionModel {
       let client = makeClient()
       let snapshot = try await machines.request(profile) { base in
         try await client.conversationSnapshot(
-          base: base, session: agent.sessionID, agent: agent.provider)
+          base: base, session: agent.sessionID, agent: agent.provider, machineID: profile.machineID)
       }
       if let machine = snapshot.machineID, machine != profile.machineID {
         throw BridgeError.protocolError("Conversation machine identity changed")
@@ -287,7 +287,8 @@ public final class SessionModel {
           let expectedConversation = conversationID
           let snapshot = try await machines.request(profile) { base in
             try await client.conversationSnapshot(
-              base: base, session: agent.sessionID, agent: agent.provider)
+              base: base, session: agent.sessionID, agent: agent.provider,
+              machineID: profile.machineID)
           }
           guard token == epoch, !Task.isCancelled else { return }
           guard snapshot.source == "canonical_log" else {
@@ -390,9 +391,9 @@ public final class SessionModel {
     }
   }
 
-  /// Answers a screen prompt by option index, id or action.
+  /// Answers a screen prompt by option id, or cancels it.
   public func answerPrompt(
-    _ promptID: String, optionIndex: Int? = nil, optionID: String? = nil, action: String? = nil
+    _ promptID: String, optionID: String? = nil, action: String? = nil
   ) async {
     await perform(
       "Failed to answer prompt", supported: capabilities?["prompt_answers"] != false,
@@ -400,7 +401,6 @@ public final class SessionModel {
     ) { client, base, session, binding in
       try await client.answerPrompt(
         base: base, session: session, binding: binding, promptID: promptID,
-        optionIndex: optionIndex,
         optionID: optionID, action: action)
     }
   }

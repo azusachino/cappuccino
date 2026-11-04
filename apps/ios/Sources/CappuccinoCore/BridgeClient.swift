@@ -11,14 +11,15 @@ public struct BridgeClient: Sendable {
   static let protocolHeader = "X-Cappuccino-Protocol"
   /// Capabilities this app implements; each is declared at version 1 in the handshake.
   static let clientCapabilities = [
-    "agent_discovery", "live_output", "conversation_history", "prompt_input",
-    "prompt_answers", "agent_control", "mutation_binding", "completion_signals",
+    "agent_discovery", "conversation_sync", "live_output", "prompt_input",
+    "prompt_answers", "agent_control", "completion_signals",
   ]
   static var handshakeBody: [String: Any] {
     [
       "protocol_min": 2,
       "protocol_max": 2,
-      "capabilities": Dictionary(uniqueKeysWithValues: clientCapabilities.map { ($0, 1) }),
+      "offered_capabilities": Dictionary(
+        uniqueKeysWithValues: clientCapabilities.map { ($0, ["version": 1]) }),
     ]
   }
 
@@ -105,7 +106,7 @@ public struct BridgeClient: Sendable {
 
   /// Fetches structured conversation turns for an agent session
   public func fetchConversation(base url: URL, session: String) async throws -> [String: Any] {
-    let endpoint = agentURL(url, session: session, "conversation")
+    let endpoint = agentURL(url, session: session, "conversation/sync")
     return try await get(endpoint)
   }
 
@@ -129,7 +130,6 @@ public struct BridgeClient: Sendable {
     session: String,
     binding: SessionBinding,
     promptID: String,
-    optionIndex: Int? = nil,
     optionID: String? = nil,
     action: String? = nil
   ) async throws {
@@ -139,7 +139,6 @@ public struct BridgeClient: Sendable {
       "prompt_id": promptID,
       "expected_session": binding.json,
     ]
-    if let optionIndex { body["option_index"] = optionIndex }
     if let optionID { body["option_id"] = optionID }
     if let action { body["action"] = action }
     _ = try await post(endpoint, body: body)
@@ -241,20 +240,13 @@ extension BridgeClient {
   /// the locator must echo back, and a canonical identity needs its canonical_log
   /// source, a machine and, when `agent` is known, that agent's provider prefix.
   public func conversationSnapshot(
-    base url: URL, session: String, agent: String? = nil
+    base url: URL, session: String, agent: String? = nil, machineID: UUID? = nil
   ) async throws -> ConversationSnapshot {
-    let json = BridgeJSON(try await get(agentURL(url, session: session, "conversation")))
-    guard try json.string("session_id") == session else {
-      throw BridgeError.protocolError("Conversation belongs to a different locator")
-    }
-    let source = try json.string("source")
+    let json = BridgeJSON(try await get(agentURL(url, session: session, "conversation/sync")))
+    // The sync response names no machine or session: the caller's verified machine is the
+    // identity, and the locator is the one requested.
+    let source = try json.string("mode") == "scrollback" ? "scrollback" : "canonical_log"
     let identity = try json.optionalString("conversation_id")
-    let machineID = try json.optionalString("machine_id").map { raw in
-      guard let id = UUID(uuidString: raw) else {
-        throw BridgeError.protocolError("Invalid machine identity")
-      }
-      return id
-    }
     if let identity {
       let canonical =
         agent.map { CanonicalConversationID.isCanonical(identity, agent: $0) }
@@ -299,8 +291,10 @@ extension BridgeClient {
     answers: [QuestionAnswer]
   ) async throws {
     let rows: [[String: Any]] = answers.map { answer in
-      var row: [String: Any] = ["selected": answer.selected]
-      if let other = answer.other { row["other"] = other }
+      var row: [String: Any] = [
+        "question_id": answer.questionID, "selected_option_ids": answer.selectedOptionIDs,
+      ]
+      if let freeText = answer.freeText { row["free_text"] = freeText }
       return row
     }
     _ = try await post(
@@ -319,7 +313,7 @@ extension BridgeClient {
     return URL(string: "/api/v2/agents/\(component)/\(leaf)", relativeTo: base)!.absoluteURL
   }
 
-  private static let locatorCharacters = CharacterSet.alphanumerics.union(
+  static let locatorCharacters = CharacterSet.alphanumerics.union(
     CharacterSet(charactersIn: "-._~"))
 }
 

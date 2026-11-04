@@ -55,11 +55,14 @@ private struct ScreenPrompt: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
       }
+      // Display only: a review's answers are shown here and never sent back by the phone.
+      ForEach(Array(prompt.reviewAnswers.enumerated()), id: \.offset) { _, review in
+        Text(review.answer).font(.body)
+      }
       ForEach(Array(prompt.options.enumerated()), id: \.offset) { index, option in
         Button {
           Task {
-            await session.answerPrompt(
-              prompt.promptID, optionIndex: index, optionID: option.id, action: "select_option")
+            await session.answerPrompt(prompt.promptID, optionID: option.id)
           }
         } label: {
           VStack(alignment: .leading, spacing: 2) {

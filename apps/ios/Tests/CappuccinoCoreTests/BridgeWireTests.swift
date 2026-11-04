@@ -6,7 +6,7 @@ import Testing
 /// Ports BridgeDetailsTest, CanonicalConversationIdTest and the wire cases of BridgeProtocolTest.
 struct BridgeWireTests {
   private let prefix =
-    #""event":"paired","machine_id":"00000000-0000-0000-0000-000000000001","plugin":"cappuccino-bridge""#
+    #""event":"handshake_accepted","machine_id":"00000000-0000-0000-0000-000000000001","plugin":"cappuccino-bridge""#
 
   private func json(_ text: String) throws -> BridgeJSON {
     try BridgeJSON.parse(Data(text.utf8))
@@ -15,7 +15,7 @@ struct BridgeWireTests {
   @Test func agreedCapabilitiesAreTrueAndOfferedOnesNotAgreedAreFalse() throws {
     let details = try parseBridgeDetails(
       json(
-        "{\(prefix),\"protocol\":2,\"bridge_version\":\"0.2.0\",\"machine_name\":\"  Mini \",\"capabilities\":{\"live_output\":1,\"prompt_input\":1},\"agreed\":{\"live_output\":1}}"
+        "{\(prefix),\"protocol_version\":2,\"bridge_version\":\"0.2.0\",\"machine_name\":\"  Mini \",\"offered_capabilities\":{\"live_output\":1,\"prompt_input\":1},\"agreed_capabilities\":{\"live_output\":1}}"
       ))
     #expect(details.version == "0.2.0")
     #expect(details.machineName == "Mini")
@@ -26,20 +26,25 @@ struct BridgeWireTests {
 
   @Test func aHandshakeWithoutCapabilitiesIsRejected() {
     #expect(throws: BridgeError.self) {
-      try parseBridgeDetails(json("{\(prefix),\"protocol\":2}"))
+      try parseBridgeDetails(json("{\(prefix),\"protocol_version\":2}"))
     }
   }
 
   @Test func malformedCapabilitiesAreRejected() {
     #expect(throws: BridgeError.self) {
-      try parseBridgeDetails(json("{\(prefix),\"protocol\":2,\"capabilities\":true,\"agreed\":{}}"))
+      try parseBridgeDetails(
+        json(
+          "{\(prefix),\"protocol_version\":2,\"offered_capabilities\":true,\"agreed_capabilities\":{}}"
+        ))
     }
   }
 
   @Test func protocolOneIsRefusedAndTheMessageNamesTheRequirement() {
     do {
       _ = try parseBridgeDetails(
-        json("{\(prefix),\"protocol\":1,\"capabilities\":{},\"agreed\":{}}"))
+        json(
+          "{\(prefix),\"protocol_version\":1,\"offered_capabilities\":{},\"agreed_capabilities\":{}}"
+        ))
       Issue.record("protocol 1 must fail closed")
     } catch let error as BridgeError {
       #expect(error.message.contains("protocol 1"))
@@ -79,13 +84,13 @@ struct BridgeWireTests {
     let card = try parsePromptCard(
       json(
         """
-        {"prompt_id":"q-toolu_1","type":"ask_user_question","title":"Pick a color?","tool_name":"AskUserQuestion","options":[],"selected_index":0,"questions":[{"header":"Color","question":"Pick a color?","multi_select":false,"options":[{"id":"opt-0","label":"Red","description":"warm"},{"id":"opt-1","label":"Blue"}]},{"header":"Pets","question":"Which pets?","multi_select":true,"options":[{"id":"opt-0","label":"Cat"}]}]}
+        {"prompt_id":"q-toolu_1","type":"ask_user_question","title":"Pick a color?","tool_name":"AskUserQuestion","options":[],"questions":[{"id":"q-color","header":"Color","question":"Pick a color?","multi_select":false,"options":[{"id":"opt-0","label":"Red","description":"warm"},{"id":"opt-1","label":"Blue"}]},{"id":"q-pets","header":"Pets","question":"Which pets?","multi_select":true,"options":[{"id":"opt-0","label":"Cat"}]}]}
         """))
     #expect(card.questions.count == 2)
     #expect(
       card.questions[0]
         == PromptQuestion(
-          header: "Color", question: "Pick a color?", multiSelect: false,
+          id: "q-color", header: "Color", question: "Pick a color?", multiSelect: false,
           options: [
             PromptOption(id: "opt-0", label: "Red", description: "warm"),
             PromptOption(id: "opt-1", label: "Blue", description: nil),
@@ -100,7 +105,7 @@ struct BridgeWireTests {
   @Test func preservesStructuredToolArgumentsAndResultsForDisclosure() throws {
     let turns = try parseConversationTurns(
       json(
-        #"{"turns":[{"id":"entry","role":"agent","parts":[{"type":"tool_call","name":"bash","input":{"command":"printf \"hello\"","timeout":10,"nested":[true,null]},"output":"hello"}]}]}"#
+        #"{"upserts":[{"id":"entry","role":"agent","parts":[{"type":"tool_call","name":"bash","input":{"command":"printf \"hello\"","timeout":10,"nested":[true,null]},"output":"hello"}]}]}"#
       ))
     guard case .toolCall(let tool) = turns[0].parts[0] else {
       Issue.record("expected a tool call")
@@ -116,7 +121,7 @@ struct BridgeWireTests {
   @Test func toolImageCountIsParsedAndAbsentStaysNil() throws {
     let turns = try parseConversationTurns(
       json(
-        #"{"turns":[{"id":"t","role":"agent","parts":[{"type":"tool_call","name":"Read","input":{"file_path":"shot.png"},"output":"","images":2},{"type":"tool_call","name":"Read","input":"file"}]}]}"#
+        #"{"upserts":[{"id":"t","role":"agent","parts":[{"type":"tool_call","name":"Read","input":{"file_path":"shot.png"},"output":"","images":2},{"type":"tool_call","name":"Read","input":"file"}]}]}"#
       ))
     guard case .toolCall(let first) = turns[0].parts[0],
       case .toolCall(let second) = turns[0].parts[1]
@@ -142,7 +147,7 @@ struct BridgeWireTests {
   @Test func malformedPartsKeepTheTurnButDropItsParts() throws {
     let turns = try parseConversationTurns(
       json(
-        #"{"turns":[{"id":"t","role":"agent","text":"hi","parts":[{"type":"text","text":"ok"},{"type":"tool_call","name":"x","is_error":"yes"}]}]}"#
+        #"{"upserts":[{"id":"t","role":"agent","text":"hi","parts":[{"type":"text","text":"ok"},{"type":"tool_call","name":"x","is_error":"yes"}]}]}"#
       ))
     #expect(turns[0].text == "hi")
     #expect(turns[0].parts.isEmpty)
@@ -151,7 +156,7 @@ struct BridgeWireTests {
   @Test func parsesOnlyAbortedOrFailedResponseStatuses() throws {
     let turns = try parseConversationTurns(
       json(
-        #"{"turns":[{"id":"t","role":"agent","parts":[{"type":"response_status","status":"completed"},{"type":"response_status","status":"aborted","detail":"stopped"},{"type":"thinking","text":"hm"},{"type":"unknown"}]}]}"#
+        #"{"upserts":[{"id":"t","role":"agent","parts":[{"type":"response_status","status":"completed"},{"type":"response_status","status":"aborted","detail":"stopped"},{"type":"thinking","text":"hm"},{"type":"unknown"}]}]}"#
       ))
     #expect(
       turns[0].parts == [
@@ -162,7 +167,7 @@ struct BridgeWireTests {
 
   @Test func rejectsTurnsWithoutAnIdentity() {
     #expect(throws: BridgeError.self) {
-      try parseConversationTurns(json(#"{"turns":[{"role":"user"}]}"#))
+      try parseConversationTurns(json(#"{"upserts":[{"role":"user"}]}"#))
     }
   }
 }

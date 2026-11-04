@@ -4,11 +4,11 @@ import Foundation
 /// bridge can accept: a multi-select needs one choice or text; a single-select needs exactly
 /// one of a choice or text.
 public func answerComplete(_ question: PromptQuestion, _ answer: QuestionAnswer) -> Bool {
-  let hasText = !(answer.other?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+  let hasText = !(answer.freeText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
   if question.multiSelect {
-    return !answer.selected.isEmpty || hasText
+    return !answer.selectedOptionIDs.isEmpty || hasText
   }
-  return (answer.selected.count == 1) != hasText
+  return (answer.selectedOptionIDs.count == 1) != hasText
 }
 
 /// The answers being written on an AskUserQuestion card, all questions at once as the
@@ -50,8 +50,13 @@ public struct QuestionDraft: Equatable, Sendable {
 
   public var answers: [QuestionAnswer] {
     questions.indices.map { index in
+      let question = questions[index]
       let text = other[index].trimmingCharacters(in: .whitespacesAndNewlines)
-      return QuestionAnswer(selected: selected[index], other: text.isEmpty ? nil : text)
+      let optionIDs = selected[index].compactMap { option in
+        question.options.indices.contains(option) ? question.options[option].id : nil
+      }
+      return QuestionAnswer(
+        questionID: question.id, selectedOptionIDs: optionIDs, freeText: text.isEmpty ? nil : text)
     }
   }
 

@@ -79,7 +79,7 @@ struct AgentStreamTests {
   @Test func parsesAskUserQuestionCardsWithTheirQuestions() throws {
     let event = try parseStreamFrame(
       """
-      {"event":"prompt_request","session_id":"s-1","prompt":{"prompt_id":"q-toolu_1","type":"ask_user_question","title":"Pick a color?","tool_name":"AskUserQuestion","options":[],"selected_index":0,"questions":[{"header":"Color","question":"Pick a color?","multi_select":false,"options":[{"id":"opt-0","label":"Red","description":"warm"},{"id":"opt-1","label":"Blue"}]},{"header":"Pets","question":"Which pets?","multi_select":true,"options":[{"id":"opt-0","label":"Cat"}]}]}}
+      {"event":"prompt_request","session_id":"s-1","prompt":{"prompt_id":"q-toolu_1","type":"ask_user_question","title":"Pick a color?","tool_name":"AskUserQuestion","options":[],"questions":[{"id":"q-color","header":"Color","question":"Pick a color?","multi_select":false,"options":[{"id":"opt-0","label":"Red","description":"warm"},{"id":"opt-1","label":"Blue"}]},{"id":"q-pets","header":"Pets","question":"Which pets?","multi_select":true,"options":[{"id":"opt-0","label":"Cat"}]}]}}
       """)
     guard case .promptRequest(let session, let card) = event else {
       Issue.record("expected a prompt request")
@@ -90,7 +90,7 @@ struct AgentStreamTests {
     #expect(
       card.questions[0]
         == PromptQuestion(
-          header: "Color", question: "Pick a color?", multiSelect: false,
+          id: "q-color", header: "Color", question: "Pick a color?", multiSelect: false,
           options: [
             PromptOption(id: "opt-0", label: "Red", description: "warm"),
             PromptOption(id: "opt-1", label: "Blue", description: nil),
@@ -121,7 +121,7 @@ struct AgentStreamTests {
     #expect(state.agentStatusDetail == "compiling")
     let card = PromptCard(
       promptID: "p-1", type: "confirm", title: "Confirm action", message: nil, toolName: nil,
-      command: nil, options: [], selectedIndex: 0, questions: [])
+      command: nil, options: [], defaultOptionID: nil, questions: [])
     state = try reduceStream(
       state, .promptRequest(sessionID: "s-1", prompt: card), selectedSession: "s-1")
     #expect(state.pendingPrompt == card)

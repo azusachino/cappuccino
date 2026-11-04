@@ -99,10 +99,10 @@ public struct BridgeDetails: Equatable, Sendable {
 
 /// Checks the v2 handshake's identity and protocol, then reads its agreed capabilities.
 func parseBridgeDetails(_ json: BridgeJSON) throws -> BridgeDetails {
-  guard try json.string("event") == "paired", try json.string("plugin") == bridgePluginID else {
+  guard try json.string("event") == "handshake_accepted" else {
     throw BridgeError.protocolError("Unsupported bridge session response")
   }
-  let protocolVersion = try json.long("protocol")
+  let protocolVersion = try json.long("protocol_version")
   guard protocolVersion == 2 else {
     throw BridgeError.protocolError(
       "Incompatible bridge protocol \(protocolVersion); app requires 2")
@@ -112,10 +112,10 @@ func parseBridgeDetails(_ json: BridgeJSON) throws -> BridgeDetails {
   }
   // The bridge offers each capability as name -> version. A capability is usable only when it is
   // also agreed, so the map is true for agreed names and false for offered-but-not-agreed ones.
-  guard let offered = json.fields["capabilities"] as? [String: Any] else {
+  guard let offered = json.fields["offered_capabilities"] as? [String: Any] else {
     throw BridgeError.protocolError("Invalid bridge capabilities")
   }
-  let agreed = Set((json.fields["agreed"] as? [String: Any] ?? [:]).keys)
+  let agreed = Set((json.fields["agreed_capabilities"] as? [String: Any] ?? [:]).keys)
   let capabilities: [String: Bool]? = Dictionary(
     uniqueKeysWithValues: offered.keys.map { ($0, agreed.contains($0)) })
   let name = try json.optionalString("machine_name")?.trimmingCharacters(
@@ -128,8 +128,6 @@ func parseBridgeDetails(_ json: BridgeJSON) throws -> BridgeDetails {
     capabilities: capabilities
   )
 }
-
-let bridgePluginID = "cappuccino-bridge"
 
 /// A canonical conversation id is `<agent>:<64 lowercase hex>`. The agent prefix must
 /// be the provider of the agent that owns it (core/CanonicalConversationId.kt).
@@ -157,10 +155,17 @@ public struct PromptOption: Equatable, Sendable {
 
 /// One AskUserQuestion question; screen-read prompts carry none.
 public struct PromptQuestion: Equatable, Sendable {
+  public let id: String
   public let header: String
   public let question: String
   public let multiSelect: Bool
   public let options: [PromptOption]
+}
+
+/// One answered question on a review card; display only, the bridge never takes it back.
+public struct ReviewAnswer: Equatable, Sendable {
+  public let questionID: String
+  public let answer: String
 }
 
 public struct PromptCard: Equatable, Sendable {
@@ -171,18 +176,22 @@ public struct PromptCard: Equatable, Sendable {
   public let toolName: String?
   public let command: String?
   public let options: [PromptOption]
-  public let selectedIndex: Int
+  /// The option the screen highlights, or nil when the card has none.
+  public let defaultOptionID: String?
   public let questions: [PromptQuestion]
+  public var reviewAnswers: [ReviewAnswer] = []
 }
 
-/// One question's answer: chosen option indexes and/or one line of own text.
+/// One question's answer: the chosen option ids and/or one line of own text.
 public struct QuestionAnswer: Equatable, Sendable {
-  public let selected: [Int]
-  public let other: String?
+  public let questionID: String
+  public let selectedOptionIDs: [String]
+  public let freeText: String?
 
-  public init(selected: [Int], other: String?) {
-    self.selected = selected
-    self.other = other
+  public init(questionID: String, selectedOptionIDs: [String], freeText: String?) {
+    self.questionID = questionID
+    self.selectedOptionIDs = selectedOptionIDs
+    self.freeText = freeText
   }
 }
 
@@ -242,9 +251,18 @@ func parsePromptCard(_ json: BridgeJSON) throws -> PromptCard {
     toolName: try json.optionalString("tool_name"),
     command: try json.optionalString("command"),
     options: try parseOptions(json),
-    selectedIndex: Int(try json.long("selected_index")),
-    questions: try parseQuestions(json)
+    defaultOptionID: try json.optionalString("default_option_id"),
+    questions: try parseQuestions(json),
+    reviewAnswers: try parseReviewAnswers(json)
   )
+}
+
+private func parseReviewAnswers(_ json: BridgeJSON) throws -> [ReviewAnswer] {
+  guard json.fields["answers"] != nil else { return [] }
+  return try json.array("answers").map { answer in
+    ReviewAnswer(
+      questionID: try answer.string("question_id"), answer: try answer.string("answer"))
+  }
 }
 
 private func parseOptions(_ json: BridgeJSON) throws -> [PromptOption] {
@@ -260,6 +278,7 @@ private func parseQuestions(_ json: BridgeJSON) throws -> [PromptQuestion] {
   guard json.fields["questions"] != nil else { return [] }
   return try json.array("questions").map { question in
     PromptQuestion(
+      id: try question.string("id"),
       header: try question.optionalString("header") ?? "",
       question: try question.string("question"),
       multiSelect: try question.boolean("multi_select"),
@@ -267,10 +286,10 @@ private func parseQuestions(_ json: BridgeJSON) throws -> [PromptQuestion] {
   }
 }
 
-/// Parses `turns`. Like BridgeProtocol.kt, a turn whose parts are malformed keeps
+/// Parses a sync page's `upserts`. Like BridgeProtocol.kt, a turn whose parts are malformed keeps
 /// its text but loses its parts; the rest of the conversation still parses.
 func parseConversationTurns(_ json: BridgeJSON) throws -> [ConversationTurn] {
-  try json.array("turns").map { turn in
+  try json.array("upserts").map { turn in
     ConversationTurn(
       id: try turn.string("id"),
       role: try turn.string("role"),

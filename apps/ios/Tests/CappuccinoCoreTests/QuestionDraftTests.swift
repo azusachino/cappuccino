@@ -11,7 +11,7 @@ struct QuestionDraftTests {
 
   @Test func radioTakesOneChoiceAndTypedTextReplacesIt() {
     var draft = QuestionDraft(questions: [
-      PromptQuestion(header: "H", question: "Q?", multiSelect: false, options: options)
+      PromptQuestion(id: "q-1", header: "H", question: "Q?", multiSelect: false, options: options)
     ])
     #expect(!draft.isComplete)
     draft.toggle(question: 0, option: 0)
@@ -20,13 +20,16 @@ struct QuestionDraftTests {
     #expect(draft.isComplete)
     draft.setOther(question: 0, "own answer")
     #expect(draft.selected == [[]])
-    #expect(draft.answers == [QuestionAnswer(selected: [], other: "own answer")])
+    #expect(
+      draft.answers == [
+        QuestionAnswer(questionID: "q-1", selectedOptionIDs: [], freeText: "own answer")
+      ])
     #expect(draft.isComplete)
   }
 
   @Test func checkboxTogglesAndOtherLineIsOneLine() {
     var draft = QuestionDraft(questions: [
-      PromptQuestion(header: "H", question: "Q?", multiSelect: true, options: options)
+      PromptQuestion(id: "q-1", header: "H", question: "Q?", multiSelect: true, options: options)
     ])
     draft.toggle(question: 0, option: 0)
     draft.toggle(question: 0, option: 1)
@@ -39,8 +42,8 @@ struct QuestionDraftTests {
 
   @Test func everyQuestionMustBeAnsweredBeforeSubmit() {
     var draft = QuestionDraft(questions: [
-      PromptQuestion(header: "A", question: "1?", multiSelect: false, options: options),
-      PromptQuestion(header: "B", question: "2?", multiSelect: true, options: options),
+      PromptQuestion(id: "q-a", header: "A", question: "1?", multiSelect: false, options: options),
+      PromptQuestion(id: "q-b", header: "B", question: "2?", multiSelect: true, options: options),
     ])
     draft.toggle(question: 0, option: 0)
     #expect(!draft.isComplete)
