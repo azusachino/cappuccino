@@ -14,6 +14,8 @@ pub struct BridgeConfig {
     pub port: u16,
     pub data_dir: PathBuf,
     pub tuning: crate::tuning::Tuning,
+    /// `[pi] agent_dir`: Pi agent directory whose `sessions/` the bridge reads.
+    pub pi_agent_dir: Option<PathBuf>,
     pub auth: AuthConfig,
     /// Status/startup apply the `tailscale serve` entry automatically when
     /// true (default); false never touches Tailscale (safe verification).
@@ -107,11 +109,20 @@ struct ConfigFile {
     iroh: Option<IrohFileConfig>,
     tailnet: Option<TailnetFileConfig>,
     telegram: Option<crate::telegram::File>,
+    pi: Option<PiFileConfig>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct TailnetFileConfig {
     url: Option<String>,
+}
+
+/// `[pi]`: opt-in location of a Pi agent directory whose `sessions/` the bridge
+/// reads. Unset means the default stores (`~/.pi`, `~/.luna`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PiFileConfig {
+    agent_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -185,6 +196,7 @@ impl BridgeConfig {
                 &home_dir(),
             ),
             tuning: crate::tuning::Tuning::default(),
+            pi_agent_dir: None,
             auth: AuthConfig::default(),
             serve_auto_apply: true,
             iroh_enabled: false,
@@ -259,6 +271,17 @@ impl BridgeConfig {
                 if let Some(tuning) = file.tuning {
                     tuning.validate()?;
                     config.tuning = tuning;
+                }
+                if let Some(pi) = file.pi {
+                    if let Some(agent_dir) = pi.agent_dir {
+                        if !agent_dir.is_absolute() {
+                            return Err(format!(
+                                "pi.agent_dir must be an absolute path, got {}",
+                                agent_dir.display()
+                            ));
+                        }
+                        config.pi_agent_dir = Some(agent_dir);
+                    }
                 }
                 if let Some(auth) = file.auth {
                     config.auth = auth;
@@ -660,5 +683,46 @@ mod path_tests {
         assert_eq!(from_file.data_dir, PathBuf::from("/from/file"));
         let from_env = BridgeConfig::load_from(Some(file), None, None, Some("/from/env")).unwrap();
         assert_eq!(from_env.data_dir, PathBuf::from("/from/env"));
+    }
+}
+
+#[cfg(test)]
+mod pi_config_tests {
+    use super::*;
+
+    fn load_text(name: &str, text: &str) -> Result<BridgeConfig, String> {
+        let dir = std::env::temp_dir().join(format!("cap-cfg-pi-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None)
+    }
+
+    #[test]
+    fn pi_agent_dir_is_opt_in() {
+        assert_eq!(BridgeConfig::defaults().pi_agent_dir, None);
+    }
+
+    #[test]
+    fn absolute_pi_agent_dir_loads() {
+        let config = load_text("abs", "[pi]\nagent_dir = \"/Users/x/.luna/agent\"\n").unwrap();
+        assert_eq!(
+            config.pi_agent_dir,
+            Some(PathBuf::from("/Users/x/.luna/agent"))
+        );
+    }
+
+    #[test]
+    fn relative_pi_agent_dir_is_rejected() {
+        let error = load_text("rel", "[pi]\nagent_dir = \"relative/agent\"\n").unwrap_err();
+        assert!(
+            error.contains("pi.agent_dir must be an absolute path"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn unknown_pi_key_is_rejected() {
+        assert!(load_text("typo", "[pi]\nagnet_dir = \"/x\"\n").is_err());
     }
 }

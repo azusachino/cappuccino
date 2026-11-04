@@ -17,6 +17,8 @@ pub struct BridgeState {
     pub machine_id: String,
     pub machine_name: Option<String>,
     pub telegram: crate::telegram::Shared,
+    /// Pi agent directory from `[pi] agent_dir`; `None` uses the default stores.
+    pub pi_agent_dir: Option<std::path::PathBuf>,
 }
 
 impl BridgeState {
@@ -25,6 +27,7 @@ impl BridgeState {
             machine_id,
             machine_name: host_name(),
             telegram: Arc::new(std::sync::Mutex::new(crate::telegram::Status::default())),
+            pi_agent_dir: None,
         }
     }
 }
@@ -94,7 +97,7 @@ pub async fn agents(State(state): State<Arc<BridgeState>>) -> Response {
 }
 
 pub async fn transcript(
-    State(_state): State<Arc<BridgeState>>,
+    State(state): State<Arc<BridgeState>>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     let Some(session) = query.get("session").filter(|session| !session.is_empty()) else {
@@ -104,7 +107,7 @@ pub async fn transcript(
             "session is required",
         );
     };
-    match transcript::resolve_transcript(session).await {
+    match transcript::resolve_transcript(session, state.pi_agent_dir.as_deref()).await {
         Ok(path) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json")],
@@ -398,7 +401,7 @@ pub async fn agent_conversation(
         );
     }
 
-    match transcript::resolve_session_transcript(&session_id).await {
+    match transcript::resolve_session_transcript(&session_id, state.pi_agent_dir.as_deref()).await {
         Ok(Some(resolved)) => {
             match conversation::read_canonical_tail(&resolved, conversation::TRANSCRIPT_TAIL_BYTES)
             {

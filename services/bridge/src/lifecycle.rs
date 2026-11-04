@@ -784,6 +784,7 @@ mod tests {
                 port: 1,
                 data_dir: PathBuf::new(),
                 tuning: crate::tuning::Tuning::default(),
+                pi_agent_dir: None,
                 auth: crate::config::AuthConfig::default(),
                 serve_auto_apply: false,
                 iroh_enabled: false,

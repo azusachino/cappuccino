@@ -83,6 +83,8 @@ Defaults are loopback `127.0.0.1:7392`. Configuration precedence is defaults, op
 
 Top-level file keys: `bind`, `port`, `data_dir`, plus the `[serve]`, `[iroh]`, `[tailnet]`, `[telegram]` and reserved `[auth]` sections.
 
+Pi sessions: `[pi] agent_dir` is opt-in. Set it to the absolute Pi agent directory (for example `/Users/you/.luna/agent`) and the bridge reads its `sessions/`. Unset, the bridge reads `~/.pi/agent/sessions` and `~/.luna/agent/sessions`. `PI_CODING_AGENT_DIR` in the bridge's own environment is only a fallback: the bridge is a Herdr plugin, so it does not inherit a per-agent value from a pane.
+
 Operational limits and timeouts live in `[tuning]`. Every key is optional and defaults to the value shown. Unknown keys and `0` fail startup. The file is the only source: there are no environment overrides for these. Read the note on the request body limit before raising it.
 
 ```toml

@@ -79,7 +79,9 @@ async fn run_server(managed_token: Option<String>) -> Result<(), String> {
         ));
     }
     let machine_id = agents::machine_id(&config.data_dir)?;
-    let state = Arc::new(routes::BridgeState::new(machine_id.clone()));
+    let mut bridge_state = routes::BridgeState::new(machine_id.clone());
+    bridge_state.pi_agent_dir = config.pi_agent_dir.clone();
+    let state = Arc::new(bridge_state);
     if let Some(settings) = config.telegram.clone() {
         tokio::spawn(telegram::watch(
             machine_id,
