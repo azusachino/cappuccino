@@ -56,6 +56,9 @@ fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnecti
       )
     else MachineConnection()
 
+/** Forward pages one catch-up may fetch before it waits for the next stream event. */
+private const val MAX_CATCH_UP_PAGES = 8
+
 data class PromptSendState(val text: String, val outcome: String? = null)
 
 /**
@@ -821,6 +824,7 @@ internal constructor(
     val client = bridgeFor(profile.endpoint)
     val token = epoch
     conversationJob = viewModelScope.launch {
+      var catchUpPages = 0
       do {
         conversationRequested = false
         try {
@@ -856,8 +860,16 @@ internal constructor(
           )
             throw ProtocolException("Canonical conversation provider mismatch")
           val recent = applyConversationSnapshot(page, direction, agent.sessionId)
-          // A forward page that stopped short of the file's end leaves more records to fetch.
-          if (direction == SyncDirection.Forward && !page.sync.caughtUp)
+          // A forward page that stopped short of the file's end leaves more records to fetch, while
+          // its token moves. The pass count is bounded; the next stream event starts another pass.
+          if (direction == SyncDirection.Forward) catchUpPages++
+          if (
+            direction == SyncDirection.Forward &&
+              !page.sync.caughtUp &&
+              page.sync.afterToken != null &&
+              page.sync.afterToken != after &&
+              catchUpPages < MAX_CATCH_UP_PAGES
+          )
             conversationRequested = true
           if (
             snapshot.source == "canonical_log" &&

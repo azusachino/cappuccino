@@ -302,8 +302,11 @@ public final class SessionModel {
       // Terminal snapshots arrive through the stream; only canonical history is shown here.
       applyConversation(
         page, direction: after == nil ? .newest : .forward, session: agent.sessionID)
-      // A forward page that stopped short of the file's end leaves more records to fetch.
-      if after != nil, !page.sync.caughtUp { conversationRequested = true }
+      // A forward page that stopped short of the file's end leaves more records to fetch, while its
+      // token moves. An equal token means a held turn is still waiting, so the next event retries.
+      if let after, !page.sync.caughtUp, let next = page.sync.afterToken, next != after {
+        conversationRequested = true
+      }
     } catch {
       // Keep the turns already shown. A failed first load falls back to scrollback.
       guard token == epoch, !Task.isCancelled else { return }
