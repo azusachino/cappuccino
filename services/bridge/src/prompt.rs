@@ -18,10 +18,37 @@ pub struct PromptCard {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     pub options: Vec<PromptOption>,
-    pub selected_index: usize,
-    /// AskUserQuestion's questions, read from the transcript; empty for screen-read prompts.
+    /// The option the screen highlights; `None` when the card has no options of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_option_id: Option<String>,
+    /// AskUserQuestion's questions, read from the form; empty for screen-read prompts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub questions: Vec<crate::questions::Question>,
+    /// Position of this question in its form, 1-based; set only on question cards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question_number: Option<usize>,
+    /// Number of questions in the form; set only on question cards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question_count: Option<usize>,
+    /// The answers on a review card, one per answered question.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub answers: Vec<crate::questions::ReviewAnswer>,
+}
+
+/// The screen row a card option presses, 1-based. The digit a numbered menu takes
+/// is the row number on screen, so an option that is hidden still keeps its row.
+/// Tool approval shows its rows as Allow once (1), Allow always (2, never offered)
+/// and Reject (3).
+pub fn screen_row(card_type: &str, option_id: &str, index: usize) -> Option<usize> {
+    if card_type == "tool_approval" {
+        return match option_id {
+            "allow_once" => Some(1),
+            "allow_always" => Some(2),
+            "reject" => Some(3),
+            _ => None,
+        };
+    }
+    Some(index + 1)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,9 +72,9 @@ pub enum PromptSubmission {
     #[serde(rename = "answer_prompt")]
     AnswerPrompt {
         prompt_id: String,
-        action: Option<String>, // "select_option" | "cancel"
-        option_index: Option<usize>,
+        /// Exactly one of `option_id` or `action: "cancel"`.
         option_id: Option<String>,
+        action: Option<String>,
     },
     #[serde(rename = "answer_question")]
     AnswerQuestion {
@@ -69,6 +96,17 @@ pub fn compute_prompt_id(title: &str, message: Option<&str>, options: &[PromptOp
     }
     let hash = hasher.finalize();
     format!("p-{}", &hex::encode(hash)[..12])
+}
+
+/// `<prefix>-<12 hex>`: a stable id derived from `parts`, each part terminated so
+/// that ["ab", "c"] and ["a", "bc"] differ.
+pub fn hashed_id(prefix: &str, parts: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for part in parts {
+        hasher.update(part.as_bytes());
+        hasher.update([0u8]);
+    }
+    format!("{prefix}-{}", &hex::encode(hasher.finalize())[..12])
 }
 
 mod hex {
@@ -246,15 +284,11 @@ fn detect_tool_approval(lines: &[&str]) -> Option<PromptCard> {
             }
         });
 
+    // "Allow always" is never offered: it would be a persistent grant, and grants are not designed yet.
     let default_options = vec![
         PromptOption {
             id: "allow_once".to_string(),
-            label: "Allow Once".to_string(),
-            description: None,
-        },
-        PromptOption {
-            id: "allow_always".to_string(),
-            label: "Allow Always".to_string(),
+            label: "Allow once".to_string(),
             description: None,
         },
         PromptOption {
@@ -278,8 +312,11 @@ fn detect_tool_approval(lines: &[&str]) -> Option<PromptCard> {
         tool_name: Some("run_command".to_string()),
         command,
         options: default_options,
-        selected_index: 0,
+        default_option_id: Some("allow_once".to_string()),
         questions: Vec::new(),
+        question_number: None,
+        question_count: None,
+        answers: Vec::new(),
     })
 }
 
@@ -360,6 +397,7 @@ fn detect_choice_menu(lines: &[&str]) -> Option<PromptCard> {
         .unwrap_or_else(|| "Select Option".to_string());
     let prompt_id = compute_prompt_id(&title, question.as_deref(), &options);
 
+    let default_option_id = options.get(selected_idx).map(|option| option.id.clone());
     Some(PromptCard {
         prompt_id,
         card_type: "ask_question".to_string(),
@@ -368,8 +406,11 @@ fn detect_choice_menu(lines: &[&str]) -> Option<PromptCard> {
         tool_name: None,
         command: None,
         options,
-        selected_index: selected_idx,
+        default_option_id,
         questions: Vec::new(),
+        question_number: None,
+        question_count: None,
+        answers: Vec::new(),
     })
 }
 
@@ -395,7 +436,7 @@ mod tests {
         assert_eq!(card.card_type, "tool_approval");
         assert_eq!(card.tool_name.as_deref(), Some("run_command"));
         assert_eq!(card.command.as_deref(), Some("git push origin main"));
-        assert_eq!(card.options.len(), 3);
+        assert_eq!(card.options.len(), 2, "allow always is never offered");
         assert_eq!(card.options[0].id, "allow_once");
     }
 

@@ -198,12 +198,12 @@ Each agent writes its own session file on the machine that runs it. The bridge r
 
 - **Store:** `~/.pi/agent/sessions/<cwd-slug>/<session>.jsonl`. `[pi] agent_dir` in the bridge config, when set to an absolute path, replaces the store with `<agent_dir>/sessions`. `PI_CODING_AGENT_DIR` in the bridge's own environment is a fallback only.
 - **Session id:** the session header's `id`. Each entry carries `id` and `parentId`, which form a tree.
-- **Turn id:** the entry `id`. Entry ids are 8 hex characters, so the bridge checks uniqueness within each session and rejects a duplicate. If a duplicate is found, the turn id becomes the entry `id` plus the byte offset of the opening record.
+- **Turn id:** the entry `id`. Entry ids are 8 hex characters, so a duplicate within one read gets the entry `id` plus `#` and a digest of its record. A collision between two reads is not caught (section 8).
 - **Resolution:** the path Herdr reports must sit inside a configured store.
-- **Active branch:** the path from the file's last entry up to the root through `parentId`. This matches Pi's own load rule, because the leaf is not stored in the file.
-- **Compaction:** a `compaction` entry shows as a divider with its summary collapsed. Earlier entries stay visible.
-- **Context edits:** a `context_edit` with `replacement: null` leaves its target visible, with an "omitted from model context" marker.
-- **Custom messages:** a `custom_message` shows only when its `display` flag is true.
+- **Active branch (P1):** the path from the file's last entry up to the root through `parentId`. This matches Pi's own load rule, because the leaf is not stored in the file. Records off the branch are dropped before parsing, so their tool results and edits cannot reach shown turns. The index is in section 7.1.
+- **Compaction (P2):** a `compaction` entry is a `notice` turn with one `divider` part (label `compaction`, the summary). Earlier entries stay visible.
+- **Context edits (P3):** a `context_edit` with `replacement: null` leaves its target visible, with a `context_omitted` part on the turn that owns it. A tool result belongs to the assistant turn that called the tool, so the marker goes there. When the edit falls in a page but its turn does not, that turn is sent again with its tool results. Only edits on the active branch count.
+- **Custom messages (P4):** a `custom_message` is a `notice` turn only when its `display` flag is true.
 - **Not shown:** `custom`, `label`, `session_info` and `usage` entries.
 
 ### 5.2 Claude Code
@@ -255,13 +255,13 @@ Claude Code writes a question's tool call to its transcript only after it is ans
   }
   ```
 
-- **Review card:** after the last question the form shows its review. The bridge sends `type: "ask_user_question_review"` with the chosen answers and two options:
+- **Review card:** after the last question the form shows its review. The bridge sends `type: "ask_user_question_review"`, with one display-only `answer` per answered question, and two options. `question_id` is the id the question card had (a hash of the question text). A wrapped question line is joined with a space, as the form joins it. The review's answers are shown, not sent back, so the phone never submits them by id:
 
   ```json
   {
     "type": "ask_user_question_review",
     "prompt_id": "p-7c2e0a91",
-    "answers": [{"question_id": "q-1", "selected_option_ids": ["opt-0"], "free_text": null}],
+    "answers": [{"question_id": "q-abb508ec5cb9", "answer": "Blue"}],
     "options": [{"id": "submit", "label": "Submit answers"}, {"id": "cancel", "label": "Cancel"}],
     "default_option_id": "submit"
   }
@@ -310,7 +310,7 @@ When an agent without `--dangerously-skip-permissions` attempts a high-stakes co
 
 ### 6.3 Prompt answer responses
 
-The answer response is `{"event": "prompt_answered", "prompt_id": "...", "outcome": "option"}` or `"outcome": "cancelled"`. The field `outcome` replaces the earlier `action` field, so one word means one thing.
+The answer response is `{"event": "prompt_answered", "prompt_id": "...", "outcome": "option"}` or `"outcome": "cancelled"`. A question submission returns `"outcome": "answered"`. A question submission returns `"outcome": "answered"`. The field `outcome` replaces the earlier `action` field, so one word means one thing.
 
 ### 6.4 Prompt delivery
 
@@ -340,15 +340,19 @@ Turns never arrive on the stream. Turns come only from the sync endpoint (§7).
 ### 7.1 Model
 
 - The phone keeps a replicated log per session. The offline cache is that log.
-- The bridge is stateless. It reads the agent's session file for each request and holds no per-client state.
-- The phone owns two tokens: `after_token` (where forward catch-up stopped) and `before_token` (where backfill stopped). Both are opaque strings the phone stores and returns unchanged.
-- A token encodes the session file identity, a byte offset and the id of the last settled record. The bridge checks all three before it trusts a token.
+- The bridge keeps no per-client state. Each request reads the agent's session file. For Pi it also keeps one index per session file (the entry tree and the context edits), derived only from the file's bytes and extended as the file grows (section 5.1).
+- A token is opaque to the phone. It is hex-encoded JSON of `{file, offset, record}`:
+  - `file` is the session file's identity: its file stem for Pi and Claude Code, and the conversation directory name for Agy, whose file is always `transcript.jsonl`.
+  - `offset` is the byte offset of the record a page starts from. Every page starts at the record that opens a turn.
+  - `record` is that record's turn id.
+- A token is trusted only when `file` matches the session's current file and the record at `offset` still has the id `record`. Otherwise the response is a resync (7.5).
 
 ### 7.2 Requests
 
-- `GET .../conversation/sync` with no query returns the newest page. Use it for a first sync.
-- `GET .../conversation/sync?after=<after_token>` returns records after that point, forward. This is the catch-up path.
-- `GET .../conversation/sync?before=<before_token>` returns an earlier page. The phone uses it to backfill history in the background, after the newest turns are shown.
+- `GET /api/v2/agents/{sessionId}/conversation/sync` with no query returns the newest page, with both tokens. Use it for a first sync.
+- `?after=<token>` returns the records after the phone's forward position. This is the catch-up path.
+- `?before=<token>` returns the turns before the phone's earliest turn. The phone uses it to backfill in the background.
+- Sending both `after` and `before` is `400 bad_request`.
 
 ### 7.3 Response
 
@@ -356,50 +360,59 @@ Turns never arrive on the stream. Turns come only from the sync endpoint (§7).
 {
   "mode": "append",
   "upserts": [
-    {
-      "id": "step-4",
-      "role": "agent",
-      "timestamp": "2026-11-04T09:00:00Z",
-      "parts": [{"type": "text", "text": "..."}]
-    }
+    {"id": "a1b2", "role": "agent", "timestamp": "2026-11-04T09:00:00Z", "parts": [{"type": "text", "text": "..."}]}
   ],
   "after_token": "<token>",
   "before_token": "<token>",
-  "caught_up": false
+  "caught_up": false,
+  "conversation_id": "pi:<digest>",
+  "stats": {}
 }
 ```
 
-- `mode` is `append` for a normal page, or `resync` (§7.5).
-- `upserts` holds whole turns. The phone replaces any turn with the same `id`, and adds any new one.
-- `after_token` is the new forward position after this page.
-- `before_token` is the position for the next earlier page, or `null` when the start of the file has been reached.
-- `caught_up` is `true` when the response reached the end of the file. The phone stops forward catch-up when it is `true`.
+- `mode` is `append`, `resync` or `scrollback`.
+- `upserts` holds whole turns. The phone replaces a turn with the same `id`, and adds a turn with a new id.
+- Which fields are present depends on the request:
 
-### 7.4 Settled boundary and late changes
+| Request | `after_token` | `before_token` | `caught_up` | `conversation_id`, `stats` |
+| --- | --- | --- | --- | --- |
+| no query | yes | yes (`null` at the start of the file) | yes | yes (when known) |
+| `after` | yes | no | yes | no |
+| `before` | no | yes (`null` at the start of the file) | no | no |
+| resync | yes | yes | yes | yes |
 
-- A turn is settled when its last record is complete. The bridge never sends the forward token past an incomplete turn.
-- An incomplete turn is sent as an upsert. The phone replaces it when the turn completes.
-- A late tool result, or an omission marker, changes an earlier turn. The bridge re-sends that turn as an upsert, and the phone replaces it.
+- `caught_up` is true when the page reached the end of the complete records in the file.
+- `conversation_id` is present only when the canonical id can be established. `stats` is the composer's session stats (model, context, rate limits).
+
+### 7.4 Turn boundaries and late changes
+
+- A page holds whole turns, and it always contains at least two turn openers, so it makes progress. Every turn of the page is sent in full. The forward token points at the earliest turn still waiting for a tool result, or else at the last turn of the page. The first turn of a page is never held, so each page moves on. The next request sends the held turn again, complete, and an upsert replaces it.
+- A turn is complete once a later turn has opened. The bridge never sends a record past the end of the file's complete lines, so a record still being written is not served.
+- A tool result that arrives later is sent with its turn, because the token is held at that turn until the result comes back.
 
 ### 7.5 Invalid token
 
-The response is `mode: "resync"` when a token names a different session file, an offset past the end of the file, or a record id that is missing or no longer on the active branch. The response then carries the newest page with a fresh `before_token`. The phone discards its local log for that session and applies the page.
+- `mode: "resync"` is returned when a token names a different session file, an offset past the end of the complete records, a record id that no longer matches, or an undecodable token. The response is the newest page, with fresh tokens. The phone discards its local log for that session and applies the page.
+- For Pi, a token whose `record`, or whose `last` turn, is off the active branch resyncs. `last` is the page's last turn and is set on forward pages.
 
-### 7.6 Budgets
+### 7.6 Scrollback
 
-- Sync page: at most `[tuning.sync] page_bytes` (proposed 1 MiB) per response, under the phone's 2 MiB ceiling.
-- A single turn is never split. A page that holds one turn larger than `page_bytes` contains only that turn.
-- Stream message: at most `[tuning.stream] message_bytes` (proposed 256 KiB) per WebSocket message, under the phone's 1 MiB ceiling. Pane rows are split across messages and none is dropped.
+- A session with no canonical log answers `mode: "scrollback"`, with the pane's recent lines as turns. Its tokens are `null`, and `caught_up` is true. Scrollback turns have positional ids, which are not stable across reads.
 
----
+### 7.7 Budgets
 
-## 8. Open items before freeze
+- Sync page: at most `[tuning.sync] page_bytes` (default 1 MiB) of records per response, except that a single turn is never split. A page holding one turn larger than that holds only that turn.
+- Stream message: at most `[tuning.stream] message_bytes` (default 256 KiB) per `entries` event. Entries are split across events and none is dropped. A single row larger than the budget is sent alone.
 
-1. Measure the worst-case pane row width on a real pane, and set `message_bytes` from it. The 256 KiB figure is provisional.
-2. Confirm the session id source for each agent, and what happens when a session id is reused.
-3. Decide the maximum size of one turn. A turn above the phone's 2 MiB ceiling cannot be shown. A bridge-side text cap with `truncated: true` is the likely answer.
-4. Confirm that Claude Code's `/compact` never rewrites a session file. No rewrite has been observed. `resync` covers it either way.
-5. Confirm the proposed defaults: `answer_budget_secs` (10), `page_bytes` (1 MiB) and `message_bytes` (256 KiB).
+## 8. Decisions on the open items
+
+These close the open items from the design review. Each is implemented unless it says otherwise.
+
+1. **Duplicate Pi entry ids.** Entry ids are short, so a session file can contain the same id twice. The bridge does not reject the session. Each turn named by a duplicated id is named `<id>#<byte offset of its record>`. Offsets are stable because session files are append-only, so the names stay unique.
+2. **Session file identity (section 7.1).** Pi and Claude Code: the file stem. Agy: the conversation directory. A new file for the same session gets a new identity, so its tokens resync.
+3. **Largest turn.** Each text field of a turn is capped at 64 KiB. A longer field is cut and the turn carries `truncated: true`. Tool inputs are not capped, which is a known limit: a very large tool input can still exceed a page.
+4. **Claude Code `/compact`.** No rewrite of a session file has been observed, so no special handling is added. A rewrite that moved an offset would fail the token check and resync, which is the intended outcome.
+5. **Defaults.** `answer_budget_secs` = 10, enforced between the steps of a multi-step answer; when it runs out, the response is `outcome_unknown`. `page_bytes` = 1 MiB. `message_bytes` = 256 KiB. The stream budget only sets where a message splits, so it is safe at any value; it is not tuned by measurement.
 
 ---
 

@@ -30,8 +30,12 @@ pub const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
 pub const MAX_WS_MESSAGE_BYTES: usize = 1024 * 1024;
 pub const MAX_WS_FRAME_BYTES: usize = 64 * 1024;
 /// Error codes the bridge is known to put on a first WS frame.
-pub const KNOWN_WS_ERROR_CODES: [&str; 4] =
-    ["not_found", "bad_request", "protocol", "herdr_unreachable"];
+pub const KNOWN_WS_ERROR_CODES: [&str; 4] = [
+    "not_found",
+    "bad_request",
+    "protocol_unsupported",
+    "upstream_unavailable",
+];
 
 /// How the HTTP legs choose a protocol version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,15 +177,14 @@ fn handshake_body() -> Value {
     json!({
         "protocol_min": 2,
         "protocol_max": 2,
-        "capabilities": {
-            "agent_discovery": 1,
-            "live_output": 1,
-            "conversation_history": 1,
-            "prompt_input": 1,
-            "prompt_answers": 1,
-            "agent_control": 1,
-            "mutation_binding": 1,
-            "completion_signals": 1
+        "offered_capabilities": {
+            "agent_discovery": {"version": 1},
+            "live_output": {"version": 1},
+            "conversation_sync": {"version": 1},
+            "prompt_input": {"version": 1},
+            "prompt_answers": {"version": 1},
+            "agent_control": {"version": 1},
+            "completion_signals": {"version": 1}
         }
     })
 }
@@ -354,7 +357,7 @@ fn validate_stream_frame(
                 return Err("repeated stream_open frame; resets use stream_reset".into());
             }
             *seen_open = true;
-            let generation = frame["generation"]
+            let generation = frame["stream_generation"]
                 .as_u64()
                 .ok_or("stream_open missing u64 generation")?;
             *last_generation = Some(generation);
@@ -424,7 +427,7 @@ fn validate_stream_frame(
             Ok(())
         }
         "stream_reset" => {
-            let generation = frame["generation"]
+            let generation = frame["stream_generation"]
                 .as_u64()
                 .ok_or("stream_reset missing u64 generation")?;
             if let Some(last) = last_generation {
@@ -477,7 +480,7 @@ pub async fn ws_stream_probe(
             .base_url
             .trim_end_matches('/')
             .replacen("http", "ws", 1),
-        format!("/api/v2/stream?session={}", urlencode(session))
+        format!("/api/v2/agents/{}/stream", urlencode(session))
     );
     let addr: std::net::SocketAddr = url
         .strip_prefix("ws://")
@@ -554,7 +557,7 @@ pub async fn ws_stream_probe(
     let mut seen_open = false; // the first frame is the (only) open
     validate_stream_frame(&value, &mut last_generation, &mut seen_open)?;
     probe.first_event = value["event"].as_str().unwrap_or("").to_string();
-    probe.generation = value["generation"].as_u64();
+    probe.generation = value["stream_generation"].as_u64();
     probe.error_code = value["code"].as_str().map(str::to_string);
 
     // Follow-up frames within the explicit budget: entries / stream_reset /
@@ -717,11 +720,11 @@ async fn run_checks_inner(options: &ProbeOptions) -> Result<CheckReport, String>
     let session = get(options, "/api/v2/handshake").await?;
     require(session.status == StatusCode::OK, "session: expected 200")?;
     require(
-        session.body["event"] == json!("paired"),
+        session.body["event"] == json!("handshake_accepted"),
         "session: expected event 'paired'",
     )?;
     require(
-        session.body["protocol"] == json!(2),
+        session.body["protocol_version"] == json!(2),
         "handshake: expected protocol 2",
     )?;
     require(
@@ -761,46 +764,6 @@ async fn run_checks_inner(options: &ProbeOptions) -> Result<CheckReport, String>
             agents.body["agents"].as_array().map(Vec::len).unwrap_or(0)
         ),
         agents.protocol,
-    );
-
-    // Transcript probe: fail-closed in every mode. 502 must carry an error
-    // envelope; a 200 must be coherent — available:true requires a nonempty
-    // transcript_path, available:false requires a null path. Never accept a
-    // payload that claims availability without a path or vice versa.
-    let probe_session = options
-        .session
-        .clone()
-        .unwrap_or_else(|| "__probe__".into());
-    let transcript = get(
-        options,
-        &format!("/api/v2/transcript?session={probe_session}"),
-    )
-    .await?;
-    match transcript.status {
-        StatusCode::OK => {
-            let available = transcript.body["available"] == json!(true);
-            let path = transcript.body["transcript_path"].as_str().unwrap_or("");
-            if available {
-                require(
-                    !path.is_empty(),
-                    "transcript: available:true without a path",
-                )?;
-            } else {
-                require(
-                    transcript.body["transcript_path"].is_null(),
-                    "transcript: available:false must carry a null path",
-                )?;
-            }
-        }
-        StatusCode::BAD_GATEWAY => require(
-            transcript.body["event"] == json!("error"),
-            "transcript: 502 must carry event 'error'",
-        )?,
-        status => return Err(format!("transcript: unexpected status {status}")),
-    }
-    report.record(
-        format!("transcript: fail-closed ok ({})", transcript.protocol),
-        transcript.protocol,
     );
 
     if let Some(name) = &options.session {
@@ -1242,10 +1205,10 @@ fn validate_session_parts(status: &StatusCode, body: &Value) -> Result<(), Strin
     if *status != StatusCode::OK {
         return Err(format!("bench: /api/v2/handshake returned {status}"));
     }
-    if body["event"] != json!("paired") {
+    if body["event"] != json!("handshake_accepted") {
         return Err("bench: /api/v2/handshake body is not a paired event".into());
     }
-    if body["protocol"] != json!(2) {
+    if body["protocol_version"] != json!(2) {
         return Err("bench: /api/v2/handshake protocol != 2".into());
     }
     if body["machine_id"].as_str().unwrap_or("").is_empty() {

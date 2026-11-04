@@ -1,10 +1,10 @@
 //! Protocol v2: a handshake that negotiates the protocol version and the
-//! capabilities before any other v2 endpoint is called. Design:
+//! capabilities before any other v2 endpoint is called. Contract:
 //! docs/bridge-v2-contract.md §4.
 //!
 //! Negotiation is stateless. The bridge keeps no record of an agreement; each
-//! client gates its own actions on the `agreed` map it received. The bridge
-//! enforces only the protocol header on v2 endpoints.
+//! client gates its own actions on `agreed_capabilities`. The bridge enforces
+//! only the protocol header on v2 endpoints. Capabilities are advisory.
 
 use crate::routes::{self, BridgeState};
 use axum::{
@@ -16,7 +16,7 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::{collections::BTreeMap, sync::Arc};
 
 /// The one protocol version this bridge speaks on v2 paths.
@@ -28,11 +28,10 @@ pub const HEADER: &str = "x-cappuccino-protocol";
 pub const OFFERED: &[(&str, u64)] = &[
     ("agent_discovery", 1),
     ("live_output", 1),
-    ("conversation_history", 1),
+    ("conversation_sync", 1),
     ("prompt_input", 1),
     ("prompt_answers", 1),
     ("agent_control", 1),
-    ("mutation_binding", 1),
     ("completion_signals", 1),
 ];
 
@@ -44,12 +43,18 @@ pub enum Refusal {
     MissingRequired(Vec<String>),
 }
 
-/// Picks the agreed capabilities. A capability is agreed when both sides speak
-/// it (version above zero), at the lower of the two versions.
+/// One capability as a client or the bridge states it: `{"version": n}`.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+pub struct CapabilityOffer {
+    pub version: u64,
+}
+
+/// Picks the agreed capabilities. A capability is agreed when both sides offer
+/// it at a version above zero, at the lower of the two versions.
 pub fn negotiate(
     protocol_min: u64,
     protocol_max: u64,
-    client: &BTreeMap<String, u64>,
+    client: &BTreeMap<String, CapabilityOffer>,
     required: &[String],
 ) -> Result<BTreeMap<String, u64>, Refusal> {
     if protocol_min > protocol_max || protocol_min > VERSION || protocol_max < VERSION {
@@ -57,9 +62,9 @@ pub fn negotiate(
     }
     let mut agreed = BTreeMap::new();
     for (name, offered) in OFFERED {
-        if let Some(&version) = client.get(*name) {
-            if version > 0 {
-                agreed.insert((*name).to_string(), version.min(*offered));
+        if let Some(offer) = client.get(*name) {
+            if offer.version > 0 {
+                agreed.insert((*name).to_string(), offer.version.min(*offered));
             }
         }
     }
@@ -75,17 +80,33 @@ pub fn negotiate(
     }
 }
 
+/// `{name: {"version": n}}` for a set of capabilities.
+pub fn versioned(capabilities: &BTreeMap<String, u64>) -> Value {
+    Value::Object(
+        capabilities
+            .iter()
+            .map(|(name, version)| (name.clone(), json!({ "version": version })))
+            .collect::<Map<String, Value>>(),
+    )
+}
+
 #[derive(Deserialize)]
 struct HandshakeRequest {
     protocol_min: u64,
     protocol_max: u64,
     #[serde(default)]
-    capabilities: BTreeMap<String, u64>,
+    offered_capabilities: BTreeMap<String, CapabilityOffer>,
     #[serde(default)]
-    required: Vec<String>,
+    required_capabilities: Vec<String>,
 }
 
-fn error(status: StatusCode, body: Value) -> Response {
+/// The error envelope every v2 refusal uses: `code` is the stable identifier,
+/// `message` is for display. `extra` adds the fields a code defines.
+pub fn error(status: StatusCode, code: &str, message: &str, extra: Value) -> Response {
+    let mut body = json!({"event": "error", "code": code, "message": message});
+    if let (Value::Object(target), Value::Object(fields)) = (&mut body, extra) {
+        target.extend(fields);
+    }
     (
         status,
         [(header::CONTENT_TYPE, "application/json")],
@@ -96,8 +117,10 @@ fn error(status: StatusCode, body: Value) -> Response {
 
 fn protocol_refused() -> Response {
     error(
-        StatusCode::UPGRADE_REQUIRED,
-        json!({"event": "error", "code": "protocol", "supported_protocol_min": VERSION, "supported_protocol_max": VERSION}),
+        StatusCode::BAD_REQUEST,
+        "protocol_unsupported",
+        "this bridge speaks protocol 2 only",
+        json!({"supported_protocol_min": VERSION, "supported_protocol_max": VERSION}),
     )
 }
 
@@ -108,22 +131,26 @@ async fn handshake(State(state): State<Arc<BridgeState>>, Json(body): Json<Value
         Err(_) => {
             return error(
                 StatusCode::BAD_REQUEST,
-                json!({"event": "error", "code": "bad_request"}),
+                "bad_request",
+                "the handshake body does not match the request shape",
+                json!({}),
             )
         }
     };
     let agreed = match negotiate(
         request.protocol_min,
         request.protocol_max,
-        &request.capabilities,
-        &request.required,
+        &request.offered_capabilities,
+        &request.required_capabilities,
     ) {
         Ok(agreed) => agreed,
         Err(Refusal::Protocol) => return protocol_refused(),
         Err(Refusal::MissingRequired(missing)) => {
             return error(
                 StatusCode::CONFLICT,
-                json!({"event": "error", "code": "capability_missing", "missing_capabilities": missing}),
+                "capability_missing",
+                "a required capability is not offered",
+                json!({"missing_capabilities": missing}),
             )
         }
     };
@@ -132,21 +159,27 @@ async fn handshake(State(state): State<Arc<BridgeState>>, Json(body): Json<Value
         .lock()
         .map(|status| status.clone())
         .unwrap_or_default();
-    let offered: BTreeMap<&str, u64> = OFFERED.iter().copied().collect();
-    error(
+    let offered: BTreeMap<String, u64> = OFFERED
+        .iter()
+        .map(|(name, version)| ((*name).to_string(), *version))
+        .collect();
+    let accepted = json!({
+        "event": "handshake_accepted",
+        "machine_id": state.machine_id,
+        "machine_name": state.machine_name,
+        "plugin": "cappuccino-bridge",
+        "bridge_version": env!("CARGO_PKG_VERSION"),
+        "protocol_version": VERSION,
+        "offered_capabilities": versioned(&offered),
+        "agreed_capabilities": versioned(&agreed),
+        "telegram": telegram.to_json(),
+    });
+    (
         StatusCode::OK,
-        json!({
-            "event": "paired",
-            "machine_id": state.machine_id,
-            "machine_name": state.machine_name,
-            "plugin": "cappuccino-bridge",
-            "bridge_version": env!("CARGO_PKG_VERSION"),
-            "protocol": VERSION,
-            "capabilities": offered,
-            "agreed": agreed,
-            "telegram": telegram.to_json(),
-        }),
+        [(header::CONTENT_TYPE, "application/json")],
+        accepted.to_string(),
     )
+        .into_response()
 }
 
 /// Refuses a v2 call whose protocol header is missing or not the agreed version.
@@ -168,8 +201,8 @@ pub fn routes() -> Router<Arc<BridgeState>> {
     let gated = Router::new()
         .route("/api/v2/agents", get(routes::agents))
         .route(
-            "/api/v2/agents/{sessionId}/conversation",
-            get(routes::agent_conversation),
+            "/api/v2/agents/{sessionId}/conversation/sync",
+            get(routes::conversation_sync),
         )
         .route(
             "/api/v2/agents/{sessionId}/prompt",
@@ -179,8 +212,7 @@ pub fn routes() -> Router<Arc<BridgeState>> {
             "/api/v2/agents/{sessionId}/control",
             post(routes::control_agent),
         )
-        .route("/api/v2/transcript", get(routes::transcript))
-        .route("/api/v2/stream", get(routes::stream))
+        .route("/api/v2/agents/{sessionId}/stream", get(routes::stream))
         .route_layer(axum::middleware::from_fn(require_version));
     Router::new()
         .route("/api/v2/handshake", post(handshake))
@@ -191,10 +223,10 @@ pub fn routes() -> Router<Arc<BridgeState>> {
 mod tests {
     use super::*;
 
-    fn client(pairs: &[(&str, u64)]) -> BTreeMap<String, u64> {
+    fn offers(pairs: &[(&str, u64)]) -> BTreeMap<String, CapabilityOffer> {
         pairs
             .iter()
-            .map(|(name, v)| ((*name).to_string(), *v))
+            .map(|(name, version)| ((*name).to_string(), CapabilityOffer { version: *version }))
             .collect()
     }
 
@@ -203,7 +235,7 @@ mod tests {
         let agreed = negotiate(
             1,
             2,
-            &client(&[("live_output", 1), ("agent_control", 3)]),
+            &offers(&[("live_output", 1), ("agent_control", 3)]),
             &[],
         )
         .expect("overlap");
@@ -217,7 +249,7 @@ mod tests {
         let agreed = negotiate(
             2,
             2,
-            &client(&[("future_thing", 1), ("live_output", 0)]),
+            &offers(&[("future_thing", 1), ("live_output", 0)]),
             &[],
         )
         .expect("no refusal");
@@ -226,18 +258,24 @@ mod tests {
 
     #[test]
     fn a_range_without_version_two_is_refused() {
-        assert_eq!(negotiate(1, 1, &client(&[]), &[]), Err(Refusal::Protocol));
-        assert_eq!(negotiate(3, 4, &client(&[]), &[]), Err(Refusal::Protocol));
-        assert_eq!(negotiate(2, 1, &client(&[]), &[]), Err(Refusal::Protocol));
+        assert_eq!(negotiate(1, 1, &offers(&[]), &[]), Err(Refusal::Protocol));
+        assert_eq!(negotiate(3, 4, &offers(&[]), &[]), Err(Refusal::Protocol));
+        assert_eq!(negotiate(2, 1, &offers(&[]), &[]), Err(Refusal::Protocol));
     }
 
     #[test]
     fn missing_required_capabilities_are_listed() {
         let required = vec!["live_output".to_string(), "future_thing".to_string()];
         assert_eq!(
-            negotiate(2, 2, &client(&[("live_output", 1)]), &required),
+            negotiate(2, 2, &offers(&[("live_output", 1)]), &required),
             Err(Refusal::MissingRequired(vec!["future_thing".to_string()]))
         );
+    }
+
+    #[test]
+    fn capabilities_are_serialized_as_versioned_objects() {
+        let map = BTreeMap::from([("live_output".to_string(), 1)]);
+        assert_eq!(versioned(&map), json!({"live_output": {"version": 1}}));
     }
 }
 
@@ -271,46 +309,49 @@ mod http_tests {
 
     #[tokio::test]
     async fn v2_endpoints_refuse_a_call_without_the_agreed_header() {
-        let response = app()
-            .oneshot(Request::get("/api/v2/agents").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
-
-        let response = app()
-            .oneshot(
-                Request::get("/api/v2/agents")
-                    .header(HEADER, "1")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+        for header_value in [None, Some("1")] {
+            let mut request = Request::get("/api/v2/agents");
+            if let Some(value) = header_value {
+                request = request.header(HEADER, value);
+            }
+            let response = app()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let body: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(body["code"], "protocol_unsupported");
+            assert!(body["message"].is_string());
+        }
     }
 
     #[tokio::test]
-    async fn handshake_returns_the_agreed_capabilities() {
+    async fn handshake_returns_the_agreed_capabilities_as_versioned_objects() {
         let (status, body) = post_handshake(json!({
             "protocol_min": 1,
             "protocol_max": 2,
-            "capabilities": {"live_output": 1, "agent_control": 1},
-            "required": ["live_output"]
+            "offered_capabilities": {
+                "live_output": {"version": 1},
+                "agent_control": {"version": 1}
+            },
+            "required_capabilities": ["live_output"]
         }))
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["protocol"], 2);
+        assert_eq!(body["event"], "handshake_accepted");
+        assert_eq!(body["protocol_version"], 2);
         assert_eq!(body["machine_id"], "test-machine");
-        assert_eq!(body["agreed"]["live_output"], 1);
-        assert_eq!(body["agreed"]["agent_control"], 1);
-        assert!(body["capabilities"]["agent_discovery"].is_number());
+        assert_eq!(body["agreed_capabilities"]["live_output"]["version"], 1);
+        assert_eq!(body["agreed_capabilities"]["agent_control"]["version"], 1);
+        assert!(body["offered_capabilities"]["agent_discovery"]["version"].is_number());
     }
 
     #[tokio::test]
     async fn handshake_refuses_a_protocol_range_without_version_two() {
         let (status, body) = post_handshake(json!({"protocol_min": 1, "protocol_max": 1})).await;
-        assert_eq!(status, StatusCode::UPGRADE_REQUIRED);
-        assert_eq!(body["code"], "protocol");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "protocol_unsupported");
         assert_eq!(body["supported_protocol_min"], 2);
         assert_eq!(body["supported_protocol_max"], 2);
     }
@@ -320,12 +361,13 @@ mod http_tests {
         let (status, body) = post_handshake(json!({
             "protocol_min": 2,
             "protocol_max": 2,
-            "required": ["future_thing"]
+            "required_capabilities": ["future_thing"]
         }))
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(body["code"], "capability_missing");
         assert_eq!(body["missing_capabilities"], json!(["future_thing"]));
+        assert!(body["message"].is_string());
     }
 
     #[tokio::test]
@@ -333,6 +375,7 @@ mod http_tests {
         let (status, body) = post_handshake(json!({"protocol_max": 2})).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["code"], "bad_request");
+        assert!(body["message"].is_string());
     }
 }
 
@@ -365,7 +408,7 @@ mod identity_tests {
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["machine_name"], "Owner's Mac");
         assert_eq!(value["machine_id"], "stable-machine-id");
-        assert_eq!(value["protocol"], 2);
+        assert_eq!(value["protocol_version"], 2);
         assert_eq!(value["bridge_version"], env!("CARGO_PKG_VERSION"));
     }
 }

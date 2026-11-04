@@ -32,18 +32,16 @@ same base URL for both transports.
 | --- | --- | --- |
 | `POST /api/v2/handshake` | HTTP | reachability, machine identity, version and capability advertisement |
 | `GET /api/v2/agents` | HTTP | Herdr `agent.list` mapping; names/pane IDs are locators, not proven native Pi session IDs |
-| `GET /api/v2/transcript?session=…` | HTTP | resolves Herdr-reported `agent_session`; fails closed when missing or outside Pi's canonical session store |
-| `GET /api/v2/agents/{sessionId}/conversation` | HTTP | canonical transcript for Pi, Claude Code or Agy; labeled `scrollback` when no usable session is reported |
+| `GET /api/v2/agents/{sessionId}/conversation/sync` | HTTP | conversation sync: newest page, or records after/before a token; `mode: "scrollback"` when no canonical log is reported |
 | `POST /api/v2/agents/{sessionId}/prompt` | HTTP | prompt text (commands need `confirmed`) or an answer to a visible card |
 | `POST /api/v2/agents/{sessionId}/control` | HTTP | `interrupt` (Escape) or `new_session` (`/new`, refused while the agent is busy) |
-| `/api/v2/stream?session=…` | WebSocket | read-only pane-line append/reset events with visible gaps |
+| `/api/v2/agents/{sessionId}/stream` | WebSocket | read-only pane-line events and status, each carrying `stream_generation` |
 
-`POST /api/v2/handshake` is the only entry point. It returns `machine_id`, `machine_name`, `bridge_version` and `protocol` (2), plus `capabilities` (each offered capability mapped to its version) and `agreed` (the capabilities both sides speak, at the lower version). The phone gates actions on `agreed`, not on `capabilities`. Capabilities advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Identity validation is unchanged. The negotiation rules are in [the v2 contract](../../docs/bridge-v2-contract.md). Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog. `telegram_notifications` is `true` only after a Telegram alert has been delivered, and `telegram_notifications_configured` is `true` while the Telegram route is not disabled. Telegram route status is under `telegram` in the same response, with `route` and the enabled `events`; setup is in [Telegram alerts setup](../../docs/telegram-alerts-setup.md).
+`POST /api/v2/handshake` is the only entry point. It returns `event: "handshake_accepted"`, `machine_id`, `machine_name`, `bridge_version` and `protocol_version` (2), plus `offered_capabilities` and `agreed_capabilities`. Each capability is `{"version": n}`. The phone gates actions on `agreed_capabilities`, not on `offered_capabilities`. Capabilities advertise implemented endpoints, not per-agent compatibility, canonical-history availability or runtime health. Identity validation is unchanged. The negotiation rules are in [the v2 contract](../../docs/bridge-v2-contract.md). Android binds metadata to the verified machine, shows cached metadata as last verified when disconnected, and does not expose UUID/pane/session IDs in the user dialog. `telegram_notifications` is `true` only after a Telegram alert has been delivered, and `telegram_notifications_configured` is `true` while the Telegram route is not disabled. Telegram route status is under `telegram` in the same response, with `route` and the enabled `events`; setup is in [Telegram alerts setup](../../docs/telegram-alerts-setup.md).
 
 Both mutation endpoints require `expected_session` with the selected `machine_id`
 (UUID), `pane_id` and opaque `native_session_ref`, including every answer/cancel
-variant. `mutation_binding: true` advertises this pre-dispatch contract. Clients
-must treat missing/false support as read-only, without an unbound fallback.
+variant. The binding is required on every mutation; it is not a capability.
 Older unbound requests receive 428 `session_binding_required`; malformed binding
 gets 400 `bad_session_binding`, and a changed/missing binding gets 409
 `stale_session` before input. Unavailable metadata fails closed with 503
@@ -57,7 +55,7 @@ These checks use fresh Herdr metadata and the verified pane, but are **not atomi
 fencing**: replacement after the final observation can still receive input.
 Native admission and process-incarnation guarantees remain unproven.
 
-The bridge exposes `/api/v2/agents/{sessionId}/conversation`, `POST /api/v2/agents/{sessionId}/prompt` for prompt text and validated prompt-card answers, and `POST /api/v2/agents/{sessionId}/control` for `interrupt` and `new_session`; this is not native Pi queue selection or a correlated delivery receipt. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
+The bridge exposes `/api/v2/agents/{sessionId}/conversation/sync`, `POST /api/v2/agents/{sessionId}/prompt` for prompt text and validated prompt-card answers, and `POST /api/v2/agents/{sessionId}/control` for `interrupt` and `new_session`; this is not native Pi queue selection or a correlated delivery receipt. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
 
 Pi conversation tool parts optionally include `is_error`, directly from the matching Pi `toolResult.isError`. Unknown-ID results remain unattached; missing flags remain absent rather than claiming success. This additive field preserves protocol 1 and existing clients. The Android reader uses it to expose failed results by default, not a keyword heuristic.
 
@@ -105,6 +103,7 @@ screen_lines = 80        # lines read to find a question or approval on screen
 stats_pane_lines = 30    # lines read for rate-limit and model hints
 scrollback_lines = 200   # lines read when a session has no canonical transcript
 answer_key_gap_ms = 250  # pause between keys when answering a multi-step question
+message_bytes = 262144     # largest stream message; entries split across messages, none dropped
 
 [tuning.iroh]
 max_tunnel_streams = 32                 # concurrent streams per tunnel connection
@@ -124,6 +123,12 @@ stop_timeout_secs = 3      # `stop` waits this long for the bridge to exit
 control_timeout_ms = 500   # control-socket read and write bound
 poll_interval_ms = 50      # lifecycle poll interval while waiting
 probe_timeout_ms = 250     # connect and read bound for the health probe
+
+[tuning.sync]
+page_bytes = 1048576      # largest sync page; a single turn is never split
+
+[tuning.prompt]
+answer_budget_secs = 10   # time for a multi-step answer; when it runs out the answer is outcome_unknown
 
 [tuning.telegram]
 request_timeout_secs = 10       # per Telegram API request

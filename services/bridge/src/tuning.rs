@@ -18,6 +18,42 @@ pub struct Tuning {
     pub iroh: Iroh,
     pub lifecycle: Lifecycle,
     pub telegram: Telegram,
+    pub sync: Sync,
+    pub prompt: Prompt,
+}
+
+/// Multi-step answers sent to the agent (contract section 6.1).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Prompt {
+    /// Time the bridge allows for typing a multi-step answer. When it runs out, the answer stops and
+    /// the response is `outcome_unknown`.
+    pub answer_budget_secs: u64,
+}
+
+impl Default for Prompt {
+    fn default() -> Self {
+        Prompt {
+            answer_budget_secs: 10,
+        }
+    }
+}
+
+/// Conversation sync pages (contract section 7).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Sync {
+    /// Largest page of records returned in one sync response. A turn is never split, so a page
+    /// holding one turn larger than this holds only that turn.
+    pub page_bytes: usize,
+}
+
+impl Default for Sync {
+    fn default() -> Self {
+        Sync {
+            page_bytes: 1024 * 1024,
+        }
+    }
 }
 
 /// Herdr socket client.
@@ -51,6 +87,8 @@ pub struct Stream {
     /// Pause between keys when answering a multi-step question, because the
     /// form redraws between steps.
     pub answer_key_gap_ms: u64,
+    /// Largest stream message. Entries are split across messages and none is dropped; a single row larger than this is sent alone.
+    pub message_bytes: usize,
 }
 
 /// iroh transport and pairing limits.
@@ -109,6 +147,8 @@ impl Default for Tuning {
             iroh: Iroh::default(),
             lifecycle: Lifecycle::default(),
             telegram: Telegram::default(),
+            sync: Sync::default(),
+            prompt: Prompt::default(),
         }
     }
 }
@@ -132,6 +172,7 @@ impl Default for Stream {
             stats_pane_lines: 30,
             scrollback_lines: 200,
             answer_key_gap_ms: 250,
+            message_bytes: 256 * 1024,
         }
     }
 }
@@ -206,6 +247,7 @@ impl Tuning {
                 self.stream.scrollback_lines as u64,
             ),
             ("stream.answer_key_gap_ms", self.stream.answer_key_gap_ms),
+            ("stream.message_bytes", self.stream.message_bytes as u64),
             (
                 "iroh.max_tunnel_streams",
                 self.iroh.max_tunnel_streams as u64,
@@ -297,6 +339,8 @@ impl Tuning {
                 "telegram.max_name_chars",
                 self.telegram.max_name_chars as u64,
             ),
+            ("sync.page_bytes", self.sync.page_bytes as u64),
+            ("prompt.answer_budget_secs", self.prompt.answer_budget_secs),
         ];
         match fields.iter().find(|(_, value)| *value == 0) {
             Some((name, _)) => Err(format!("tuning.{name} must be greater than 0")),
@@ -338,6 +382,9 @@ mod tests {
         ("stream", "stats_pane_lines"),
         ("stream", "scrollback_lines"),
         ("stream", "answer_key_gap_ms"),
+        ("stream", "message_bytes"),
+        ("sync", "page_bytes"),
+        ("prompt", "answer_budget_secs"),
         ("iroh", "max_tunnel_streams"),
         ("iroh", "max_tunnel_connections"),
         ("iroh", "max_tunnel_connections_per_id"),

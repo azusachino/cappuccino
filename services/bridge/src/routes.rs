@@ -3,13 +3,13 @@
 //! reconciliation semantics.
 
 use crate::{
-    agents, conversation, herdr, mutation, prompt, questions, reconcile, stats, transcript,
+    agents, conversation, herdr, mutation, prompt, questions, reconcile, stats, sync, transcript,
 };
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Json, Path as AxumPath, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -90,48 +90,26 @@ pub async fn agents(State(state): State<Arc<BridgeState>>) -> Response {
         },
         Err(error) => error_response(
             StatusCode::BAD_GATEWAY,
-            "herdr_unreachable",
+            "upstream_unavailable",
             &error.to_string(),
         ),
-    }
-}
-
-pub async fn transcript(
-    State(state): State<Arc<BridgeState>>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Response {
-    let Some(session) = query.get("session").filter(|session| !session.is_empty()) else {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            "session is required",
-        );
-    };
-    match transcript::resolve_transcript(session, state.pi_agent_dir.as_deref()).await {
-        Ok(path) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "application/json")],
-            transcript::transcript_json(session, path.as_deref()).to_string(),
-        )
-            .into_response(),
-        Err(message) => error_response(StatusCode::BAD_GATEWAY, "protocol", &message),
     }
 }
 
 /// WS /api/stream?session=<locator>
 pub async fn stream(
     State(state): State<Arc<BridgeState>>,
-    Query(query): Query<HashMap<String, String>>,
+    AxumPath(session_id): AxumPath<String>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    let Some(session) = query.get("session").cloned() else {
+    if session_id.is_empty() {
         return error_response(
             StatusCode::BAD_REQUEST,
             "bad_request",
-            "session is required",
+            "sessionId is required",
         );
-    };
-    upgrade.on_upgrade(move |socket| stream_socket(state, session, socket))
+    }
+    upgrade.on_upgrade(move |socket| stream_socket(state, session_id, socket))
 }
 
 async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: WebSocket) {
@@ -168,7 +146,7 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
 
     if socket
         .send(Message::Text(
-            json!({"event": "stream_open", "session_id": session, "generation": generation})
+            json!({"event": "stream_open", "session_id": session, "stream_generation": generation})
                 .to_string()
                 .into(),
         ))
@@ -301,7 +279,7 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
         if ring.generation != generation {
             if socket
                 .send(Message::Text(
-                    json!({"event": "stream_reset", "generation": ring.generation})
+                    json!({"event": "stream_reset", "stream_generation": ring.generation})
                         .to_string()
                         .into(),
                 ))
@@ -314,8 +292,9 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
             // re-emit stream_reset on every subsequent poll.
             generation = ring.generation;
         }
-        if !new_entries.is_empty() {
-            let event = json!({"event": "entries", "entries": new_entries});
+        for batch in entry_batches(new_entries, crate::tuning::active().stream.message_bytes) {
+            let event =
+                json!({"event": "entries", "stream_generation": ring.generation, "entries": batch});
             if socket
                 .send(Message::Text(event.to_string().into()))
                 .await
@@ -328,14 +307,19 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
 }
 
 /// Spends the answered card's id before anything is typed; a racing or repeated answer is stale.
+/// A stale prompt answer. `on_screen_prompt_id` names the card on screen, or is null.
+fn stale_prompt(message: &str, on_screen_prompt_id: Option<&str>) -> Response {
+    crate::protocol::error(
+        StatusCode::CONFLICT,
+        "stale_prompt",
+        message,
+        json!({"on_screen_prompt_id": on_screen_prompt_id}),
+    )
+}
+
 fn claimed(pane_id: &str, prompt_id: &str) -> Option<Response> {
-    (!prompt::claim(pane_id, prompt_id)).then(|| {
-        error_response(
-            StatusCode::CONFLICT,
-            "stale_prompt",
-            "this prompt was already answered",
-        )
-    })
+    (!prompt::claim(pane_id, prompt_id))
+        .then(|| stale_prompt("this prompt was already answered", None))
 }
 
 async fn send_stream_unavailable(socket: &mut WebSocket) {
@@ -363,10 +347,16 @@ async fn resolve_pane(state: &Arc<BridgeState>, session: &str) -> Option<String>
 
 /// The question form on screen while `prompt_id` still names it, untouched by the terminal.
 async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form, Response> {
-    let stale = |message: &str| error_response(StatusCode::CONFLICT, "stale_prompt", message);
+    let stale = |message: &str| stale_prompt(message, None);
     let screen = herdr::pane_read_recent(pane_id, crate::tuning::active().stream.screen_lines)
         .await
-        .map_err(|err| error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string()))?;
+        .map_err(|err| {
+            error_response(
+                StatusCode::BAD_GATEWAY,
+                "upstream_unavailable",
+                &err.to_string(),
+            )
+        })?;
     let Some(form) = questions::form(&screen) else {
         return Err(stale("the question is no longer shown"));
     };
@@ -375,9 +365,10 @@ async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form,
         return Err(stale("this question was already answered"));
     };
     if shown != prompt_id {
-        return Err(stale(&format!(
-            "the question on screen has changed (on screen {shown})"
-        )));
+        return Err(stale_prompt(
+            "the question on screen has changed",
+            Some(&shown),
+        ));
     }
     // Toggles are relative: ticks made in the terminal would be undone.
     if form.ticked {
@@ -389,9 +380,14 @@ async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form,
 }
 
 /// GET /api/agents/{sessionId}/conversation
-pub async fn agent_conversation(
+/// `GET /api/v2/agents/{sessionId}/conversation/sync` (contract section 7). With no token the
+/// newest page comes back with both tokens. `after` moves the phone's forward position, and
+/// `before` pages back. A token that no longer matches the file gets the newest page as a resync.
+/// A session without a canonical log answers with its pane scrollback as one snapshot.
+pub async fn conversation_sync(
     State(state): State<Arc<BridgeState>>,
     AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     if session_id.is_empty() {
         return error_response(
@@ -400,142 +396,177 @@ pub async fn agent_conversation(
             "sessionId is required",
         );
     }
-
-    match transcript::resolve_session_transcript(&session_id, state.pi_agent_dir.as_deref()).await {
-        Ok(Some(resolved)) => {
-            match conversation::read_canonical_tail(&resolved, conversation::TRANSCRIPT_TAIL_BYTES)
-            {
-                Ok((content, conversation_id)) => {
-                    let (turns, kind) = match resolved {
-                        transcript::ResolvedTranscript::Pi(_) => {
-                            (conversation::parse_pi_transcript(&content), stats::Kind::Pi)
-                        }
-                        transcript::ResolvedTranscript::Claude(_) => (
-                            conversation::parse_claude_transcript(&content),
-                            stats::Kind::Claude,
-                        ),
-                        transcript::ResolvedTranscript::Agy(_) => (
-                            conversation::parse_agy_transcript(&content),
-                            stats::Kind::Agy,
-                        ),
-                    };
-                    let mut session_stats = stats::session_stats(kind, &content);
-                    let pane_text = if let Some(pane_id) = resolve_pane(&state, &session_id).await {
-                        herdr::pane_read_recent(
-                            &pane_id,
-                            crate::tuning::active().stream.stats_pane_lines,
-                        )
-                        .await
-                        .ok()
-                    } else {
-                        None
-                    };
-                    let (rate_limits, inferred_model) =
-                        stats::parse_rate_limits(kind, &content, pane_text.as_deref());
-
-                    if let Some(found) = session_stats.as_mut() {
-                        if found.model.is_none() {
-                            found.model = inferred_model;
-                        }
-                        found.rate_limits = rate_limits;
-                        if kind == stats::Kind::Pi {
-                            if let (Some(provider), Some(model)) = (&found.provider, &found.model) {
-                                found.context_window =
-                                    stats::pi_context_window(resolved.path(), provider, model);
-                            }
-                            if found.thinking_level.is_none() {
-                                found.thinking_level = stats::pi_thinking_level(resolved.path());
-                            }
-                        }
-                        if found.context_window.is_none() {
-                            found.context_window = stats::default_context_window(
-                                found.model.as_deref(),
-                                match kind {
-                                    stats::Kind::Pi => Some("pi"),
-                                    stats::Kind::Claude => Some("claude"),
-                                    stats::Kind::Agy => Some("agy"),
-                                },
-                                found.context_tokens,
-                            );
-                        }
-                    } else if rate_limits.is_some() || inferred_model.is_some() {
-                        let mut found = stats::SessionStats::default();
-                        found.model = inferred_model;
-                        found.rate_limits = rate_limits;
-                        found.context_window = stats::default_context_window(
-                            found.model.as_deref(),
-                            match kind {
-                                stats::Kind::Pi => Some("pi"),
-                                stats::Kind::Claude => Some("claude"),
-                                stats::Kind::Agy => Some("agy"),
-                            },
-                            found.context_tokens,
-                        );
-                        session_stats = Some(found);
-                    }
-                    let payload = conversation::ConversationResponse {
-                        session_id,
-                        source: "canonical_log".to_string(),
-                        machine_id: Some(state.machine_id.clone()),
-                        conversation_id,
-                        turns,
-                        stats: session_stats,
-                    };
-                    (
-                        StatusCode::OK,
-                        [(header::CONTENT_TYPE, "application/json")],
-                        serde_json::to_string(&payload).unwrap_or_default(),
-                    )
-                        .into_response()
-                }
-                Err(err) => error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "io_error",
-                    &format!("cannot read transcript: {err}"),
-                ),
-            }
-        }
-        Ok(None) => {
-            // Fallback: If no canonical session transcript exists, check if pane exists and parse recent scrollback
-            if let Some(pane_id) = resolve_pane(&state, &session_id).await {
-                match herdr::pane_read_recent(
-                    &pane_id,
-                    crate::tuning::active().stream.scrollback_lines,
-                )
-                .await
-                {
-                    Ok(text) => {
-                        let lines: Vec<String> = text.lines().map(str::to_string).collect();
-                        let turns = conversation::parse_scrollback_turns(&lines);
-                        let payload = conversation::ConversationResponse {
-                            session_id,
-                            source: "scrollback".to_string(),
-                            machine_id: Some(state.machine_id.clone()),
-                            conversation_id: None,
-                            turns,
-                            stats: None,
-                        };
-                        (
-                            StatusCode::OK,
-                            [(header::CONTENT_TYPE, "application/json")],
-                            serde_json::to_string(&payload).unwrap_or_default(),
-                        )
-                            .into_response()
-                    }
-                    Err(err) => {
-                        error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string())
-                    }
-                }
-            } else {
-                error_response(
-                    StatusCode::NOT_FOUND,
-                    "not_found",
-                    &format!("no agent with session_id {session_id}"),
-                )
-            }
-        }
-        Err(err) => error_response(StatusCode::BAD_GATEWAY, "protocol", &err),
+    let after = query.get("after");
+    let before = query.get("before");
+    if after.is_some() && before.is_some() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "send either after or before, not both",
+        );
     }
+
+    let resolved =
+        match transcript::resolve_session_transcript(&session_id, state.pi_agent_dir.as_deref())
+            .await
+        {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                return error_response(StatusCode::BAD_GATEWAY, "upstream_unavailable", &err)
+            }
+        };
+    let Some(resolved) = resolved else {
+        return scrollback_snapshot(&state, &session_id).await;
+    };
+
+    let kind = sync::Kind::of(&resolved);
+    let file = sync::file_id(&resolved);
+    let request = match (after, before) {
+        (Some(text), _) => match sync::decode(text) {
+            Some(token) => sync::Request::After(token),
+            None => sync::Request::Unreadable,
+        },
+        (None, Some(text)) => match sync::decode(text) {
+            Some(token) => sync::Request::Before(token),
+            None => sync::Request::Unreadable,
+        },
+        (None, None) => sync::Request::Initial,
+    };
+    let budget = crate::tuning::active().sync.page_bytes as u64;
+    let served = match sync::serve(resolved.path(), &file, kind, request.clone(), budget) {
+        Ok(served) => served,
+        Err(err) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                &format!("cannot read transcript: {err}"),
+            )
+        }
+    };
+    let (mode, page) = match &served {
+        sync::Served::Page(page) => ("append", page),
+        sync::Served::Resync(page) => ("resync", page),
+    };
+    let mut body = sync::body(mode, page, &request);
+    if matches!(served, sync::Served::Resync(_)) || matches!(request, sync::Request::Initial) {
+        // The newest page also carries the canonical conversation id and the composer's stats.
+        match conversation::read_canonical_tail(&resolved, conversation::TRANSCRIPT_TAIL_BYTES) {
+            Ok((content, conversation_id)) => {
+                let stats = canonical_stats(&state, &session_id, &resolved, &content).await;
+                if let Some(id) = conversation_id {
+                    body["conversation_id"] = json!(id);
+                }
+                body["stats"] = serde_json::to_value(stats).unwrap_or(Value::Null);
+            }
+            Err(err) => {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal_error",
+                    &format!("cannot read transcript: {err}"),
+                )
+            }
+        }
+    }
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
+/// The pane's recent scrollback as one snapshot, for a session with no canonical log.
+async fn scrollback_snapshot(state: &Arc<BridgeState>, session_id: &str) -> Response {
+    let Some(pane_id) = resolve_pane(state, session_id).await else {
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            &format!("no agent with session_id {session_id}"),
+        );
+    };
+    match herdr::pane_read_recent(&pane_id, crate::tuning::active().stream.scrollback_lines).await {
+        Ok(text) => {
+            let lines: Vec<String> = text.lines().map(str::to_string).collect();
+            let turns = conversation::parse_scrollback_turns(&lines);
+            let body = json!({
+                "mode": "scrollback",
+                "upserts": turns,
+                "caught_up": true,
+                "after_token": null,
+                "before_token": null,
+            });
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/json")],
+                body.to_string(),
+            )
+                .into_response()
+        }
+        Err(err) => error_response(
+            StatusCode::BAD_GATEWAY,
+            "upstream_unavailable",
+            &err.to_string(),
+        ),
+    }
+}
+
+/// The composer's stats for a canonical log: model, context window, thinking level and rate limits.
+async fn canonical_stats(
+    state: &Arc<BridgeState>,
+    session_id: &str,
+    resolved: &transcript::ResolvedTranscript,
+    content: &str,
+) -> Option<stats::SessionStats> {
+    let kind = match resolved {
+        transcript::ResolvedTranscript::Pi(_) => stats::Kind::Pi,
+        transcript::ResolvedTranscript::Claude(_) => stats::Kind::Claude,
+        transcript::ResolvedTranscript::Agy(_) => stats::Kind::Agy,
+    };
+    let agent = match kind {
+        stats::Kind::Pi => Some("pi"),
+        stats::Kind::Claude => Some("claude"),
+        stats::Kind::Agy => Some("agy"),
+    };
+    let mut session_stats = stats::session_stats(kind, content);
+    let pane_text = match resolve_pane(state, session_id).await {
+        Some(pane_id) => {
+            herdr::pane_read_recent(&pane_id, crate::tuning::active().stream.stats_pane_lines)
+                .await
+                .ok()
+        }
+        None => None,
+    };
+    let (rate_limits, inferred_model) =
+        stats::parse_rate_limits(kind, content, pane_text.as_deref());
+
+    if let Some(found) = session_stats.as_mut() {
+        if found.model.is_none() {
+            found.model = inferred_model;
+        }
+        found.rate_limits = rate_limits;
+        if kind == stats::Kind::Pi {
+            if let (Some(provider), Some(model)) = (&found.provider, &found.model) {
+                found.context_window = stats::pi_context_window(resolved.path(), provider, model);
+            }
+            if found.thinking_level.is_none() {
+                found.thinking_level = stats::pi_thinking_level(resolved.path());
+            }
+        }
+        if found.context_window.is_none() {
+            found.context_window =
+                stats::default_context_window(found.model.as_deref(), agent, found.context_tokens);
+        }
+    } else if rate_limits.is_some() || inferred_model.is_some() {
+        let mut found = stats::SessionStats {
+            model: inferred_model,
+            rate_limits,
+            ..Default::default()
+        };
+        found.context_window =
+            stats::default_context_window(found.model.as_deref(), agent, found.context_tokens);
+        session_stats = Some(found);
+    }
+    session_stats
 }
 
 /// Pi, Claude Code and Agy all start a fresh conversation in the same process with `/new`.
@@ -622,7 +653,7 @@ pub async fn control_agent(
         Ok(_) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json")],
-            json!({"event": "control_sent", "action": request.action, "session_id": session_id})
+            json!({"event": "control_typed", "action": request.action, "session_id": session_id})
                 .to_string(),
         )
             .into_response(),
@@ -681,7 +712,7 @@ pub async fn submit_agent_prompt(
                 Ok(_) => (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "application/json")],
-                    json!({"event": "prompt_sent", "session_id": session_id}).to_string(),
+                    json!({"event": "prompt_typed", "session_id": session_id}).to_string(),
                 )
                     .into_response(),
                 Err(_) => mutation::unknown(),
@@ -689,9 +720,8 @@ pub async fn submit_agent_prompt(
         }
         prompt::PromptSubmission::AnswerPrompt {
             prompt_id,
-            action,
-            option_index,
             option_id,
+            action,
         } => {
             let active_screen = match herdr::pane_read_recent(
                 &pane_id,
@@ -703,28 +733,23 @@ pub async fn submit_agent_prompt(
                 Err(err) => {
                     return error_response(
                         StatusCode::BAD_GATEWAY,
-                        "herdr_error",
+                        "upstream_unavailable",
                         &err.to_string(),
                     );
                 }
             };
 
             let Some(card) = prompt::shown(&pane_id, prompt::screen_card(&active_screen)) else {
-                return error_response(
-                    StatusCode::CONFLICT,
-                    "stale_prompt",
-                    "interactive prompt is no longer visible on screen",
-                );
+                return stale_prompt("interactive prompt is no longer visible on screen", None);
             };
 
             if card.prompt_id != prompt_id {
-                return error_response(
-                    StatusCode::CONFLICT,
-                    "stale_prompt",
+                return stale_prompt(
                     &format!(
                         "prompt id mismatch: expected {}, on screen {}",
                         prompt_id, card.prompt_id
                     ),
+                    Some(&card.prompt_id),
                 );
             }
 
@@ -755,41 +780,49 @@ pub async fn submit_agent_prompt(
                 return (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "application/json")],
-                    json!({"event": "prompt_answered", "action": "canceled", "prompt_id": prompt_id}).to_string(),
+                    json!({"event": "prompt_answered", "prompt_id": prompt_id, "outcome": "cancelled"}).to_string(),
                 )
                     .into_response();
             }
 
-            // Fail closed: an approval's first option allows the command, so a missing,
-            // unknown or contradictory choice must never fall back to an index.
-            if action.as_deref() != Some("select_option") {
+            // Fail closed: an approval's first option allows the command, so a missing or
+            // unknown choice must never fall back to a position.
+            if action.is_some() {
                 return error_response(
                     StatusCode::BAD_REQUEST,
                     "bad_answer",
-                    "action must be select_option or cancel",
+                    "action must be cancel when option_id is absent",
                 );
             }
-            let by_id = option_id
-                .as_ref()
-                .map(|id| card.options.iter().position(|o| o.id == *id));
-            let opt_idx = match (option_index, by_id) {
-                (_, Some(None)) => None,
-                (Some(idx), Some(Some(pos))) if idx != pos => None,
-                (Some(idx), _) => Some(idx),
-                (None, Some(pos)) => pos,
-                (None, None) => None,
-            };
-            let Some(opt_idx) = opt_idx.filter(|idx| *idx < card.options.len()) else {
+            let Some(option_id) = option_id else {
                 return error_response(
                     StatusCode::BAD_REQUEST,
                     "bad_answer",
-                    "option_index or option_id must name one option on the card",
+                    "option_id is required unless action is cancel",
+                );
+            };
+            let Some(index) = card
+                .options
+                .iter()
+                .position(|option| option.id == option_id)
+            else {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "bad_answer",
+                    "option_id must name one option on the card",
+                );
+            };
+            let Some(row) = prompt::screen_row(&card.card_type, &option_id, index) else {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "bad_answer",
+                    "option_id must name one option on the card",
                 );
             };
 
             // If numbered choice (1, 2, 3), press digit + enter. The review acts on the digit
             // alone; a following enter would land in the agent's input.
-            let key_digit = format!("{}", opt_idx + 1);
+            let key_digit = row.to_string();
             let keys: &[&str] = if card.card_type == questions::REVIEW {
                 &[&key_digit]
             } else {
@@ -809,7 +842,8 @@ pub async fn submit_agent_prompt(
                     json!({
                         "event": "prompt_answered",
                         "prompt_id": prompt_id,
-                        "selected_index": opt_idx,
+                        "outcome": "option",
+                        "option_id": option_id,
                     })
                     .to_string(),
                 )
@@ -839,7 +873,18 @@ pub async fn submit_agent_prompt(
                     return error_response(StatusCode::BAD_REQUEST, "bad_answer", &message)
                 }
             };
+            let started = std::time::Instant::now();
             for (index, step) in steps.into_iter().enumerate() {
+                // The answer budget: once it runs out, the keys already typed cannot be taken back.
+                if index > 0
+                    && started.elapsed()
+                        > std::time::Duration::from_secs(
+                            crate::tuning::active().prompt.answer_budget_secs,
+                        )
+                {
+                    prompt::forget(&pane_id);
+                    return mutation::unknown();
+                }
                 if let Err(response) = binding
                     .check(&state.machine_id, &session_id, index > 0)
                     .await
@@ -871,7 +916,8 @@ pub async fn submit_agent_prompt(
             (
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, "application/json")],
-                json!({"event": "question_answered", "prompt_id": prompt_id}).to_string(),
+                json!({"event": "prompt_answered", "prompt_id": prompt_id, "outcome": "answered"})
+                    .to_string(),
             )
                 .into_response()
         }
@@ -889,5 +935,51 @@ mod tests {
         assert_eq!(new_session_command("agy"), Some("/new"));
         assert_eq!(new_session_command("antigravity-cli"), Some("/new"));
         assert_eq!(new_session_command("codex"), None);
+    }
+}
+
+/// Splits stream entries into batches whose JSON stays within `budget` bytes. No entry is split
+/// or dropped; one entry larger than the budget is sent alone.
+fn entry_batches(entries: Vec<Value>, budget: usize) -> Vec<Vec<Value>> {
+    let mut batches: Vec<Vec<Value>> = vec![Vec::new()];
+    let mut size = 0usize;
+    for entry in entries {
+        let len = entry.to_string().len() + 1;
+        let full = size + len > budget && batches.last().is_some_and(|batch| !batch.is_empty());
+        if full {
+            batches.push(Vec::new());
+            size = 0;
+        }
+        batches.last_mut().expect("at least one batch").push(entry);
+        size += len;
+    }
+    batches.retain(|batch| !batch.is_empty());
+    batches
+}
+
+#[cfg(test)]
+mod entry_batch_tests {
+    use super::*;
+
+    #[test]
+    fn batches_respect_the_budget_and_keep_every_entry_in_order() {
+        let entries: Vec<Value> = (0..10)
+            .map(|i| json!({"seq": i, "text": "x".repeat(40)}))
+            .collect();
+        let batches = entry_batches(entries.clone(), 150);
+        assert!(batches.len() > 1);
+        assert!(batches
+            .iter()
+            .all(|batch| serde_json::to_string(batch).unwrap().len() <= 150 + 40));
+        let flat: Vec<Value> = batches.into_iter().flatten().collect();
+        assert_eq!(flat, entries);
+    }
+
+    #[test]
+    fn an_oversized_entry_is_sent_alone_not_dropped() {
+        let big = json!({"text": "y".repeat(500)});
+        let batches = entry_batches(vec![json!({"a": 1}), big.clone(), json!({"b": 2})], 100);
+        assert_eq!(batches.iter().flatten().count(), 3);
+        assert!(batches.iter().any(|batch| batch == &vec![big.clone()]));
     }
 }

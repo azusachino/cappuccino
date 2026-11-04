@@ -10,19 +10,6 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 pub const TRANSCRIPT_TAIL_BYTES: u64 = 2 * 1024 * 1024; // 2MB
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ConversationResponse {
-    pub session_id: String,
-    pub source: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub machine_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub conversation_id: Option<String>,
-    pub turns: Vec<ConversationTurn>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stats: Option<crate::stats::SessionStats>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConversationTurn {
     pub id: String,
     pub role: String, // "user" | "agent"
@@ -39,6 +26,10 @@ pub struct ConversationTurn {
 pub enum ConversationPart {
     #[serde(rename = "text")]
     Text { text: String },
+    #[serde(rename = "divider")]
+    Divider { label: String, text: String },
+    #[serde(rename = "context_omitted")]
+    ContextOmitted,
     #[serde(rename = "thinking")]
     Thinking { text: String },
     #[serde(rename = "response_status")]
@@ -144,7 +135,7 @@ fn read_compacted_tail(file: &mut File, budget: u64, io_cap: u64) -> std::io::Re
     Ok(kept.join("\n"))
 }
 
-fn compact_claude_line(line: &[u8]) -> String {
+pub(crate) fn compact_claude_line(line: &[u8]) -> String {
     if line.len() <= COMPACT_LINE_BYTES {
         return String::from_utf8_lossy(line).into_owned();
     }
@@ -206,11 +197,17 @@ fn read_conversation_id(
 }
 
 /// Parse agy transcript lines (from `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl`)
+#[cfg(test)]
 pub fn parse_agy_transcript(content: &str) -> Vec<ConversationTurn> {
-    let mut turns: Vec<ConversationTurn> = Vec::new();
-    let mut turn_counter = 1usize;
+    parse_agy_with_openers(content).turns
+}
 
-    for line in content.lines() {
+/// Agy turns with the line that opened each one. A turn's id is `step-<step_index>` of its opening step.
+pub fn parse_agy_with_openers(content: &str) -> Parsed {
+    let mut turns: Vec<ConversationTurn> = Vec::new();
+    let mut opened_at_line: Vec<usize> = Vec::new();
+
+    for (line_no, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -228,6 +225,9 @@ pub fn parse_agy_transcript(content: &str) -> Vec<ConversationTurn> {
 
         match (source, typ) {
             ("USER_EXPLICIT", "USER_INPUT") => {
+                let Some(step) = agy_step_id(&v) else {
+                    continue;
+                };
                 let text = v
                     .get("content")
                     .and_then(|c| c.as_str())
@@ -235,13 +235,13 @@ pub fn parse_agy_transcript(content: &str) -> Vec<ConversationTurn> {
                     .to_string();
                 let clean_text = clean_agy_user_prompt(&text);
                 turns.push(ConversationTurn {
-                    id: format!("t-{turn_counter:03}"),
+                    id: step,
                     role: "user".to_string(),
                     timestamp,
                     text: Some(clean_text),
                     parts: Vec::new(),
                 });
-                turn_counter += 1;
+                opened_at_line.push(line_no);
             }
             ("MODEL", "PLANNER_RESPONSE") => {
                 let mut parts = Vec::new();
@@ -295,14 +295,17 @@ pub fn parse_agy_transcript(content: &str) -> Vec<ConversationTurn> {
                         last.parts.extend(parts);
                     }
                 } else {
+                    let Some(step) = agy_step_id(&v) else {
+                        continue;
+                    };
                     turns.push(ConversationTurn {
-                        id: format!("t-{turn_counter:03}"),
+                        id: step,
                         role: "agent".to_string(),
                         timestamp,
                         text: None,
                         parts,
                     });
-                    turn_counter += 1;
+                    opened_at_line.push(line_no);
                 }
             }
             ("MODEL", "GENERIC") => {
@@ -326,7 +329,37 @@ pub fn parse_agy_transcript(content: &str) -> Vec<ConversationTurn> {
         }
     }
 
-    turns
+    Parsed {
+        turns,
+        opened_at_line,
+    }
+}
+
+/// `step-<step_index>`: the stable id of an Agy step, or `None` for a record without one.
+fn agy_step_id(record: &Value) -> Option<String> {
+    record
+        .get("step_index")
+        .and_then(Value::as_u64)
+        .map(|index| format!("step-{index}"))
+}
+
+/// A record's turn id, made unique within the turns already parsed from the same read. A
+/// duplicate (Pi ids are short) gets a suffix from the record's own bytes.
+fn record_turn_id(turns: &[ConversationTurn], record: &str, line: &str) -> String {
+    if turns.iter().any(|turn| turn.id == record) {
+        let digest = <sha2::Sha256 as sha2::Digest>::digest(line.as_bytes());
+        let hex: String = digest.iter().take(4).map(|b| format!("{b:02x}")).collect();
+        format!("{record}#{hex}")
+    } else {
+        record.to_string()
+    }
+}
+
+/// Turns of a transcript read, with the line index that opened each one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Parsed {
+    pub turns: Vec<ConversationTurn>,
+    pub opened_at_line: Vec<usize>,
 }
 
 /// Strip `<USER_REQUEST>` envelope if present
@@ -346,12 +379,20 @@ fn clean_agy_user_prompt(raw: &str) -> String {
 }
 
 /// Parse pi transcript lines (from `~/.pi/agent/sessions/<cwd-slug>/<session>.jsonl`)
+#[cfg(test)]
 pub fn parse_pi_transcript(content: &str) -> Vec<ConversationTurn> {
-    let mut turns: Vec<ConversationTurn> = Vec::new();
-    let mut turn_counter = 1usize;
-    let mut tool_calls = std::collections::HashMap::new();
+    parse_pi_with_openers(content).turns
+}
 
-    for line in content.lines() {
+/// Pi turns with the line that opened each one. A turn's id is its entry `id`.
+pub fn parse_pi_with_openers(content: &str) -> Parsed {
+    let mut turns: Vec<ConversationTurn> = Vec::new();
+    let mut opened_at_line: Vec<usize> = Vec::new();
+    let mut tool_calls = std::collections::HashMap::new();
+    // Entries whose model context a later context_edit removed (Pi, P3).
+    let mut omitted: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for (line_no, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -361,6 +402,69 @@ pub fn parse_pi_transcript(content: &str) -> Vec<ConversationTurn> {
         };
 
         let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let timestamp = v
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        match typ {
+            // P2: a compaction is a divider; the earlier entries stay visible.
+            "compaction" => {
+                if let (Some(record), Some(summary)) = (
+                    v.get("id").and_then(Value::as_str),
+                    v.get("summary").and_then(Value::as_str),
+                ) {
+                    let id = record_turn_id(&turns, record, trimmed);
+                    turns.push(ConversationTurn {
+                        id,
+                        role: "notice".to_string(),
+                        timestamp: timestamp.clone(),
+                        text: None,
+                        parts: vec![ConversationPart::Divider {
+                            label: "compaction".to_string(),
+                            text: summary.trim().to_string(),
+                        }],
+                    });
+                    opened_at_line.push(line_no);
+                }
+                continue;
+            }
+            // P4: a custom message is shown only when its display flag is set.
+            "custom_message" => {
+                if v.get("display").and_then(Value::as_bool) == Some(true) {
+                    if let Some(record) = v.get("id").and_then(Value::as_str) {
+                        let text = match &v["content"] {
+                            Value::String(text) => text.clone(),
+                            Value::Array(blocks) => blocks
+                                .iter()
+                                .filter_map(|block| block["text"].as_str())
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                            _ => String::new(),
+                        };
+                        let id = record_turn_id(&turns, record, trimmed);
+                        turns.push(ConversationTurn {
+                            id,
+                            role: "notice".to_string(),
+                            timestamp: timestamp.clone(),
+                            text: Some(text.trim().to_string()),
+                            parts: Vec::new(),
+                        });
+                        opened_at_line.push(line_no);
+                    }
+                }
+                continue;
+            }
+            // P3: a context edit with no replacement removes its target from model context.
+            "context_edit" => {
+                if v["replacement"].is_null() {
+                    if let Some(target) = v["targetId"].as_str() {
+                        omitted.insert(target.to_string());
+                    }
+                }
+                continue;
+            }
+            _ => {}
+        }
         if typ != "message" {
             continue;
         }
@@ -387,14 +491,18 @@ pub fn parse_pi_transcript(content: &str) -> Vec<ConversationTurn> {
                     String::new()
                 };
 
+                let Some(record) = v.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let id = record_turn_id(&turns, record, trimmed);
                 turns.push(ConversationTurn {
-                    id: format!("t-{turn_counter:03}"),
+                    id,
                     role: "user".to_string(),
                     timestamp,
                     text: Some(text.trim().to_string()),
                     parts: Vec::new(),
                 });
-                turn_counter += 1;
+                opened_at_line.push(line_no);
             }
             "assistant" => {
                 let mut parts = Vec::new();
@@ -470,14 +578,18 @@ pub fn parse_pi_transcript(content: &str) -> Vec<ConversationTurn> {
                 }
 
                 // Preserve actual response boundaries and their timestamps.
+                let Some(record) = v.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let id = record_turn_id(&turns, record, trimmed);
                 turns.push(ConversationTurn {
-                    id: format!("t-{turn_counter:03}"),
+                    id,
                     role: "agent".to_string(),
                     timestamp,
                     text: None,
                     parts,
                 });
-                turn_counter += 1;
+                opened_at_line.push(line_no);
             }
             "toolResult" | "tool_result" => {
                 let content_str = if let Some(s) = msg.get("content").and_then(|c| c.as_str()) {
@@ -538,7 +650,13 @@ pub fn parse_pi_transcript(content: &str) -> Vec<ConversationTurn> {
         }
     }
 
-    turns
+    for turn in turns.iter_mut().filter(|turn| omitted.contains(&turn.id)) {
+        turn.parts.push(ConversationPart::ContextOmitted);
+    }
+    Parsed {
+        turns,
+        opened_at_line,
+    }
 }
 
 /// Slash-command bookkeeping Claude Code writes as user text; never a person's message.
@@ -595,15 +713,29 @@ fn is_harness_notice(text: &str) -> bool {
 /// Parse a Claude Code session (`<config>/projects/<project>/<session>.jsonl`).
 /// One agent turn spans everything between a person's messages; subagent sidechains,
 /// meta records and hook bookkeeping are skipped.
+#[cfg(test)]
 pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
+    parse_claude_with_openers(content).turns
+}
+
+/// Claude Code turns with the line that opened each one. A turn's id is the `uuid` of its opening record.
+pub fn parse_claude_with_openers(content: &str) -> Parsed {
     let mut turns: Vec<ConversationTurn> = Vec::new();
+    let mut opened_at_line: Vec<usize> = Vec::new();
     let mut tool_calls = std::collections::HashMap::new();
 
-    fn push_user(turns: &mut Vec<ConversationTurn>, text: String, timestamp: Option<String>) {
-        if text.trim().is_empty() {
+    /// A record without a `uuid` opens no turn: its id would not be stable.
+    fn push_user(
+        turns: &mut Vec<ConversationTurn>,
+        opened: &mut Vec<usize>,
+        line_no: usize,
+        id: String,
+        text: String,
+        timestamp: Option<String>,
+    ) {
+        if text.trim().is_empty() || id.is_empty() {
             return;
         }
-        let id = format!("t-{:03}", turns.len() + 1);
         turns.push(ConversationTurn {
             id,
             role: "user".to_string(),
@@ -611,9 +743,10 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
             text: Some(text.trim().to_string()),
             parts: Vec::new(),
         });
+        opened.push(line_no);
     }
 
-    for line in content.lines() {
+    for (line_no, line) in content.lines().enumerate() {
         let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
             continue;
         };
@@ -621,6 +754,7 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
             continue;
         }
         let timestamp = v["timestamp"].as_str().map(str::to_string);
+        let uuid = v["uuid"].as_str().unwrap_or("").to_string();
         match v["type"].as_str().unwrap_or("") {
             // A message typed while the agent was working, delivered into the running turn.
             "attachment" => {
@@ -630,7 +764,15 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
                 {
                     let text = attachment["prompt"].as_str().unwrap_or("").to_string();
                     if !is_harness_notice(&text) {
-                        push_user(&mut turns, text, timestamp);
+                        let id = record_turn_id(&turns, &uuid, line);
+                        push_user(
+                            &mut turns,
+                            &mut opened_at_line,
+                            line_no,
+                            id,
+                            text,
+                            timestamp,
+                        );
                     }
                 }
             }
@@ -642,7 +784,15 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
             "user" => match &v["message"]["content"] {
                 Value::String(text) => {
                     let text = claude_command_text(text).unwrap_or_else(|| text.clone());
-                    push_user(&mut turns, text, timestamp);
+                    let id = record_turn_id(&turns, &uuid, line);
+                    push_user(
+                        &mut turns,
+                        &mut opened_at_line,
+                        line_no,
+                        id,
+                        text,
+                        timestamp,
+                    );
                 }
                 Value::Array(blocks) => {
                     let text = blocks
@@ -652,7 +802,15 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
                         .filter(|text| !is_harness_notice(text))
                         .collect::<Vec<_>>()
                         .join("\n");
-                    push_user(&mut turns, text, timestamp.clone());
+                    let id = record_turn_id(&turns, &uuid, line);
+                    push_user(
+                        &mut turns,
+                        &mut opened_at_line,
+                        line_no,
+                        id,
+                        text,
+                        timestamp.clone(),
+                    );
                     for block in blocks
                         .iter()
                         .filter(|block| block["type"].as_str() == Some("tool_result"))
@@ -744,7 +902,10 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
                 match turns.last_mut().filter(|turn| turn.role == "agent") {
                     Some(turn) => turn.parts.extend(parts),
                     None => {
-                        let id = format!("t-{:03}", turns.len() + 1);
+                        let id = record_turn_id(&turns, &uuid, line);
+                        if id.is_empty() {
+                            continue;
+                        }
                         turns.push(ConversationTurn {
                             id,
                             role: "agent".to_string(),
@@ -752,13 +913,17 @@ pub fn parse_claude_transcript(content: &str) -> Vec<ConversationTurn> {
                             text: None,
                             parts,
                         });
+                        opened_at_line.push(line_no);
                     }
                 }
             }
             _ => {}
         }
     }
-    turns
+    Parsed {
+        turns,
+        opened_at_line,
+    }
 }
 
 /// Fallback parser for raw terminal scrollback lines when no canonical log exists.
@@ -951,20 +1116,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_conversation_response_has_no_claimed_canonical_id() {
-        let legacy: ConversationResponse = serde_json::from_str(
-            "{\"session_id\":\"pane\",\"source\":\"scrollback\",\"turns\":[]}",
-        )
-        .unwrap();
-        assert_eq!(legacy.conversation_id, None);
-        assert!(!serde_json::to_value(legacy)
-            .unwrap()
-            .as_object()
-            .unwrap()
-            .contains_key("conversation_id"));
-    }
-
-    #[test]
     fn parses_agy_transcript_into_turns() {
         let jsonl = r#"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-07T08:00:41Z","content":"<USER_REQUEST>\ncheck caccpucino status\n</USER_REQUEST>"}
 {"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-10-07T08:00:41Z","thinking":"Checking repo status","tool_calls":[{"name":"run_command","args":{"CommandLine":"git status"}}]}
@@ -998,10 +1149,10 @@ mod tests {
 
     #[test]
     fn parses_pi_transcript_into_turns() {
-        let jsonl = r#"{"type":"message","timestamp":"2026-10-07T12:00:00Z","message":{"role":"user","content":"Run tests"}}
-{"type":"message","timestamp":"2026-10-07T12:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"cargo_test","arguments":{"target":"all"}}]}}
-{"type":"message","timestamp":"2026-10-07T12:00:05Z","message":{"role":"toolResult","content":"test result: ok"}}
-{"type":"message","timestamp":"2026-10-07T12:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests passed successfully"}]}}"#;
+        let jsonl = r#"{"type":"message","id":"p1","timestamp":"2026-10-07T12:00:00Z","message":{"role":"user","content":"Run tests"}}
+{"type":"message","id":"p2","timestamp":"2026-10-07T12:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"cargo_test","arguments":{"target":"all"}}]}}
+{"type":"message","id":"p3","timestamp":"2026-10-07T12:00:05Z","message":{"role":"toolResult","content":"test result: ok"}}
+{"type":"message","id":"p4","timestamp":"2026-10-07T12:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests passed successfully"}]}}"#;
 
         let turns = parse_pi_transcript(jsonl);
         assert_eq!(turns.len(), 3);
@@ -1035,10 +1186,10 @@ mod tests {
 
     #[test]
     fn pi_text_blocks_match_parallel_tool_ids_not_result_order() {
-        let jsonl = r#"{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"a","name":"read","arguments":{"path":"a.md"}},{"type":"toolCall","id":"b","name":"bash","arguments":{"command":"pwd"}}]}}
-{"type":"message","message":{"role":"toolResult","toolCallId":"missing","content":[{"type":"text","text":"must not attach"}]}}
-{"type":"message","message":{"role":"toolResult","toolCallId":"a","content":[{"type":"text","text":"first block"},{"type":"text","text":"second block"}]}}
-{"type":"message","message":{"role":"toolResult","toolCallId":"b","content":[{"type":"text","text":"/project"}]}}"#;
+        let jsonl = r#"{"type":"message","id":"p5","message":{"role":"assistant","content":[{"type":"toolCall","id":"a","name":"read","arguments":{"path":"a.md"}},{"type":"toolCall","id":"b","name":"bash","arguments":{"command":"pwd"}}]}}
+{"type":"message","id":"p6","message":{"role":"toolResult","toolCallId":"missing","content":[{"type":"text","text":"must not attach"}]}}
+{"type":"message","id":"p7","message":{"role":"toolResult","toolCallId":"a","content":[{"type":"text","text":"first block"},{"type":"text","text":"second block"}]}}
+{"type":"message","id":"p8","message":{"role":"toolResult","toolCallId":"b","content":[{"type":"text","text":"/project"}]}}"#;
         let turns = parse_pi_transcript(jsonl);
         assert_eq!(turns.len(), 1);
         assert_eq!(turns[0].parts.len(), 2);
@@ -1054,9 +1205,9 @@ mod tests {
 
     #[test]
     fn pi_error_flag_follows_the_matching_tool_result() {
-        let log = r#"{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"a","name":"read","arguments":{}},{"type":"toolCall","id":"b","name":"bash","arguments":{}}]}}
-{"type":"message","message":{"role":"toolResult","toolCallId":"b","isError":true,"content":[{"type":"text","text":"command failed"}]}}
-{"type":"message","message":{"role":"toolResult","toolCallId":"a","isError":false,"content":[{"type":"text","text":"contains the word error but succeeded"}]}}"#;
+        let log = r#"{"type":"message","id":"p9","message":{"role":"assistant","content":[{"type":"toolCall","id":"a","name":"read","arguments":{}},{"type":"toolCall","id":"b","name":"bash","arguments":{}}]}}
+{"type":"message","id":"p10","message":{"role":"toolResult","toolCallId":"b","isError":true,"content":[{"type":"text","text":"command failed"}]}}
+{"type":"message","id":"p11","message":{"role":"toolResult","toolCallId":"a","isError":false,"content":[{"type":"text","text":"contains the word error but succeeded"}]}}"#;
         let turns = parse_pi_transcript(log);
         assert!(matches!(
             &turns[0].parts[0],
@@ -1073,9 +1224,9 @@ mod tests {
     #[test]
     fn pi_explicit_abort_keeps_partial_and_empty_responses_without_guessing() {
         let turns = parse_pi_transcript(
-            r#"{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"Partial reply"}],"stopReason":"aborted","errorMessage":"Operation cancelled"}}
-{"type":"message","message":{"role":"user","content":"next"}}
-{"type":"message","message":{"role":"assistant","content":[],"stopReason":"aborted"}}"#,
+            r#"{"type":"message","id":"p12","message":{"role":"assistant","content":[{"type":"text","text":"Partial reply"}],"stopReason":"aborted","errorMessage":"Operation cancelled"}}
+{"type":"message","id":"p13","message":{"role":"user","content":"next"}}
+{"type":"message","id":"p14","message":{"role":"assistant","content":[],"stopReason":"aborted"}}"#,
         );
         assert!(
             matches!(&turns[0].parts[0], ConversationPart::Text { text } if text == "Partial reply")
@@ -1087,11 +1238,11 @@ mod tests {
             matches!(&turns[2].parts[0], ConversationPart::ResponseStatus { status, detail: None } if status == "aborted")
         );
         let ordinary = parse_pi_transcript(
-            r#"{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"The operation aborted yesterday"}],"stopReason":"stop"}}"#,
+            r#"{"type":"message","id":"p15","message":{"role":"assistant","content":[{"type":"text","text":"The operation aborted yesterday"}],"stopReason":"stop"}}"#,
         );
         assert_eq!(ordinary[0].parts.len(), 1);
         let failed = parse_pi_transcript(
-            r#"{"type":"message","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Provider failed"}}"#,
+            r#"{"type":"message","id":"p16","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Provider failed"}}"#,
         );
         assert!(
             matches!(&failed[0].parts[0], ConversationPart::ResponseStatus { status, .. } if status == "failed")
@@ -1100,10 +1251,10 @@ mod tests {
 
     #[test]
     fn pi_tool_times_remain_id_bound_across_separate_responses() {
-        let log = r#"{"type":"message","timestamp":"2026-10-10T01:00:00Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"a","name":"read","arguments":{}}]}}
-{"type":"message","timestamp":"2026-10-10T01:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"b","name":"bash","arguments":{}}]}}
-{"type":"message","timestamp":"2026-10-10T01:00:02Z","message":{"role":"toolResult","toolCallId":"b","content":"b"}}
-{"type":"message","timestamp":"2026-10-10T01:00:03Z","message":{"role":"toolResult","toolCallId":"a","content":"a"}}"#;
+        let log = r#"{"type":"message","id":"p17","timestamp":"2026-10-10T01:00:00Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"a","name":"read","arguments":{}}]}}
+{"type":"message","id":"p18","timestamp":"2026-10-10T01:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"b","name":"bash","arguments":{}}]}}
+{"type":"message","id":"p19","timestamp":"2026-10-10T01:00:02Z","message":{"role":"toolResult","toolCallId":"b","content":"b"}}
+{"type":"message","id":"p20","timestamp":"2026-10-10T01:00:03Z","message":{"role":"toolResult","toolCallId":"a","content":"a"}}"#;
         let turns = parse_pi_transcript(log);
         assert_eq!(turns.len(), 2);
         assert!(
@@ -1144,10 +1295,10 @@ mod tests {
             {"type": "tool_result", "tool_use_id": "t1", "content": [
                 {"type": "image", "source": {"type": "base64", "data": "A".repeat(600_000)}}]}]}});
         let lines = [
-            r#"{"type":"user","message":{"role":"user","content":"early question"}}"#.to_string(),
+            r#"{"type":"user","uuid":"c1","message":{"role":"user","content":"early question"}}"#.to_string(),
             image.to_string(),
             image.to_string(),
-            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"late answer"}]}}"#.to_string(),
+            r#"{"type":"assistant","uuid":"c2","message":{"role":"assistant","content":[{"type":"text","text":"late answer"}]}}"#.to_string(),
         ];
         std::fs::write(&path, lines.join("\n") + "\n").unwrap();
         let mut file = File::open(&path).unwrap();
@@ -1168,14 +1319,53 @@ mod tests {
 
     #[test]
     fn claude_harness_notices_never_become_owner_messages() {
-        let jsonl = r#"{"type":"attachment","attachment":{"type":"queued_command","humanTurn":true,"prompt":"<task-notification>done</task-notification>"}}
-{"type":"user","message":{"content":[{"type":"text","text":"<task-notification>done</task-notification>"}]}}
-{"type":"attachment","attachment":{"type":"queued_command","humanTurn":true,"prompt":"real follow-up"}}"#;
+        let jsonl = r#"{"type":"attachment","uuid":"c3","attachment":{"type":"queued_command","humanTurn":true,"prompt":"<task-notification>done</task-notification>"}}
+{"type":"user","uuid":"c4","message":{"content":[{"type":"text","text":"<task-notification>done</task-notification>"}]}}
+{"type":"attachment","uuid":"c5","attachment":{"type":"queued_command","humanTurn":true,"prompt":"real follow-up"}}"#;
         let turns = parse_claude_transcript(jsonl);
         let texts: Vec<_> = turns
             .iter()
             .filter_map(|turn| turn.text.as_deref())
             .collect();
         assert_eq!(texts, vec!["real follow-up"]);
+    }
+}
+
+#[cfg(test)]
+mod pi_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn compaction_is_a_divider_and_earlier_entries_stay() {
+        let text = "{\"type\":\"message\",\"id\":\"m1\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n{\"type\":\"compaction\",\"id\":\"c1\",\"summary\":\"Goal: x\"}\n";
+        let turns = parse_pi_with_openers(text).turns;
+        assert_eq!(
+            turns.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["m1", "c1"]
+        );
+        assert_eq!(turns[1].role, "notice");
+        assert!(
+            matches!(&turns[1].parts[0], ConversationPart::Divider { label, text } if label == "compaction" && text == "Goal: x")
+        );
+    }
+
+    #[test]
+    fn custom_messages_show_only_when_displayed() {
+        let text = "{\"type\":\"custom_message\",\"id\":\"n1\",\"display\":true,\"content\":\"background task done\"}\n{\"type\":\"custom_message\",\"id\":\"n2\",\"display\":false,\"content\":\"hidden\"}\n";
+        let turns = parse_pi_with_openers(text).turns;
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].id, "n1");
+        assert_eq!(turns[0].text.as_deref(), Some("background task done"));
+    }
+
+    #[test]
+    fn an_omitted_entry_keeps_its_text_and_gains_a_marker() {
+        let text = "{\"type\":\"message\",\"id\":\"m1\",\"message\":{\"role\":\"user\",\"content\":\"secret\"}}\n{\"type\":\"context_edit\",\"id\":\"e1\",\"targetId\":\"m1\",\"replacement\":null}\n";
+        let turns = parse_pi_with_openers(text).turns;
+        assert_eq!(turns[0].text.as_deref(), Some("secret"));
+        assert!(matches!(
+            turns[0].parts.last(),
+            Some(ConversationPart::ContextOmitted)
+        ));
     }
 }

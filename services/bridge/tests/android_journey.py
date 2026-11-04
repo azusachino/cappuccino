@@ -37,16 +37,15 @@ PROTOCOL_HEADERS = {"X-Cappuccino-Protocol": "2"}
 HANDSHAKE = {
     "protocol_min": 2,
     "protocol_max": 2,
-    "capabilities": {
-        name: 1
+    "offered_capabilities": {
+        name: {"version": 1}
         for name in (
             "agent_discovery",
             "live_output",
-            "conversation_history",
+            "conversation_sync",
             "prompt_input",
             "prompt_answers",
             "agent_control",
-            "mutation_binding",
             "completion_signals",
         )
     },
@@ -281,7 +280,7 @@ def self_test(base, admin, fixture):
     row = agents["agents"][0]
     binding = {key: row[key] for key in ("machine_id", "pane_id", "native_session_ref")}
     assert row["native_session_ref"]
-    assert request(base + "/api/v2/agents/s-journey/conversation")[1]["conversation_id"]
+    assert request(base + "/api/v2/agents/s-journey/conversation/sync")[1]["conversation_id"]
     fixture.change({"native": "B"})
     status, error = request(base + "/api/v2/agents/s-journey/prompt", {
         "type": "prompt", "text": "synthetic", "expected_session": binding})
@@ -293,10 +292,10 @@ def self_test(base, admin, fixture):
         "type": "prompt", "text": "synthetic", "expected_session": binding})[0] == 200
     assert fixture.snapshot()["journal"][0]["native"] == "B"
     fixture.change({"history": False})
-    _, unavailable = request(base + "/api/v2/agents/s-journey/conversation")
-    assert unavailable["source"] == "scrollback" and unavailable.get("conversation_id") is None
+    _, unavailable = request(base + "/api/v2/agents/s-journey/conversation/sync")
+    assert unavailable["mode"] == "scrollback" and unavailable.get("conversation_id") is None
     fixture.change({"history": True})
-    assert request(base + "/api/v2/agents/s-journey/conversation")[1]["conversation_id"]
+    assert request(base + "/api/v2/agents/s-journey/conversation/sync")[1]["conversation_id"]
     machine = request(base + "/api/v2/handshake", HANDSHAKE)[1]["machine_id"]
     status, _ = request(f"http://127.0.0.1:{admin}/", {"restart_bridge": True})
     assert status == 200
