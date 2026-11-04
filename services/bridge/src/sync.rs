@@ -7,6 +7,7 @@
 //! turn id. A token is trusted only when the record at its offset still has that id.
 
 use crate::conversation::{self, ConversationTurn, Parsed};
+use crate::pi_index;
 use crate::transcript::ResolvedTranscript;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -50,6 +51,10 @@ pub struct Token {
     pub file: String,
     pub offset: u64,
     pub record: String,
+    /// The last turn of the page that issued this token. Pi checks it against the active branch too:
+    /// a branch that abandons it, but not `record`, must still resync.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<String>,
 }
 
 pub fn encode(token: &Token) -> String {
@@ -83,7 +88,7 @@ pub struct Line {
 }
 
 /// Byte offset just past the last newline. A record still being written is not part of the file yet.
-fn complete_end(file: &mut File) -> io::Result<u64> {
+pub(crate) fn complete_end(file: &mut File) -> io::Result<u64> {
     const CHUNK: u64 = 64 * 1024;
     let mut end = file.seek(SeekFrom::End(0))?;
     while end > 0 {
@@ -182,19 +187,65 @@ fn read_backward(file: &mut File, end: u64, min_bytes: u64) -> io::Result<(Vec<L
 }
 
 /// Parses records with the agent's own rules. Each parsed turn carries the index of the record that opened it.
-fn parse(kind: Kind, lines: &[Line]) -> Parsed {
+fn parse(kind: Kind, lines: &[Line], pi: Option<&pi_index::Snapshot>) -> (Vec<Line>, Parsed) {
+    // Pi: records off the active branch are dropped before parsing, so that their tool results and
+    // context edits cannot reach the turns that are shown. Records that are not entries are kept.
+    let kept: Vec<Line> = match (kind, pi) {
+        (Kind::Pi, Some(snapshot)) => lines
+            .iter()
+            .filter(|line| {
+                snapshot.kept_offsets.contains(&line.offset)
+                    || !snapshot.entry_offsets.contains(&line.offset)
+            })
+            .cloned()
+            .collect(),
+        _ => lines.to_vec(),
+    };
     let mut text = String::new();
-    for line in lines {
+    for line in &kept {
         match kind {
             Kind::Claude => text.push_str(&conversation::compact_claude_line(&line.bytes)),
             _ => text.push_str(&String::from_utf8_lossy(&line.bytes)),
         }
         text.push('\n');
     }
-    match kind {
+    let parsed = match kind {
         Kind::Pi => conversation::parse_pi_with_openers(&text),
         Kind::Claude => conversation::parse_claude_with_openers(&text),
         Kind::Agy => conversation::parse_agy_with_openers(&text),
+    };
+    let parsed = match (kind, pi) {
+        (Kind::Pi, Some(snapshot)) => shown(parsed, snapshot),
+        _ => parsed,
+    };
+    (kept, parsed)
+}
+
+/// The turn id without its duplicate suffix (`<id>#<hash>`).
+fn raw_id(turn_id: &str) -> &str {
+    turn_id.split('#').next().unwrap_or(turn_id)
+}
+
+/// Pi (P1, P3): keeps the turns on the active branch, and marks every turn whose context was edited.
+fn shown(parsed: Parsed, snapshot: &pi_index::Snapshot) -> Parsed {
+    let mut turns = Vec::new();
+    let mut opened_at_line = Vec::new();
+    for (mut turn, line) in parsed.turns.into_iter().zip(parsed.opened_at_line) {
+        if snapshot.omitted.contains_key(raw_id(&turn.id))
+            && !turn
+                .parts
+                .iter()
+                .any(|part| matches!(part, conversation::ConversationPart::ContextOmitted))
+        {
+            turn.parts
+                .push(conversation::ConversationPart::ContextOmitted);
+        }
+        turns.push(turn);
+        opened_at_line.push(line);
+    }
+    Parsed {
+        turns,
+        opened_at_line,
     }
 }
 
@@ -243,6 +294,7 @@ fn forward(
     start: u64,
     end: u64,
     budget: u64,
+    pi: Option<&pi_index::Snapshot>,
 ) -> io::Result<Page> {
     let mut lines = Vec::new();
     let mut next = start;
@@ -252,11 +304,11 @@ fn forward(
         next = after;
         // Stop at the end of the file, or once two turns open: the first is complete, so this
         // page always makes progress.
-        if reached || parse(kind, &lines).opened_at_line.len() >= 2 {
+        if reached || parse(kind, &lines, pi).1.opened_at_line.len() >= 2 {
             break reached;
         }
     };
-    let parsed = parse(kind, &lines);
+    let (lines, parsed) = parse(kind, &lines, pi);
     // Hold the token at the earliest turn still waiting for a tool result, so that result is sent
     // with its turn when it arrives. The first turn of a page is never held, so each page moves on.
     let held = parsed
@@ -273,12 +325,20 @@ fn forward(
         ),
         None => (next, String::new()),
     };
+    let last = parsed.turns.last().map(|turn| turn.id.clone());
+    // P3 across pages: a turn whose context edit falls in this page, but which is not in it, is sent
+    // again with its tool results, so the phone learns it is omitted.
+    let resent = match pi {
+        Some(snapshot) => resend_omitted(file, snapshot, start, next, end, &parsed.turns)?,
+        None => Vec::new(),
+    };
     Ok(Page {
-        turns: parsed.turns,
+        turns: resent.into_iter().chain(parsed.turns).collect(),
         after: Some(Token {
             file: session.to_string(),
             offset,
             record,
+            last,
         }),
         before: None,
         caught_up: reached,
@@ -308,6 +368,7 @@ fn backward(
     kind: Kind,
     end: u64,
     budget: u64,
+    pi: Option<&pi_index::Snapshot>,
 ) -> io::Result<Earlier> {
     if end == 0 {
         return Ok(Earlier {
@@ -319,12 +380,12 @@ fn backward(
     let mut min_bytes = budget;
     let (lines, at_start) = loop {
         let (lines, at_start) = read_backward(file, end, min_bytes)?;
-        if at_start || parse(kind, &lines).opened_at_line.len() >= 2 {
+        if at_start || parse(kind, &lines, pi).1.opened_at_line.len() >= 2 {
             break (lines, at_start);
         }
         min_bytes = min_bytes.saturating_mul(2);
     };
-    let parsed = parse(kind, &lines);
+    let (lines, parsed) = parse(kind, &lines, pi);
     let last_opener = parsed
         .opened_at_line
         .last()
@@ -343,6 +404,7 @@ fn backward(
         file: session.to_string(),
         offset: lines[parsed.opened_at_line[1]].offset,
         record: first.id.clone(),
+        last: None,
     };
     Ok(Earlier {
         turns: parsed.turns[1..].to_vec(),
@@ -352,19 +414,27 @@ fn backward(
 }
 
 /// The newest page, for a first sync or a resync.
-fn newest(file: &mut File, session: &str, kind: Kind, budget: u64) -> io::Result<Page> {
+fn newest(
+    file: &mut File,
+    session: &str,
+    kind: Kind,
+    budget: u64,
+    pi: Option<&pi_index::Snapshot>,
+) -> io::Result<Page> {
     let end = complete_end(file)?;
-    let earlier = backward(file, session, kind, end, budget)?;
+    let earlier = backward(file, session, kind, end, budget, pi)?;
     let after = match earlier.last_opener {
         Some((offset, record)) => Token {
             file: session.to_string(),
             offset,
             record,
+            last: None,
         },
         None => Token {
             file: session.to_string(),
             offset: end,
             record: String::new(),
+            last: None,
         },
     };
     Ok(Page {
@@ -377,9 +447,20 @@ fn newest(file: &mut File, session: &str, kind: Kind, budget: u64) -> io::Result
 
 /// Whether a token's record is still at its offset. An offset past the end of the complete records,
 /// or a record with another id, makes the token stale.
-fn still_valid(file: &mut File, session: &str, kind: Kind, token: &Token) -> io::Result<bool> {
+fn still_valid(
+    file: &mut File,
+    session: &str,
+    kind: Kind,
+    token: &Token,
+    pi: Option<&pi_index::Snapshot>,
+) -> io::Result<bool> {
     if token.file != session {
         return Ok(false);
+    }
+    if let Some(snapshot) = pi {
+        if !snapshot.active.contains(raw_id(&token.record)) {
+            return Ok(false);
+        }
     }
     let end = complete_end(file)?;
     if token.offset == end && token.record.is_empty() {
@@ -423,11 +504,19 @@ pub fn serve(
     budget: u64,
 ) -> io::Result<Served> {
     let mut file = File::open(path)?;
+    let snapshot = if kind == Kind::Pi {
+        Some(pi_index::snapshot(path)?)
+    } else {
+        None
+    };
+    let pi = snapshot.as_deref();
     match request {
-        Request::Initial => Ok(Served::Page(newest(&mut file, session, kind, budget)?)),
-        Request::Unreadable => Ok(Served::Resync(newest(&mut file, session, kind, budget)?)),
+        Request::Initial => Ok(Served::Page(newest(&mut file, session, kind, budget, pi)?)),
+        Request::Unreadable => Ok(Served::Resync(newest(
+            &mut file, session, kind, budget, pi,
+        )?)),
         Request::After(token) => {
-            if still_valid(&mut file, session, kind, &token)? {
+            if still_valid(&mut file, session, kind, &token, pi)? {
                 let end = complete_end(&mut file)?;
                 Ok(Served::Page(forward(
                     &mut file,
@@ -436,14 +525,17 @@ pub fn serve(
                     token.offset,
                     end,
                     budget,
+                    pi,
                 )?))
             } else {
-                Ok(Served::Resync(newest(&mut file, session, kind, budget)?))
+                Ok(Served::Resync(newest(
+                    &mut file, session, kind, budget, pi,
+                )?))
             }
         }
         Request::Before(token) => {
-            if still_valid(&mut file, session, kind, &token)? {
-                let earlier = backward(&mut file, session, kind, token.offset, budget)?;
+            if still_valid(&mut file, session, kind, &token, pi)? {
+                let earlier = backward(&mut file, session, kind, token.offset, budget, pi)?;
                 Ok(Served::Page(Page {
                     turns: earlier.turns,
                     after: None,
@@ -451,7 +543,9 @@ pub fn serve(
                     caught_up: false,
                 }))
             } else {
-                Ok(Served::Resync(newest(&mut file, session, kind, budget)?))
+                Ok(Served::Resync(newest(
+                    &mut file, session, kind, budget, pi,
+                )?))
             }
         }
     }
@@ -557,6 +651,7 @@ mod tests {
             file: "s-1".into(),
             offset: 4096,
             record: "u7".into(),
+            last: None,
         };
         assert_eq!(decode(&encode(&token)), Some(token));
         assert_eq!(decode("not-hex"), None);
@@ -686,6 +781,7 @@ mod tests {
             file: "session".into(),
             offset: 0,
             record: "not-the-record".into(),
+            last: None,
         };
         let served = serve(
             &path,
@@ -706,6 +802,7 @@ mod tests {
             file: "other".into(),
             offset: 0,
             record: "u0".into(),
+            last: None,
         };
         let served = serve(
             &path,
@@ -726,6 +823,7 @@ mod tests {
             file: "session".into(),
             offset: 1 << 30,
             record: "u0".into(),
+            last: None,
         };
         let served = serve(
             &path,
@@ -741,7 +839,7 @@ mod tests {
     #[test]
     fn pi_and_agy_pages_follow_their_own_record_ids() {
         let scratch = Scratch::new("other-agents");
-        let pi = "{\"type\":\"session\",\"id\":\"s\"}\n{\"type\":\"message\",\"id\":\"p1\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n{\"type\":\"message\",\"id\":\"p2\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"yo\"}]}}\n";
+        let pi = "{\"type\":\"session\",\"id\":\"s\"}\n{\"type\":\"message\",\"id\":\"p1\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n{\"type\":\"message\",\"id\":\"p2\",\"parentId\":\"p1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"yo\"}]}}\n";
         let path = scratch.write("pi.jsonl", pi);
         let page = page_of(serve(&path, "pi", Kind::Pi, Request::Initial, 1 << 20).unwrap());
         let ids: Vec<&str> = page.turns.iter().map(|t| t.id.as_str()).collect();
@@ -829,6 +927,161 @@ mod hold_tests {
                 break;
             }
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// The turns of omitted targets whose context edit is in `start..window_end` and that are not in
+/// `present`. Each target is read from its own record, which is self-contained for Pi.
+fn resend_omitted(
+    file: &mut File,
+    snapshot: &pi_index::Snapshot,
+    start: u64,
+    window_end: u64,
+    end: u64,
+    present: &[ConversationTurn],
+) -> io::Result<Vec<ConversationTurn>> {
+    let mut resent = Vec::new();
+    for (turn_id, edit) in &snapshot.omitted {
+        if *edit < start || *edit >= window_end {
+            continue;
+        }
+        if present.iter().any(|turn| raw_id(&turn.id) == turn_id) {
+            continue;
+        }
+        let Some(&offset) = snapshot.offsets.get(turn_id) else {
+            continue;
+        };
+        if offset >= window_end {
+            continue;
+        }
+        // The turn with its tool results: every record from its opening to the end of the window.
+        let (lines, _, _) = read_forward(file, offset, window_end.min(end), window_end - offset)?;
+        let (_, parsed) = parse(Kind::Pi, &lines, Some(snapshot));
+        resent.extend(
+            parsed
+                .turns
+                .into_iter()
+                .filter(|turn| raw_id(&turn.id) == turn_id),
+        );
+    }
+    Ok(resent)
+}
+
+#[cfg(test)]
+mod pi_branch_tests {
+    use super::*;
+
+    fn pi_scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("cap-sync-pi-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("session.jsonl")
+    }
+
+    fn user(id: &str, parent: Option<&str>, text: &str) -> String {
+        let parent = parent.map_or("null".to_string(), |p| format!("\"{p}\""));
+        format!("{{\"type\":\"message\",\"id\":\"{id}\",\"parentId\":{parent},\"message\":{{\"role\":\"user\",\"content\":\"{text}\"}}}}\n")
+    }
+
+    fn answer(id: &str, parent: &str, text: &str) -> String {
+        format!("{{\"type\":\"message\",\"id\":\"{id}\",\"parentId\":\"{parent}\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"{text}\"}}]}}}}\n")
+    }
+
+    fn page(path: &std::path::Path, request: Request, budget: u64) -> Page {
+        match serve(path, "session", Kind::Pi, request, budget).unwrap() {
+            Served::Page(page) | Served::Resync(page) => page,
+        }
+    }
+
+    #[test]
+    fn only_the_active_branch_is_served() {
+        let path = pi_scratch("branch");
+        // p3 branches from p1 and is the abandoned one: the file's last entry is p2.
+        let text = format!(
+            "{}{}{}{}",
+            user("p1", None, "ask"),
+            answer("p2", "p1", "kept"),
+            answer("p3", "p1", "abandoned"),
+            answer("p4", "p2", "kept again"),
+        );
+        std::fs::write(&path, &text).unwrap();
+        let shown = page(&path, Request::Initial, 1 << 20);
+        let ids: Vec<&str> = shown.turns.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["p1", "p2", "p4"]);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn an_edit_outside_the_page_resends_its_turn_with_the_marker() {
+        let path = pi_scratch("cross-page");
+        let mut text = format!(
+            "{}{}{}",
+            user("p1", None, "secret"),
+            answer("p2", "p1", "first answer"),
+            user("p3", Some("p2"), "more"),
+        );
+        std::fs::write(&path, &text).unwrap();
+        let newest = page(&path, Request::Initial, 1 << 20);
+        let token = newest.after.clone().unwrap();
+        text.push_str("{\"type\":\"context_edit\",\"id\":\"e1\",\"parentId\":\"p3\",\"targetId\":\"p1\",\"replacement\":null}\n");
+        std::fs::write(&path, &text).unwrap();
+        let caught = page(&path, Request::After(token), 1 << 20);
+        let target = caught
+            .turns
+            .iter()
+            .find(|t| t.id == "p1")
+            .expect("the omitted turn is sent again");
+        assert!(target
+            .parts
+            .iter()
+            .any(|p| matches!(p, conversation::ConversationPart::ContextOmitted)));
+        assert_eq!(target.text.as_deref(), Some("secret"));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod pi_abandoned_tests {
+    use super::*;
+
+    fn user(id: &str, parent: Option<&str>, text: &str) -> String {
+        let parent = parent.map_or("null".to_string(), |p| format!("\"{p}\""));
+        format!("{{\"type\":\"message\",\"id\":\"{id}\",\"parentId\":{parent},\"message\":{{\"role\":\"user\",\"content\":\"{text}\"}}}}\n")
+    }
+
+    fn answer(id: &str, parent: &str, text: &str) -> String {
+        format!("{{\"type\":\"message\",\"id\":\"{id}\",\"parentId\":\"{parent}\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"{text}\"}}]}}}}\n")
+    }
+
+    #[test]
+    fn a_token_on_an_abandoned_branch_resyncs() {
+        let dir = std::env::temp_dir().join(format!("cap-sync-abandon-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        let mut text = format!(
+            "{}{}{}",
+            user("p1", None, "ask"),
+            answer("p2", "p1", "one"),
+            user("p3", Some("p2"), "two"),
+        );
+        std::fs::write(&path, &text).unwrap();
+        let first = match serve(&path, "session", Kind::Pi, Request::Initial, 1 << 20).unwrap() {
+            Served::Page(page) | Served::Resync(page) => page,
+        };
+        let token = first.after.clone().unwrap();
+        text.push_str(&answer("p4", "p3", "three"));
+        text.push_str(&user("p5", Some("p4"), "four"));
+        std::fs::write(&path, &text).unwrap();
+        let caught =
+            match serve(&path, "session", Kind::Pi, Request::After(token), 1 << 20).unwrap() {
+                Served::Page(page) | Served::Resync(page) => page,
+            };
+        let issued = caught.after.clone().unwrap();
+        // A new branch from p3 becomes the leaf: p4 and p5 are abandoned.
+        text.push_str(&answer("p6", "p3", "other branch"));
+        std::fs::write(&path, &text).unwrap();
+        let served = serve(&path, "session", Kind::Pi, Request::After(issued), 1 << 20).unwrap();
+        assert!(matches!(served, Served::Resync(_)));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

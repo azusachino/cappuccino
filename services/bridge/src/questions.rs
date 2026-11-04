@@ -182,7 +182,7 @@ pub fn form(screen: &str) -> Option<Form> {
     let question = question.join(" ");
     Some(Form {
         question: Question {
-            id: crate::prompt::hashed_id("q", &[&header, &question]),
+            id: crate::prompt::hashed_id("q", &[&question]),
             header,
             question,
             multi_select,
@@ -232,6 +232,7 @@ pub fn card(form: &Form) -> PromptCard {
         questions: vec![question],
         question_number: multi_question.then(|| (answered + 1).min(form.tabs.len())),
         question_count: multi_question.then_some(form.tabs.len()),
+        answers: Vec::new(),
     }
 }
 
@@ -260,6 +261,7 @@ pub fn review(screen: &str) -> Option<PromptCard> {
         .map(|line| line.trim_start_matches('●').trim())
         .collect::<Vec<_>>()
         .join("\n");
+    let answers = review_answers(&lines[start + 1..end]);
     let options = vec![
         PromptOption {
             id: "submit".to_string(),
@@ -276,7 +278,7 @@ pub fn review(screen: &str) -> Option<PromptCard> {
         prompt_id: compute_prompt_id("Review your answers", Some(&summary), &options),
         card_type: REVIEW.to_string(),
         title: "Submit your answers?".to_string(),
-        message: Some(summary),
+        message: None,
         tool_name: Some("AskUserQuestion".to_string()),
         command: None,
         options,
@@ -284,6 +286,7 @@ pub fn review(screen: &str) -> Option<PromptCard> {
         questions: Vec::new(),
         question_number: None,
         question_count: None,
+        answers,
     })
 }
 
@@ -360,6 +363,10 @@ pub fn answer_steps(form: &Form, answer: &Answer) -> Result<Vec<Step>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Question ids of the fixture forms: a hash of the question text.
+    const COLOR_ID: &str = "q-abb508ec5cb9";
+    const PETS_ID: &str = "q-e5d9aaf9cb27";
 
     // Screens as Herdr reads them from a Claude Code 2.1 pane.
     const COLOR: &str = "──────────
@@ -509,9 +516,20 @@ Ready to submit your answers?
         let card = review(REVIEW_SCREEN).unwrap();
         assert_eq!(card.card_type, REVIEW);
         assert_eq!(
-            card.message.as_deref(),
-            Some("Pick a color?\n→ Blue\nWhich pets?\n→ Cat, Fish")
+            card.message, None,
+            "the answers are structured, not a summary"
         );
+        let answers: Vec<(&str, &str)> = card
+            .answers
+            .iter()
+            .map(|a| (a.answer.as_str(), a.question_id.as_str()))
+            .collect();
+        assert_eq!(
+            answers.iter().map(|a| a.0).collect::<Vec<_>>(),
+            ["Blue", "Cat, Fish"]
+        );
+        assert_eq!(card.answers[0].question_id, COLOR_ID);
+        assert_eq!(card.answers[1].question_id, PETS_ID);
         assert_eq!(card.options.len(), 2);
     }
 
@@ -599,5 +617,56 @@ Ready to submit your answers?
         assert!(answer_steps(&color, &answer(&color, &[5], None)).is_err());
         assert!(answer_steps(&color, &answer(&color, &[], Some("two\nlines"))).is_err());
         assert!(answer_steps(&pets, &answer(&pets, &[], Some("   "))).is_err());
+    }
+}
+
+/// The answers on a review screen: each question line (`●`) is followed by its answer (`→`).
+/// A question is keyed by the same id the question card gets, so the phone can match them.
+fn review_answers(lines: &[&str]) -> Vec<ReviewAnswer> {
+    let mut answers = Vec::new();
+    let mut question: Option<String> = None;
+    for line in lines {
+        if let Some(text) = line.strip_prefix('●') {
+            question = Some(text.trim().to_string());
+        } else if let Some(answer) = line.strip_prefix('→') {
+            if let Some(text) = question.take() {
+                answers.push(ReviewAnswer {
+                    question_id: crate::prompt::hashed_id("q", &[&text]),
+                    answer: answer.trim().to_string(),
+                });
+            }
+        } else if let (Some(text), false) = (question.as_mut(), line.is_empty()) {
+            // A wrapped question line: the form joins its lines with a space, so the id does too.
+            text.push(' ');
+            text.push_str(line);
+        }
+    }
+    answers
+}
+
+/// One answered question on the review screen, for display.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReviewAnswer {
+    pub question_id: String,
+    pub answer: String,
+}
+
+#[cfg(test)]
+mod review_wrap_tests {
+    use super::*;
+
+    #[test]
+    fn a_wrapped_question_keeps_the_id_the_form_gave_it() {
+        let lines = [
+            "● Which of these options",
+            "fits the project best?",
+            "→ Blue",
+        ];
+        let answers = review_answers(&lines);
+        assert_eq!(answers.len(), 1);
+        assert_eq!(
+            answers[0].question_id,
+            crate::prompt::hashed_id("q", &["Which of these options fits the project best?"])
+        );
     }
 }

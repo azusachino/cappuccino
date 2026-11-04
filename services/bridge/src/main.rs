@@ -11,6 +11,7 @@ mod herdr;
 mod iroh_transport;
 mod lifecycle;
 mod mutation;
+mod pi_index;
 mod prompt;
 mod protocol;
 mod questions;

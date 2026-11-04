@@ -578,9 +578,9 @@ async fn agent_conversation_returns_structured_turns() {
     let transcript = sessions.join("s-probe.jsonl");
 
     let jsonl = r#"{"type":"message","id":"e1","timestamp":"2026-10-07T12:00:00Z","message":{"role":"user","content":"Run tests"}}
-{"type":"message","id":"e2","timestamp":"2026-10-07T12:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"cargo_test","arguments":{"target":"all"}}]}}
-{"type":"message","id":"e3","timestamp":"2026-10-07T12:00:05Z","message":{"role":"toolResult","content":"test result: ok"}}
-{"type":"message","id":"e4","timestamp":"2026-10-07T12:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests passed successfully"}]}}
+{"type":"message","id":"e2","parentId":"e1","timestamp":"2026-10-07T12:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"cargo_test","arguments":{"target":"all"}}]}}
+{"type":"message","id":"e3","parentId":"e2","timestamp":"2026-10-07T12:00:05Z","message":{"role":"toolResult","content":"test result: ok"}}
+{"type":"message","id":"e4","parentId":"e3","timestamp":"2026-10-07T12:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests passed successfully"}]}}
 "#;
     std::fs::write(&transcript, jsonl.as_bytes()).unwrap();
 
@@ -1058,9 +1058,9 @@ Ready to submit your answers?
   2. Cancel
 ";
 
-/// Question ids the bridge derives from the fixture forms (header and question text).
-const COLOR_QUESTION: &str = "q-9ee65439d604";
-const PETS_QUESTION: &str = "q-420dd5e9c110";
+/// Question ids the bridge derives from the fixture forms (a hash of the question text).
+const COLOR_QUESTION: &str = "q-abb508ec5cb9";
+const PETS_QUESTION: &str = "q-e5d9aaf9cb27";
 
 /// The wire answer for option positions of question `question`. Option ids are `opt-<index>`.
 fn pick(question: &str, selected: &[usize], free_text: Option<&str>) -> Value {

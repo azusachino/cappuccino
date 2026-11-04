@@ -30,6 +30,9 @@ pub struct PromptCard {
     /// Number of questions in the form; set only on question cards.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub question_count: Option<usize>,
+    /// The answers on a review card, one per answered question.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub answers: Vec<crate::questions::ReviewAnswer>,
 }
 
 /// The screen row a card option presses, 1-based. The digit a numbered menu takes
@@ -313,6 +316,7 @@ fn detect_tool_approval(lines: &[&str]) -> Option<PromptCard> {
         questions: Vec::new(),
         question_number: None,
         question_count: None,
+        answers: Vec::new(),
     })
 }
 
@@ -406,6 +410,7 @@ fn detect_choice_menu(lines: &[&str]) -> Option<PromptCard> {
         questions: Vec::new(),
         question_number: None,
         question_count: None,
+        answers: Vec::new(),
     })
 }
 

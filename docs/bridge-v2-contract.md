@@ -200,9 +200,9 @@ Each agent writes its own session file on the machine that runs it. The bridge r
 - **Session id:** the session header's `id`. Each entry carries `id` and `parentId`, which form a tree.
 - **Turn id:** the entry `id`. Entry ids are 8 hex characters, so a duplicate within one read gets the entry `id` plus `#` and a digest of its record. A collision between two reads is not caught (section 8).
 - **Resolution:** the path Herdr reports must sit inside a configured store.
-- **Active branch (P1):** the path from the file's last entry up to the root through `parentId`. This matches Pi's own load rule, because the leaf is not stored in the file. Not yet implemented: entries are read in file order, so a branching session shows every branch (section 8).
+- **Active branch (P1):** the path from the file's last entry up to the root through `parentId`. This matches Pi's own load rule, because the leaf is not stored in the file. Records off the branch are dropped before parsing, so their tool results and edits cannot reach shown turns. The index is in section 7.1.
 - **Compaction (P2):** a `compaction` entry is a `notice` turn with one `divider` part (label `compaction`, the summary). Earlier entries stay visible.
-- **Context edits (P3):** a `context_edit` with `replacement: null` leaves its target visible, with a `context_omitted` part. The marker is added when the edit and its target are read in the same page. A later page does not re-send the target, which is a known limit (section 8).
+- **Context edits (P3):** a `context_edit` with `replacement: null` leaves its target visible, with a `context_omitted` part on the turn that owns it. A tool result belongs to the assistant turn that called the tool, so the marker goes there. When the edit falls in a page but its turn does not, that turn is sent again with its tool results. Only edits on the active branch count.
 - **Custom messages (P4):** a `custom_message` is a `notice` turn only when its `display` flag is true.
 - **Not shown:** `custom`, `label`, `session_info` and `usage` entries.
 
@@ -255,13 +255,13 @@ Claude Code writes a question's tool call to its transcript only after it is ans
   }
   ```
 
-- **Review card:** after the last question the form shows its review. The bridge sends `type: "ask_user_question_review"` with the chosen answers and two options:
+- **Review card:** after the last question the form shows its review. The bridge sends `type: "ask_user_question_review"`, with one display-only `answer` per answered question, and two options. `question_id` is the id the question card had (a hash of the question text). A wrapped question line is joined with a space, as the form joins it. The review's answers are shown, not sent back, so the phone never submits them by id:
 
   ```json
   {
     "type": "ask_user_question_review",
     "prompt_id": "p-7c2e0a91",
-    "answers": [{"question_id": "q-1", "selected_option_ids": ["opt-0"], "free_text": null}],
+    "answers": [{"question_id": "q-abb508ec5cb9", "answer": "Blue"}],
     "options": [{"id": "submit", "label": "Submit answers"}, {"id": "cancel", "label": "Cancel"}],
     "default_option_id": "submit"
   }
@@ -340,7 +340,7 @@ Turns never arrive on the stream. Turns come only from the sync endpoint (§7).
 ### 7.1 Model
 
 - The phone keeps a replicated log per session. The offline cache is that log.
-- The bridge is stateless. Each request reads the agent's session file and holds no per-client state.
+- The bridge keeps no per-client state. Each request reads the agent's session file. For Pi it also keeps one index per session file (the entry tree and the context edits), derived only from the file's bytes and extended as the file grows (section 5.1).
 - A token is opaque to the phone. It is hex-encoded JSON of `{file, offset, record}`:
   - `file` is the session file's identity: its file stem for Pi and Claude Code, and the conversation directory name for Agy, whose file is always `transcript.jsonl`.
   - `offset` is the byte offset of the record a page starts from. Every page starts at the record that opens a turn.
@@ -393,7 +393,7 @@ Turns never arrive on the stream. Turns come only from the sync endpoint (§7).
 ### 7.5 Invalid token
 
 - `mode: "resync"` is returned when a token names a different session file, an offset past the end of the complete records, a record id that no longer matches, or an undecodable token. The response is the newest page, with fresh tokens. The phone discards its local log for that session and applies the page.
-- Branch checks for Pi are not yet implemented (section 8), so a token is not checked against the active branch.
+- For Pi, a token whose `record`, or whose `last` turn, is off the active branch resyncs. `last` is the page's last turn and is set on forward pages.
 
 ### 7.6 Scrollback
 
@@ -406,14 +406,11 @@ Turns never arrive on the stream. Turns come only from the sync endpoint (§7).
 
 ## 8. Open items before freeze
 
-1. Not implemented: Pi active-branch mapping (P1). The bridge reads entries in file order, so a branching session shows every branch. A per-request scan of the whole file is too costly, so a cached index keyed by file identity and length is the likely design. No local session branches yet.
-2. Known limit: a context edit whose target was sent in an earlier page does not re-send the target, so its marker appears only when both are read together (section 7.4 and 5.1).
-3. Not implemented: review-card answers keyed by `question_id` (section 6.1). The review screen does not carry the question text that the id is derived from. Decide between deriving the id from the header, or changing the review shape.
-4. Pi entry ids are 8 hex characters. Duplicates are detected only within one read, so a collision between two reads is not caught. Decide whether the turn key should include the opening record's byte offset.
-5. Confirm the session file identity for each agent (section 7.1), and what happens when a session id is reused.
-6. Decide the maximum size of one turn. A turn above the phone's 2 MiB ceiling cannot be shown. A bridge-side text cap with `truncated: true` is the likely answer.
-7. Confirm that Claude Code's `/compact` never rewrites a session file. No rewrite has been observed. `resync` covers it either way.
-8. Confirm the proposed defaults: `answer_budget_secs` (10), `page_bytes` (1 MiB) and `message_bytes` (256 KiB).
+1. Pi entry ids are 8 hex characters. Duplicates are detected only within one read, so a collision between two reads is not caught. Decide whether the turn key should include the opening record's byte offset.
+2. Confirm the session file identity for each agent (section 7.1), and what happens when a session id is reused.
+3. Decide the maximum size of one turn. A turn above the phone's 2 MiB ceiling cannot be shown. A bridge-side text cap with `truncated: true` is the likely answer.
+4. Confirm that Claude Code's `/compact` never rewrites a session file. No rewrite has been observed. `resync` covers it either way.
+5. Confirm the proposed defaults: `answer_budget_secs` (10), `page_bytes` (1 MiB) and `message_bytes` (256 KiB).
 
 ---
 
