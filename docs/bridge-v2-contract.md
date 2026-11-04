@@ -1,7 +1,7 @@
 # Cappuccino Bridge & Interceptor Architecture Specification
 
 **Status**: Proposal / Draft Contract  
-**Target Repositories**: `vendor/cappuccino/services/bridge`, `refs/coding-agents/herdr-web-ui`  
+**Target Repositories**: `services/bridge`, and the herdr-web-ui reference (read-only, not vendored)  
 **Related Documents**: [Architecture](architecture.md), [Herdr WebUI Research](research/herdr-webui-design-research.md), [Behavior Spec](behavior-spec.md)
 
 ---
@@ -18,7 +18,7 @@ Clients (Android, iOS/macOS, WebUI) should not act as VT100 terminal emulators o
 
 ## 2. Herdr API Surface & Extension Model
 
-Based on installed Herdr 0.9.3 and reference implementations in `refs/coding-agents/herdr-web-ui/server/herdr/client.ts`:
+Based on installed Herdr 0.9.3 and reference implementations in herdr-web-ui `server/herdr/client.ts`:
 
 ### 2.1 Transport & Lifecycle
 
@@ -222,7 +222,7 @@ Pairing and transport sit outside `/api/`, and each has its own version:
 
 ## 5. Antigravity (`agy`) Session Model & Interaction Protocol
 
-Antigravity (`agy`) is the agent actively powering this workstation environment and running across Herdr panes.
+Antigravity (`agy`) is the agent actively powering this environment and running across Herdr panes.
 
 ### 5.1 Storage & Session File Resolution
 
@@ -357,7 +357,7 @@ To enable low-effort, focused execution by delegated agents:
    - *Verification*: Unit tests with real session JSONL samples.
 
 3. **Task 3: Interactive Prompt Detection Engine (Rust)**
-   - Implement `services/bridge/src/modules/prompt.rs` porting regex signatures from `refs/coding-agents/herdr-web-ui/server/prompt.ts`.
+   - Implement `services/bridge/src/modules/prompt.rs` porting regex signatures from herdr-web-ui `server/prompt.ts`.
    - Expose `POST /api/agents/:sessionId/prompt` for card answering.
    - *Verification*: Synthetic ANSI screen test fixtures.
 

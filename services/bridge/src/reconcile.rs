@@ -453,7 +453,7 @@ mod tests {
         assert!(is_transient_chrome("────────────────────────"));
         assert!(is_transient_chrome("━━━━━━━━━━━━━━━━━━━━━━━━"));
         assert!(is_transient_chrome(
-            "working · Gemini 3.8 Flash · harus-workstation"
+            "working · Gemini 3.8 Flash · example-project"
         ));
         assert!(is_transient_chrome("thinking · analyzing directory..."));
         assert!(is_transient_chrome("idle · standing by"));

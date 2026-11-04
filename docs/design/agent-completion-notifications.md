@@ -66,8 +66,8 @@ Full workstation/native acceptance is not replaced by a synthetic notification.
 
 ## Primary sources
 
-- Herdr pinned workstation source: `AgentInfo` and state-transition ownership in
-  `refs/coding-agents/herdr/src/api/schema/agents.rs` and `src/app/actions.rs`.
+- Herdr pinned source: `AgentInfo` and state-transition ownership in
+  herdr `src/api/schema/agents.rs` and `src/app/actions.rs`.
 - [Android notification permission](https://developer.android.com/develop/ui/views/notifications/notification-permission)
 - [Android foreground service types](https://developer.android.com/develop/background-work/services/fgs/service-types)
 - [Telegram sendMessage](https://core.telegram.org/bots/api#sendmessage)

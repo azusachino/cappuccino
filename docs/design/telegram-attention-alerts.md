@@ -40,7 +40,7 @@ show_pane_names = false              # opt-in: add the herdr pane name to messag
 events = ["completion", "needs_answer", "route_failure"]
 ```
 
-The owner's setup steps (token in harus-nix, config, herdr naming, verification)
+The owner's setup steps (token in the Nix secrets repository, config, herdr naming, verification)
 are in [telegram alerts setup](../telegram-alerts-setup.md).
 
 - The token is read from `token_file` at startup and on an explicit reload. It
