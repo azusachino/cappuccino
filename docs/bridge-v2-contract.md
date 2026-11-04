@@ -391,7 +391,7 @@ The following 11 mechanical decisions were established during grilling review to
    - In-flight turns are assigned synthetic IDs (`in_flight:<step_index>`). On step completion, `turn_commit` atomically replaces the transient entry with the canonical markdown turn without UI flicker.
 6. **Semantic Anchor Hashing (Q6)**:
    - Viewport hash checks isolate the prompt bounding box lines via title and divider regexes, ignoring unstable background scrollback or footer clock tickers.
-7. **Tail Window & Cursor Paging (Q7)**:
+7. **Tail Window & Cursor Paging (Q7)** — superseded by section 9 (client-held watermark, no server cursor):
    - To protect mobile memory, the bridge reads transcripts backwards starting from the latest 2MB window (20–30 turns). Clients prepend earlier history via `cursor=offset:<bytes>`.
 8. **Global Multi-Device Broadcast (Q8)**:
    - Prompt requests and approvals are broadcast across all active client connections. Answering a card on a phone immediately broadcasts `prompt_resolved` to dismiss it on the tablet and Mac.
@@ -404,3 +404,68 @@ The following 11 mechanical decisions were established during grilling review to
     - A card id is a hash of what the screen shows plus a nonce. The nonce stays while the card stays on screen, is renewed when the card leaves and comes back (the same command asked again is a new prompt), and is spent as soon as an answer or cancel is typed. A spent or stale id gets `409 stale_prompt` with the id on screen now.
 11. **Graceful Cancellation Contract (Q11)**:
     - User interruption from mobile sends `ctrl+c` / `agent.stop` via Herdr RPC. Bridge updates status to `"interrupted"` and emits `turn_complete`. If the agent fails to yield within 3 seconds, a forceful kill option is presented.
+
+## 9. Conversation sync (proposed)
+
+Status: proposed. The decisions below come from the design review; none is implemented yet. Implementation follows the contract in reviewed slices.
+
+### 9.1 Model
+
+- The phone keeps a replicated log per session. The offline cache becomes that log.
+- The bridge is stateless. It serves records from the agent's session file and holds no per-client state.
+- The phone owns a watermark: where it stopped reading. It is an opaque token, `{file_id, offset}`, where `offset` is the byte position just past the last settled record applied.
+- `file_id` is the agent's own session id (Pi header `id`, Claude session id, Agy conversation id). Session files are append-only; a rewrite is detected through `resync` (9.4).
+
+### 9.2 Requests
+
+- `GET /api/v2/agents/{sessionId}/conversation/sync?after=<token>` returns records after the watermark, forward. This is the catch-up path.
+- `GET /api/v2/agents/{sessionId}/conversation/sync?before=<token>` returns an earlier page. The phone uses it to backfill history in the background, after the latest turns are shown (decision Q10).
+- Both tokens are client-held. The bridge keeps no cursor state.
+- Response:
+
+```json
+{
+  "mode": "append",
+  "upserts": [ { "id": "...", "role": "agent", "parts": [] } ],
+  "watermark": "<token>",
+  "more": true
+}
+```
+
+- `upserts` holds whole turns, keyed by `id`. A turn is sent again whenever a later record changes it, such as a tool result or an omission marker.
+- `more: true` means the phone should request the next page with the new token.
+
+### 9.3 Settled boundary
+
+- A record is settled when it belongs to a complete turn. The bridge never sends the watermark past an incomplete turn (decision Q9).
+- An incomplete turn is still sent as an upsert, and the phone replaces it later (decision Q15).
+
+### 9.4 Invalid watermark
+
+- If the token names a different `file_id`, an offset past the end of the file, or a point that no longer matches the record there, the response is `"mode": "resync"`. The response then carries the first page of a fresh snapshot.
+- The phone discards its local log for that session and applies the snapshot (decision Q8).
+
+### 9.5 Turn identity
+
+- A turn's `id` is the id of the record that opened it: Claude `uuid`, Agy `step_index`, Pi entry `id` (decision Q14).
+- Positional ids (`t-001`) are not used on the wire.
+- Open risk for Pi: entry ids are 8 hex characters. Ids are 32-bit random values, so by the birthday estimate a session of about 7,000 entries has roughly a 0.6% chance of a collision. The parser must check uniqueness per session, or the turn key must include the byte offset of the opening record.
+
+### 9.6 Record-to-turn rules
+
+- **Pi.** Active branch = the path from the file's last entry up to the root through `parentId` (P1). `compaction` becomes a divider with its summary collapsed, and earlier entries stay visible (P2). A `context_edit` with `replacement: null` leaves its target visible with an "omitted from model context" marker (P3). `custom_message` is shown only when `display` is true (P4). `custom`, `label`, `session_info` and `usage` are not shown.
+- **Claude.** Current parser rules. Records marked `isSidechain` or `isMeta`, and harness notices, are skipped. Compaction was observed as appended records, not rewrites.
+- **Agy.** Current parser rules, keyed by `step_index`.
+
+### 9.7 Budgets
+
+- Sync page budget: 1 MiB per response, under the phone's 2 MiB ceiling. Proposed `[tuning.sync] page_bytes`.
+- Stream message budget: 256 KB per WebSocket message, under the phone's 1 MiB ceiling. Proposed `[tuning.stream] message_bytes`. Entries are split across messages and none is dropped (decision Q3). The worst-case row width is unmeasured, so this number is provisional.
+- The phone's own ceilings stay as they are (decision Q4).
+
+### 9.8 Open items before implementation
+
+1. Pi entry-id uniqueness check, or switch the turn key to include the opening record's byte offset (9.5).
+2. Confirm the `file_id` source for each agent, and the behaviour when a session id is reused.
+3. Measure the stream's worst-case row width on a real pane and set `message_bytes` from it.
+4. Decide whether Claude's `/compact` ever rewrites a file. No rewrite has been observed. `resync` covers it either way.
