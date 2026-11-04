@@ -40,16 +40,17 @@ class QuestionFormUiTest {
       toolName = "AskUserQuestion",
       command = null,
       options = emptyList(),
-      selectedIndex = 0,
       questions =
         listOf(
           PromptQuestion(
+            "q-color",
             "Color",
             "Pick a color?",
             false,
             listOf(PromptOption("opt-0", "Red", "warm"), PromptOption("opt-1", "Blue", "cool")),
           ),
           PromptQuestion(
+            "q-pets",
             "Pets",
             "Which pets?",
             true,
@@ -125,7 +126,10 @@ class QuestionFormUiTest {
     compose.onNodeWithText("Cat").performClick().assertIsOff()
     compose.onNodeWithText("Submit").assertIsEnabled().performClick()
     assertEquals(
-      listOf(QuestionAnswer(listOf(1), null), QuestionAnswer(listOf(2), null)),
+      listOf(
+        QuestionAnswer("q-color", listOf("opt-1"), null),
+        QuestionAnswer("q-pets", listOf("opt-2"), null),
+      ),
       submitted.single(),
     )
 
@@ -146,7 +150,10 @@ class QuestionFormUiTest {
     compose.onAllNodes(hasSetTextAction())[1].performScrollTo().performTextInput("a bird")
     compose.onNodeWithText("Submit").performClick()
     assertEquals(
-      listOf(QuestionAnswer(emptyList(), "Teal"), QuestionAnswer(emptyList(), "a bird")),
+      listOf(
+        QuestionAnswer("q-color", emptyList(), "Teal"),
+        QuestionAnswer("q-pets", emptyList(), "a bird"),
+      ),
       submitted.single(),
     )
   }

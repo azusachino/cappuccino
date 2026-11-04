@@ -58,12 +58,15 @@ fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnecti
 
 data class PromptSendState(val text: String, val outcome: String? = null)
 
-/** Live observation and an advertised binding contract are both required for writes. */
+/**
+ * Live observation and an agreed prompt input are both required for writes. Every v2 write carries
+ * its session binding, so the binding needs no capability of its own.
+ */
 val ConnectedUiState.canMutate: Boolean
   get() =
     connection == ConnectionState.Connected &&
       streamLive &&
-      bridgeDetails[activeProfileId]?.capabilities?.get("mutation_binding") == true &&
+      bridgeDetails[activeProfileId]?.capabilities?.get("prompt_input") == true &&
       selectedAgent?.let { MutationBinding.from(it) } != null
 
 /**
@@ -169,7 +172,7 @@ interface ConnectedActions {
     answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
   ) = Unit
 
-  fun answerPrompt(promptId: String, optionIndex: Int?, optionId: String?, action: String?)
+  fun answerPrompt(promptId: String, optionId: String?, action: String?)
 
   fun loadConversation()
 
@@ -955,14 +958,9 @@ internal constructor(
     }
   }
 
-  override fun answerPrompt(
-    promptId: String,
-    optionIndex: Int?,
-    optionId: String?,
-    action: String?,
-  ) =
+  override fun answerPrompt(promptId: String, optionId: String?, action: String?) =
     runAgentAction("Failed to answer prompt") { client, agent, binding ->
-      client.answerPrompt(agent.sessionId, promptId, optionIndex, optionId, action, binding)
+      client.answerPrompt(agent.sessionId, promptId, optionId, action, binding)
     }
 
   override fun answerQuestions(
@@ -1212,6 +1210,8 @@ internal constructor(
             }
             if (event is StreamEvent.AgentStatus && !opened)
               throw ProtocolException("Agent status arrived before stream_open")
+            // The stream carries no turns; a hint means a sync request now.
+            if (event is StreamEvent.ConversationChanged) loadConversation()
             val current = mutableState.value
             val reduced = reduce(current.stream, event, agent.sessionId)
             val streamError = (event as? StreamEvent.Error)?.let { "${it.code}: ${it.message}" }

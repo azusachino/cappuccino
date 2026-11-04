@@ -69,7 +69,7 @@ import com.azusachino.cappuccino.io.SessionStats
 @Composable
 fun PromptCardView(
   prompt: PromptCard,
-  onSelectOption: (Int, String) -> Unit,
+  onSelectOption: (String) -> Unit,
   onCancel: () -> Unit,
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
@@ -107,20 +107,31 @@ fun PromptCardView(
         )
       }
 
+      // Display only: the review's answers are shown here and never sent back by the phone.
+      if (prompt.reviewAnswers.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          prompt.reviewAnswers.forEach { review ->
+            val question = prompt.questions.firstOrNull { it.id == review.questionId }
+            Text(
+              text = question?.let { "${it.question}: ${review.answer}" } ?: review.answer,
+              style = MaterialTheme.typography.bodyMedium,
+            )
+          }
+        }
+      }
+
       if (prompt.options.isNotEmpty()) {
         val options = prompt.options
         Column(
           modifier = Modifier.fillMaxWidth(),
           verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-          options.forEachIndexed { index, option ->
+          options.forEach { option ->
             Surface(
               shape = RoundedCornerShape(12.dp),
               color = MaterialTheme.colorScheme.surfaceVariant,
               modifier =
-                Modifier.fillMaxWidth().clickable(enabled = enabled) {
-                  onSelectOption(index, option.id)
-                },
+                Modifier.fillMaxWidth().clickable(enabled = enabled) { onSelectOption(option.id) },
             ) {
               Column(
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),

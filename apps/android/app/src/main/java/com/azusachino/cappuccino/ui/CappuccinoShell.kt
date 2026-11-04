@@ -1029,18 +1029,18 @@ fun CappuccinoScreen(
                               mutate { it.answerQuestions(card.promptId, answers) }
                             },
                             onCancel = {
-                              mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                              mutate { it.answerPrompt(card.promptId, null, "cancel") }
                             },
                           )
                         else
                           PromptCardView(
                             prompt = card,
                             enabled = answersEnabled,
-                            onSelectOption = { idx, optId ->
-                              mutate { it.answerPrompt(card.promptId, idx, optId, "select_option") }
+                            onSelectOption = { optId ->
+                              mutate { it.answerPrompt(card.promptId, optId, null) }
                             },
                             onCancel = {
-                              mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                              mutate { it.answerPrompt(card.promptId, null, "cancel") }
                             },
                           )
                       }

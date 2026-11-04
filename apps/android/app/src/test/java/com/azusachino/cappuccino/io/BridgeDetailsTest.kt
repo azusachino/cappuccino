@@ -11,14 +11,14 @@ import org.junit.Test
 
 class BridgeDetailsTest {
   private val prefix =
-    """"event":"paired","machine_id":"00000000-0000-0000-0000-000000000001","plugin":"cappuccino-bridge""""
+    """"event":"handshake_accepted","machine_id":"00000000-0000-0000-0000-000000000001""""
 
   @Test
   fun offeredAndAgreedCapabilitiesAreTrueOnlyWhenAgreed() {
     val details =
       parseBridgeDetails(
         parseJsonObject(
-          "{$prefix,\"protocol\":2,\"bridge_version\":\"0.2.0\",\"capabilities\":{\"live_output\":1,\"prompt_input\":1},\"agreed\":{\"live_output\":1}}"
+          "{$prefix,\"protocol_version\":2,\"bridge_version\":\"0.2.0\",\"offered_capabilities\":{\"live_output\":{\"version\":1},\"prompt_input\":{\"version\":1}},\"agreed_capabilities\":{\"live_output\":{\"version\":1}}}"
         )
       )
     assertEquals("0.2.0", details.version)
@@ -29,20 +29,24 @@ class BridgeDetailsTest {
 
   @Test(expected = ProtocolException::class)
   fun aHandshakeWithoutCapabilitiesIsRejected() {
-    parseBridgeDetails(parseJsonObject("{$prefix,\"protocol\":2}"))
+    parseBridgeDetails(parseJsonObject("{$prefix,\"protocol_version\":2}"))
   }
 
   @Test(expected = ProtocolException::class)
   fun malformedCapabilitiesAreRejected() {
     parseBridgeDetails(
-      parseJsonObject("{$prefix,\"protocol\":2,\"capabilities\":\"yes\",\"agreed\":{}}")
+      parseJsonObject(
+        "{$prefix,\"protocol_version\":2,\"offered_capabilities\":\"yes\",\"agreed_capabilities\":{}}"
+      )
     )
   }
 
   @Test
   fun incompatibleProtocolExplainsTheConflict() {
     try {
-      parsePairedFromDetails("{$prefix,\"protocol\":1}")
+      parsePairedFromDetails(
+        "{\"event\":\"handshake_accepted\",\"machine_id\":\"00000000-0000-0000-0000-000000000001\",\"protocol_version\":1}"
+      )
       throw AssertionError("Protocol v1 must fail closed")
     } catch (error: ProtocolException) {
       assertTrue(error.message!!.contains("protocol v1"))
@@ -55,7 +59,7 @@ class BridgeDetailsTest {
     val details =
       parseBridgeDetails(
         parseJsonObject(
-          "{$prefix,\"protocol\":2,\"capabilities\":{},\"agreed\":{},\"telegram\":{\"route\":\"enabled\",\"events\":[\"completion\"]}}"
+          "{$prefix,\"protocol_version\":2,\"offered_capabilities\":{},\"agreed_capabilities\":{},\"telegram\":{\"route\":\"enabled\",\"events\":[\"completion\"]}}"
         )
       )
     assertEquals("enabled", details.telegramRoute)
@@ -66,7 +70,9 @@ class BridgeDetailsTest {
   fun missingTelegramBlockMeansTelegramDoesNotCover() {
     val details =
       parseBridgeDetails(
-        parseJsonObject("{$prefix,\"protocol\":2,\"capabilities\":{},\"agreed\":{}}")
+        parseJsonObject(
+          "{$prefix,\"protocol_version\":2,\"offered_capabilities\":{},\"agreed_capabilities\":{}}"
+        )
       )
     assertNull(details.telegramRoute)
     assertTrue(details.telegramEvents.isEmpty())

@@ -137,7 +137,7 @@ class ConversationPreviewScreenshotTest {
                 machine,
                 "fixture",
                 1,
-                mapOf("mutation_binding" to true, "prompt_input" to true),
+                mapOf("prompt_input" to true),
               )
           ),
       )
@@ -385,7 +385,6 @@ class ConversationPreviewScreenshotTest {
 
     override fun answerPrompt(
       promptId: String,
-      optionIndex: Int?,
       optionId: String?,
       action: String?,
     ) = Unit

@@ -135,7 +135,6 @@ class ConnectedViewModelTest {
                     null,
                     null,
                     listOf(PromptOption("a", "Yes", null)),
-                    0,
                   ),
                 )
               )
@@ -184,7 +183,6 @@ class ConnectedViewModelTest {
                       null,
                       null,
                       listOf(PromptOption("a", "Yes", null)),
-                      0,
                     ),
                   )
                 )
@@ -357,7 +355,6 @@ class ConnectedViewModelTest {
                     null,
                     null,
                     listOf(PromptOption("a", "Yes", null)),
-                    0,
                   ),
                 )
               )
@@ -469,7 +466,7 @@ class ConnectedViewModelTest {
                   machine,
                   "1",
                   1,
-                  mapOf("agent_control" to advertised, "mutation_binding" to true),
+                  mapOf("agent_control" to advertised, "prompt_input" to true),
                 )
               return machine
             }
@@ -517,7 +514,7 @@ class ConnectedViewModelTest {
         // A refused answer is reported on its own; the connection stays usable.
         viewModel.answerQuestions(
           "q-1",
-          listOf(com.azusachino.cappuccino.core.QuestionAnswer(listOf(0), null)),
+          listOf(com.azusachino.cappuccino.core.QuestionAnswer("q-1", listOf("opt-0"), null)),
         )
         advanceUntilIdle()
         assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
@@ -1575,7 +1572,7 @@ class ConnectedViewModelTest {
       advanceUntilIdle()
       val before = viewModel.state.value
       viewModel.submitPrompt("Never send this")
-      viewModel.answerPrompt("not-live", 0, null, null)
+      viewModel.answerPrompt("not-live", null, null)
       viewModel.retry()
       viewModel.loadConversation()
       advanceUntilIdle()
@@ -1836,11 +1833,11 @@ class ConnectedViewModelTest {
     listOf(
       { it.submitPrompt("original draft") },
       { it.controlAgent("interrupt") },
-      { it.answerPrompt("p-1", 0, "reject", "select_option") },
+      { it.answerPrompt("p-1", "reject", null) },
       {
         it.answerQuestions(
           "p-1",
-          listOf(com.azusachino.cappuccino.core.QuestionAnswer(listOf(0), null)),
+          listOf(com.azusachino.cappuccino.core.QuestionAnswer("q-1", listOf("opt-0"), null)),
         )
       },
     )
@@ -1893,7 +1890,6 @@ class ConnectedViewModelTest {
           null,
           null,
           listOf(PromptOption("reject", "Reject", null)),
-          0,
         )
       for (failure in
         listOf(
@@ -2017,7 +2013,7 @@ class ConnectedViewModelTest {
           "1",
           1,
           mapOf("agent_control" to true) +
-            (bindingCapability?.let { mapOf("mutation_binding" to it) } ?: emptyMap()),
+            (bindingCapability?.let { mapOf("prompt_input" to it) } ?: emptyMap()),
         )
 
       private suspend fun dispatch(
@@ -2046,7 +2042,6 @@ class ConnectedViewModelTest {
       override suspend fun answerPrompt(
         sessionId: String,
         promptId: String,
-        optionIndex: Int?,
         optionId: String?,
         action: String?,
         binding: MutationBinding,
@@ -2104,8 +2099,7 @@ class ConnectedViewModelTest {
               conversationMachine,
             )
 
-          override val bridgeDetails =
-            BridgeDetails(machine, "1", 1, mapOf("mutation_binding" to true))
+          override val bridgeDetails = BridgeDetails(machine, "1", 1, mapOf("prompt_input" to true))
 
           override suspend fun submitPrompt(
             sessionId: String,
@@ -2117,7 +2111,6 @@ class ConnectedViewModelTest {
           override suspend fun answerPrompt(
             sessionId: String,
             promptId: String,
-            optionIndex: Int?,
             optionId: String?,
             action: String?,
             binding: MutationBinding,

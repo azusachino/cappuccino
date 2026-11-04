@@ -51,17 +51,19 @@ class BridgeClientTest {
    * Flags are `"name":true` (offered and agreed) or `"name":false` (offered, not agreed). A name
    * that is not listed is not offered at all.
    */
-  private fun advertisement(flags: String = "\"mutation_binding\":true"): MockResponse {
+  private fun advertisement(
+    flags: String = "\"prompt_input\":true,\"prompt_answers\":true,\"agent_control\":true"
+  ): MockResponse {
     val pairs =
       flags
         .split(",")
         .filter { it.isNotBlank() }
         .map { it.substringBefore(":").trim('"') to (it.substringAfter(":") == "true") }
-    val offered = pairs.joinToString(",") { "\"${it.first}\":1" }
-    val agreed = pairs.filter { it.second }.joinToString(",") { "\"${it.first}\":1" }
+    val offered = pairs.joinToString(",") { "\"${it.first}\":{\"version\":1}" }
+    val agreed = pairs.filter { it.second }.joinToString(",") { "\"${it.first}\":{\"version\":1}" }
     return MockResponse.Builder()
       .body(
-        """{"event":"paired","machine_id":"$machine","protocol":2,"plugin":"cappuccino-bridge","capabilities":{$offered},"agreed":{$agreed}}"""
+        """{"event":"handshake_accepted","machine_id":"$machine","protocol_version":2,"offered_capabilities":{$offered},"agreed_capabilities":{$agreed}}"""
       )
       .build()
   }
@@ -85,7 +87,7 @@ class BridgeClientTest {
   fun transparentlyNegotiatesAndDecodesGzipWithoutChangingIdentity() = runBlocking {
     MockWebServer().use { server ->
       val payload =
-        """{"event":"paired","machine_id":"$machine","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"""
+        """{"event":"handshake_accepted","machine_id":"$machine","protocol_version":2,"offered_capabilities":{},"agreed_capabilities":{}}"""
       val bytes = java.io.ByteArrayOutputStream()
       java.util.zip.GZIPOutputStream(bytes).use { it.write(payload.toByteArray(Charsets.UTF_8)) }
       server.enqueue(
@@ -132,7 +134,7 @@ class BridgeClientTest {
       server.enqueue(
         MockResponse.Builder()
           .body(
-            """{"event":"paired","machine_id":"$machine","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"""
+            """{"event":"handshake_accepted","machine_id":"$machine","protocol_version":2,"offered_capabilities":{},"agreed_capabilities":{}}"""
           )
           .build()
       )
@@ -162,7 +164,9 @@ class BridgeClientTest {
           .webSocketUpgrade(
             object : WebSocketListener() {
               override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
-                webSocket.send("""{"event":"stream_open","session_id":"a &雪","generation":0}""")
+                webSocket.send(
+                  """{"event":"stream_open","session_id":"a &雪","stream_generation":0}"""
+                )
               }
 
               override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -184,7 +188,10 @@ class BridgeClientTest {
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
       val event = client.stream("a &雪").first()
       assertEquals("a &雪", (event as StreamEvent.Open).sessionId)
-      assertTrue(server.takeRequest().url.encodedQuery!!.contains("session=a%20%26%E9%9B%AA"))
+      assertEquals(
+        "/api/v2/agents/a%20%26%E9%9B%AA/stream",
+        server.takeRequest().url.encodedPath,
+      )
       assertTrue("cancelled flow left the WebSocket open", socketEnded.await(5, TimeUnit.SECONDS))
     }
   }
@@ -198,7 +205,9 @@ class BridgeClientTest {
           .webSocketUpgrade(
             object : WebSocketListener() {
               override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
-                webSocket.send("""{"event":"stream_open","session_id":"session","generation":1}""")
+                webSocket.send(
+                  """{"event":"stream_open","session_id":"session","stream_generation":1}"""
+                )
                 webSocket.close(1000, "雪".repeat(41))
               }
 
@@ -289,7 +298,9 @@ class BridgeClientTest {
           .webSocketUpgrade(
             object : WebSocketListener() {
               override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
-                webSocket.send("""{"event":"stream_open","session_id":"session","generation":1}""")
+                webSocket.send(
+                  """{"event":"stream_open","session_id":"session","stream_generation":1}"""
+                )
                 webSocket.cancel()
               }
             }
@@ -417,11 +428,10 @@ class BridgeClientTest {
   fun fetchesCanonicalIdentityWithoutTreatingLocatorAsIdentity() = runBlocking {
     MockWebServer().use { server ->
       val id = "pi:${"a".repeat(64)}"
+      server.enqueue(advertisement())
       server.enqueue(
         MockResponse.Builder()
-          .body(
-            """{"session_id":"chosen","source":"canonical_log","machine_id":"11111111-1111-4111-8111-111111111111","conversation_id":"$id","turns":[]}"""
-          )
+          .body("""{"mode":"append","conversation_id":"$id","upserts":[]}""")
           .build()
       )
       server.start()
@@ -429,29 +439,30 @@ class BridgeClientTest {
       val snapshot = client.conversationSnapshot("chosen")
       assertEquals(id, snapshot.conversationId)
       assertEquals("canonical_log", snapshot.source)
-      assertEquals("/api/v2/agents/chosen/conversation", server.takeRequest().url.encodedPath)
+      assertEquals(machine, snapshot.machineId)
+      assertEquals("/api/v2/handshake", server.takeRequest().url.encodedPath)
+      assertEquals("/api/v2/agents/chosen/conversation/sync", server.takeRequest().url.encodedPath)
     }
   }
 
   @Test
-  fun rejectsWrongLocatorMalformedIdentityAndScrollbackIdentityClaims() = runBlocking {
+  fun rejectsMalformedIdentityAndScrollbackIdentityClaims() = runBlocking {
     MockWebServer().use { server ->
       val id = "pi:${"a".repeat(64)}"
       val bodies =
         listOf(
-          """{"session_id":"other","source":"canonical_log","machine_id":"11111111-1111-4111-8111-111111111111","conversation_id":"$id","turns":[]}""",
-          """{"session_id":"chosen","source":"canonical_log","conversation_id":"$id","turns":[]}""",
-          """{"session_id":"chosen","source":"canonical_log","machine_id":"11111111-1111-4111-8111-111111111111","conversation_id":"pane","turns":[]}""",
-          """{"session_id":"chosen","source":"scrollback","machine_id":"11111111-1111-4111-8111-111111111111","conversation_id":"$id","turns":[]}""",
-          """{"session_id":"chosen","source":"canonical_log","machine_id":"11111111-1111-4111-8111-111111111111","conversation_id":123,"turns":[]}""",
+          """{"mode":"append","conversation_id":"pane","upserts":[]}""",
+          """{"mode":"scrollback","conversation_id":"$id","upserts":[]}""",
+          """{"mode":"append","conversation_id":123,"upserts":[]}""",
         )
+      server.enqueue(advertisement())
       bodies.forEach { server.enqueue(MockResponse.Builder().body(it).build()) }
       server.start()
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
       bodies.forEach { _ ->
         try {
           client.conversationSnapshot("chosen")
-          fail("Invalid ownership/identity must fail closed")
+          fail("Invalid identity must fail closed")
         } catch (_: ProtocolException) {}
       }
     }
@@ -460,11 +471,10 @@ class BridgeClientTest {
   @Test
   fun fetchesConversationTurns() = runBlocking {
     MockWebServer().use { server ->
+      server.enqueue(advertisement())
       server.enqueue(
         MockResponse.Builder()
-          .body(
-            """{"session_id":"s-1","source":"canonical_log","turns":[{"id":"t1","role":"user","text":"hello"}]}"""
-          )
+          .body("""{"mode":"append","upserts":[{"id":"t1","role":"user","text":"hello"}]}""")
           .build()
       )
       server.start()
@@ -472,8 +482,9 @@ class BridgeClientTest {
       val turns = client.conversation("s-1")
       assertEquals(1, turns.size)
       assertEquals("t1", turns[0].id)
+      assertEquals("/api/v2/handshake", server.takeRequest().url.encodedPath)
       val req = server.takeRequest()
-      assertEquals("/api/v2/agents/s-1/conversation", req.url.encodedPath)
+      assertEquals("/api/v2/agents/s-1/conversation/sync", req.url.encodedPath)
     }
   }
 
@@ -499,13 +510,13 @@ class BridgeClientTest {
       assertTrue(command, command.contains(""""confirmed":true"""))
 
       enqueueMutation(server, MockResponse.Builder().body("""{"status":"delivered"}""").build())
-      client.answerPrompt("s-1", "p-1", 0, "opt-1", "select_option", binding)
+      client.answerPrompt("s-1", "p-1", "opt-1", null, binding)
       val req2 = takeBoundPost(server)
       assertEquals("/api/v2/agents/s-1/prompt", req2.url.encodedPath)
       assertEquals("POST", req2.method)
       val body2 = req2.body?.utf8() ?: ""
       assertTrue(body2.contains(""""prompt_id":"p-1""""))
-      assertTrue(body2.contains(""""option_index":0"""))
+      assertTrue(body2.contains(""""option_id":"opt-1""""))
     }
   }
 
@@ -541,18 +552,15 @@ class BridgeClientTest {
   @Test
   fun conversationCarriesSessionStatsWhenTheBridgeSendsThem() = runBlocking {
     MockWebServer().use { server ->
+      server.enqueue(advertisement())
       server.enqueue(
         MockResponse.Builder()
           .body(
-            """{"session_id":"s-1","source":"canonical_log","turns":[],"stats":{"model":"glm","thinking_level":"low","context_tokens":1100,"cache_percent":60,"rate_limits":{"provider":"anthropic","plan_tier":null,"windows":[{"window":"5h","used_percent":2,"resets_in":null},{"window":"7d","used_percent":81,"resets_in":"17h43m"}],"status":"warning"}}}"""
+            """{"mode":"append","upserts":[],"stats":{"model":"glm","thinking_level":"low","context_tokens":1100,"cache_percent":60,"rate_limits":{"provider":"anthropic","plan_tier":null,"windows":[{"window":"5h","used_percent":2,"resets_in":null},{"window":"7d","used_percent":81,"resets_in":"17h43m"}],"status":"warning"}}}"""
           )
           .build()
       )
-      server.enqueue(
-        MockResponse.Builder()
-          .body("""{"session_id":"s-1","source":"canonical_log","turns":[]}""")
-          .build()
-      )
+      server.enqueue(MockResponse.Builder().body("""{"mode":"append","upserts":[]}""").build())
       server.start()
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
       assertEquals(
@@ -597,14 +605,18 @@ class BridgeClientTest {
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
       val answers =
         listOf(
-          com.azusachino.cappuccino.core.QuestionAnswer(listOf(1), null),
-          com.azusachino.cappuccino.core.QuestionAnswer(listOf(0, 2), "a \"bird\""),
+          com.azusachino.cappuccino.core.QuestionAnswer("q-color", listOf("opt-1"), null),
+          com.azusachino.cappuccino.core.QuestionAnswer(
+            "q-pets",
+            listOf("opt-0", "opt-2"),
+            "a \"bird\"",
+          ),
         )
       client.answerQuestions("s-1", "q-toolu_1", answers, binding)
       val request = takeBoundPost(server)
       assertEquals("/api/v2/agents/s-1/prompt", request.url.encodedPath)
       assertEquals(
-        """{"expected_session":{"machine_id":"$machine","pane_id":"${binding.paneId}","native_session_ref":"${binding.nativeSessionRef}"},"type":"answer_question","prompt_id":"q-toolu_1","answers":[{"selected":[1]},{"selected":[0,2],"other":"a \"bird\""}]}""",
+        """{"expected_session":{"machine_id":"$machine","pane_id":"${binding.paneId}","native_session_ref":"${binding.nativeSessionRef}"},"type":"answer_question","prompt_id":"q-toolu_1","answers":[{"question_id":"q-color","selected_option_ids":["opt-1"]},{"question_id":"q-pets","selected_option_ids":["opt-0","opt-2"],"free_text":"a \"bird\""}]}""",
         request.body?.utf8(),
       )
       // The bridge's reason reaches the owner, not just the status.
@@ -622,10 +634,11 @@ class BridgeClientTest {
         listOf(
           { client.submitPrompt("s-1", "synthetic", binding = binding) },
           { client.controlAgent("s-1", "interrupt", binding) },
-          { client.answerPrompt("s-1", "p-1", null, null, "cancel", binding) },
+          { client.answerPrompt("s-1", "p-1", null, "cancel", binding) },
           { client.answerQuestions("s-1", "p-1", emptyList(), binding) },
         )
-      for (flags in listOf("", "\"mutation_binding\":false")) {
+      for (flags in
+        listOf("", "\"prompt_input\":false,\"prompt_answers\":false,\"agent_control\":false")) {
         for (action in actions) {
           server.enqueue(advertisement(flags))
           assertTrue(
@@ -699,7 +712,7 @@ class BridgeClientTest {
       )
       server.start()
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
-      client.answerPrompt("s-1", "p\"1", 0, "option\"1", "select_option", binding)
+      client.answerPrompt("s-1", "p\"1", "option\"1", null, binding)
       val json =
         kotlinx.serialization.json.Json.parseToJsonElement(takeBoundPost(server).body!!.utf8())
           .jsonObject
@@ -715,9 +728,9 @@ class BridgeClientTest {
       val client = BridgeClient(Endpoint.parse(server.url("/").toString(), allowLocalHttp = true))
       for (flags in
         listOf(
-          "\"agent_control\":false,\"mutation_binding\":true",
-          "\"agent_control\":true",
-          "\"agent_control\":true,\"mutation_binding\":false",
+          "\"agent_control\":false",
+          "\"prompt_input\":true",
+          "",
         )) {
         server.enqueue(advertisement(flags))
         val outcome = runCatching { client.controlAgent("s-1", "interrupt", binding) }
@@ -729,7 +742,7 @@ class BridgeClientTest {
         assertEquals("POST", server.takeRequest().method)
       }
       assertEquals("read-only compatibility sends no POST", 3, server.requestCount)
-      server.enqueue(advertisement("\"agent_control\":true,\"mutation_binding\":true"))
+      server.enqueue(advertisement("\"agent_control\":true"))
       server.enqueue(MockResponse.Builder().body("""{"event":"control_sent"}""").build())
       client.controlAgent("s-1", "interrupt", binding)
       val req = takeBoundPost(server)

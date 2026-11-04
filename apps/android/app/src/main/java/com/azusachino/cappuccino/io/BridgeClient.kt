@@ -126,7 +126,6 @@ interface BridgeTransport {
   suspend fun answerPrompt(
     sessionId: String,
     promptId: String,
-    optionIndex: Int?,
     optionId: String?,
     action: String?,
     binding: MutationBinding,
@@ -173,9 +172,16 @@ class BridgeClient(
         put("protocol_min", kotlinx.serialization.json.JsonPrimitive(BRIDGE_PROTOCOL_VERSION))
         put("protocol_max", kotlinx.serialization.json.JsonPrimitive(BRIDGE_PROTOCOL_VERSION))
         put(
-          "capabilities",
+          "offered_capabilities",
           kotlinx.serialization.json.buildJsonObject {
-            CLIENT_CAPABILITIES.forEach { put(it, kotlinx.serialization.json.JsonPrimitive(1)) }
+            CLIENT_CAPABILITIES.forEach {
+              put(
+                it,
+                kotlinx.serialization.json.buildJsonObject {
+                  put("version", kotlinx.serialization.json.JsonPrimitive(1))
+                },
+              )
+            }
           },
         )
       }
@@ -189,16 +195,13 @@ class BridgeClient(
 
   override suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
     withContext(Dispatchers.IO) {
-      val json = parseJsonObject(get("api/v2/agents/$sessionId/conversation"))
-      if (json.string("session_id") != sessionId)
-        throw ProtocolException("Conversation belongs to a different locator")
-      val source = json.string("source")
+      // The sync response names no machine: it is the verified bridge's, so take that identity.
+      val machine = bridgeDetails?.machineId ?: verify()
+      val json = parseJsonObject(get("api/v2/agents/$sessionId/conversation/sync"))
+      val source =
+        if (json.optionalString("mode") == "scrollback") "scrollback" else "canonical_log"
       val identity = json.optionalString("conversation_id")
-      val machine = json.optionalString("machine_id")?.let(::uuid)
-      if (
-        identity != null &&
-          (source != "canonical_log" || machine == null || !isCanonicalConversationId(identity))
-      )
+      if (identity != null && (source != "canonical_log" || !isCanonicalConversationId(identity)))
         throw ProtocolException("Invalid canonical conversation identity")
       val stats =
         json.optionalObject("stats")?.let {
@@ -283,13 +286,16 @@ class BridgeClient(
             kotlinx.serialization.json.JsonArray(
               answers.map { answer ->
                 kotlinx.serialization.json.buildJsonObject {
+                  put("question_id", kotlinx.serialization.json.JsonPrimitive(answer.questionId))
                   put(
-                    "selected",
+                    "selected_option_ids",
                     kotlinx.serialization.json.JsonArray(
-                      answer.selected.map { kotlinx.serialization.json.JsonPrimitive(it) }
+                      answer.selectedOptionIds.map { kotlinx.serialization.json.JsonPrimitive(it) }
                     ),
                   )
-                  answer.other?.let { put("other", kotlinx.serialization.json.JsonPrimitive(it)) }
+                  answer.freeText?.let {
+                    put("free_text", kotlinx.serialization.json.JsonPrimitive(it))
+                  }
                 }
               }
             ),
@@ -301,7 +307,6 @@ class BridgeClient(
   override suspend fun answerPrompt(
     sessionId: String,
     promptId: String,
-    optionIndex: Int?,
     optionId: String?,
     action: String?,
     binding: MutationBinding,
@@ -313,7 +318,6 @@ class BridgeClient(
           put("type", kotlinx.serialization.json.JsonPrimitive("answer_prompt"))
           put("prompt_id", kotlinx.serialization.json.JsonPrimitive(promptId))
           put("expected_session", bindingJson(binding))
-          optionIndex?.let { put("option_index", kotlinx.serialization.json.JsonPrimitive(it)) }
           optionId?.let { put("option_id", kotlinx.serialization.json.JsonPrimitive(it)) }
           action?.let { put("action", kotlinx.serialization.json.JsonPrimitive(it)) }
         }
@@ -322,8 +326,8 @@ class BridgeClient(
 
   private suspend fun requireMutation(binding: MutationBinding, capability: String) {
     verify(binding.machineId)
-    val flags = bridgeDetails?.capabilities
-    if (flags?.get("mutation_binding") != true || flags[capability] == false)
+    // The handshake's agreed set is the only gate: a capability must be agreed to be called.
+    if (bridgeDetails?.capabilities?.get(capability) != true)
       throw BridgeMutationUnsupportedException("Session-bound actions unsupported by this bridge")
   }
 

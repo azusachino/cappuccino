@@ -87,7 +87,6 @@ class MultiMachineTest {
             override suspend fun answerPrompt(
               sessionId: String,
               promptId: String,
-              optionIndex: Int?,
               optionId: String?,
               action: String?,
               binding: MutationBinding,

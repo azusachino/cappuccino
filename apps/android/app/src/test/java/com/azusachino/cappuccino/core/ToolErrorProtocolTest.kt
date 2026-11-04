@@ -13,7 +13,7 @@ class ToolErrorProtocolTest {
         "" to null,
       )) {
       val json =
-        """{"turns":[{"id":"t","role":"agent","parts":[{"type":"tool_call","name":"bash","input":{"command":"test"},"output":"contains error text"$flag}]}]}"""
+        """{"upserts":[{"id":"t","role":"agent","parts":[{"type":"tool_call","name":"bash","input":{"command":"test"},"output":"contains error text"$flag}]}]}"""
       val part =
         parseConversationResponse(parseJsonObject(json)).single().parts.single()
           as ConversationPart.ToolCall

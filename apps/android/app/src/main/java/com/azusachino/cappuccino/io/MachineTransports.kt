@@ -170,12 +170,8 @@ internal class RoutedBridge(private val router: MachineRouter<BridgeTransport>) 
   override suspend fun answerPrompt(
     sessionId: String,
     promptId: String,
-    optionIndex: Int?,
     optionId: String?,
     action: String?,
     binding: MutationBinding,
-  ) =
-    call(mutation = true) {
-      it.answerPrompt(sessionId, promptId, optionIndex, optionId, action, binding)
-    }
+  ) = call(mutation = true) { it.answerPrompt(sessionId, promptId, optionId, action, binding) }
 }
