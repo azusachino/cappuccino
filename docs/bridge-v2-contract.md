@@ -404,13 +404,15 @@ Turns never arrive on the stream. Turns come only from the sync endpoint (§7).
 - Sync page: at most `[tuning.sync] page_bytes` (default 1 MiB) of records per response, except that a single turn is never split. A page holding one turn larger than that holds only that turn.
 - Stream message: at most `[tuning.stream] message_bytes` (default 256 KiB) per `entries` event. Entries are split across events and none is dropped. A single row larger than the budget is sent alone.
 
-## 8. Open items before freeze
+## 8. Decisions on the open items
 
-1. Pi entry ids are 8 hex characters. Duplicates are detected only within one read, so a collision between two reads is not caught. Decide whether the turn key should include the opening record's byte offset.
-2. Confirm the session file identity for each agent (section 7.1), and what happens when a session id is reused.
-3. Decide the maximum size of one turn. A turn above the phone's 2 MiB ceiling cannot be shown. A bridge-side text cap with `truncated: true` is the likely answer.
-4. Confirm that Claude Code's `/compact` never rewrites a session file. No rewrite has been observed. `resync` covers it either way.
-5. Confirm the proposed defaults: `answer_budget_secs` (10), `page_bytes` (1 MiB) and `message_bytes` (256 KiB).
+These close the open items from the design review. Each is implemented unless it says otherwise.
+
+1. **Duplicate Pi entry ids.** Entry ids are short, so a session file can contain the same id twice. The bridge does not reject the session. Each turn named by a duplicated id is named `<id>#<byte offset of its record>`. Offsets are stable because session files are append-only, so the names stay unique.
+2. **Session file identity (section 7.1).** Pi and Claude Code: the file stem. Agy: the conversation directory. A new file for the same session gets a new identity, so its tokens resync.
+3. **Largest turn.** Each text field of a turn is capped at 64 KiB. A longer field is cut and the turn carries `truncated: true`. Tool inputs are not capped, which is a known limit: a very large tool input can still exceed a page.
+4. **Claude Code `/compact`.** No rewrite of a session file has been observed, so no special handling is added. A rewrite that moved an offset would fail the token check and resync, which is the intended outcome.
+5. **Defaults.** `answer_budget_secs` = 10, enforced between the steps of a multi-step answer; when it runs out, the response is `outcome_unknown`. `page_bytes` = 1 MiB. `message_bytes` = 256 KiB. The stream budget only sets where a message splits, so it is safe at any value; it is not tuned by measurement.
 
 ---
 

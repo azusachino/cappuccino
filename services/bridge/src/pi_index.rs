@@ -35,6 +35,8 @@ pub struct Snapshot {
     pub omitted: HashMap<String, u64>,
     /// Byte offset of each entry's record, by entry id.
     pub offsets: HashMap<String, u64>,
+    /// Entry ids that occur more than once in the file. Their turns are named `<id>#<offset>`.
+    pub duplicates: HashSet<String>,
 }
 
 /// A context edit: the turn it changes, whether it removes context, and where it is.
@@ -51,6 +53,7 @@ struct Index {
     tail: Vec<u8>,
     parents: HashMap<String, Option<String>>,
     offsets: HashMap<String, u64>,
+    duplicates: HashSet<String>,
     leaf: Option<String>,
     /// The turn an entry belongs to: itself, or for a tool result the assistant entry that called the tool.
     turn_of: HashMap<String, String>,
@@ -103,6 +106,7 @@ impl Index {
             tail: Vec::new(),
             parents: HashMap::new(),
             offsets: HashMap::new(),
+            duplicates: HashSet::new(),
             leaf: None,
             turn_of: HashMap::new(),
             call_owner: HashMap::new(),
@@ -156,6 +160,9 @@ impl Index {
             id.to_string(),
             value["parentId"].as_str().map(str::to_string),
         );
+        if self.offsets.contains_key(id) {
+            self.duplicates.insert(id.to_string());
+        }
         self.offsets.insert(id.to_string(), offset);
         self.leaf = Some(id.to_string());
 
@@ -236,6 +243,7 @@ impl Index {
             entry_offsets: self.offsets.values().copied().collect(),
             omitted,
             offsets: self.offsets.clone(),
+            duplicates: self.duplicates.clone(),
         }
     }
 }

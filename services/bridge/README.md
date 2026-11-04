@@ -127,6 +127,9 @@ probe_timeout_ms = 250     # connect and read bound for the health probe
 [tuning.sync]
 page_bytes = 1048576      # largest sync page; a single turn is never split
 
+[tuning.prompt]
+answer_budget_secs = 10   # time for a multi-step answer; when it runs out the answer is outcome_unknown
+
 [tuning.telegram]
 request_timeout_secs = 10       # per Telegram API request
 max_retry_after_secs = 60       # longest retry_after honoured from a 429

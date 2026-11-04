@@ -215,7 +215,7 @@ fn parse(kind: Kind, lines: &[Line], pi: Option<&pi_index::Snapshot>) -> (Vec<Li
         Kind::Agy => conversation::parse_agy_with_openers(&text),
     };
     let parsed = match (kind, pi) {
-        (Kind::Pi, Some(snapshot)) => shown(parsed, snapshot),
+        (Kind::Pi, Some(snapshot)) => shown(parsed, snapshot, &kept),
         _ => parsed,
     };
     (kept, parsed)
@@ -227,10 +227,13 @@ fn raw_id(turn_id: &str) -> &str {
 }
 
 /// Pi (P1, P3): keeps the turns on the active branch, and marks every turn whose context was edited.
-fn shown(parsed: Parsed, snapshot: &pi_index::Snapshot) -> Parsed {
+fn shown(parsed: Parsed, snapshot: &pi_index::Snapshot, kept: &[Line]) -> Parsed {
     let mut turns = Vec::new();
     let mut opened_at_line = Vec::new();
     for (mut turn, line) in parsed.turns.into_iter().zip(parsed.opened_at_line) {
+        if snapshot.duplicates.contains(raw_id(&turn.id)) {
+            turn.id = format!("{}#{}", raw_id(&turn.id), kept[line].offset);
+        }
         if snapshot.omitted.contains_key(raw_id(&turn.id))
             && !turn
                 .parts
@@ -555,9 +558,10 @@ pub fn serve(
 /// forward request; `before_token` for the newest page and for an earlier request; `caught_up` for
 /// the newest page and for a forward request. `stats` is added by the caller for the newest page.
 pub fn body(mode: &str, page: &Page, request: &Request) -> Value {
+    let upserts: Vec<Value> = page.turns.iter().map(capped_turn).collect();
     let mut body = json!({
         "mode": mode,
-        "upserts": page.turns,
+        "upserts": upserts,
     });
     let newest_page = matches!(request, Request::Initial) || mode == "resync";
     let fields = &mut body;
@@ -1082,6 +1086,111 @@ mod pi_abandoned_tests {
         std::fs::write(&path, &text).unwrap();
         let served = serve(&path, "session", Kind::Pi, Request::After(issued), 1 << 20).unwrap();
         assert!(matches!(served, Served::Resync(_)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// The largest text field sent for one turn part. A longer field is cut, and the turn is marked
+/// `truncated: true`, so the phone can say so instead of showing a partial message as whole.
+pub const TEXT_CAP_BYTES: usize = 64 * 1024;
+
+fn cap_text(text: &mut String) -> bool {
+    if text.len() <= TEXT_CAP_BYTES {
+        return false;
+    }
+    let mut end = TEXT_CAP_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+    true
+}
+
+/// Cuts every long text field of a turn. Returns whether any field was cut.
+fn cap_turn(turn: &mut ConversationTurn) -> bool {
+    use conversation::ConversationPart;
+    let mut cut = turn.text.as_mut().is_some_and(cap_text);
+    for part in &mut turn.parts {
+        cut |= match part {
+            ConversationPart::Text { text }
+            | ConversationPart::Thinking { text }
+            | ConversationPart::Divider { text, .. } => cap_text(text),
+            ConversationPart::ToolCall {
+                output: Some(output),
+                ..
+            } => cap_text(output),
+            ConversationPart::ResponseStatus {
+                detail: Some(detail),
+                ..
+            } => cap_text(detail),
+            _ => false,
+        };
+    }
+    cut
+}
+
+/// A turn as the wire carries it, with `truncated` set when a field was cut.
+fn capped_turn(turn: &ConversationTurn) -> Value {
+    let mut turn = turn.clone();
+    let cut = cap_turn(&mut turn);
+    let mut value = serde_json::to_value(&turn).unwrap_or(Value::Null);
+    if cut {
+        value["truncated"] = json!(true);
+    }
+    value
+}
+
+#[cfg(test)]
+mod cap_tests {
+    use super::*;
+
+    #[test]
+    fn a_long_text_field_is_cut_and_marked() {
+        let long = "é".repeat(TEXT_CAP_BYTES);
+        let turn = ConversationTurn {
+            id: "t".into(),
+            role: "agent".into(),
+            timestamp: None,
+            text: None,
+            parts: vec![conversation::ConversationPart::Text { text: long }],
+        };
+        let value = capped_turn(&turn);
+        assert_eq!(value["truncated"], json!(true));
+        let text = value["parts"][0]["text"].as_str().unwrap();
+        assert!(text.len() <= TEXT_CAP_BYTES && text.is_char_boundary(text.len()));
+    }
+
+    #[test]
+    fn a_short_turn_is_untouched() {
+        let turn = ConversationTurn {
+            id: "t".into(),
+            role: "user".into(),
+            timestamp: None,
+            text: Some("short".into()),
+            parts: Vec::new(),
+        };
+        assert!(capped_turn(&turn).get("truncated").is_none());
+    }
+}
+
+#[cfg(test)]
+mod duplicate_id_tests {
+    use super::*;
+
+    #[test]
+    fn a_duplicated_entry_id_names_each_turn_by_its_offset() {
+        let dir = std::env::temp_dir().join(format!("cap-sync-dup-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        let text = "{\"type\":\"message\",\"id\":\"same\",\"message\":{\"role\":\"user\",\"content\":\"one\"}}\n{\"type\":\"message\",\"id\":\"same\",\"parentId\":\"same\",\"message\":{\"role\":\"user\",\"content\":\"two\"}}\n";
+        std::fs::write(&path, text).unwrap();
+        let page = match serve(&path, "session", Kind::Pi, Request::Initial, 1 << 20).unwrap() {
+            Served::Page(page) | Served::Resync(page) => page,
+        };
+        let ids: Vec<&str> = page.turns.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids.len(), 2, "both turns are kept");
+        assert_ne!(ids[0], ids[1]);
+        assert!(ids.iter().all(|id| id.starts_with("same#")), "{ids:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -873,7 +873,18 @@ pub async fn submit_agent_prompt(
                     return error_response(StatusCode::BAD_REQUEST, "bad_answer", &message)
                 }
             };
+            let started = std::time::Instant::now();
             for (index, step) in steps.into_iter().enumerate() {
+                // The answer budget: once it runs out, the keys already typed cannot be taken back.
+                if index > 0
+                    && started.elapsed()
+                        > std::time::Duration::from_secs(
+                            crate::tuning::active().prompt.answer_budget_secs,
+                        )
+                {
+                    prompt::forget(&pane_id);
+                    return mutation::unknown();
+                }
                 if let Err(response) = binding
                     .check(&state.machine_id, &session_id, index > 0)
                     .await

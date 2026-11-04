@@ -19,6 +19,24 @@ pub struct Tuning {
     pub lifecycle: Lifecycle,
     pub telegram: Telegram,
     pub sync: Sync,
+    pub prompt: Prompt,
+}
+
+/// Multi-step answers sent to the agent (contract section 6.1).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Prompt {
+    /// Time the bridge allows for typing a multi-step answer. When it runs out, the answer stops and
+    /// the response is `outcome_unknown`.
+    pub answer_budget_secs: u64,
+}
+
+impl Default for Prompt {
+    fn default() -> Self {
+        Prompt {
+            answer_budget_secs: 10,
+        }
+    }
 }
 
 /// Conversation sync pages (contract section 7).
@@ -130,6 +148,7 @@ impl Default for Tuning {
             lifecycle: Lifecycle::default(),
             telegram: Telegram::default(),
             sync: Sync::default(),
+            prompt: Prompt::default(),
         }
     }
 }
@@ -321,6 +340,7 @@ impl Tuning {
                 self.telegram.max_name_chars as u64,
             ),
             ("sync.page_bytes", self.sync.page_bytes as u64),
+            ("prompt.answer_budget_secs", self.prompt.answer_budget_secs),
         ];
         match fields.iter().find(|(_, value)| *value == 0) {
             Some((name, _)) => Err(format!("tuning.{name} must be greater than 0")),
@@ -364,6 +384,7 @@ mod tests {
         ("stream", "answer_key_gap_ms"),
         ("stream", "message_bytes"),
         ("sync", "page_bytes"),
+        ("prompt", "answer_budget_secs"),
         ("iroh", "max_tunnel_streams"),
         ("iroh", "max_tunnel_connections"),
         ("iroh", "max_tunnel_connections_per_id"),
