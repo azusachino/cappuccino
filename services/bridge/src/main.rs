@@ -18,6 +18,7 @@ mod reconcile;
 mod routes;
 mod state;
 mod stats;
+mod sync;
 mod telegram;
 mod transcript;
 mod tuning;

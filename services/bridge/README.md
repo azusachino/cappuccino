@@ -32,7 +32,7 @@ same base URL for both transports.
 | --- | --- | --- |
 | `POST /api/v2/handshake` | HTTP | reachability, machine identity, version and capability advertisement |
 | `GET /api/v2/agents` | HTTP | Herdr `agent.list` mapping; names/pane IDs are locators, not proven native Pi session IDs |
-| `GET /api/v2/agents/{sessionId}/conversation` | HTTP | canonical transcript for Pi, Claude Code or Agy; labeled `scrollback` when no usable session is reported |
+| `GET /api/v2/agents/{sessionId}/conversation/sync` | HTTP | conversation sync: newest page, or records after/before a token; `mode: "scrollback"` when no canonical log is reported |
 | `POST /api/v2/agents/{sessionId}/prompt` | HTTP | prompt text (commands need `confirmed`) or an answer to a visible card |
 | `POST /api/v2/agents/{sessionId}/control` | HTTP | `interrupt` (Escape) or `new_session` (`/new`, refused while the agent is busy) |
 | `/api/v2/agents/{sessionId}/stream` | WebSocket | read-only pane-line events and status, each carrying `stream_generation` |
@@ -55,7 +55,7 @@ These checks use fresh Herdr metadata and the verified pane, but are **not atomi
 fencing**: replacement after the final observation can still receive input.
 Native admission and process-incarnation guarantees remain unproven.
 
-The bridge exposes `/api/v2/agents/{sessionId}/conversation`, `POST /api/v2/agents/{sessionId}/prompt` for prompt text and validated prompt-card answers, and `POST /api/v2/agents/{sessionId}/control` for `interrupt` and `new_session`; this is not native Pi queue selection or a correlated delivery receipt. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
+The bridge exposes `/api/v2/agents/{sessionId}/conversation/sync`, `POST /api/v2/agents/{sessionId}/prompt` for prompt text and validated prompt-card answers, and `POST /api/v2/agents/{sessionId}/control` for `interrupt` and `new_session`; this is not native Pi queue selection or a correlated delivery receipt. Herdr 0.9.3 has `agent.prompt`, `agent.read`, `agent.get`, `agent.wait` and `agent.send-keys` APIs, but its `agent.prompt` submits PTY text plus Enter and an optional lifecycle wait. That surface does not select Pi's `steer` versus `follow_up` queue or return a correlated Pi receipt. See [architecture](../../docs/architecture.md#herdr-input-api-and-delivery-boundary) and the [behavior spec](../../docs/behavior-spec.md#delivery-nudge--follow-up). Do not describe a terminal write acknowledgement as Nudge, Follow-up, `sent`, or `confirmed`.
 
 Pi conversation tool parts optionally include `is_error`, directly from the matching Pi `toolResult.isError`. Unknown-ID results remain unattached; missing flags remain absent rather than claiming success. This additive field preserves protocol 1 and existing clients. The Android reader uses it to expose failed results by default, not a keyword heuristic.
 
@@ -122,6 +122,9 @@ stop_timeout_secs = 3      # `stop` waits this long for the bridge to exit
 control_timeout_ms = 500   # control-socket read and write bound
 poll_interval_ms = 50      # lifecycle poll interval while waiting
 probe_timeout_ms = 250     # connect and read bound for the health probe
+
+[tuning.sync]
+page_bytes = 1048576      # largest sync page; a single turn is never split
 
 [tuning.telegram]
 request_timeout_secs = 10       # per Telegram API request

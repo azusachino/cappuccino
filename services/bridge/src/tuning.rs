@@ -18,6 +18,24 @@ pub struct Tuning {
     pub iroh: Iroh,
     pub lifecycle: Lifecycle,
     pub telegram: Telegram,
+    pub sync: Sync,
+}
+
+/// Conversation sync pages (contract section 7).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Sync {
+    /// Largest page of records returned in one sync response. A turn is never split, so a page
+    /// holding one turn larger than this holds only that turn.
+    pub page_bytes: usize,
+}
+
+impl Default for Sync {
+    fn default() -> Self {
+        Sync {
+            page_bytes: 1024 * 1024,
+        }
+    }
 }
 
 /// Herdr socket client.
@@ -109,6 +127,7 @@ impl Default for Tuning {
             iroh: Iroh::default(),
             lifecycle: Lifecycle::default(),
             telegram: Telegram::default(),
+            sync: Sync::default(),
         }
     }
 }
@@ -297,6 +316,7 @@ impl Tuning {
                 "telegram.max_name_chars",
                 self.telegram.max_name_chars as u64,
             ),
+            ("sync.page_bytes", self.sync.page_bytes as u64),
         ];
         match fields.iter().find(|(_, value)| *value == 0) {
             Some((name, _)) => Err(format!("tuning.{name} must be greater than 0")),
@@ -338,6 +358,7 @@ mod tests {
         ("stream", "stats_pane_lines"),
         ("stream", "scrollback_lines"),
         ("stream", "answer_key_gap_ms"),
+        ("sync", "page_bytes"),
         ("iroh", "max_tunnel_streams"),
         ("iroh", "max_tunnel_connections"),
         ("iroh", "max_tunnel_connections_per_id"),

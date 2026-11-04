@@ -180,7 +180,7 @@ fn handshake_body() -> Value {
         "offered_capabilities": {
             "agent_discovery": {"version": 1},
             "live_output": {"version": 1},
-            "conversation_history": {"version": 1},
+            "conversation_sync": {"version": 1},
             "prompt_input": {"version": 1},
             "prompt_answers": {"version": 1},
             "agent_control": {"version": 1},

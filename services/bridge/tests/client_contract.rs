@@ -577,10 +577,10 @@ async fn agent_conversation_returns_structured_turns() {
     std::fs::create_dir(&sessions).unwrap();
     let transcript = sessions.join("s-probe.jsonl");
 
-    let jsonl = r#"{"type":"message","timestamp":"2026-10-07T12:00:00Z","message":{"role":"user","content":"Run tests"}}
-{"type":"message","timestamp":"2026-10-07T12:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"cargo_test","arguments":{"target":"all"}}]}}
-{"type":"message","timestamp":"2026-10-07T12:00:05Z","message":{"role":"toolResult","content":"test result: ok"}}
-{"type":"message","timestamp":"2026-10-07T12:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests passed successfully"}]}}
+    let jsonl = r#"{"type":"message","id":"e1","timestamp":"2026-10-07T12:00:00Z","message":{"role":"user","content":"Run tests"}}
+{"type":"message","id":"e2","timestamp":"2026-10-07T12:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"cargo_test","arguments":{"target":"all"}}]}}
+{"type":"message","id":"e3","timestamp":"2026-10-07T12:00:05Z","message":{"role":"toolResult","content":"test result: ok"}}
+{"type":"message","id":"e4","timestamp":"2026-10-07T12:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests passed successfully"}]}}
 "#;
     std::fs::write(&transcript, jsonl.as_bytes()).unwrap();
 
@@ -595,18 +595,13 @@ async fn agent_conversation_returns_structured_turns() {
 
     let exchange = probe::get(
         &probe_options(&bridge.base_url()),
-        "/api/v2/agents/s-probe/conversation",
+        "/api/v2/agents/s-probe/conversation/sync",
     )
     .await
     .expect("conversation request");
 
     assert_eq!(exchange.status, 200, "payload: {}", exchange.body);
-    assert_eq!(exchange.body["source"], "canonical_log");
-    assert_eq!(exchange.body["session_id"], "s-probe");
-    let paired = probe::get(&probe_options(&bridge.base_url()), "/api/v2/handshake")
-        .await
-        .unwrap();
-    assert_eq!(exchange.body["machine_id"], paired.body["machine_id"]);
+    assert_eq!(exchange.body["mode"], "append");
     assert!(exchange.body.get("conversation_id").is_none());
     std::fs::write(
         &transcript,
@@ -615,18 +610,17 @@ async fn agent_conversation_returns_structured_turns() {
     .unwrap();
     let modern = probe::get(
         &probe_options(&bridge.base_url()),
-        "/api/v2/agents/s-probe/conversation",
+        "/api/v2/agents/s-probe/conversation/sync",
     )
     .await
     .unwrap();
     assert_eq!(modern.status, 200);
-    assert_eq!(modern.body["machine_id"], paired.body["machine_id"]);
     let canonical = modern.body["conversation_id"].as_str().unwrap();
     assert!(canonical.starts_with("pi:"));
     assert_eq!(canonical.len(), 67);
-    assert_eq!(modern.body["turns"], exchange.body["turns"]);
+    assert_eq!(modern.body["upserts"], exchange.body["upserts"]);
 
-    let turns = exchange.body["turns"].as_array().expect("turns array");
+    let turns = exchange.body["upserts"].as_array().expect("turns array");
     assert_eq!(turns.len(), 3);
     assert_eq!(turns[0]["role"], "user");
     assert_eq!(turns[0]["text"], "Run tests");

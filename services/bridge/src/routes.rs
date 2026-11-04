@@ -3,13 +3,14 @@
 //! reconciliation semantics.
 
 use crate::{
-    agents, conversation, herdr, mutation, prompt, questions, reconcile, stats, transcript,
+    agents, conversation, herdr, mutation, prompt, questions, reconcile, stats, sync, transcript,
 };
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Json, Path as AxumPath, State};
+use axum::extract::{Json, Path as AxumPath, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
+use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct BridgeState {
@@ -378,9 +379,14 @@ async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form,
 }
 
 /// GET /api/agents/{sessionId}/conversation
-pub async fn agent_conversation(
+/// `GET /api/v2/agents/{sessionId}/conversation/sync` (contract section 7). With no token the
+/// newest page comes back with both tokens. `after` moves the phone's forward position, and
+/// `before` pages back. A token that no longer matches the file gets the newest page as a resync.
+/// A session without a canonical log answers with its pane scrollback as one snapshot.
+pub async fn conversation_sync(
     State(state): State<Arc<BridgeState>>,
     AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     if session_id.is_empty() {
         return error_response(
@@ -389,144 +395,177 @@ pub async fn agent_conversation(
             "sessionId is required",
         );
     }
+    let after = query.get("after");
+    let before = query.get("before");
+    if after.is_some() && before.is_some() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "send either after or before, not both",
+        );
+    }
 
-    match transcript::resolve_session_transcript(&session_id, state.pi_agent_dir.as_deref()).await {
-        Ok(Some(resolved)) => {
-            match conversation::read_canonical_tail(&resolved, conversation::TRANSCRIPT_TAIL_BYTES)
-            {
-                Ok((content, conversation_id)) => {
-                    let (turns, kind) = match resolved {
-                        transcript::ResolvedTranscript::Pi(_) => {
-                            (conversation::parse_pi_transcript(&content), stats::Kind::Pi)
-                        }
-                        transcript::ResolvedTranscript::Claude(_) => (
-                            conversation::parse_claude_transcript(&content),
-                            stats::Kind::Claude,
-                        ),
-                        transcript::ResolvedTranscript::Agy(_) => (
-                            conversation::parse_agy_transcript(&content),
-                            stats::Kind::Agy,
-                        ),
-                    };
-                    let mut session_stats = stats::session_stats(kind, &content);
-                    let pane_text = if let Some(pane_id) = resolve_pane(&state, &session_id).await {
-                        herdr::pane_read_recent(
-                            &pane_id,
-                            crate::tuning::active().stream.stats_pane_lines,
-                        )
-                        .await
-                        .ok()
-                    } else {
-                        None
-                    };
-                    let (rate_limits, inferred_model) =
-                        stats::parse_rate_limits(kind, &content, pane_text.as_deref());
+    let resolved =
+        match transcript::resolve_session_transcript(&session_id, state.pi_agent_dir.as_deref())
+            .await
+        {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                return error_response(StatusCode::BAD_GATEWAY, "upstream_unavailable", &err)
+            }
+        };
+    let Some(resolved) = resolved else {
+        return scrollback_snapshot(&state, &session_id).await;
+    };
 
-                    if let Some(found) = session_stats.as_mut() {
-                        if found.model.is_none() {
-                            found.model = inferred_model;
-                        }
-                        found.rate_limits = rate_limits;
-                        if kind == stats::Kind::Pi {
-                            if let (Some(provider), Some(model)) = (&found.provider, &found.model) {
-                                found.context_window =
-                                    stats::pi_context_window(resolved.path(), provider, model);
-                            }
-                            if found.thinking_level.is_none() {
-                                found.thinking_level = stats::pi_thinking_level(resolved.path());
-                            }
-                        }
-                        if found.context_window.is_none() {
-                            found.context_window = stats::default_context_window(
-                                found.model.as_deref(),
-                                match kind {
-                                    stats::Kind::Pi => Some("pi"),
-                                    stats::Kind::Claude => Some("claude"),
-                                    stats::Kind::Agy => Some("agy"),
-                                },
-                                found.context_tokens,
-                            );
-                        }
-                    } else if rate_limits.is_some() || inferred_model.is_some() {
-                        let mut found = stats::SessionStats::default();
-                        found.model = inferred_model;
-                        found.rate_limits = rate_limits;
-                        found.context_window = stats::default_context_window(
-                            found.model.as_deref(),
-                            match kind {
-                                stats::Kind::Pi => Some("pi"),
-                                stats::Kind::Claude => Some("claude"),
-                                stats::Kind::Agy => Some("agy"),
-                            },
-                            found.context_tokens,
-                        );
-                        session_stats = Some(found);
-                    }
-                    let payload = conversation::ConversationResponse {
-                        session_id,
-                        source: "canonical_log".to_string(),
-                        machine_id: Some(state.machine_id.clone()),
-                        conversation_id,
-                        turns,
-                        stats: session_stats,
-                    };
-                    (
-                        StatusCode::OK,
-                        [(header::CONTENT_TYPE, "application/json")],
-                        serde_json::to_string(&payload).unwrap_or_default(),
-                    )
-                        .into_response()
+    let kind = sync::Kind::of(&resolved);
+    let file = sync::file_id(&resolved);
+    let request = match (after, before) {
+        (Some(text), _) => match sync::decode(text) {
+            Some(token) => sync::Request::After(token),
+            None => sync::Request::Unreadable,
+        },
+        (None, Some(text)) => match sync::decode(text) {
+            Some(token) => sync::Request::Before(token),
+            None => sync::Request::Unreadable,
+        },
+        (None, None) => sync::Request::Initial,
+    };
+    let budget = crate::tuning::active().sync.page_bytes as u64;
+    let served = match sync::serve(resolved.path(), &file, kind, request.clone(), budget) {
+        Ok(served) => served,
+        Err(err) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                &format!("cannot read transcript: {err}"),
+            )
+        }
+    };
+    let (mode, page) = match &served {
+        sync::Served::Page(page) => ("append", page),
+        sync::Served::Resync(page) => ("resync", page),
+    };
+    let mut body = sync::body(mode, page, &request);
+    if matches!(served, sync::Served::Resync(_)) || matches!(request, sync::Request::Initial) {
+        // The newest page also carries the canonical conversation id and the composer's stats.
+        match conversation::read_canonical_tail(&resolved, conversation::TRANSCRIPT_TAIL_BYTES) {
+            Ok((content, conversation_id)) => {
+                let stats = canonical_stats(&state, &session_id, &resolved, &content).await;
+                if let Some(id) = conversation_id {
+                    body["conversation_id"] = json!(id);
                 }
-                Err(err) => error_response(
+                body["stats"] = serde_json::to_value(stats).unwrap_or(Value::Null);
+            }
+            Err(err) => {
+                return error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal_error",
                     &format!("cannot read transcript: {err}"),
-                ),
-            }
-        }
-        Ok(None) => {
-            // Fallback: If no canonical session transcript exists, check if pane exists and parse recent scrollback
-            if let Some(pane_id) = resolve_pane(&state, &session_id).await {
-                match herdr::pane_read_recent(
-                    &pane_id,
-                    crate::tuning::active().stream.scrollback_lines,
-                )
-                .await
-                {
-                    Ok(text) => {
-                        let lines: Vec<String> = text.lines().map(str::to_string).collect();
-                        let turns = conversation::parse_scrollback_turns(&lines);
-                        let payload = conversation::ConversationResponse {
-                            session_id,
-                            source: "scrollback".to_string(),
-                            machine_id: Some(state.machine_id.clone()),
-                            conversation_id: None,
-                            turns,
-                            stats: None,
-                        };
-                        (
-                            StatusCode::OK,
-                            [(header::CONTENT_TYPE, "application/json")],
-                            serde_json::to_string(&payload).unwrap_or_default(),
-                        )
-                            .into_response()
-                    }
-                    Err(err) => error_response(
-                        StatusCode::BAD_GATEWAY,
-                        "upstream_unavailable",
-                        &err.to_string(),
-                    ),
-                }
-            } else {
-                error_response(
-                    StatusCode::NOT_FOUND,
-                    "not_found",
-                    &format!("no agent with session_id {session_id}"),
                 )
             }
         }
-        Err(err) => error_response(StatusCode::BAD_GATEWAY, "protocol", &err),
     }
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
+/// The pane's recent scrollback as one snapshot, for a session with no canonical log.
+async fn scrollback_snapshot(state: &Arc<BridgeState>, session_id: &str) -> Response {
+    let Some(pane_id) = resolve_pane(state, session_id).await else {
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            &format!("no agent with session_id {session_id}"),
+        );
+    };
+    match herdr::pane_read_recent(&pane_id, crate::tuning::active().stream.scrollback_lines).await {
+        Ok(text) => {
+            let lines: Vec<String> = text.lines().map(str::to_string).collect();
+            let turns = conversation::parse_scrollback_turns(&lines);
+            let body = json!({
+                "mode": "scrollback",
+                "upserts": turns,
+                "caught_up": true,
+                "after_token": null,
+                "before_token": null,
+            });
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/json")],
+                body.to_string(),
+            )
+                .into_response()
+        }
+        Err(err) => error_response(
+            StatusCode::BAD_GATEWAY,
+            "upstream_unavailable",
+            &err.to_string(),
+        ),
+    }
+}
+
+/// The composer's stats for a canonical log: model, context window, thinking level and rate limits.
+async fn canonical_stats(
+    state: &Arc<BridgeState>,
+    session_id: &str,
+    resolved: &transcript::ResolvedTranscript,
+    content: &str,
+) -> Option<stats::SessionStats> {
+    let kind = match resolved {
+        transcript::ResolvedTranscript::Pi(_) => stats::Kind::Pi,
+        transcript::ResolvedTranscript::Claude(_) => stats::Kind::Claude,
+        transcript::ResolvedTranscript::Agy(_) => stats::Kind::Agy,
+    };
+    let agent = match kind {
+        stats::Kind::Pi => Some("pi"),
+        stats::Kind::Claude => Some("claude"),
+        stats::Kind::Agy => Some("agy"),
+    };
+    let mut session_stats = stats::session_stats(kind, content);
+    let pane_text = match resolve_pane(state, session_id).await {
+        Some(pane_id) => {
+            herdr::pane_read_recent(&pane_id, crate::tuning::active().stream.stats_pane_lines)
+                .await
+                .ok()
+        }
+        None => None,
+    };
+    let (rate_limits, inferred_model) =
+        stats::parse_rate_limits(kind, content, pane_text.as_deref());
+
+    if let Some(found) = session_stats.as_mut() {
+        if found.model.is_none() {
+            found.model = inferred_model;
+        }
+        found.rate_limits = rate_limits;
+        if kind == stats::Kind::Pi {
+            if let (Some(provider), Some(model)) = (&found.provider, &found.model) {
+                found.context_window = stats::pi_context_window(resolved.path(), provider, model);
+            }
+            if found.thinking_level.is_none() {
+                found.thinking_level = stats::pi_thinking_level(resolved.path());
+            }
+        }
+        if found.context_window.is_none() {
+            found.context_window =
+                stats::default_context_window(found.model.as_deref(), agent, found.context_tokens);
+        }
+    } else if rate_limits.is_some() || inferred_model.is_some() {
+        let mut found = stats::SessionStats {
+            model: inferred_model,
+            rate_limits,
+            ..Default::default()
+        };
+        found.context_window =
+            stats::default_context_window(found.model.as_deref(), agent, found.context_tokens);
+        session_stats = Some(found);
+    }
+    session_stats
 }
 
 /// Pi, Claude Code and Agy all start a fresh conversation in the same process with `/new`.

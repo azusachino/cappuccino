@@ -28,7 +28,7 @@ pub const HEADER: &str = "x-cappuccino-protocol";
 pub const OFFERED: &[(&str, u64)] = &[
     ("agent_discovery", 1),
     ("live_output", 1),
-    ("conversation_history", 1),
+    ("conversation_sync", 1),
     ("prompt_input", 1),
     ("prompt_answers", 1),
     ("agent_control", 1),
@@ -201,8 +201,8 @@ pub fn routes() -> Router<Arc<BridgeState>> {
     let gated = Router::new()
         .route("/api/v2/agents", get(routes::agents))
         .route(
-            "/api/v2/agents/{sessionId}/conversation",
-            get(routes::agent_conversation),
+            "/api/v2/agents/{sessionId}/conversation/sync",
+            get(routes::conversation_sync),
         )
         .route(
             "/api/v2/agents/{sessionId}/prompt",

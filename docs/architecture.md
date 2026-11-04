@@ -12,7 +12,7 @@ Native phone clients reach selected machine-local Herdr APIs through a separate 
 
 - `POST /api/v2/handshake`: reachability, machine identity, version and a capability advertisement.
 - `GET /api/v2/agents`: maps Herdr `agent.list` metadata, including unnamed panes.
-- `GET /api/v2/agents/{sessionId}/conversation`: the canonical transcript for Pi, Claude Code or Agy when Herdr reports a usable session. Otherwise the pane's recent scrollback, labeled `scrollback`. Returns active model metadata, context tokens, and upstream provider rate limit quotas in `stats`.
+- `GET /api/v2/agents/{sessionId}/conversation/sync`: conversation sync (contract section 7). The newest page, or records after or before a token. Sessions without a usable canonical log return their pane scrollback. Otherwise the pane's recent scrollback, labeled `scrollback`. Returns active model metadata, context tokens, and upstream provider rate limit quotas in `stats`.
 - `POST /api/v2/agents/{sessionId}/prompt`: sends prompt text into the pane, or answers a visible approval or question card. Text that starts with an agent command is refused with `409 confirm_command` unless the owner confirmed it. Interactive terminal commands (like `/status`) are blocked in mobile clients to prevent unescapable curses locks.
 - `POST /api/v2/agents/{sessionId}/control`: `interrupt` sends Escape; `new_session` types the agent's `/new` command and is refused while the agent is working or blocked.
 - `WS /api/v2/agents/{sessionId}/stream`: the read-only pane-line stream.
