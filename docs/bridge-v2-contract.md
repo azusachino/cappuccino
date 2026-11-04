@@ -200,10 +200,10 @@ Each agent writes its own session file on the machine that runs it. The bridge r
 - **Session id:** the session header's `id`. Each entry carries `id` and `parentId`, which form a tree.
 - **Turn id:** the entry `id`. Entry ids are 8 hex characters, so a duplicate within one read gets the entry `id` plus `#` and a digest of its record. A collision between two reads is not caught (section 8).
 - **Resolution:** the path Herdr reports must sit inside a configured store.
-- **Active branch:** the path from the file's last entry up to the root through `parentId`. This matches Pi's own load rule, because the leaf is not stored in the file.
-- **Compaction:** a `compaction` entry shows as a divider with its summary collapsed. Earlier entries stay visible.
-- **Context edits:** a `context_edit` with `replacement: null` leaves its target visible, with an "omitted from model context" marker.
-- **Custom messages:** a `custom_message` shows only when its `display` flag is true.
+- **Active branch (P1):** the path from the file's last entry up to the root through `parentId`. This matches Pi's own load rule, because the leaf is not stored in the file. Not yet implemented: entries are read in file order, so a branching session shows every branch (section 8).
+- **Compaction (P2):** a `compaction` entry is a `notice` turn with one `divider` part (label `compaction`, the summary). Earlier entries stay visible.
+- **Context edits (P3):** a `context_edit` with `replacement: null` leaves its target visible, with a `context_omitted` part. The marker is added when the edit and its target are read in the same page. A later page does not re-send the target, which is a known limit (section 8).
+- **Custom messages (P4):** a `custom_message` is a `notice` turn only when its `display` flag is true.
 - **Not shown:** `custom`, `label`, `session_info` and `usage` entries.
 
 ### 5.2 Claude Code
@@ -386,9 +386,9 @@ Turns never arrive on the stream. Turns come only from the sync endpoint (§7).
 
 ### 7.4 Turn boundaries and late changes
 
-- A page holds whole turns, and it always contains at least two turn openers, so it makes progress. The last turn of a page is sent in full, and the forward token points at its opener. The next request therefore sends that turn again, complete. An upsert replaces it.
+- A page holds whole turns, and it always contains at least two turn openers, so it makes progress. Every turn of the page is sent in full. The forward token points at the earliest turn still waiting for a tool result, or else at the last turn of the page. The first turn of a page is never held, so each page moves on. The next request sends the held turn again, complete, and an upsert replaces it.
 - A turn is complete once a later turn has opened. The bridge never sends a record past the end of the file's complete lines, so a record still being written is not served.
-- Known limit: a tool result that arrives after the next turn has opened is not re-sent. The turn it belongs to is already before the forward token. See section 8.
+- A tool result that arrives later is sent with its turn, because the token is held at that turn until the result comes back.
 
 ### 7.5 Invalid token
 
@@ -402,13 +402,13 @@ Turns never arrive on the stream. Turns come only from the sync endpoint (§7).
 ### 7.7 Budgets
 
 - Sync page: at most `[tuning.sync] page_bytes` (default 1 MiB) of records per response, except that a single turn is never split. A page holding one turn larger than that holds only that turn.
-- The stream message budget in section 8 is not implemented yet. Stream messages are not split.
+- Stream message: at most `[tuning.stream] message_bytes` (default 256 KiB) per `entries` event. Entries are split across events and none is dropped. A single row larger than the budget is sent alone.
 
 ## 8. Open items before freeze
 
-1. Not implemented: the stream message budget (`[tuning.stream] message_bytes`, proposed 256 KiB). Measure the worst-case pane row width on a real pane, then split stream messages to that budget.
-2. Not implemented: Pi branch mapping (P1 active branch, P2 compaction, P3 context edits, P4 custom messages). The parser maps `message` records only, as one linear history. No local session branches, so this does not show yet.
-3. Known limit: a tool result that arrives after the next turn has opened is not re-sent (section 7.4). Decide whether the limit is acceptable, or keep the last settled turns open for a longer window.
+1. Not implemented: Pi active-branch mapping (P1). The bridge reads entries in file order, so a branching session shows every branch. A per-request scan of the whole file is too costly, so a cached index keyed by file identity and length is the likely design. No local session branches yet.
+2. Known limit: a context edit whose target was sent in an earlier page does not re-send the target, so its marker appears only when both are read together (section 7.4 and 5.1).
+3. Not implemented: review-card answers keyed by `question_id` (section 6.1). The review screen does not carry the question text that the id is derived from. Decide between deriving the id from the header, or changing the review shape.
 4. Pi entry ids are 8 hex characters. Duplicates are detected only within one read, so a collision between two reads is not caught. Decide whether the turn key should include the opening record's byte offset.
 5. Confirm the session file identity for each agent (section 7.1), and what happens when a session id is reused.
 6. Decide the maximum size of one turn. A turn above the phone's 2 MiB ceiling cannot be shown. A bridge-side text cap with `truncated: true` is the likely answer.

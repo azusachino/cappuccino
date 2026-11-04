@@ -103,6 +103,7 @@ screen_lines = 80        # lines read to find a question or approval on screen
 stats_pane_lines = 30    # lines read for rate-limit and model hints
 scrollback_lines = 200   # lines read when a session has no canonical transcript
 answer_key_gap_ms = 250  # pause between keys when answering a multi-step question
+message_bytes = 262144     # largest stream message; entries split across messages, none dropped
 
 [tuning.iroh]
 max_tunnel_streams = 32                 # concurrent streams per tunnel connection

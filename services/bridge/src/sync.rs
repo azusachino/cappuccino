@@ -257,9 +257,21 @@ fn forward(
         }
     };
     let parsed = parse(kind, &lines);
-    let (offset, record) = match (parsed.opened_at_line.last(), parsed.turns.last()) {
-        (Some(&index), Some(turn)) => (lines[index].offset, turn.id.clone()),
-        _ => (next, String::new()),
+    // Hold the token at the earliest turn still waiting for a tool result, so that result is sent
+    // with its turn when it arrives. The first turn of a page is never held, so each page moves on.
+    let held = parsed
+        .turns
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_, turn)| waiting_for_result(turn))
+        .map(|(index, _)| index);
+    let (offset, record) = match held.or(parsed.turns.len().checked_sub(1)) {
+        Some(index) => (
+            lines[parsed.opened_at_line[index]].offset,
+            parsed.turns[index].id.clone(),
+        ),
+        None => (next, String::new()),
     };
     Ok(Page {
         turns: parsed.turns,
@@ -270,6 +282,16 @@ fn forward(
         }),
         before: None,
         caught_up: reached,
+    })
+}
+
+/// A turn has a tool call whose result has not arrived yet.
+fn waiting_for_result(turn: &ConversationTurn) -> bool {
+    turn.parts.iter().any(|part| {
+        matches!(
+            part,
+            conversation::ConversationPart::ToolCall { output: None, .. }
+        )
     })
 }
 
@@ -764,5 +786,49 @@ mod tests {
             _ => None,
         });
         assert_eq!(output.as_deref(), Some("ok"));
+    }
+}
+
+#[cfg(test)]
+mod hold_tests {
+    use super::*;
+
+    #[test]
+    fn a_call_that_never_returns_does_not_stall_catch_up() {
+        let dir = std::env::temp_dir().join(format!("cap-sync-hold-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        let mut text = String::from(
+            "{\"type\":\"assistant\",\"uuid\":\"a0\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"lost\",\"name\":\"bash\",\"input\":{}}]}}\n",
+        );
+        for index in 1..30 {
+            text.push_str(&format!(
+                "{{\"type\":\"user\",\"uuid\":\"u{index}\",\"message\":{{\"role\":\"user\",\"content\":\"{}\"}}}}\n",
+                "q".repeat(120)
+            ));
+        }
+        std::fs::write(&path, &text).unwrap();
+        let mut request = Request::Initial;
+        let mut rounds = 0;
+        loop {
+            rounds += 1;
+            assert!(
+                rounds < 200,
+                "catch-up must finish even while a call is held"
+            );
+            let served = serve(&path, "session", Kind::Claude, request.clone(), 600).unwrap();
+            let page = match served {
+                Served::Page(page) | Served::Resync(page) => page,
+            };
+            if let Some(after) = page.after.clone() {
+                if page.caught_up && matches!(request, Request::After(_)) {
+                    break;
+                }
+                request = Request::After(after);
+            } else {
+                break;
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

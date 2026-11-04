@@ -26,6 +26,10 @@ pub struct ConversationTurn {
 pub enum ConversationPart {
     #[serde(rename = "text")]
     Text { text: String },
+    #[serde(rename = "divider")]
+    Divider { label: String, text: String },
+    #[serde(rename = "context_omitted")]
+    ContextOmitted,
     #[serde(rename = "thinking")]
     Thinking { text: String },
     #[serde(rename = "response_status")]
@@ -385,6 +389,8 @@ pub fn parse_pi_with_openers(content: &str) -> Parsed {
     let mut turns: Vec<ConversationTurn> = Vec::new();
     let mut opened_at_line: Vec<usize> = Vec::new();
     let mut tool_calls = std::collections::HashMap::new();
+    // Entries whose model context a later context_edit removed (Pi, P3).
+    let mut omitted: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for (line_no, line) in content.lines().enumerate() {
         let trimmed = line.trim();
@@ -396,6 +402,69 @@ pub fn parse_pi_with_openers(content: &str) -> Parsed {
         };
 
         let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let timestamp = v
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        match typ {
+            // P2: a compaction is a divider; the earlier entries stay visible.
+            "compaction" => {
+                if let (Some(record), Some(summary)) = (
+                    v.get("id").and_then(Value::as_str),
+                    v.get("summary").and_then(Value::as_str),
+                ) {
+                    let id = record_turn_id(&turns, record, trimmed);
+                    turns.push(ConversationTurn {
+                        id,
+                        role: "notice".to_string(),
+                        timestamp: timestamp.clone(),
+                        text: None,
+                        parts: vec![ConversationPart::Divider {
+                            label: "compaction".to_string(),
+                            text: summary.trim().to_string(),
+                        }],
+                    });
+                    opened_at_line.push(line_no);
+                }
+                continue;
+            }
+            // P4: a custom message is shown only when its display flag is set.
+            "custom_message" => {
+                if v.get("display").and_then(Value::as_bool) == Some(true) {
+                    if let Some(record) = v.get("id").and_then(Value::as_str) {
+                        let text = match &v["content"] {
+                            Value::String(text) => text.clone(),
+                            Value::Array(blocks) => blocks
+                                .iter()
+                                .filter_map(|block| block["text"].as_str())
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                            _ => String::new(),
+                        };
+                        let id = record_turn_id(&turns, record, trimmed);
+                        turns.push(ConversationTurn {
+                            id,
+                            role: "notice".to_string(),
+                            timestamp: timestamp.clone(),
+                            text: Some(text.trim().to_string()),
+                            parts: Vec::new(),
+                        });
+                        opened_at_line.push(line_no);
+                    }
+                }
+                continue;
+            }
+            // P3: a context edit with no replacement removes its target from model context.
+            "context_edit" => {
+                if v["replacement"].is_null() {
+                    if let Some(target) = v["targetId"].as_str() {
+                        omitted.insert(target.to_string());
+                    }
+                }
+                continue;
+            }
+            _ => {}
+        }
         if typ != "message" {
             continue;
         }
@@ -581,6 +650,9 @@ pub fn parse_pi_with_openers(content: &str) -> Parsed {
         }
     }
 
+    for turn in turns.iter_mut().filter(|turn| omitted.contains(&turn.id)) {
+        turn.parts.push(ConversationPart::ContextOmitted);
+    }
     Parsed {
         turns,
         opened_at_line,
@@ -1256,5 +1328,44 @@ mod tests {
             .filter_map(|turn| turn.text.as_deref())
             .collect();
         assert_eq!(texts, vec!["real follow-up"]);
+    }
+}
+
+#[cfg(test)]
+mod pi_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn compaction_is_a_divider_and_earlier_entries_stay() {
+        let text = "{\"type\":\"message\",\"id\":\"m1\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n{\"type\":\"compaction\",\"id\":\"c1\",\"summary\":\"Goal: x\"}\n";
+        let turns = parse_pi_with_openers(text).turns;
+        assert_eq!(
+            turns.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["m1", "c1"]
+        );
+        assert_eq!(turns[1].role, "notice");
+        assert!(
+            matches!(&turns[1].parts[0], ConversationPart::Divider { label, text } if label == "compaction" && text == "Goal: x")
+        );
+    }
+
+    #[test]
+    fn custom_messages_show_only_when_displayed() {
+        let text = "{\"type\":\"custom_message\",\"id\":\"n1\",\"display\":true,\"content\":\"background task done\"}\n{\"type\":\"custom_message\",\"id\":\"n2\",\"display\":false,\"content\":\"hidden\"}\n";
+        let turns = parse_pi_with_openers(text).turns;
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].id, "n1");
+        assert_eq!(turns[0].text.as_deref(), Some("background task done"));
+    }
+
+    #[test]
+    fn an_omitted_entry_keeps_its_text_and_gains_a_marker() {
+        let text = "{\"type\":\"message\",\"id\":\"m1\",\"message\":{\"role\":\"user\",\"content\":\"secret\"}}\n{\"type\":\"context_edit\",\"id\":\"e1\",\"targetId\":\"m1\",\"replacement\":null}\n";
+        let turns = parse_pi_with_openers(text).turns;
+        assert_eq!(turns[0].text.as_deref(), Some("secret"));
+        assert!(matches!(
+            turns[0].parts.last(),
+            Some(ConversationPart::ContextOmitted)
+        ));
     }
 }

@@ -292,8 +292,9 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
             // re-emit stream_reset on every subsequent poll.
             generation = ring.generation;
         }
-        if !new_entries.is_empty() {
-            let event = json!({"event": "entries", "stream_generation": ring.generation, "entries": new_entries});
+        for batch in entry_batches(new_entries, crate::tuning::active().stream.message_bytes) {
+            let event =
+                json!({"event": "entries", "stream_generation": ring.generation, "entries": batch});
             if socket
                 .send(Message::Text(event.to_string().into()))
                 .await
@@ -923,5 +924,51 @@ mod tests {
         assert_eq!(new_session_command("agy"), Some("/new"));
         assert_eq!(new_session_command("antigravity-cli"), Some("/new"));
         assert_eq!(new_session_command("codex"), None);
+    }
+}
+
+/// Splits stream entries into batches whose JSON stays within `budget` bytes. No entry is split
+/// or dropped; one entry larger than the budget is sent alone.
+fn entry_batches(entries: Vec<Value>, budget: usize) -> Vec<Vec<Value>> {
+    let mut batches: Vec<Vec<Value>> = vec![Vec::new()];
+    let mut size = 0usize;
+    for entry in entries {
+        let len = entry.to_string().len() + 1;
+        let full = size + len > budget && batches.last().is_some_and(|batch| !batch.is_empty());
+        if full {
+            batches.push(Vec::new());
+            size = 0;
+        }
+        batches.last_mut().expect("at least one batch").push(entry);
+        size += len;
+    }
+    batches.retain(|batch| !batch.is_empty());
+    batches
+}
+
+#[cfg(test)]
+mod entry_batch_tests {
+    use super::*;
+
+    #[test]
+    fn batches_respect_the_budget_and_keep_every_entry_in_order() {
+        let entries: Vec<Value> = (0..10)
+            .map(|i| json!({"seq": i, "text": "x".repeat(40)}))
+            .collect();
+        let batches = entry_batches(entries.clone(), 150);
+        assert!(batches.len() > 1);
+        assert!(batches
+            .iter()
+            .all(|batch| serde_json::to_string(batch).unwrap().len() <= 150 + 40));
+        let flat: Vec<Value> = batches.into_iter().flatten().collect();
+        assert_eq!(flat, entries);
+    }
+
+    #[test]
+    fn an_oversized_entry_is_sent_alone_not_dropped() {
+        let big = json!({"text": "y".repeat(500)});
+        let batches = entry_batches(vec![json!({"a": 1}), big.clone(), json!({"b": 2})], 100);
+        assert_eq!(batches.iter().flatten().count(), 3);
+        assert!(batches.iter().any(|batch| batch == &vec![big.clone()]));
     }
 }

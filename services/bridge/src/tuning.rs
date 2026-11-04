@@ -69,6 +69,8 @@ pub struct Stream {
     /// Pause between keys when answering a multi-step question, because the
     /// form redraws between steps.
     pub answer_key_gap_ms: u64,
+    /// Largest stream message. Entries are split across messages and none is dropped; a single row larger than this is sent alone.
+    pub message_bytes: usize,
 }
 
 /// iroh transport and pairing limits.
@@ -151,6 +153,7 @@ impl Default for Stream {
             stats_pane_lines: 30,
             scrollback_lines: 200,
             answer_key_gap_ms: 250,
+            message_bytes: 256 * 1024,
         }
     }
 }
@@ -225,6 +228,7 @@ impl Tuning {
                 self.stream.scrollback_lines as u64,
             ),
             ("stream.answer_key_gap_ms", self.stream.answer_key_gap_ms),
+            ("stream.message_bytes", self.stream.message_bytes as u64),
             (
                 "iroh.max_tunnel_streams",
                 self.iroh.max_tunnel_streams as u64,
@@ -358,6 +362,7 @@ mod tests {
         ("stream", "stats_pane_lines"),
         ("stream", "scrollback_lines"),
         ("stream", "answer_key_gap_ms"),
+        ("stream", "message_bytes"),
         ("sync", "page_bytes"),
         ("iroh", "max_tunnel_streams"),
         ("iroh", "max_tunnel_connections"),
