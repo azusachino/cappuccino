@@ -322,13 +322,13 @@ The answer response is `{"event": "prompt_answered", "prompt_id": "...", "outcom
 
 `GET /api/v2/agents/{sessionId}/stream` is a WebSocket. Its events:
 
-- `stream_open` (first frame): `{"event": "stream_open", "session_id": "...", "stream_generation": 3}`. It also carries the current `agent_status`, so a reconnecting client has a snapshot.
-- `agent_status`: `{"event": "agent_status", "session_id": "...", "state": "working", "detail": "...", "elapsed_seconds": 14}`. `state` is `idle`, `working` or `exited`.
+- `stream_open` (first frame): `{"event": "stream_open", "session_id": "...", "stream_generation": 3}`. It is transport only, not live state. The first poll then sends an `agent_status` read live from the pane, followed by any prompt still on screen as `prompt_request`. A reconnecting client gets its status snapshot within about one poll interval, and must not enable actions before that `agent_status`. `stream_generation` restarts at 0 for each new stream connection, so live rows never carry across connections.
+- `agent_status`: `{"event": "agent_status", "session_id": "...", "state": "working", "detail": "..."}`. `state` is `idle`, `working` or `exited`.
 - `entries`: live pane rows, for the live view only: `{"event": "entries", "stream_generation": 3, "entries": [{"id": "...", "seq": 412, "text": "..."}]}`. Pane rows are not turns.
 - `stream_reset`: the live window restarted. The client drops its live rows. The next `entries` event carries the new `stream_generation`.
 - `prompt_request`: `{"event": "prompt_request", "session_id": "...", "prompt": {card}}`.
 - `prompt_resolved`: `{"event": "prompt_resolved", "session_id": "...", "prompt_id": "..."}`, sent when the card leaves the screen.
-- `conversation_changed`: `{"event": "conversation_changed", "session_id": "..."}`, a hint to run a sync request. It carries no turns.
+- `conversation_changed`: reserved. The bridge does not send it yet, and a client must not depend on it. Clients run a sync request on `entries` and `agent_status`.
 - `error`: the envelope from §4.6. Pane read failures arrive as `upstream_unavailable`.
 
 Turns never arrive on the stream. Turns come only from the sync endpoint (§7).
