@@ -713,7 +713,7 @@ class CappuccinoShellTest {
           profile.machineId,
           "fixture",
           1,
-          mapOf("prompt_input" to true, "prompt_answers" to true, "agent_control" to true) +
+          mapOf("prompt_answers" to true, "agent_control" to true) +
             (advertised?.let { mapOf("prompt_input" to it) } ?: emptyMap()),
         )
     )
