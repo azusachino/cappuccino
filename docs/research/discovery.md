@@ -4,7 +4,7 @@ Source research from 2026-10-05 that informed the [intent](../intent.md) and the
 
 ## References and lessons
 
-Read-only clones are catalogued in the workstation under `refs/coding-agents/`. These are research material, not adopted dependencies. Revisions below pin this inspection; refreshing the shelf later does not update these conclusions automatically.
+Read-only reference clones are kept outside this repository. These are research material, not adopted dependencies. Revisions below pin this inspection; refreshing the shelf later does not update these conclusions automatically.
 
 | Project | What the primary sources show | Useful lesson | Fit limitation |
 | --- | --- | --- | --- |
@@ -32,7 +32,7 @@ Further primary-source reading:
 
 ## Optional debugging: vphone-cli
 
-The owner suggested [vphone-cli](https://github.com/Lakr233/vphone-cli) for debugging sessions. Read-only source revision `49fdb7d3c015aa2fb732c9f4a8a278410295c8d8` is on the workstation's `refs/computer-use/vphone-cli/` shelf; it is not a Cappuccino dependency or required gate.
+The owner suggested [vphone-cli](https://github.com/Lakr233/vphone-cli) for debugging sessions. Read-only source revision `49fdb7d3c015aa2fb732c9f4a8a278410295c8d8` is kept as a read-only reference outside this repository; it is not a Cappuccino dependency or required gate.
 
 - It runs a patched iOS research guest through Apple's Virtualization.framework on a physical Apple Silicon Mac with macOS 15+. Upstream documents screenshot/input automation, a UI tree, app launch and HTTP/WebSocket guest APIs. This could support repeatable native UI investigation and later disposable reconnect/attention scenarios, not agent orchestration.
 - Host setup is consequential: Recovery must enable research guests and at least relax SIP debugging restrictions; private-entitlement admission requires AMFI allowlisting and privileged helper authorization. The more permissive alternative disables SIP/AMFI. Default guest storage is a 64 GB virtual disk plus firmware. Merely considering the tool authorizes none of these changes, installation, downloads or VM creation.

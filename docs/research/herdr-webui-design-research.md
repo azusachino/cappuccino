@@ -9,7 +9,7 @@ Cappuccino is an Apple and Android native companion for monitoring and managing 
 - Disconnecting or switching machines was unintuitive, with bare text buttons instead of standard Material Design iconography and clear action surfaces.
 - The transcript lacked structure, treating prompts, tool executions, and internal status chrome as identical raw text.
 
-To fix Cappuccino's native Android client cleanly, this document conducts an architectural and design study of `herdr-web-ui` (`refs/coding-agents/herdr-web-ui`), extracting its design decisions, layout system, transcript heuristics, and interaction model.
+To fix Cappuccino's native Android client cleanly, this document conducts an architectural and design study of `herdr-web-ui` (herdr-web-ui, read-only reference), extracting its design decisions, layout system, transcript heuristics, and interaction model.
 
 ---
 

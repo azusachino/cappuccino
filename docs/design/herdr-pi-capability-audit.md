@@ -6,7 +6,7 @@ must not be described as a feature being outside that goal.
 
 ## Inspected versions and boundaries
 
-- Herdr reference: `refs/coding-agents/herdr`, commit
+- Herdr reference (read-only), commit
   `e35f3937b0efe40ec0dab675709c68e1d8e8c9e6`, Cargo version `0.9.3`.
 - Managed Pi integration: `src/integration/assets/pi/herdr-agent-state.ts`,
   integration version **9**; read in full.

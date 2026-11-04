@@ -2,8 +2,6 @@ use crate::config::StrictBool;
 use serde::Deserialize;
 use std::path::PathBuf;
 
-pub(super) const MAX_LABEL_CHARS: usize = 40;
-
 /// Events an owner can enable in `[telegram] events`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
@@ -59,7 +57,7 @@ pub struct Settings {
 
 /// `Ok(None)` when the route is disabled. Shape errors fail startup; a missing or
 /// unreadable token file does not, it is reported as `misconfigured` instead.
-pub fn settings(file: File) -> Result<Option<Settings>, String> {
+pub fn settings(file: File, max_label_chars: usize) -> Result<Option<Settings>, String> {
     if !file.enabled.unwrap_or(StrictBool(false)).0 {
         return Ok(None);
     }
@@ -74,11 +72,11 @@ pub fn settings(file: File) -> Result<Option<Settings>, String> {
     let machine_label = file.machine_label.unwrap_or_default();
     let label = machine_label.trim();
     if label.is_empty()
-        || label.chars().count() > MAX_LABEL_CHARS
+        || label.chars().count() > max_label_chars
         || label.chars().any(char::is_control)
     {
         return Err(format!(
-            "telegram.machine_label must be 1-{MAX_LABEL_CHARS} printable characters"
+            "telegram.machine_label must be 1-{max_label_chars} printable characters"
         ));
     }
     let mut events = Vec::new();
@@ -107,6 +105,13 @@ pub fn settings(file: File) -> Result<Option<Settings>, String> {
 mod tests {
     use super::*;
     use crate::telegram::test_support::*;
+
+    fn settings(file: File) -> Result<Option<Settings>, String> {
+        super::settings(
+            file,
+            crate::tuning::Tuning::default().telegram.max_label_chars,
+        )
+    }
 
     #[test]
     fn disabled_route_has_no_settings() {
@@ -148,6 +153,14 @@ mod tests {
         // A typo'd key must fail the parse, not silently fall back to a default.
         assert!(toml::from_str::<File>(&format!("{base}chat_id = \"1\"\nmystery = 1")).is_err());
         assert!(settings(file(&format!("{base}chat_id = \"1\""))).is_ok());
+    }
+
+    #[test]
+    fn configured_label_limit_is_enforced() {
+        let base = "enabled = true\nchat_id = \"-100\"\ntoken_file = \"/tmp/t\"\n";
+        let label = format!("machine_label = \"{}\"", "a".repeat(6));
+        assert!(super::settings(file(&format!("{base}{label}")), 5).is_err());
+        assert!(super::settings(file(&format!("{base}{label}")), 6).is_ok());
     }
 
     #[test]

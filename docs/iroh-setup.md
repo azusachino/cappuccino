@@ -70,7 +70,7 @@ on its `PATH`, normally the `~/.cargo/bin` copy, not a checkout's `target/`
 artifact.
 
 ```sh
-cd /Users/azusachino/Projects/project-github/harus-workstation/vendor/cappuccino
+cd <repo-root>
 cargo build --release --manifest-path services/bridge/Cargo.toml
 cargo install --path services/bridge --locked
 command -v cappuccino-bridge

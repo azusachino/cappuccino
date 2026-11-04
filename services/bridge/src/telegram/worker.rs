@@ -1,8 +1,6 @@
 use super::config::{Event, Settings};
 use super::message::{message, route_failure_message};
-use super::send::{
-    Outcome, Sender, API_BASE, MAX_RATE_LIMIT_TRIES, REQUEST_TIMEOUT, SERVER_RETRY_DELAY,
-};
+use super::send::{Outcome, Sender, API_BASE};
 use super::status::{Route, Shared, Status};
 use super::token::{read_token, Token};
 use super::tracker::Tracker;
@@ -10,9 +8,6 @@ use crate::agents::AgentRow;
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-pub(super) const POLL_INTERVAL: Duration = Duration::from_secs(5);
-pub(super) const MAX_PENDING: usize = 50;
 
 pub(super) fn unix_now() -> u64 {
     SystemTime::now()
@@ -109,7 +104,7 @@ impl Telegram {
     }
 
     fn enqueue(&mut self, text: String, now: Instant) {
-        if self.pending.len() >= MAX_PENDING {
+        if self.pending.len() >= crate::tuning::active().telegram.max_pending {
             self.pending.pop_front();
             self.status.dropped_count += 1;
         }
@@ -161,7 +156,7 @@ impl Telegram {
                     return true;
                 };
                 front.attempts += 1;
-                if front.attempts >= MAX_RATE_LIMIT_TRIES {
+                if front.attempts >= crate::tuning::active().telegram.max_rate_limit_tries {
                     self.pending.pop_front();
                     self.status.dropped_count += 1;
                 } else {
@@ -178,7 +173,10 @@ impl Telegram {
                 };
                 if front.attempts == 0 {
                     front.attempts = 1;
-                    front.not_before = now + SERVER_RETRY_DELAY;
+                    front.not_before = now
+                        + Duration::from_secs(
+                            crate::tuning::active().telegram.server_retry_delay_secs,
+                        );
                 } else {
                     self.pending.pop_front();
                     self.status.dropped_count += 1;
@@ -210,7 +208,10 @@ impl Telegram {
 /// send what is due. A herdr error skips the snapshot, so it never re-baselines.
 pub async fn watch(machine_id: String, settings: Settings, shared: Shared) {
     let token = read_token(&settings.token_file).ok();
-    let sender = match Sender::new(API_BASE, REQUEST_TIMEOUT) {
+    let sender = match Sender::new(
+        API_BASE,
+        Duration::from_secs(crate::tuning::active().telegram.request_timeout_secs),
+    ) {
         Ok(sender) => sender,
         Err(_) => return,
     };
@@ -218,7 +219,9 @@ pub async fn watch(machine_id: String, settings: Settings, shared: Shared) {
     if telegram.is_misconfigured() {
         return;
     }
-    let mut ticker = tokio::time::interval(POLL_INTERVAL);
+    let mut ticker = tokio::time::interval(Duration::from_secs(
+        crate::tuning::active().telegram.poll_interval_secs,
+    ));
     loop {
         ticker.tick().await;
         let snapshot = crate::herdr::agent_list().await.ok();
@@ -293,7 +296,12 @@ mod tests {
             1,
             "not due before the retry delay"
         );
-        telegram.flush(start + SERVER_RETRY_DELAY).await;
+        telegram
+            .flush(
+                start
+                    + Duration::from_secs(crate::tuning::active().telegram.server_retry_delay_secs),
+            )
+            .await;
         assert_eq!(hits.load(Ordering::SeqCst), 2);
         assert_eq!(telegram.status.dropped_count, 1);
     }
@@ -316,10 +324,13 @@ mod tests {
     #[test]
     fn queue_is_bounded_and_counts_drops() {
         let mut telegram = telegram_for("http://127.0.0.1:1", vec![Event::Completion]);
-        for index in 0..(MAX_PENDING + 5) {
+        for index in 0..(crate::tuning::active().telegram.max_pending + 5) {
             telegram.enqueue(format!("m{index}"), Instant::now());
         }
-        assert_eq!(telegram.pending.len(), MAX_PENDING);
+        assert_eq!(
+            telegram.pending.len(),
+            crate::tuning::active().telegram.max_pending
+        );
         assert_eq!(telegram.status.dropped_count, 5);
     }
 

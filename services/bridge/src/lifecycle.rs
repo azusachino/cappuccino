@@ -22,10 +22,26 @@ use std::{
     time::{Duration, Instant},
 };
 
-const START_TIMEOUT: Duration = Duration::from_secs(5);
-const STOP_TIMEOUT: Duration = Duration::from_secs(3);
-const CONTROL_TIMEOUT: Duration = Duration::from_millis(500);
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
+fn start_timeout() -> Duration {
+    Duration::from_secs(crate::tuning::active().lifecycle.start_timeout_secs)
+}
+
+fn stop_timeout() -> Duration {
+    Duration::from_secs(crate::tuning::active().lifecycle.stop_timeout_secs)
+}
+
+fn control_timeout() -> Duration {
+    Duration::from_millis(crate::tuning::active().lifecycle.control_timeout_ms)
+}
+
+fn poll_interval() -> Duration {
+    Duration::from_millis(crate::tuning::active().lifecycle.poll_interval_ms)
+}
+
+fn probe_timeout() -> Duration {
+    Duration::from_millis(crate::tuning::active().lifecycle.probe_timeout_ms)
+}
+
 const MANAGED_ARG: &str = "__serve";
 const RECORD_FILE: &str = "bridge.control";
 const LEGACY_PID_FILE: &str = "bridge.pid";
@@ -150,7 +166,7 @@ fn start() -> Result<(), String> {
         }
     };
 
-    match wait_for_ready(&mut child, &state, &token, &config, START_TIMEOUT) {
+    match wait_for_ready(&mut child, &state, &token, &config, start_timeout()) {
         Ok(pid) => {
             println!(
                 "cappuccino-bridge: started (pid {pid}, port {})",
@@ -175,7 +191,7 @@ fn stop() -> Result<(), String> {
     };
 
     let pid = control_request(&state, &token, "STOP")?;
-    let deadline = Instant::now() + STOP_TIMEOUT;
+    let deadline = Instant::now() + stop_timeout();
     loop {
         let control_gone = control_request(&state, &token, "PING").is_err();
         if control_gone && !healthy(&config.bind, config.port) {
@@ -188,7 +204,7 @@ fn stop() -> Result<(), String> {
                 "bridge process {pid} did not stop before timeout; state was preserved"
             ));
         }
-        thread::sleep(POLL_INTERVAL);
+        thread::sleep(poll_interval());
     }
 }
 
@@ -309,7 +325,7 @@ fn wait_for_ready(
                 timeout.as_millis()
             ));
         }
-        thread::sleep(POLL_INTERVAL);
+        thread::sleep(poll_interval());
     }
 }
 
@@ -407,7 +423,7 @@ impl ControlServer {
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                    thread::park_timeout(POLL_INTERVAL)
+                    thread::park_timeout(poll_interval())
                 }
                 Err(_) => {
                     let _ = shutdown.send(());
@@ -425,7 +441,7 @@ impl Drop for ControlServer {
 }
 
 fn read_control_line(stream: &mut UnixStream) -> io::Result<String> {
-    stream.set_read_timeout(Some(CONTROL_TIMEOUT))?;
+    stream.set_read_timeout(Some(control_timeout()))?;
     let mut bytes = Vec::with_capacity(80);
     let mut byte = [0u8; 1];
     loop {
@@ -481,10 +497,10 @@ fn control_request(state: &StateDir, token: &str, action: &str) -> Result<u32, S
     let mut stream = UnixStream::connect(&path)
         .map_err(|error| format!("connect private bridge control socket: {error}"))?;
     stream
-        .set_read_timeout(Some(CONTROL_TIMEOUT))
+        .set_read_timeout(Some(control_timeout()))
         .map_err(|error| format!("set control timeout: {error}"))?;
     stream
-        .set_write_timeout(Some(CONTROL_TIMEOUT))
+        .set_write_timeout(Some(control_timeout()))
         .map_err(|error| format!("set control timeout: {error}"))?;
     writeln!(stream, "{action} {token}")
         .map_err(|error| format!("write control request: {error}"))?;
@@ -554,11 +570,11 @@ fn healthy(bind: &str, port: u16) -> bool {
     };
     let Some(mut stream) = addresses
         .into_iter()
-        .find_map(|address| TcpStream::connect_timeout(&address, Duration::from_millis(250)).ok())
+        .find_map(|address| TcpStream::connect_timeout(&address, probe_timeout()).ok())
     else {
         return false;
     };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
+    let _ = stream.set_read_timeout(Some(probe_timeout()));
     // Readiness is the v2 handshake: a POST that answers 200 only when the server is serving.
     let body = r#"{"protocol_min":2,"protocol_max":2}"#;
     let request = format!(
@@ -767,6 +783,8 @@ mod tests {
                 bind: "127.0.0.1".into(),
                 port: 1,
                 data_dir: PathBuf::new(),
+                tuning: crate::tuning::Tuning::default(),
+                pi_agent_dir: None,
                 auth: crate::config::AuthConfig::default(),
                 serve_auto_apply: false,
                 iroh_enabled: false,

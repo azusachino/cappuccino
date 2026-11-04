@@ -13,13 +13,12 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// How often an idle stream checks that the phone is still there.
-const STREAM_PING_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
-
 pub struct BridgeState {
     pub machine_id: String,
     pub machine_name: Option<String>,
     pub telegram: crate::telegram::Shared,
+    /// Pi agent directory from `[pi] agent_dir`; `None` uses the default stores.
+    pub pi_agent_dir: Option<std::path::PathBuf>,
 }
 
 impl BridgeState {
@@ -28,6 +27,7 @@ impl BridgeState {
             machine_id,
             machine_name: host_name(),
             telegram: Arc::new(std::sync::Mutex::new(crate::telegram::Status::default())),
+            pi_agent_dir: None,
         }
     }
 }
@@ -97,7 +97,7 @@ pub async fn agents(State(state): State<Arc<BridgeState>>) -> Response {
 }
 
 pub async fn transcript(
-    State(_state): State<Arc<BridgeState>>,
+    State(state): State<Arc<BridgeState>>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     let Some(session) = query.get("session").filter(|session| !session.is_empty()) else {
@@ -107,7 +107,7 @@ pub async fn transcript(
             "session is required",
         );
     };
-    match transcript::resolve_transcript(session).await {
+    match transcript::resolve_transcript(session, state.pi_agent_dir.as_deref()).await {
         Ok(path) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json")],
@@ -183,7 +183,8 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
     // read too, and pinged, so a closed or vanished phone ends the loop even
     // when the pane is quiet and nothing else would be sent.
     let mut last_ping = tokio::time::Instant::now();
-    let mut poll = tokio::time::interval(std::time::Duration::from_millis(400));
+    let stream = &crate::tuning::active().stream;
+    let mut poll = tokio::time::interval(std::time::Duration::from_millis(stream.poll_interval_ms));
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     poll.tick().await;
     loop {
@@ -194,13 +195,13 @@ async fn stream_socket(state: Arc<BridgeState>, session: String, mut socket: Web
                 Some(Ok(_)) => continue,
             },
         }
-        if last_ping.elapsed() >= STREAM_PING_INTERVAL {
+        if last_ping.elapsed() >= std::time::Duration::from_secs(stream.ping_interval_secs) {
             last_ping = tokio::time::Instant::now();
             if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
                 return;
             }
         }
-        let text = match herdr::pane_read_recent(&pane_id, 2000).await {
+        let text = match herdr::pane_read_recent(&pane_id, stream.pane_lines).await {
             Ok(text) => text,
             Err(_) => {
                 send_stream_unavailable(&mut socket).await;
@@ -363,7 +364,7 @@ async fn resolve_pane(state: &Arc<BridgeState>, session: &str) -> Option<String>
 /// The question form on screen while `prompt_id` still names it, untouched by the terminal.
 async fn current_form(pane_id: &str, prompt_id: &str) -> Result<questions::Form, Response> {
     let stale = |message: &str| error_response(StatusCode::CONFLICT, "stale_prompt", message);
-    let screen = herdr::pane_read_recent(pane_id, 80)
+    let screen = herdr::pane_read_recent(pane_id, crate::tuning::active().stream.screen_lines)
         .await
         .map_err(|err| error_response(StatusCode::BAD_GATEWAY, "herdr_error", &err.to_string()))?;
     let Some(form) = questions::form(&screen) else {
@@ -400,7 +401,7 @@ pub async fn agent_conversation(
         );
     }
 
-    match transcript::resolve_session_transcript(&session_id).await {
+    match transcript::resolve_session_transcript(&session_id, state.pi_agent_dir.as_deref()).await {
         Ok(Some(resolved)) => {
             match conversation::read_canonical_tail(&resolved, conversation::TRANSCRIPT_TAIL_BYTES)
             {
@@ -420,7 +421,12 @@ pub async fn agent_conversation(
                     };
                     let mut session_stats = stats::session_stats(kind, &content);
                     let pane_text = if let Some(pane_id) = resolve_pane(&state, &session_id).await {
-                        herdr::pane_read_recent(&pane_id, 30).await.ok()
+                        herdr::pane_read_recent(
+                            &pane_id,
+                            crate::tuning::active().stream.stats_pane_lines,
+                        )
+                        .await
+                        .ok()
                     } else {
                         None
                     };
@@ -492,7 +498,12 @@ pub async fn agent_conversation(
         Ok(None) => {
             // Fallback: If no canonical session transcript exists, check if pane exists and parse recent scrollback
             if let Some(pane_id) = resolve_pane(&state, &session_id).await {
-                match herdr::pane_read_recent(&pane_id, 200).await {
+                match herdr::pane_read_recent(
+                    &pane_id,
+                    crate::tuning::active().stream.scrollback_lines,
+                )
+                .await
+                {
                     Ok(text) => {
                         let lines: Vec<String> = text.lines().map(str::to_string).collect();
                         let turns = conversation::parse_scrollback_turns(&lines);
@@ -682,7 +693,12 @@ pub async fn submit_agent_prompt(
             option_index,
             option_id,
         } => {
-            let active_screen = match herdr::pane_read_recent(&pane_id, 80).await {
+            let active_screen = match herdr::pane_read_recent(
+                &pane_id,
+                crate::tuning::active().stream.screen_lines,
+            )
+            .await
+            {
                 Ok(text) => text,
                 Err(err) => {
                     return error_response(
@@ -847,7 +863,10 @@ pub async fn submit_agent_prompt(
                     return mutation::unknown();
                 }
                 // The form redraws between keys; faster input lands on the previous step.
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    crate::tuning::active().stream.answer_key_gap_ms,
+                ))
+                .await;
             }
             (
                 StatusCode::OK,

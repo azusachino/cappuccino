@@ -13,6 +13,9 @@ pub struct BridgeConfig {
     pub bind: String,
     pub port: u16,
     pub data_dir: PathBuf,
+    pub tuning: crate::tuning::Tuning,
+    /// `[pi] agent_dir`: Pi agent directory whose `sessions/` the bridge reads.
+    pub pi_agent_dir: Option<PathBuf>,
     pub auth: AuthConfig,
     /// Status/startup apply the `tailscale serve` entry automatically when
     /// true (default); false never touches Tailscale (safe verification).
@@ -100,16 +103,26 @@ struct ConfigFile {
     bind: Option<String>,
     port: Option<u16>,
     data_dir: Option<PathBuf>,
+    tuning: Option<crate::tuning::Tuning>,
     auth: Option<AuthConfig>,
     serve: Option<ServeConfig>,
     iroh: Option<IrohFileConfig>,
     tailnet: Option<TailnetFileConfig>,
     telegram: Option<crate::telegram::File>,
+    pi: Option<PiFileConfig>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct TailnetFileConfig {
     url: Option<String>,
+}
+
+/// `[pi]`: opt-in location of a Pi agent directory whose `sessions/` the bridge
+/// reads. Unset means the default store (`~/.pi/agent/sessions`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PiFileConfig {
+    agent_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -182,6 +195,8 @@ impl BridgeConfig {
                 std::env::var("XDG_STATE_HOME").ok().as_deref(),
                 &home_dir(),
             ),
+            tuning: crate::tuning::Tuning::default(),
+            pi_agent_dir: None,
             auth: AuthConfig::default(),
             serve_auto_apply: true,
             iroh_enabled: false,
@@ -200,7 +215,7 @@ impl BridgeConfig {
             std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
             &home_dir(),
         );
-        Self::load_from_with_serve(
+        let config = Self::load_from_with_serve(
             Some(&path),
             std::env::var("CAPP_BRIDGE_HOST").ok().as_deref(),
             std::env::var("CAPP_BRIDGE_PORT").ok().as_deref(),
@@ -208,7 +223,11 @@ impl BridgeConfig {
             std::env::var("CAPP_BRIDGE_SERVE_AUTO_APPLY")
                 .ok()
                 .as_deref(),
-        )
+        )?;
+        // Every command that loads the config (start, stop, status, pair, serve)
+        // is one process, so the tuning is installed once here.
+        crate::tuning::install(config.tuning.clone())?;
+        Ok(config)
     }
 
     /// Pure form for tests: no process-env reads (tests run in parallel and
@@ -249,6 +268,21 @@ impl BridgeConfig {
                 if let Some(data_dir) = file.data_dir {
                     config.data_dir = data_dir;
                 }
+                if let Some(tuning) = file.tuning {
+                    tuning.validate()?;
+                    config.tuning = tuning;
+                }
+                if let Some(pi) = file.pi {
+                    if let Some(agent_dir) = pi.agent_dir {
+                        if !agent_dir.is_absolute() {
+                            return Err(format!(
+                                "pi.agent_dir must be an absolute path, got {}",
+                                agent_dir.display()
+                            ));
+                        }
+                        config.pi_agent_dir = Some(agent_dir);
+                    }
+                }
                 if let Some(auth) = file.auth {
                     config.auth = auth;
                 }
@@ -267,7 +301,10 @@ impl BridgeConfig {
                     config.tailnet_url = tailnet.url;
                 }
                 if let Some(telegram) = file.telegram {
-                    config.telegram = crate::telegram::settings(telegram)?;
+                    config.telegram = crate::telegram::settings(
+                        telegram,
+                        config.tuning.telegram.max_label_chars,
+                    )?;
                 }
             }
         }
@@ -336,6 +373,33 @@ mod tests {
             BridgeConfig::load_from(Some(path.to_str().unwrap()), None, Some("7401"), None)
                 .unwrap();
         assert_eq!(config.port, 7401);
+    }
+
+    #[test]
+    fn tuning_comes_from_file_and_rejects_zero() {
+        assert_eq!(
+            BridgeConfig::defaults().tuning,
+            crate::tuning::Tuning::default()
+        );
+        let dir = std::env::temp_dir().join(format!("cap-cfg-body-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[tuning]\nmax_request_body_bytes = 4096\n[tuning.herdr]\nrequest_timeout_ms = 500\n",
+        )
+        .unwrap();
+        let config =
+            BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None).unwrap();
+        assert_eq!(config.tuning.max_request_body_bytes, 4096);
+        assert_eq!(config.tuning.herdr.request_timeout_ms, 500);
+        std::fs::write(&path, "[tuning.stream]\npoll_interval_ms = 0\n").unwrap();
+        let error =
+            BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None).unwrap_err();
+        assert!(
+            error.contains("tuning.stream.poll_interval_ms must be greater than 0"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -619,5 +683,43 @@ mod path_tests {
         assert_eq!(from_file.data_dir, PathBuf::from("/from/file"));
         let from_env = BridgeConfig::load_from(Some(file), None, None, Some("/from/env")).unwrap();
         assert_eq!(from_env.data_dir, PathBuf::from("/from/env"));
+    }
+}
+
+#[cfg(test)]
+mod pi_config_tests {
+    use super::*;
+
+    fn load_text(name: &str, text: &str) -> Result<BridgeConfig, String> {
+        let dir = std::env::temp_dir().join(format!("cap-cfg-pi-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        BridgeConfig::load_from(Some(path.to_str().unwrap()), None, None, None)
+    }
+
+    #[test]
+    fn pi_agent_dir_is_opt_in() {
+        assert_eq!(BridgeConfig::defaults().pi_agent_dir, None);
+    }
+
+    #[test]
+    fn absolute_pi_agent_dir_loads() {
+        let config = load_text("abs", "[pi]\nagent_dir = \"/opt/pi/agent\"\n").unwrap();
+        assert_eq!(config.pi_agent_dir, Some(PathBuf::from("/opt/pi/agent")));
+    }
+
+    #[test]
+    fn relative_pi_agent_dir_is_rejected() {
+        let error = load_text("rel", "[pi]\nagent_dir = \"relative/agent\"\n").unwrap_err();
+        assert!(
+            error.contains("pi.agent_dir must be an absolute path"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn unknown_pi_key_is_rejected() {
+        assert!(load_text("typo", "[pi]\nagnet_dir = \"/x\"\n").is_err());
     }
 }

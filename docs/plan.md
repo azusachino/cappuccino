@@ -55,9 +55,10 @@ prerequisites remain blocked.
 3. Settle the delivery receipt contract (#8), then implement it behind the
    existing fail-closed rules.
 4. Build the typed approval gate and grants (#9) after delivery is accepted.
-5. Add Telegram attention alerts as a separate, later slice: generic attention
-   only, no code or prompt payload, no approval buttons, and no credentials in
-   source or tests.
+5. Telegram attention alerts shipped in 0.2.0 as a separate, send-only, off-by-default
+   route: generic attention only, no code or prompt payload, no approval buttons,
+   and no credentials in source or tests. Remaining: verify a live agent's
+   completion alert end to end ([setup and checks](telegram-alerts-setup.md)).
 
 ## Decisions in force
 

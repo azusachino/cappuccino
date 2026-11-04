@@ -27,6 +27,6 @@ Agent spawning/termination, arbitrary other extensions' terminal dialogs, remote
 
 ## Delivery boundary
 
-Prompt text and the stop and new-session controls reach the pane without receipts. Delivery receipts, approval correlation, grants and Telegram alerts are not implemented. The bridge is a separate phone-transport facade over machine-local Herdr APIs, not an agent runtime. Herdr's PTY prompt acknowledgement does not prove Pi accepted a Nudge or Follow-up; those semantics and any receipt contract need explicit owner-reconciled acceptance before implementation. Never relax session continuity or fail-closed decisions.
+Prompt text and the stop and new-session controls reach the pane without receipts. Delivery receipts, approval correlation and grants are not implemented. Send-only Telegram attention alerts ship as an optional bridge route, off by default ([setup](telegram-alerts-setup.md)). The bridge is a separate phone-transport facade over machine-local Herdr APIs, not an agent runtime. Herdr's PTY prompt acknowledgement does not prove Pi accepted a Nudge or Follow-up; those semantics and any receipt contract need explicit owner-reconciled acceptance before implementation. Never relax session continuity or fail-closed decisions.
 
 [Discovery](research/discovery.md) holds the earlier Apple/bridge research and its limits. [Plan](plan.md) defines the current slices and platform order; [Android plan](https://github.com/azusachino/cappuccino/blob/35e72ff/docs/android-plan.md) defines the later native client without changing these safety requirements.

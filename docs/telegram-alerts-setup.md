@@ -8,11 +8,11 @@ the owner's checklist for one machine.
 The bot token is a secret. Never paste it into chat, a commit, a log, or a command line.
 The chat id is not secret, but it stays in the untracked bridge config, not in committed files.
 
-## 1. Store the token (harus-nix)
+## 1. Store the token (Nix secrets)
 
-The token lives in harus-nix's sops secrets, rendered to a stable file for the bridge.
+The token lives in the Nix configuration's sops secrets, rendered to a stable file for the bridge.
 
-1. In `vendor/harus-nix`, add the value under the key `cappuccino_telegram_bot_token`:
+1. In your Nix configuration repository, add the value under the key `cappuccino_telegram_bot_token`:
    `sops secrets/secrets.yaml`. Paste the token into the editor, save, and quit.
 2. Check that the key exists without printing the value:
    `sops decrypt --extract '["cappuccino_telegram_bot_token"]' secrets/secrets.yaml | wc -c`
@@ -65,7 +65,7 @@ After any config change, reinstall from the repo when the bridge code has change
 restart it:
 
 ```sh
-cd vendor/cappuccino
+cd <repo-root>
 cargo install --path services/bridge --locked   # only after updating the repo
 cappuccino-bridge stop
 cappuccino-bridge start

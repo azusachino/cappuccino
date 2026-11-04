@@ -18,17 +18,18 @@ fn session_stores(
     if let Some(dir) = agent_dir {
         return vec![dir.join("sessions")];
     }
-    vec![
-        home.join(".pi/agent/sessions"),
-        home.join(".luna/agent/sessions"),
-    ]
+    vec![home.join(".pi/agent/sessions")]
 }
 
-fn pi_session_stores() -> Vec<PathBuf> {
+/// `[pi] agent_dir` from the bridge config wins; `PI_CODING_AGENT_DIR` is only a
+/// fallback for a bridge started with it set.
+fn pi_session_stores(config_agent_dir: Option<&Path>) -> Vec<PathBuf> {
     session_stores(
         Path::new(&home_dir()),
         std::env::var_os("PI_CODING_AGENT_SESSION_DIR").map(PathBuf::from),
-        std::env::var_os("PI_CODING_AGENT_DIR").map(PathBuf::from),
+        config_agent_dir
+            .map(Path::to_path_buf)
+            .or_else(|| std::env::var_os("PI_CODING_AGENT_DIR").map(PathBuf::from)),
     )
 }
 
@@ -214,8 +215,11 @@ impl ResolvedTranscript {
 
 /// Resolves one session locator (agent name or pane id) to its transcript.
 /// Returns Ok(Some(path)) for Pi, Claude or Agy, or Ok(None) if not available.
-pub async fn resolve_transcript(session: &str) -> Result<Option<PathBuf>, String> {
-    Ok(resolve_session_transcript(session)
+pub async fn resolve_transcript(
+    session: &str,
+    pi_agent_dir: Option<&Path>,
+) -> Result<Option<PathBuf>, String> {
+    Ok(resolve_session_transcript(session, pi_agent_dir)
         .await?
         .map(|r| r.path().to_path_buf()))
 }
@@ -223,6 +227,7 @@ pub async fn resolve_transcript(session: &str) -> Result<Option<PathBuf>, String
 /// Resolves session locator to a typed ResolvedTranscript (Pi, Claude or Agy).
 pub async fn resolve_session_transcript(
     session: &str,
+    pi_agent_dir: Option<&Path>,
 ) -> Result<Option<ResolvedTranscript>, String> {
     let info = crate::herdr::agent_get(session)
         .await
@@ -231,7 +236,7 @@ pub async fn resolve_session_transcript(
     let agent_name = agent_info["agent"].as_str().unwrap_or("");
     let pane_id = agent_info["pane_id"].as_str().unwrap_or("");
 
-    if let Some(path) = reported_pi_transcript(agent_info, &pi_session_stores()) {
+    if let Some(path) = reported_pi_transcript(agent_info, &pi_session_stores(pi_agent_dir)) {
         return Ok(Some(ResolvedTranscript::Pi(path)));
     }
 
@@ -547,10 +552,7 @@ mod tests {
         );
         assert_eq!(
             session_stores(home, None, None),
-            vec![
-                home.join(".pi/agent/sessions"),
-                home.join(".luna/agent/sessions"),
-            ]
+            vec![home.join(".pi/agent/sessions")]
         );
     }
 
@@ -692,7 +694,7 @@ mod tests {
             "HERDR_SOCKET_PATH",
             "/nonexistent/cappuccino-transcript.sock",
         );
-        let result = resolve_transcript("cap-spike-agent").await;
+        let result = resolve_transcript("cap-spike-agent", None).await;
         std::env::remove_var("HERDR_SOCKET_PATH");
         if let Some(saved) = saved {
             std::env::set_var("HERDR_SOCKET_PATH", saved);

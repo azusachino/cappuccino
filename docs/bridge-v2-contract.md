@@ -1,308 +1,294 @@
-# Cappuccino Bridge & Interceptor Architecture Specification
+# Cappuccino Bridge Protocol v2
 
-**Status**: Proposal / Draft Contract  
-**Target Repositories**: `vendor/cappuccino/services/bridge`, `refs/coding-agents/herdr-web-ui`  
-**Related Documents**: [Architecture](architecture.md), [Herdr WebUI Research](research/herdr-webui-design-research.md), [Behavior Spec](behavior-spec.md)
-
----
-
-## 1. Principles: Thin Client, Strong Bridge
-
-Clients (Android, iOS/macOS, WebUI) should not act as VT100 terminal emulators or parse unstructured ANSI text to guess prompt boundaries, tool calls, and ephemeral status indicators.
-
-- **Bridge owns normalization**: Connects to the local Herdr IPC socket, inspects agent processes and session files, parses live TUI prompts/approvals, and normalizes ANSI text into structured domain events.
-- **Clients remain thin**: Consume typed HTTP/WebSocket endpoints to render native views (Jetpack Compose, SwiftUI, or Web DOM).
-- **Separation of transient state vs durable history**: Ephemeral status (spinners, `working · ...`, resource meters) is maintained in a discrete status slot, never appended into historical transcript turns.
+**Status**: Draft for freeze. The 0.2.0 bridge and apps speak a pre-freeze draft that this document replaces. The freeze tag is the first stable v2. Until then, shapes here may still change.
+**Clients**: native Android and iOS apps. The browser WebUI is not a v2 client.
+**Related**: [Architecture](architecture.md), [Behavior Spec](behavior-spec.md), [Intent](intent.md).
 
 ---
 
-## 2. Herdr API Surface & Extension Model
+## 1. Scope and principles
 
-Based on installed Herdr 0.9.3 and reference implementations in `refs/coding-agents/herdr-web-ui/server/herdr/client.ts`:
+- **Thin client, strong bridge.** The bridge owns normalization: it reads Herdr and each agent's session file, parses prompts on screen, and returns typed data. Clients never parse terminal output.
+- **The bridge never starts, stops or kills an agent.** Its only control actions are `interrupt` (Esc) and `new_session` (typing `/new` into an idle session).
+- **Transient state is not history.** Spinners, footers and status lines travel as `agent_status` events. They never become conversation turns.
+- **Typed input is not delivery.** The bridge reports that text was typed into the pane (`prompt_typed`). Herdr does not confirm acceptance, so no receipt is claimed.
 
-### 2.1 Transport & Lifecycle
+## 2. Herdr surface used by the bridge
 
-- **IPC Protocol**: Unix Domain Socket (`~/.config/herdr/herdr.sock`), line-delimited JSON-RPC 2.0. One request per connection (Herdr server closes connection after single response).
-- **Hosting**: Herdr Plugin manifest (`herdr-plugin.toml`). Herdr lifecycle hooks spawn `cappuccino-bridge` as a managed process.
+The bridge talks to Herdr over its local Unix socket, one line-delimited JSON-RPC request per connection. Methods used:
 
-### 2.2 Key Herdr RPC Methods
+- `agent.list`, `agent.get { session_id }`: agent descriptors (`cwd`, `agent_status` as `idle` or `working`, `agent_session` as the reported native session path or id).
+- `pane.read { pane_id, source, lines }`: visible screen or recent scrollback.
+- `pane.send_keys { pane_id, keys }`: logical keystrokes.
+- `pane.send_text { pane_id, text }`: literal text.
 
-1. `ping`: returns server version, protocol level, and capabilities.
-2. `session.snapshot`: returns entire workspace tree (workspaces, tabs, panes, active focus).
-3. `agent.list`: returns all running agent descriptors across panes.
-4. `agent.get { session_id }`: returns detailed agent metadata:
-   - `cwd`: working directory.
-   - `agent_status`: `idle` vs `working`.
-   - `agent_session`: native session file path / id (for Pi, Claude, Codex).
-5. `pane.read { pane_id, source, format, strip_ansi, lines }`: reads visible viewport or recent scrollback (`recent` / `recent_unwrapped`).
-6. `agent.prompt { pane_id, text, wait }`: writes text + Enter to the agent PTY.
-7. `pane.send-keys { pane_id, keys }`: sends logical keystrokes (`up`, `down`, `enter`, `escape`, `space`, `tab`).
+## 3. Bridge pipelines
 
----
-
-## 3. The "Interceptor" Layer Architecture
-
-The Interceptor sits inside `cappuccino-bridge` between Herdr's low-level pane/PTY streams and the client-facing APIs. It consists of three decoupled pipelines:
-
-```text
-                  ┌────────────────────────┐
-                  │    Herdr RPC Socket    │
-                  └───────────┬────────────┘
-                              │
-  ┌───────────────────────────┴───────────────────────────┐
-  │                   Interceptor Layer                   │
-  │                                                       │
-  │  ┌─────────────────┐ ┌────────────────┐ ┌──────────┐  │
-  │  │ Session File    │ │ Screen-State   │ │ Terminal │  │
-  │  │ Watcher         │ │ Prompt Engine  │ │ Stripper │  │
-  │  │ (Canonical Log) │ │ (Approval Card)│ │ & Status │  │
-  │  └────────┬────────┘ └───────┬────────┘ └────┬─────┘  │
-  └───────────┼──────────────────┼───────────────┼────────┘
-              │                  │               │
-  ┌───────────▼──────────────────▼───────────────▼────────┐
-  │              Cappuccino Bridge HTTP / WS              │
-  │        (Structured Events, Typed Turns, Status Slot)  │
-  └───────────────────────────┬───────────────────────────┘
-                              │
-          ┌───────────────────┼───────────────────┐
-          ▼                   ▼                   ▼
-    Android App           Apple App            WebUI
-  (Jetpack Compose)       (SwiftUI)        (Browser DOM)
-```
-
-### 3.1 Pipeline A: Canonical Transcript Parser (Durable History)
-
-Instead of guessing turns from screen dumps, read canonical session files when available:
-
-- **Pi**: `~/.pi/agent/sessions/<cwd-slug>/<session>.jsonl`
-- **Claude Code**: `~/.claude/projects/<project-slug>/<session>.jsonl`
-- **Codex**: rollout jsonl files.
-- **Fallback (Generic shell/agent)**: Strip ANSI sequences, split on prompt echo (`^[❯>▸]`), and group output into user and agent turns.
-
-### 3.2 Pipeline B: Screen-State Prompt & Approval Engine (Interactive Interceptor)
-
-Learned from `herdr-web-ui/server/prompt.ts`:
-
-- Monitors the active viewport of working agents via `pane.read(source: "visible", stripAnsi: true)`.
-- Detects interactive prompt states using regex signatures:
-  - Claude confirmation menus (`enter to confirm`, `esc to cancel`).
-  - Tool execution permission requests (`Allow ... to run`, `Approve tool call`).
-  - Multi-choice option selectors (`1. Yes, 2. No`, `❯ option`).
-- Synthesizes an interactive `PromptCard`:
-
-  ```json
-  {
-    "id": "prompt-hash-123",
-    "kind": "confirm" | "choice" | "input",
-    "title": "Bash Command Approval",
-    "message": "Allow agent to execute: rm -rf .tmp/test?",
-    "options": ["Allow once", "Allow always", "Reject"],
-    "selected_index": 0
-  }
-  ```
-
-- Handles responses safely: verifies prompt screen signature still matches before sending keystrokes via `pane.send-keys` or `agent.prompt`.
-
-### 3.3 Pipeline C: Ephemeral Status Extractor
-
-- Extracts current spinner, timer, active model, and tool state from the footer or `agent.get`.
-- Emits discrete `agent_status` events:
-
-  ```json
-  {
-    "event": "agent_status",
-    "session_id": "cap-lead",
-    "state": "working",
-    "detail": "Reading services/bridge/src/main.rs...",
-    "elapsed_seconds": 14
-  }
-  ```
-
-- **Rule**: Never append status lines to transcript message history.
+- **Canonical history.** Turns come from each agent's session file (§5, §7). Never from screen text.
+- **Prompt detection.** Permission dialogs and question forms are read from the visible screen and become prompt cards (§6). A card is answered only if the same prompt is still on screen.
+- **Live status.** The stream emits `agent_status` changes and live pane rows. Spinners and footer meters are filtered out.
 
 ---
 
-## 4. Cappuccino Bridge v2 contract
+## 4. Wire contract
 
-Status: shipped in 0.2.0. The bridge serves v2 only; the v1 paths listed in §4.3 are removed.
+### 4.1 Versioning and freeze
 
-### 4.0 What v2 changes
+- The protocol number is `2`. It is carried in the `X-Cappuccino-Protocol: 2` header on every call after the handshake.
+- The freeze tag marks v2 stable. After it, v2 changes are additive only (§4.7). A breaking change needs v3, a new protocol number and a new path prefix.
+- The 0.2.0 draft is not stable, so clients built against it are not supported after the freeze.
 
-v2 changes three things and nothing else:
+### 4.2 Connection and handshake
 
-- **How a client connects.** A client handshakes before any other call (§4.1).
-- **Which paths it calls.** Endpoints move under `/api/v2/` (§4.3).
-- **How versions are checked.** Each v2 call carries the agreed protocol version (§4.1).
-
-The payloads of the endpoints do not change. Their shapes are the shipped ones in
-[services/bridge/README.md](../services/bridge/README.md).
-
-### 4.1 Workflow
-
-1. The phone calls `POST /api/v2/handshake` with its protocol range and the capabilities it
-   implements. Nothing else is called before this succeeds.
-2. The phone checks that `machine_id` in the response is the paired machine. A different id
-   stops the connection.
-3. Every later v2 request carries `X-Cappuccino-Protocol: 2`. A request without it, or with
-   another value, gets HTTP 426.
-4. The bridge keeps no record of an agreement. The client offers only the actions whose
-   capability is in `agreed`.
-
-### 4.2 Handshake
+1. The client calls `POST /api/v2/handshake` with its protocol range and capabilities. Nothing else is called before this succeeds.
+2. The client checks that `machine_id` in the response is the machine it registered. A different id ends the connection.
+3. Every later call carries `X-Cappuccino-Protocol: 2`. A missing or different value returns `400 protocol_unsupported`.
+4. The bridge keeps no record of an agreement. The client offers only the actions whose capability is in `agreed_capabilities`.
 
 Request:
 
 ```json
 {
-  "protocol_min": 1,
+  "protocol_min": 2,
   "protocol_max": 2,
-  "capabilities": {"live_output": 1, "agent_control": 1, "prompt_input": 1},
-  "required": ["live_output"]
+  "offered_capabilities": {
+    "live_output": {"version": 1},
+    "agent_control": {"version": 1},
+    "prompt_input": {"version": 1}
+  },
+  "required_capabilities": ["live_output"]
 }
 ```
 
-- `capabilities` maps each name to the highest version the client speaks. A value of 0 or an
-  absent key means unsupported. Unknown keys are ignored.
-- `required` lists capabilities the client cannot run without.
+- `offered_capabilities` maps each capability name the client speaks to an object whose `version` is the highest version it speaks. An absent name means the client does not speak it. Unknown names are ignored.
+- `required_capabilities` lists capabilities the client cannot run without.
 
 Response (HTTP 200):
 
 ```json
 {
-  "event": "paired",
+  "event": "handshake_accepted",
   "machine_id": "ced25706-f528-456e-b340-4fad8a6c8c88",
   "machine_name": "MacMini",
-  "plugin": "cappuccino-bridge",
   "bridge_version": "0.2.0",
-  "protocol": 2,
-  "capabilities": {"agent_discovery": 1, "live_output": 1, "agent_control": 1},
-  "agreed": {"live_output": 1, "agent_control": 1},
+  "protocol_version": 2,
+  "offered_capabilities": {
+    "agent_discovery": {"version": 1},
+    "conversation_sync": {"version": 1},
+    "live_output": {"version": 1},
+    "prompt_input": {"version": 1},
+    "prompt_answers": {"version": 1},
+    "agent_control": {"version": 1},
+    "completion_signals": {"version": 1}
+  },
+  "agreed_capabilities": {
+    "live_output": {"version": 1},
+    "agent_control": {"version": 1}
+  },
   "telegram": {"route": "enabled", "events": ["completion", "needs_answer", "route_failure"]}
 }
 ```
 
-- `agreed` holds each capability both sides speak, at the lower version.
+- `agreed_capabilities` holds each capability both sides offer, at the lower of the two versions.
 - `telegram` is advisory status. A client treats an absent block as unknown.
+- Refusals: `400 protocol_unsupported` when the range excludes 2, with `supported_protocol_min: 2` and `supported_protocol_max: 2`. `409 capability_missing` when a required capability is not offered, with `missing_capabilities: ["<name>", ...]`.
 
-Refusals, all with the envelope `{"event": "error", "code": ...}`:
+### 4.3 Capability registry
 
-| HTTP | Code | When | Extra fields |
+Every capability is at version `1` in this contract. A capability's version changes only when its payloads change in a breaking way, which needs v3 (§4.1).
+
+| Name | Promises |
+| --- | --- |
+| `agent_discovery` | `GET /api/v2/agents` lists agents with `session_id`, name, `cwd`, status and branch where known. |
+| `conversation_sync` | The sync endpoint in §7 returns upserts and tokens. |
+| `live_output` | The stream endpoint in §4.4 delivers live pane rows and status events. |
+| `prompt_input` | `POST .../prompt` with `type: "prompt"` types text into the pane. |
+| `prompt_answers` | `POST .../prompt` with `type: "answer_question"` or `type: "answer_prompt"` answers a prompt card. |
+| `agent_control` | `POST .../control` with `interrupt` or `new_session`. |
+| `completion_signals` | The stream sends `agent_status` changes that show a session has finished working or is waiting for input. |
+
+The capability list is advisory. The bridge does not refuse a call because the client did not agree a capability. A client must not call an endpoint whose capability is missing from `agreed_capabilities`.
+
+### 4.4 Endpoints
+
+Every session-scoped path uses `{sessionId}`, the id from `agent_discovery`. Mutating calls (`prompt`, `control`) require `expected_session` (§4.8).
+
+| Method | Path | Capability | Notes |
 | --- | --- | --- | --- |
-| 426 | `protocol` | The range does not include version 2 | `"supported": [2, 2]` |
-| 409 | `capability_missing` | A `required` capability is not offered | `"capabilities": ["<name>", ...]` |
-| 400 | `bad_request` | The body does not match the request shape | |
+| `POST` | `/api/v2/handshake` | none | §4.2 |
+| `GET` | `/api/v2/agents` | `agent_discovery` | |
+| `GET` | `/api/v2/agents/{sessionId}/conversation/sync` | `conversation_sync` | §7 |
+| `POST` | `/api/v2/agents/{sessionId}/prompt` | `prompt_input`, `prompt_answers` | Body `type` selects the action. |
+| `POST` | `/api/v2/agents/{sessionId}/control` | `agent_control` | Body `action` selects the action. |
+| `GET` (WebSocket) | `/api/v2/agents/{sessionId}/stream` | `live_output` | §6.5 |
 
-### 4.3 Endpoint map
+The transcript endpoint `/api/v2/transcript` is removed. No client calls it.
 
-| Method | Path (v2) | Capability | v1 path retired at cutover |
-| --- | --- | --- | --- |
-| `POST` | `/api/v2/handshake` | none | `GET /api/session` |
-| `GET` | `/api/v2/agents` | `agent_discovery` | `GET /api/agents` |
-| `GET` | `/api/v2/agents/{sessionId}/conversation` | `conversation_history` | `GET /api/agents/{sessionId}/conversation` |
-| `GET` | `/api/v2/transcript?session=` | `conversation_history` | `GET /api/transcript` |
-| `POST` | `/api/v2/agents/{sessionId}/prompt` | `prompt_input` | `POST /api/agents/{sessionId}/prompt` |
-| `POST` | `/api/v2/agents/{sessionId}/control` | `agent_control` | `POST /api/agents/{sessionId}/control` |
-| `GET` (WebSocket) | `/api/v2/stream?session=` | `live_output` | `GET /api/stream` |
-
-Pairing and transport sit outside `/api/`, and each has its own version:
+Pairing and transport sit outside `/api/`, each with its own version:
 
 | Surface | Version | Role |
 | --- | --- | --- |
-| `GET /pair` | unversioned page | Owner-facing pairing page, served only when iroh is enabled. It shows the QR payload and is not part of the phone API. |
-| ALPN `cappuccino-pair/1` | ALPN | Pairing-code exchange between a phone and a bridge. Unchanged in 0.2.0, so existing pairings keep working. |
-| ALPN `cappuccino/1` | ALPN | Tunnel that carries the HTTP contract as-is, v2 paths included. This is transport framing, not the API version, so it is unchanged. |
+| `GET /pair` | unversioned page | Owner-facing pairing page, served only when iroh is enabled. Not part of the phone API. |
+| ALPN `cappuccino-pair/1` | ALPN | Pairing-code exchange. |
+| ALPN `cappuccino/1` | ALPN | Tunnel that carries this HTTP contract unchanged. Transport framing, not the API version. |
 
-### 4.4 Versioning rules
+### 4.5 Field naming rule
 
-- **Additive within v2.** Fields may be added, never repurposed or removed.
-- **Breaking changes need v3.** A change of meaning or a removal gets a new protocol number and a
-  new path prefix.
-- **Retired paths return 404.** After cutover, unversioned `/api/...` paths are removed, not
-  redirected.
+Every request and response field must say what it means on its own.
 
-## 5. Antigravity (`agy`) Session Model & Interaction Protocol
+- No bare numbers or positional arrays as values. A version, count or choice carries a key that names it.
+- An array is allowed only when its key names the items, for example `options`, `events` or `missing_capabilities`.
+- An item is identified by its id, never by its position in a list.
+- A new field follows this rule. A field that breaks it needs v3 (§4.1).
 
-Antigravity (`agy`) is the agent actively powering this workstation environment and running across Herdr panes.
+### 4.6 Errors
 
-### 5.1 Storage & Session File Resolution
+Every error response has this envelope:
 
-- **Base Directory**: `~/.gemini/antigravity-cli/`
-- **Session Identification**: A session has a unique UUID (e.g. `691371cf-798b-47d6-ae99-ff7e3a0a23a5`).
-- **Transcript Logs**:
-  - Located at `~/.gemini/antigravity-cli/brain/<session-id>/.system_generated/logs/transcript.jsonl`.
-  - Compact NDJSON containing incremental entries. Each line represents a step:
-    - `"type": "USER_INPUT"`, `"source": "USER_EXPLICIT"`
-    - `"type": "PLANNER_RESPONSE"`, `"source": "MODEL"` with `"tool_calls": [...]` and `"content": "..."`
-- **Resolution in Bridge**:
-  - Herdr reports `session_id` via `agent.get`.
-  - The bridge locates `~/.gemini/antigravity-cli/brain/<session-id>/.system_generated/logs/transcript.jsonl`.
-  - Parses structured turns directly without any terminal screen guessing.
+```json
+{"event": "error", "code": "stale_prompt", "message": "the question is no longer shown", "on_screen_prompt_id": null}
+```
+
+- `code` is the stable identifier. Clients branch on it.
+- `message` is for display only. Its wording may change.
+- Extra fields are listed in the table, and only for the codes that define them.
+
+| HTTP | Code | When | Extra fields |
+| --- | --- | --- | --- |
+| 400 | `protocol_unsupported` | Missing or different `X-Cappuccino-Protocol`, or a handshake range that excludes 2 | `supported_protocol_min`, `supported_protocol_max` (handshake only) |
+| 400 | `bad_request` | The body does not match the request shape, or an unknown `type` or `action` | |
+| 400 | `session_binding_required` | A mutating call has no `expected_session` | |
+| 400 | `bad_session_binding` | `expected_session` is malformed | |
+| 400 | `bad_answer` | An answer does not fit the question (for example two options for a single-select) | |
+| 404 | `not_found` | No agent has this `sessionId` | |
+| 409 | `capability_missing` | Handshake: a required capability is not offered | `missing_capabilities` |
+| 409 | `confirm_command` | A slash command needs `confirmed: true` | `command` |
+| 409 | `agent_busy` | `new_session` while the agent is working or blocked | |
+| 409 | `stale_prompt` | The prompt id is spent or no longer on screen | `on_screen_prompt_id` (null if none) |
+| 413 | `payload_too_large` | The request body exceeds `max_request_body_bytes` | |
+| 502 | `upstream_unavailable` | Herdr cannot be reached, or it returned an error | |
+| 502 | `outcome_unknown` | A keystroke sequence may have been partly typed (§4.8) | |
+| 500 | `internal_error` | Unexpected bridge fault | |
+
+A client that receives an unknown code uses the HTTP status family to decide what to show.
+
+### 4.7 Forward compatibility
+
+- Clients ignore unknown fields, unknown events and unknown error codes.
+- A prompt card with an unknown `type` renders as "answer in the terminal".
+- A payload changes only through a capability version bump or v3. Additive fields are the only change allowed in v2.
+
+### 4.8 Retries and timeouts
+
+- The handshake and all `GET` calls are safe to retry.
+- `prompt` and `control` are never retried automatically. A send that fails is shown to the user, who decides.
+- `outcome_unknown` is final. The bridge never replays keystrokes, and neither does a client.
+- Every mutating call carries `expected_session: {machine_id, pane_id, native_session_ref}` from the agent's last `agent_discovery` result. The bridge refuses the call if the binding no longer matches.
+- Answers are protected by spent prompt ids: an id is used once, and a repeat gets `stale_prompt`.
+- A multi-step answer is bounded by a server time budget (`[tuning.prompt] answer_budget_secs`, proposed default 10). If the budget runs out, the response is `outcome_unknown`.
+- A client re-runs the handshake after every reconnect.
 
 ---
 
-## 6. Actual Interactive Prompt Behaviors: Detailed Contract
+## 5. Agent session stores
 
-Before low-effort sub-agents implement these features, the exact behavior across the 4 primary interaction flows must be specified:
+Each agent writes its own session file on the machine that runs it. The bridge reads that file, maps it to turns, and returns turns to the phone. Turn ids are opaque strings, unique within a session. Interaction flows are in §6.
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                        INTERACTIVE FLOW MATRIX                         │
-├───────────────────┬──────────────────────────────┬─────────────────────┤
-│ Interaction Type  │ Trigger / Detection          │ Resolution Action   │
-├───────────────────┼──────────────────────────────┼─────────────────────┤
-│ 1. Ask User Q     │ ask_question tool call       │ Submit answers JSON │
-│ 2. Tool Approval  │ TUI permission prompt screen │ Allow / Deny key    │
-│ 3. Agent Response │ Streaming token/markdown     │ Render markdown     │
-│ 4. Prompt Deliver │ User initiates message       │ PTY text + Enter    │
-└───────────────────┴──────────────────────────────┴─────────────────────┘
-```
+### 5.1 Pi
 
-### 6.1 Flow 1: Claude Code `AskUserQuestion` (`ask_user_question`)
+- **Store:** `~/.pi/agent/sessions/<cwd-slug>/<session>.jsonl`. `[pi] agent_dir` in the bridge config, when set to an absolute path, replaces the store with `<agent_dir>/sessions`. `PI_CODING_AGENT_DIR` in the bridge's own environment is a fallback only.
+- **Session id:** the session header's `id`. Each entry carries `id` and `parentId`, which form a tree.
+- **Turn id:** the entry `id`. Entry ids are 8 hex characters, so the bridge checks uniqueness within each session and rejects a duplicate. If a duplicate is found, the turn id becomes the entry `id` plus the byte offset of the opening record.
+- **Resolution:** the path Herdr reports must sit inside a configured store.
+- **Active branch:** the path from the file's last entry up to the root through `parentId`. This matches Pi's own load rule, because the leaf is not stored in the file.
+- **Compaction:** a `compaction` entry shows as a divider with its summary collapsed. Earlier entries stay visible.
+- **Context edits:** a `context_edit` with `replacement: null` leaves its target visible, with an "omitted from model context" marker.
+- **Custom messages:** a `custom_message` shows only when its `display` flag is true.
+- **Not shown:** `custom`, `label`, `session_info` and `usage` entries.
 
-When Claude Code asks the owner a question through its `AskUserQuestion` tool. Claude Code writes the tool call to its transcript only after it is answered, so the visible form is the only source while it waits.
+### 5.2 Claude Code
 
-- **Detection**: the pane shows the form (footer `Enter to select`, a `Chat about this` row). The bridge reads the question on screen: its text, the options with their descriptions (the form's own "Type something" and "Chat about this" rows are not options), checkboxes for a multi-select, and the tab row's headers with their answered marks. One card is one question; as the form moves on, the next question becomes a new card. The final review becomes an `ask_user_question_review` card. Other choice menus keep the screen-read `ask_question` card.
-- **Card Schema** (`prompt_id` is a hash of what is on screen plus a per-showing nonce; see Q10):
+- **Store:** `~/.claude/projects/<project-slug>/<session>.jsonl`, under `CLAUDE_CONFIG_DIR` when that is set.
+- **Session id:** the session id from the file name.
+- **Turn id:** the record's `uuid`.
+- **Skipped:** records marked `isSidechain` or `isMeta`, and harness notices.
+- **Tool results** attach to the turn that holds the `tool_use` with the same id. When the result is in a later record than the call, that turn is re-sent as an upsert (§7.4).
+- **Compaction** was observed as appended records. No file rewrite has been observed.
+
+### 5.3 Agy
+
+- **Store:** `~/.gemini/antigravity-cli/brain/<session-id>/.system_generated/logs/transcript.jsonl`.
+- **Session id:** the UUID that Herdr reports through `agent.get` as `session_id`.
+- **Turn id:** `step-<step_index>`, for example `step-4`. Each line is one step.
+- **Step types:** `USER_INPUT` (source `USER_EXPLICIT`) and `PLANNER_RESPONSE` (source `MODEL`, with `tool_calls` and `content`).
+- **Resolution:** the bridge parses structured turns from this file. It never guesses turns from the terminal screen.
+
+---
+
+## 6. Interaction flows
+
+### 6.1 Claude Code questions (`ask_user_question`)
+
+Claude Code writes a question's tool call to its transcript only after it is answered, so the visible form is the only source while it waits.
+
+- **Detection:** the pane shows the form (footer `Enter to select`, a `Chat about this` row). The bridge reads the question text, its options with their descriptions, checkboxes for multi-select, and the tab row. The form's own "Type something" and "Chat about this" rows are not options.
+- **Card (one per question):**
 
   ```json
   {
     "type": "ask_user_question",
     "prompt_id": "p-918ff1b95c4e",
     "title": "Pick a color?",
-    "message": "Question 1 of 2",
     "tool_name": "AskUserQuestion",
-    "options": [],
-    "selected_index": 0,
+    "question_number": 1,
+    "question_count": 2,
     "questions": [
       {
+        "id": "q-1",
         "header": "Color",
         "question": "Pick a color?",
         "multi_select": false,
+        "highlighted_option_id": "opt-0",
         "options": [{"id": "opt-0", "label": "Red", "description": "warm"}]
       }
     ]
   }
   ```
 
-  The review card has `type: "ask_user_question_review"`, the chosen answers as its `message`, and the options `Submit answers` and `Cancel`.
-- **Resolution**:
-  - `POST /api/agents/:sessionId/prompt` with the one question's answer: option indexes and/or one line of free text (the form's "Type something"):
-    `{"type": "answer_question", "prompt_id": "p-918ff1b95c4e", "answers": [{"selected": [0, 2], "other": "a bird"}]}`
-  - A single-select takes exactly one of an index or text; a multi-select takes at least one. Answers that do not fit are `400 bad_answer`.
-  - The bridge re-reads the screen first: the same question must still show, with nothing ticked in the terminal; otherwise `409 stale_prompt`, and the owner finishes it in the terminal.
-  - Keys, with a short pause between steps (checked against Claude Code 2.1 in a Herdr pane): single-select digit, or the "Type something" digit, the text and enter; multi-select digits toggle, free text goes on its row (reached from the `❯` cursor), then the Submit row and enter.
-  - The review is answered with `answer_prompt`: `select_option` presses its digit alone (`1` submits, `2` cancels).
-  - Cancel is `answer_prompt` with `action: "cancel"`: Esc on a question, `2` on the review.
+- **Review card:** after the last question the form shows its review. The bridge sends `type: "ask_user_question_review"` with the chosen answers and two options:
 
-### 6.2 Flow 2: Tool Permission Approval (`tool_approval`)
+  ```json
+  {
+    "type": "ask_user_question_review",
+    "prompt_id": "p-7c2e0a91",
+    "answers": [{"question_id": "q-1", "selected_option_ids": ["opt-0"], "free_text": null}],
+    "options": [{"id": "submit", "label": "Submit answers"}, {"id": "cancel", "label": "Cancel"}],
+    "default_option_id": "submit"
+  }
+  ```
 
-When an agent without `--dangerously-skip-permissions` attempts a high-stakes command (`run_command`, writing files):
+- **Answer a question:** `POST .../prompt` with `type: "answer_question"`:
 
-- **Detection**:
-  - Viewport matches permission dialog signatures:
-    `/(?:Approve (?:this )?tool call|Allow .* to run|Execute command\?)/i`
-  - Options present: `1. Yes / Allow`, `2. Always allow`, `3. No / Reject`.
-- **Card Schema**:
+  ```json
+  {
+    "type": "answer_question",
+    "prompt_id": "p-918ff1b95c4e",
+    "expected_session": {"machine_id": "...", "pane_id": "...", "native_session_ref": "..."},
+    "answers": [{"question_id": "q-1", "selected_option_ids": ["opt-0", "opt-2"], "free_text": "a bird"}]
+  }
+  ```
+
+  A single-select takes exactly one of `selected_option_ids` (one id) or `free_text`. A multi-select takes at least one id. An answer that does not fit returns `400 bad_answer`.
+- **Before typing:** the bridge re-reads the screen. The same question must still show, with nothing ticked in the terminal. Otherwise it returns `409 stale_prompt`, and the owner finishes the form in the terminal.
+- **Keys:** sent with a short pause between steps, checked against Claude Code 2.1. Single-select sends the option digit, or the "Type something" digit then the text and Enter. Multi-select toggles digits, types free text on its row, then moves to Submit and presses Enter.
+- **Answer the review:** `POST .../prompt` with `type: "answer_prompt"` and `option_id` (`submit` or `cancel`). Submit presses `1`, and cancel presses `2`.
+
+### 6.2 Tool approval (`tool_approval`)
+
+When an agent without `--dangerously-skip-permissions` attempts a high-stakes command:
+
+- **Detection:** the viewport matches a permission dialog, and the options are `Yes / Allow` and `No / Reject`.
+- **Card:**
 
   ```json
   {
@@ -311,96 +297,131 @@ When an agent without `--dangerously-skip-permissions` attempts a high-stakes co
     "tool_name": "run_command",
     "command": "git push origin main",
     "options": [
-      {"id": "allow_once", "label": "Allow Once"},
-      {"id": "allow_always", "label": "Allow Always"},
+      {"id": "allow_once", "label": "Allow once"},
       {"id": "reject", "label": "Reject"}
-    ]
+    ],
+    "default_option_id": "allow_once"
   }
   ```
 
-- **Resolution**:
-  - Client sends selection: `{"type": "answer_prompt", "prompt_id": "approval-hash-456", "option_id": "allow_once"}`.
-  - Bridge verifies the prompt is still active on screen, then sends keystroke `1` + `Enter` via Herdr `pane.send-keys`.
+- **Always-allow is not offered.** The agent's persistent "always allow" option is hidden, and the bridge never selects it, until grants are designed (intent: narrow, revocable grants only).
+- **Answer:** `POST .../prompt` with `type: "answer_prompt"`, `prompt_id` and `option_id`. The bridge checks that the prompt is still on screen, then sends `1` or `2` and Enter.
+- **Cancel** (`action: "cancel"` in place of `option_id`) sends Esc.
 
-### 6.3 Flow 3: Streaming Agent Response
+### 6.3 Prompt answer responses
 
-- **Behavior**:
-  - While agent status is `working`, the bridge streams incremental markdown chunks (`event: "turn_chunk"`).
-  - TUI spinner characters and footer meters are filtered out at the bridge.
-  - When the step completes, bridge emits `event: "turn_complete", "turn_id": "t-..."`.
-- **Client Rendering**:
-  - Appends chunk text to the active turn bubble.
-  - Formats markdown continuously using commonmark parser (fenced code, lists, bold).
+The answer response is `{"event": "prompt_answered", "prompt_id": "...", "outcome": "option"}` or `"outcome": "cancelled"`. The field `outcome` replaces the earlier `action` field, so one word means one thing.
 
-### 6.4 Flow 4: User Prompt Delivery
+### 6.4 Prompt delivery
 
-- **Behavior**:
-  - User types in the input field and hits Send.
-  - Client sends `POST /api/agents/:sessionId/prompt` with `{"type": "prompt", "text": "continue with step 2"}`.
-  - Bridge calls Herdr `agent.prompt(pane_id, text, wait=false)`.
-  - PTY accepts submission, client creates an optimistic `user` turn bubble, and bridge emits `agent_status: "working"`.
+- The client sends `POST .../prompt` with `{"type": "prompt", "text": "...", "expected_session": {...}}`. Add `"confirmed": true` only after the user has confirmed a slash command.
+- A slash command such as `/model` or `/new` without `confirmed: true` returns `409 confirm_command`.
+- On success the bridge types the text and Enter into the pane and returns `{"event": "prompt_typed", "session_id": "..."}`. The client shows the text as sent by the user, but makes no claim about delivery.
 
----
+### 6.5 Stream
 
-## 7. Migration & Sub-Agent Task Breakdown
+`GET /api/v2/agents/{sessionId}/stream` is a WebSocket. Its events:
 
-To enable low-effort, focused execution by delegated agents:
+- `stream_open` (first frame): `{"event": "stream_open", "session_id": "...", "stream_generation": 3}`. It also carries the current `agent_status`, so a reconnecting client has a snapshot.
+- `agent_status`: `{"event": "agent_status", "session_id": "...", "state": "working", "detail": "...", "elapsed_seconds": 14}`. `state` is `idle`, `working` or `exited`.
+- `entries`: live pane rows, for the live view only: `{"event": "entries", "stream_generation": 3, "entries": [{"id": "...", "seq": 412, "text": "..."}]}`. Pane rows are not turns.
+- `stream_reset`: the live window restarted. The client drops its live rows. The next `entries` event carries the new `stream_generation`.
+- `prompt_request`: `{"event": "prompt_request", "session_id": "...", "prompt": {card}}`.
+- `prompt_resolved`: `{"event": "prompt_resolved", "session_id": "...", "prompt_id": "..."}`, sent when the card leaves the screen.
+- `conversation_changed`: `{"event": "conversation_changed", "session_id": "..."}`, a hint to run a sync request. It carries no turns.
+- `error`: the envelope from §4.6. Pane read failures arrive as `upstream_unavailable`.
 
-1. **Task 1: Status Slot Decoupling in Bridge (Rust)**
-   - Filter transient status lines (`working · ...`, spinners) out of `reconcile.rs`.
-   - Add discrete `agent_status` WebSocket event to `routes.rs`.
-   - *Verification*: `cargo test -p cappuccino-bridge`.
-
-2. **Task 2: Native Transcript Ingestion for `agy` and `pi` (Rust)**
-   - In `services/bridge/src/modules/transcript.rs`, add reader for `~/.gemini/antigravity-cli/brain/<session>/.../transcript.jsonl` and `~/.pi/agent/sessions/...`.
-   - Expose `GET /api/agents/:sessionId/conversation`.
-   - *Verification*: Unit tests with real session JSONL samples.
-
-3. **Task 3: Interactive Prompt Detection Engine (Rust)**
-   - Implement `services/bridge/src/modules/prompt.rs` porting regex signatures from `refs/coding-agents/herdr-web-ui/server/prompt.ts`.
-   - Expose `POST /api/agents/:sessionId/prompt` for card answering.
-   - *Verification*: Synthetic ANSI screen test fixtures.
-
-4. **Task 4: Thin Client Consumer Refactor (Android / Apple)**
-   - Android: Remove legacy regexes from `TranscriptParser.kt`. Connect to `GET /conversation` and bind `agent_status` WS event directly to the header status badge.
-   - Render clean `PromptCard` components when `prompt_request` arrives.
-   - *Verification*: `make check-android && make check`.
+Turns never arrive on the stream. Turns come only from the sync endpoint (§7).
 
 ---
 
-## 8. Grilling Decisions & Edge-Case Contracts (Q1–Q11)
+## 7. Conversation sync
 
-The following 11 mechanical decisions were established during grilling review to close all unseen failure modes and security gaps:
+### 7.1 Model
 
-### Round 1: Safety & Core Foundations
+- The phone keeps a replicated log per session. The offline cache is that log.
+- The bridge is stateless. It reads the agent's session file for each request and holds no per-client state.
+- The phone owns two tokens: `after_token` (where forward catch-up stopped) and `before_token` (where backfill stopped). Both are opaque strings the phone stores and returns unchanged.
+- A token encodes the session file identity, a byte offset and the id of the last settled record. The bridge checks all three before it trusts a token.
 
-1. **Approval Keystroke Safety (Q1)**:
-   - Before typing keystrokes for an approval, the bridge computes a SHA256 of the normalized prompt bounding box lines from `pane.read(source: "visible")`.
-   - If the signature has drifted, the bridge aborts fail-closed and refuses to type into the PTY.
-2. **Hybrid Stream Synchronization (Q2)**:
-   - Historical turns are served from canonical session logs (`transcript.jsonl`).
-   - In-flight turns stream live PTY deltas from the bridge until the step completes, then seamlessly swap in the canonical markdown turn.
-3. **Multi-Choice Form Emulation (Q3)**:
-   - For `ask_question`, the bridge computes the delta from the currently selected index and simulates exact arrow/space/enter key sequences via `pane.send-keys`, with fallback to numeric text submission.
-4. **Stateful Reconnect Snapshot (Q4)**:
-   - The opening frame of the WebSocket (`stream_open`) immediately delivers the authoritative `agent_status` snapshot (`working`, `idle`, `exited`), preventing race conditions on phone wake.
+### 7.2 Requests
 
-### Round 2: Drift, Buffer & Multi-Device Coordination
+- `GET .../conversation/sync` with no query returns the newest page. Use it for a first sync.
+- `GET .../conversation/sync?after=<after_token>` returns records after that point, forward. This is the catch-up path.
+- `GET .../conversation/sync?before=<before_token>` returns an earlier page. The phone uses it to backfill history in the background, after the newest turns are shown.
 
-5. **Transient Turn ID Binding (Q5)**:
-   - In-flight turns are assigned synthetic IDs (`in_flight:<step_index>`). On step completion, `turn_commit` atomically replaces the transient entry with the canonical markdown turn without UI flicker.
-6. **Semantic Anchor Hashing (Q6)**:
-   - Viewport hash checks isolate the prompt bounding box lines via title and divider regexes, ignoring unstable background scrollback or footer clock tickers.
-7. **Tail Window & Cursor Paging (Q7)**:
-   - To protect mobile memory, the bridge reads transcripts backwards starting from the latest 2MB window (20–30 turns). Clients prepend earlier history via `cursor=offset:<bytes>`.
-8. **Global Multi-Device Broadcast (Q8)**:
-   - Prompt requests and approvals are broadcast across all active client connections. Answering a card on a phone immediately broadcasts `prompt_resolved` to dismiss it on the tablet and Mac.
+### 7.3 Response
 
-### Round 3: Crash Recovery, Security & Control
+```json
+{
+  "mode": "append",
+  "upserts": [
+    {
+      "id": "step-4",
+      "role": "agent",
+      "timestamp": "2026-11-04T09:00:00Z",
+      "parts": [{"type": "text", "text": "..."}]
+    }
+  ],
+  "after_token": "<token>",
+  "before_token": "<token>",
+  "caught_up": false
+}
+```
 
-9. **Stateless Re-hydration on Boot (Q9)**:
-   - On bridge restart, it inspects Herdr's live pane state via `session.snapshot` and `agent.list`, re-emitting active prompts without requiring persistent disk state.
-10. **One-Time Nonce Ephemeral Prompt IDs (Q10)**:
-    - A card id is a hash of what the screen shows plus a nonce. The nonce stays while the card stays on screen, is renewed when the card leaves and comes back (the same command asked again is a new prompt), and is spent as soon as an answer or cancel is typed. A spent or stale id gets `409 stale_prompt` with the id on screen now.
-11. **Graceful Cancellation Contract (Q11)**:
-    - User interruption from mobile sends `ctrl+c` / `agent.stop` via Herdr RPC. Bridge updates status to `"interrupted"` and emits `turn_complete`. If the agent fails to yield within 3 seconds, a forceful kill option is presented.
+- `mode` is `append` for a normal page, or `resync` (§7.5).
+- `upserts` holds whole turns. The phone replaces any turn with the same `id`, and adds any new one.
+- `after_token` is the new forward position after this page.
+- `before_token` is the position for the next earlier page, or `null` when the start of the file has been reached.
+- `caught_up` is `true` when the response reached the end of the file. The phone stops forward catch-up when it is `true`.
+
+### 7.4 Settled boundary and late changes
+
+- A turn is settled when its last record is complete. The bridge never sends the forward token past an incomplete turn.
+- An incomplete turn is sent as an upsert. The phone replaces it when the turn completes.
+- A late tool result, or an omission marker, changes an earlier turn. The bridge re-sends that turn as an upsert, and the phone replaces it.
+
+### 7.5 Invalid token
+
+The response is `mode: "resync"` when a token names a different session file, an offset past the end of the file, or a record id that is missing or no longer on the active branch. The response then carries the newest page with a fresh `before_token`. The phone discards its local log for that session and applies the page.
+
+### 7.6 Budgets
+
+- Sync page: at most `[tuning.sync] page_bytes` (proposed 1 MiB) per response, under the phone's 2 MiB ceiling.
+- A single turn is never split. A page that holds one turn larger than `page_bytes` contains only that turn.
+- Stream message: at most `[tuning.stream] message_bytes` (proposed 256 KiB) per WebSocket message, under the phone's 1 MiB ceiling. Pane rows are split across messages and none is dropped.
+
+---
+
+## 8. Open items before freeze
+
+1. Measure the worst-case pane row width on a real pane, and set `message_bytes` from it. The 256 KiB figure is provisional.
+2. Confirm the session id source for each agent, and what happens when a session id is reused.
+3. Decide the maximum size of one turn. A turn above the phone's 2 MiB ceiling cannot be shown. A bridge-side text cap with `truncated: true` is the likely answer.
+4. Confirm that Claude Code's `/compact` never rewrites a session file. No rewrite has been observed. `resync` covers it either way.
+5. Confirm the proposed defaults: `answer_budget_secs` (10), `page_bytes` (1 MiB) and `message_bytes` (256 KiB).
+
+---
+
+## 9. Decision record
+
+Decisions made in design review, with their current status. Earlier numbering (Q1–Q16, P1–P4, S-series in review notes) is kept for traceability.
+
+| Decision | Outcome |
+| --- | --- |
+| Approval keystrokes fail closed when the prompt region's signature changes (Q1) | Kept (§6.2) |
+| Multi-choice answers are typed from the current selection (Q3) | Kept (§6.1) |
+| Stream opens with a status snapshot (Q4) | Kept (§6.5) |
+| Turn ids come from the record that opened the turn (Q14) | Kept, with opaque string ids (§5) |
+| Watermark-based sync with client-held tokens; no server cursor (Q7, superseded) | Kept (§7) |
+| Invalid token returns `resync` (Q8) | Kept (§7.5) |
+| Settled boundary; incomplete turns re-sent as upserts (Q9, Q15) | Kept (§7.4) |
+| Fresh phone syncs the newest page first, then backfills (Q10) | Kept (§7.2) |
+| Pages under a byte budget, nothing lost (Q11) | Kept (§7.6) |
+| Live output is a pane view and stays separate from sync (Q12) | Kept (§6.5) |
+| Prompt card ids are nonce-spent (Q10 in the earlier round) | Kept (§4.8) |
+| Interrupt is Esc; the bridge never kills an agent (Q11 earlier round) | Kept, forced kill removed (§1) |
+| Turn events `turn_chunk`, `turn_complete`, `turn_commit` | Removed. Sync upserts are the only turn path. |
+| `allow_always` offered to the phone | Hidden until grants are designed (§6.2) |
+| Global broadcast of prompt cards to every client | Deferred. Not part of the freeze. |
+| Native clients only; WebUI is not a v2 client | Decided |

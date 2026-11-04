@@ -23,9 +23,11 @@ These limits were true of every accepted checkpoint and still hold.
 - **No typed approval gate.** Approvals are answered from the screen. Grants,
   reconnect semantics for pending requests, and process-death recovery are not
   implemented or verified.
-- **No push or Telegram alerts.** Android runs a foreground service that watches
-  configured machines for completions and input requests. iOS has no alerts.
-  Telegram notifications are not configured.
+- **Alerts.** Android runs a foreground service that watches configured machines
+  for completions and input requests. iOS has no alerts. Telegram alerts are an
+  optional bridge route, off by default. A test message reached the group; a
+  live agent's alert is not yet verified end to end
+  ([setup and checks](telegram-alerts-setup.md)).
 - **Performance and leaks.** Benchmark results are baseline observations, not
   budgets. The bridge soak (`make resource-bridge-client`) is opt-in before
   releases; a short sample does not prove zero leaks.
