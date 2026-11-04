@@ -43,7 +43,8 @@ func applySyncPage(
 ) -> (turns: [ConversationTurn], cursor: SyncCursor?) {
   if page.mode == "scrollback" { return (page.upserts, nil) }
   let sameConversation =
-    cursor != nil && cursor?.conversationID == page.conversationID && page.mode == "append"
+    cursor != nil && (page.conversationID == nil || cursor?.conversationID == page.conversationID)
+    && page.mode == "append"
     && direction != .newest
   let merged =
     sameConversation

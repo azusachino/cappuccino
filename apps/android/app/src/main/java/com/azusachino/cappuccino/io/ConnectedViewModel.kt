@@ -807,8 +807,12 @@ internal constructor(
           omittedConversationTurns = recent.omittedMessages,
           omittedToolOperations = recent.omittedTools,
           conversationSource = snapshot.source,
-          sessionStats = snapshot.stats,
-          conversationId = snapshot.conversationId,
+          // Forward pages carry no identity or stats; they keep what the newest page set.
+          sessionStats =
+            snapshot.stats ?: current.sessionStats.takeIf { direction != SyncDirection.Newest },
+          conversationId =
+            snapshot.conversationId
+              ?: current.conversationId.takeIf { direction != SyncDirection.Newest },
           offlineSavedAt = null,
         )
     }
@@ -1280,7 +1284,9 @@ internal constructor(
             if (!isActive || token != epoch || !foreground) return@launch
             if (snapshot.source != "canonical_log")
               throw java.io.IOException("Canonical history unavailable; retry to enable actions")
-            val identity = snapshot.conversationId
+            // A forward page names no conversation; the identity the phone already holds stands.
+            val identity =
+              snapshot.conversationId ?: mutableState.value.conversationId.takeIf { after != null }
             if (
               snapshot.machineId != profile.machineId ||
                 identity == null ||

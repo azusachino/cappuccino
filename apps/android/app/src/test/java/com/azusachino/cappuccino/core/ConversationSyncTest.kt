@@ -145,6 +145,19 @@ class ConversationSyncTest {
   }
 
   @Test
+  fun anAppendPageWithoutAnIdentityContinuesTheSameConversation() {
+    val (turns, next) =
+      applySyncPage(
+        listOf(turn("t1")),
+        cursor,
+        SyncDirection.Forward,
+        page(listOf(turn("t2")), after = "A2", hasAfter = true, conversationId = null),
+      )
+    assertEquals(listOf("t1", "t2"), turns.map { it.id })
+    assertEquals("pi:a", next?.conversationId)
+  }
+
+  @Test
   fun forwardWithoutACursorReplacesRatherThanMerging() {
     val (turns, _) =
       applySyncPage(listOf(turn("t1")), null, SyncDirection.Forward, page(listOf(turn("t9"))))

@@ -45,9 +45,10 @@ fun applySyncPage(
   page: SyncPage,
 ): Pair<List<ConversationTurn>, SyncCursor?> {
   if (page.mode == "scrollback") return page.upserts to null
+  // Only newest and resync pages name the conversation; an append page without an id continues it.
   val sameConversation =
     cursor != null &&
-      cursor.conversationId == page.conversationId &&
+      (page.conversationId == null || cursor.conversationId == page.conversationId) &&
       page.mode == "append" &&
       direction != SyncDirection.Newest
   val merged =

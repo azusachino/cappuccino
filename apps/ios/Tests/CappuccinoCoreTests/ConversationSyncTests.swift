@@ -89,6 +89,14 @@ struct ConversationSyncTests {
     #expect(result.cursor?.conversationID == "pi:b")
   }
 
+  @Test func anAppendPageWithoutAnIdentityContinuesTheSameConversation() {
+    let result = applySyncPage(
+      [turn("t1")], cursor: cursor, direction: .forward,
+      page: page([turn("t2")], after: "A2", hasAfter: true, conversationID: nil))
+    #expect(result.turns.map(\.id) == ["t1", "t2"])
+    #expect(result.cursor?.conversationID == "pi:a")
+  }
+
   @Test func forwardWithoutACursorReplacesRatherThanMerging() {
     let result = applySyncPage(
       [turn("t1")], cursor: nil, direction: .forward, page: page([turn("t9")]))

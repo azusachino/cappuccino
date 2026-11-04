@@ -585,8 +585,8 @@ class ConnectedViewModelTest {
               true,
               savedId,
             ),
-          "A1" to SyncPage("append", listOf(turn("t7")), "A2", true, null, false, false, savedId),
-          "A2" to SyncPage("append", listOf(turn("t8")), "A3", true, null, false, true, savedId),
+          "A1" to SyncPage("append", listOf(turn("t7")), "A2", true, null, false, false, null),
+          "A2" to SyncPage("append", listOf(turn("t8")), "A3", true, null, false, true, null),
           "B1" to
             SyncPage(
               "append",
@@ -613,7 +613,7 @@ class ConnectedViewModelTest {
             queries += after to before
             val page = pages.getValue(after ?: before)
             return ConversationPage(
-              ConversationSnapshot(page.upserts, "canonical_log", savedId, machine),
+              ConversationSnapshot(page.upserts, "canonical_log", page.conversationId, machine),
               page,
             )
           }
@@ -634,6 +634,8 @@ class ConnectedViewModelTest {
         viewModel.state.value.conversationTurns.map { it.id },
       )
       assertEquals(listOf(null to null, "A1" to null, "A2" to null), queries)
+      // Forward pages name no conversation, so the identity from the newest page must survive.
+      assertEquals(savedId, viewModel.state.value.conversationId)
       viewModel.loadOlderConversation()
       advanceUntilIdle()
       assertEquals(

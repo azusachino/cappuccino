@@ -370,7 +370,8 @@ public final class SessionModel {
             throw BridgeError.unreachable("Canonical history unavailable; retry to enable actions")
           }
           guard snapshot.machineID == profile.machineID,
-            let identity = snapshot.conversationID, let provider = agent.provider,
+            let identity = snapshot.conversationID ?? (after == nil ? nil : conversationID),
+            let provider = agent.provider,
             CanonicalConversationID.isCanonical(identity, agent: provider),
             expectedConversation == nil || identity == expectedConversation
           else {
