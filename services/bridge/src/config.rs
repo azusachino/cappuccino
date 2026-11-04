@@ -118,7 +118,7 @@ struct TailnetFileConfig {
 }
 
 /// `[pi]`: opt-in location of a Pi agent directory whose `sessions/` the bridge
-/// reads. Unset means the default stores (`~/.pi`, `~/.luna`).
+/// reads. Unset means the default store (`~/.pi/agent/sessions`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PiFileConfig {
@@ -705,11 +705,8 @@ mod pi_config_tests {
 
     #[test]
     fn absolute_pi_agent_dir_loads() {
-        let config = load_text("abs", "[pi]\nagent_dir = \"/Users/x/.luna/agent\"\n").unwrap();
-        assert_eq!(
-            config.pi_agent_dir,
-            Some(PathBuf::from("/Users/x/.luna/agent"))
-        );
+        let config = load_text("abs", "[pi]\nagent_dir = \"/opt/pi/agent\"\n").unwrap();
+        assert_eq!(config.pi_agent_dir, Some(PathBuf::from("/opt/pi/agent")));
     }
 
     #[test]

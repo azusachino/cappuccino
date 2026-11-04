@@ -18,10 +18,7 @@ fn session_stores(
     if let Some(dir) = agent_dir {
         return vec![dir.join("sessions")];
     }
-    vec![
-        home.join(".pi/agent/sessions"),
-        home.join(".luna/agent/sessions"),
-    ]
+    vec![home.join(".pi/agent/sessions")]
 }
 
 /// `[pi] agent_dir` from the bridge config wins; `PI_CODING_AGENT_DIR` is only a
@@ -555,10 +552,7 @@ mod tests {
         );
         assert_eq!(
             session_stores(home, None, None),
-            vec![
-                home.join(".pi/agent/sessions"),
-                home.join(".luna/agent/sessions"),
-            ]
+            vec![home.join(".pi/agent/sessions")]
         );
     }
 
