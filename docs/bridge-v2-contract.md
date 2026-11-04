@@ -94,8 +94,12 @@ Learned from `herdr-web-ui/server/prompt.ts`:
     "kind": "confirm" | "choice" | "input",
     "title": "Bash Command Approval",
     "message": "Allow agent to execute: rm -rf .tmp/test?",
-    "options": ["Allow once", "Allow always", "Reject"],
-    "selected_index": 0
+    "options": [
+      {"id": "allow_once", "label": "Allow once"},
+      {"id": "allow_always", "label": "Allow always"},
+      {"id": "reject", "label": "Reject"}
+    ],
+    "default_option_id": "allow_once"
   }
   ```
 
@@ -154,13 +158,17 @@ Request:
 {
   "protocol_min": 1,
   "protocol_max": 2,
-  "capabilities": {"live_output": 1, "agent_control": 1, "prompt_input": 1},
+  "capabilities": {
+    "live_output": {"version": 1},
+    "agent_control": {"version": 1},
+    "prompt_input": {"version": 1}
+  },
   "required": ["live_output"]
 }
 ```
 
-- `capabilities` maps each name to the highest version the client speaks. A value of 0 or an
-  absent key means unsupported. Unknown keys are ignored.
+- `capabilities` maps each capability name to an object whose `version` is the highest version the
+  client speaks. An absent key means the client does not speak that capability. Unknown keys are ignored.
 - `required` lists capabilities the client cannot run without.
 
 Response (HTTP 200):
@@ -173,13 +181,20 @@ Response (HTTP 200):
   "plugin": "cappuccino-bridge",
   "bridge_version": "0.2.0",
   "protocol": 2,
-  "capabilities": {"agent_discovery": 1, "live_output": 1, "agent_control": 1},
-  "agreed": {"live_output": 1, "agent_control": 1},
+  "capabilities": {
+    "agent_discovery": {"version": 1},
+    "live_output": {"version": 1},
+    "agent_control": {"version": 1}
+  },
+  "agreed": {
+    "live_output": {"version": 1},
+    "agent_control": {"version": 1}
+  },
   "telegram": {"route": "enabled", "events": ["completion", "needs_answer", "route_failure"]}
 }
 ```
 
-- `agreed` holds each capability both sides speak, at the lower version.
+- `agreed` holds each capability both sides speak, with the lower of the two versions.
 - `telegram` is advisory status. A client treats an absent block as unknown.
 
 Refusals, all with the envelope `{"event": "error", "code": ...}`:
@@ -221,6 +236,8 @@ Pairing and transport sit outside `/api/`, and each has its own version:
 ### 4.5 Field naming rule
 
 Every request and response field must say what it means on its own.
+
+The v2 redesign applies this rule to every shape in this contract, including breaking changes. Until the implementation slices land, the bridge and the apps still send and read the 0.2.0 shapes (numeric capability versions, positional option indexes).
 
 - No bare numbers or positional arrays as values. A version, count or choice carries a key that names it.
 - An array is allowed only when its key names the items, for example `options`, `events` or `missing_capabilities`.
@@ -290,13 +307,13 @@ When Claude Code asks the owner a question through its `AskUserQuestion` tool. C
     "title": "Pick a color?",
     "message": "Question 1 of 2",
     "tool_name": "AskUserQuestion",
-    "options": [],
-    "selected_index": 0,
     "questions": [
       {
+        "id": "q-1",
         "header": "Color",
         "question": "Pick a color?",
         "multi_select": false,
+        "highlighted_option_id": "opt-0",
         "options": [{"id": "opt-0", "label": "Red", "description": "warm"}]
       }
     ]
@@ -305,9 +322,9 @@ When Claude Code asks the owner a question through its `AskUserQuestion` tool. C
 
   The review card has `type: "ask_user_question_review"`, the chosen answers as its `message`, and the options `Submit answers` and `Cancel`.
 - **Resolution**:
-  - `POST /api/agents/:sessionId/prompt` with the one question's answer: option indexes and/or one line of free text (the form's "Type something"):
-    `{"type": "answer_question", "prompt_id": "p-918ff1b95c4e", "answers": [{"selected": [0, 2], "other": "a bird"}]}`
-  - A single-select takes exactly one of an index or text; a multi-select takes at least one. Answers that do not fit are `400 bad_answer`.
+  - `POST /api/agents/:sessionId/prompt` with the one question's answer, identified by `question_id`: option ids and/or one line of free text in `free_text` (the form's "Type something"):
+    `{"type": "answer_question", "prompt_id": "p-918ff1b95c4e", "answers": [{"question_id": "q-1", "selected_option_ids": ["opt-0", "opt-2"], "free_text": "a bird"}]}`
+  - A single-select takes exactly one of `selected_option_ids` (one id) or `free_text`; a multi-select takes at least one id. Answers that do not fit are `400 bad_answer`.
   - The bridge re-reads the screen first: the same question must still show, with nothing ticked in the terminal; otherwise `409 stale_prompt`, and the owner finishes it in the terminal.
   - Keys, with a short pause between steps (checked against Claude Code 2.1 in a Herdr pane): single-select digit, or the "Type something" digit, the text and enter; multi-select digits toggle, free text goes on its row (reached from the `❯` cursor), then the Submit row and enter.
   - The review is answered with `answer_prompt`: `select_option` presses its digit alone (`1` submits, `2` cancels).
