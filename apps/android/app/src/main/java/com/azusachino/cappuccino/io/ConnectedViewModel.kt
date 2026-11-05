@@ -9,6 +9,7 @@ import java.util.UUID
 import javax.net.ssl.SSLException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -198,6 +199,16 @@ interface ConnectedActions {
   fun clearSavedConversations(machineId: UUID? = null) = Unit
 }
 
+private data class SessionCacheEntry(
+  val turns: List<ConversationTurn>,
+  val cursor: SyncCursor?,
+  val omittedConversationTurns: Int = 0,
+  val omittedToolOperations: Int = 0,
+  val sessionStats: SessionStats? = null,
+  val conversationId: String? = null,
+  val conversationSource: String? = null,
+)
+
 class ConnectedViewModel
 internal constructor(
   private val store: MachineProfileStore,
@@ -233,6 +244,7 @@ internal constructor(
   private var streamJob: Job? = null
   private var conversationJob: Job? = null
   private var conversationRequested = false
+  private val sessionCache = mutableMapOf<String, SessionCacheEntry>()
   private var foreground = false
   private var epoch = 0L
   private var pendingRestore = savedStateHandle.get<String>(SELECTED_PROFILE) != null
@@ -776,14 +788,20 @@ internal constructor(
         )
       return
     }
+    val cached = agent?.let { sessionCache[it.sessionId] }
     mutableState.value =
       mutableState.value.copy(
         selectedAgent = agent,
         stream = StreamState(),
         streamLive = false,
-        conversationTurns = emptyList(),
-        conversationSource = null,
-        sessionStats = null,
+        conversationTurns = cached?.turns ?: emptyList(),
+        conversationCursor = cached?.cursor,
+        conversationCursorSession = if (cached?.cursor != null) agent.sessionId else null,
+        omittedConversationTurns = cached?.omittedConversationTurns ?: 0,
+        omittedToolOperations = cached?.omittedToolOperations ?: 0,
+        conversationSource = cached?.conversationSource,
+        sessionStats = cached?.sessionStats,
+        conversationId = cached?.conversationId,
         actionError = null,
       )
     if (agent == null) clearSavedSelection()
@@ -827,6 +845,21 @@ internal constructor(
         applySyncPage(current.conversationTurns, prior, direction, page.sync)
       else emptyList<ConversationTurn>() to null
     return boundedConversation(merged).also { recent ->
+      val resolvedStats =
+        snapshot.stats ?: current.sessionStats.takeIf { direction != SyncDirection.Newest }
+      val resolvedId =
+        snapshot.conversationId
+          ?: current.conversationId.takeIf { direction != SyncDirection.Newest }
+      sessionCache[session] =
+        SessionCacheEntry(
+          turns = recent.turns,
+          cursor = cursor,
+          omittedConversationTurns = recent.omittedMessages,
+          omittedToolOperations = recent.omittedTools,
+          sessionStats = resolvedStats,
+          conversationId = resolvedId,
+          conversationSource = snapshot.source,
+        )
       mutableState.value =
         mutableState.value.copy(
           conversationTurns = recent.turns,
@@ -836,11 +869,8 @@ internal constructor(
           omittedToolOperations = recent.omittedTools,
           conversationSource = snapshot.source,
           // Forward pages carry no identity or stats; they keep what the newest page set.
-          sessionStats =
-            snapshot.stats ?: current.sessionStats.takeIf { direction != SyncDirection.Newest },
-          conversationId =
-            snapshot.conversationId
-              ?: current.conversationId.takeIf { direction != SyncDirection.Newest },
+          sessionStats = resolvedStats,
+          conversationId = resolvedId,
           offlineSavedAt = null,
         )
     }
@@ -951,6 +981,9 @@ internal constructor(
                 conversationSource = mutableState.value.conversationSource ?: "terminal_scrollback"
               )
           }
+        }
+        if (conversationRequested) {
+          delay(300)
         }
       } while (isActive && conversationRequested && token == epoch && foreground)
     }

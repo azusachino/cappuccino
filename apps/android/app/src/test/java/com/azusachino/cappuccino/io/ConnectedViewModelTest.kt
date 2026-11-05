@@ -587,6 +587,7 @@ class ConnectedViewModelTest {
             ),
           "A1" to SyncPage("append", listOf(turn("t7")), "A2", true, null, false, false, null),
           "A2" to SyncPage("append", listOf(turn("t8")), "A3", true, null, false, true, null),
+          "A3" to SyncPage("append", emptyList(), "A3", true, null, false, true, null),
           "B1" to
             SyncPage(
               "append",
@@ -643,6 +644,21 @@ class ConnectedViewModelTest {
         viewModel.state.value.conversationTurns.map { it.id },
       )
       assertEquals(listOf(null to null, "A1" to null, "A2" to null, null to "B1"), queries)
+
+      // Switching away and back restores cached turns immediately and resumes forward sync.
+      viewModel.selectAgent(null)
+      assertTrue(viewModel.state.value.conversationTurns.isEmpty())
+      viewModel.selectAgent(agent)
+      assertEquals(
+        listOf("t3", "t4", "t5", "t6", "t7", "t8"),
+        viewModel.state.value.conversationTurns.map { it.id },
+      )
+      advanceUntilIdle()
+      // Catch-up uses the forward cursor "A3", not an initial full page fetch (null to null).
+      assertEquals(
+        listOf(null to null, "A1" to null, "A2" to null, null to "B1", "A3" to null),
+        queries,
+      )
     }
 
   @Test

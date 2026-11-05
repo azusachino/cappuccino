@@ -288,9 +288,8 @@ fun CappuccinoScreen(
   val namingProfile = state.profiles.firstOrNull { it.id == namingProfileId } ?: selectedProfile
   var namingMachine by rememberSaveable { mutableStateOf(false) }
   var machineNameDraft by rememberSaveable { mutableStateOf("") }
-  val scopedConversation = selected?.let {
-    state.conversationId ?: it.nativeSessionRef ?: it.sessionId
-  }
+  val scopedConversation =
+    if (state.offlineSavedAt != null) state.conversationId else selected?.let { it.sessionId }
   val outputIdentity = Triple(state.activeProfileId, selected?.machineId, scopedConversation)
   val conversationKey = "${state.activeProfileId}|${selected?.machineId}|$scopedConversation"
   val outputStates =
@@ -324,7 +323,7 @@ fun CappuccinoScreen(
         val last = layout.visibleItemsInfo.lastOrNull()
         !outputListState.canScrollForward ||
           (last != null &&
-            last.index == layout.totalItemsCount - 1 &&
+            last.index >= layout.totalItemsCount - 2 &&
             last.offset + last.size - layout.viewportEndOffset <= followSlack)
       }
     }
@@ -360,6 +359,7 @@ fun CappuccinoScreen(
   var textLayoutRevision by remember(outputIdentity) { mutableStateOf(0) }
   val onTextLayoutChanged: () -> Unit = remember(outputIdentity) { { textLayoutRevision += 1 } }
   var observedFollowContent by remember(outputIdentity) { mutableStateOf<List<*>?>(null) }
+  var observedDisplayedSize by remember(outputIdentity) { mutableStateOf(-1) }
   var observedTextLayoutRevision by remember(outputIdentity) { mutableStateOf(textLayoutRevision) }
   val outputScope = rememberCoroutineScope()
 
@@ -385,12 +385,14 @@ fun CappuccinoScreen(
     outputIdentity,
     followingOutput,
   ) {
-    val newContent = observedFollowContent != followContent
+    val contentChanged =
+      observedFollowContent != followContent || observedDisplayedSize != displayedContent.size
     val layoutChanged = observedTextLayoutRevision != textLayoutRevision
     observedFollowContent = followContent
+    observedDisplayedSize = displayedContent.size
     observedTextLayoutRevision = textLayoutRevision
-    if (selected != null && followContent.isNotEmpty()) {
-      if (followingOutput && (newContent || layoutChanged)) {
+    if (selected != null && displayedContent.isNotEmpty()) {
+      if (followingOutput && (contentChanged || layoutChanged)) {
         automaticScroll = true
         try {
           // A bottom marker handles tall last turns and collapsed stream rows alike.
@@ -399,7 +401,7 @@ fun CappuccinoScreen(
         } finally {
           automaticScroll = false
         }
-      } else if (newContent) {
+      } else if (contentChanged) {
         hasNewOutput = true
       }
     }
