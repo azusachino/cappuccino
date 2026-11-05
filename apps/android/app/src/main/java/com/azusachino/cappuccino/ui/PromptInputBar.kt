@@ -178,7 +178,7 @@ fun PromptInputBar(
   enabled: Boolean,
   modifier: Modifier = Modifier,
   placeholder: String = "Message agent…",
-  disabledPlaceholder: String = "Not connected",
+  disabledPlaceholder: String = placeholder,
   onStop: (() -> Unit)? = null,
   model: String? = null,
   agent: String? = null,
@@ -338,7 +338,7 @@ fun PromptInputBar(
                 .focusRequester(focusRequester)
                 .onFocusChanged { isFocused = it.isFocused }
                 .testTag("promptInput"),
-            enabled = enabled,
+            enabled = !pending,
             maxLines = 6,
             textStyle =
               MaterialTheme.typography.bodyMedium.copy(color = colors.text, lineHeight = 20.sp),
@@ -347,7 +347,7 @@ fun PromptInputBar(
               Box {
                 if (input.isEmpty())
                   Text(
-                    if (enabled) placeholder else disabledPlaceholder,
+                    placeholder,
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.faint,
                   )

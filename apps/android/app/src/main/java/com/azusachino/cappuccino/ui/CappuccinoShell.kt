@@ -553,98 +553,111 @@ fun CappuccinoScreen(
               val currentAgent = selected ?: lastSelectedAgent
               val currentProfile = selectedProfile ?: lastSelectedProfile
               if (currentAgent != null) {
-                Row(
-                  Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
-                  verticalAlignment = Alignment.CenterVertically,
-                ) {
-                  IconButton(
-                    onClick = {
-                      if (state.offlineSavedAt != null) actions.closeSavedConversation()
-                      else actions.selectAgent(null)
-                    },
-                    modifier = Modifier.pressScale().size(40.dp),
-                  ) {
-                    Icon(
-                      painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
-                      contentDescription =
-                        if (state.offlineSavedAt != null) "Back to history" else "Back",
-                    )
-                  }
-                  val status =
-                    agentStatusStyle(
-                      selectedStatus,
-                      MaterialTheme.colorScheme.background.luminance() < 0.5f,
-                    )
+                Column(Modifier.fillMaxWidth()) {
                   Row(
-                    Modifier.weight(1f)
-                      .clip(RoundedCornerShape(8.dp))
-                      .clickable(enabled = currentProfile != null) {
-                        detailsProfileId = currentProfile?.id
-                        showingConnection = true
-                      }
-                      .padding(horizontal = 6.dp, vertical = 2.dp),
+                    Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                   ) {
-                    AgentAvatar(currentAgent.agent, 32.dp)
-                    Column(
-                      Modifier.weight(1f),
-                      verticalArrangement = Arrangement.spacedBy(1.dp),
+                    IconButton(
+                      onClick = {
+                        if (state.offlineSavedAt != null) actions.closeSavedConversation()
+                        else actions.selectAgent(null)
+                      },
+                      modifier = Modifier.pressScale().size(40.dp),
                     ) {
-                      Text(
-                        currentAgent.label,
-                        style =
-                          MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.SemiBold
-                          ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                      Icon(
+                        painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
+                        contentDescription =
+                          if (state.offlineSavedAt != null) "Back to history" else "Back",
                       )
-                      // Status keeps its color as a square beside its word, never color alone.
-                      Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    }
+                    val status =
+                      agentStatusStyle(
+                        selectedStatus,
+                        MaterialTheme.colorScheme.background.luminance() < 0.5f,
+                      )
+                    Row(
+                      Modifier.weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = currentProfile != null) {
+                          detailsProfileId = currentProfile?.id
+                          showingConnection = true
+                        }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                      AgentAvatar(currentAgent.agent, 32.dp)
+                      Column(
+                        Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(1.dp),
                       ) {
-                        if (state.offlineSavedAt != null) {
-                          StatusSquare(MaterialTheme.appColors.muted)
-                          Text(
-                            "Saved history · Read-only",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.appColors.muted,
-                          )
-                        } else {
-                          StatusSquare(status.background)
-                          Text(
-                            status.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.appColors.muted,
-                          )
+                        Text(
+                          currentAgent.label,
+                          style =
+                            MaterialTheme.typography.titleSmall.copy(
+                              fontWeight = FontWeight.SemiBold
+                            ),
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis,
+                        )
+                        // Status keeps its color as a square beside its word, never color alone.
+                        Row(
+                          verticalAlignment = Alignment.CenterVertically,
+                          horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                          if (state.offlineSavedAt != null) {
+                            StatusSquare(MaterialTheme.appColors.muted)
+                            Text(
+                              "Saved history · Read-only",
+                              style = MaterialTheme.typography.labelSmall,
+                              color = MaterialTheme.appColors.muted,
+                            )
+                          } else {
+                            StatusSquare(status.background)
+                            Text(
+                              status.label,
+                              style = MaterialTheme.typography.labelSmall,
+                              color = MaterialTheme.appColors.muted,
+                            )
+                          }
                         }
                       }
                     }
+                    if (currentProfile != null) {
+                      IconButton(
+                        onClick = { showingHistory = true },
+                        modifier = Modifier.testTag("conversationHistoryButton").size(40.dp),
+                      ) {
+                        Icon(
+                          painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
+                          contentDescription = "Conversation history",
+                        )
+                      }
+                      IconButton(
+                        onClick = {
+                          detailsProfileId = currentProfile.id
+                          showingConnection = true
+                        },
+                        modifier = Modifier.size(40.dp),
+                      ) {
+                        Icon(
+                          painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
+                          contentDescription = "Connection details",
+                        )
+                      }
+                    }
                   }
-                  if (currentProfile != null) {
-                    IconButton(
-                      onClick = { showingHistory = true },
-                      modifier = Modifier.testTag("conversationHistoryButton").size(40.dp),
-                    ) {
-                      Icon(
-                        painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
-                        contentDescription = "Conversation history",
-                      )
-                    }
-                    IconButton(
-                      onClick = {
-                        detailsProfileId = currentProfile.id
-                        showingConnection = true
-                      },
-                      modifier = Modifier.size(40.dp),
-                    ) {
-                      Icon(
-                        painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
-                        contentDescription = "Connection details",
-                      )
-                    }
+                  if (
+                    state.offlineSavedAt == null &&
+                      (state.connection is ConnectionState.Connecting ||
+                        state.connection is ConnectionState.Recovering)
+                  ) {
+                    LinearProgressIndicator(
+                      modifier = Modifier.fillMaxWidth().height(2.dp),
+                      color = MaterialTheme.appColors.warn,
+                      trackColor = androidx.compose.ui.graphics.Color.Transparent,
+                    )
                   }
                 }
               }
@@ -852,38 +865,7 @@ fun CappuccinoScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                       )
                   }
-                  val bannerInset =
-                    if (
-                      state.connection is ConnectionState.Connecting ||
-                        state.connection is ConnectionState.Recovering ||
-                        state.connection is ConnectionState.Error
-                    )
-                      12.dp
-                    else chromeTop
-                  when (val connection = state.connection) {
-                    ConnectionState.Connecting ->
-                      Column(
-                        Modifier.fillMaxWidth()
-                          .padding(top = chromeTop)
-                          .padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                      ) {
-                        Text(
-                          "Connecting…",
-                          style = MaterialTheme.typography.bodyMedium,
-                          color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
-                      }
-                    ConnectionState.Recovering ->
-                      WarningBanner(
-                        "Reconnecting; earlier output may be missing",
-                        Modifier.padding(top = chromeTop),
-                      )
-                    is ConnectionState.Error ->
-                      ErrorBanner(connection.message, Modifier.padding(top = chromeTop))
-                    else -> Unit
-                  }
+                  val bannerInset = chromeTop
 
                   if (state.conversationSource == "scrollback") {
                     Text(
@@ -1111,12 +1093,6 @@ fun CappuccinoScreen(
                           stats = state.sessionStats,
                           placeholder =
                             "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…",
-                          disabledPlaceholder =
-                            if (loadingBody || state.connection == ConnectionState.Connected)
-                              "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…"
-                            else
-                              (session as? SessionStatus.Link)?.status?.composerLabel()
-                                ?: "Not connected",
                           enabled =
                             state.connection == ConnectionState.Connected &&
                               state.canMutate &&
