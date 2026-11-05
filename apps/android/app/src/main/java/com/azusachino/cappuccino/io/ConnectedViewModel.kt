@@ -44,17 +44,20 @@ data class MachineConnection(
   val reconnectReason: String? = null,
 )
 
+/**
+ * The machine's connection. The active machine reads the session's connection, the field every
+ * write path keeps current; a copy in [machines] for it can go stale and is never read.
+ */
 fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnection =
-  machines[profile.id]
-    ?: if (activeProfileId == profile.id)
-      MachineConnection(
-        connection,
-        agents.filter { it.machineId == profile.machineId },
-        busy,
-        reconnectAttempt,
-        reconnectReason,
-      )
-    else MachineConnection()
+  if (activeProfileId == profile.id)
+    MachineConnection(
+      connection,
+      agents.filter { it.machineId == profile.machineId },
+      busy,
+      reconnectAttempt,
+      reconnectReason,
+    )
+  else machines[profile.id] ?: MachineConnection()
 
 /** Forward pages one catch-up may fetch before it waits for the next stream event. */
 private const val MAX_CATCH_UP_PAGES = 8
@@ -714,8 +717,7 @@ internal constructor(
             when {
               replacedLocators ->
                 ConnectionState.Error("Selected session was replaced; select it again")
-              old == null -> ConnectionState.Connected
-              else -> mutableState.value.connection
+              else -> ConnectionState.Connected
             },
           busy = false,
           stream = if (replacedLocators) StreamState() else mutableState.value.stream,

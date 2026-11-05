@@ -39,14 +39,12 @@ class ConnectionStatusTest {
 
   @Test
   fun workingNeverShowsOverAnErrorOnTheMachine() {
-    // The bug: the stream was still marked live while the machine had already failed.
+    // The bug: a stale agent status showed while the connection had already failed. The session
+    // connection is now the one field that carries the error, so the agent status cannot win.
     val broken =
-      state(
-          connection = ConnectionState.Connected,
-          streamLive = true,
-          machine = ConnectionState.Error("timeout"),
-        )
-        .let { it.copy(stream = it.stream.copy(agentStatus = "working")) }
+      state(connection = ConnectionState.Error("timeout"), streamLive = true).let {
+        it.copy(stream = it.stream.copy(agentStatus = "working"))
+      }
     assertEquals(SessionStatus.Link(ConnectionStatus.Offline), broken.sessionStatus(null))
   }
 
@@ -107,10 +105,11 @@ class ConnectionStatusTest {
   }
 
   @Test
-  fun machineStatusReadsTheMachinesOwnConnection() {
-    val machine =
+  fun machineStatusReadsTheMachinesOwnConnectionWhenItIsNotActive() {
+    val other =
       state(connection = ConnectionState.Connected, machine = ConnectionState.Error("x"))
-    assertEquals(ConnectionStatus.Offline, machine.machineStatus(profile))
+        .copy(activeProfileId = "other")
+    assertEquals(ConnectionStatus.Offline, other.machineStatus(profile))
   }
 
   @Test
