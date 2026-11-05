@@ -85,6 +85,24 @@ class ConnectionStatusTest {
   }
 
   @Test
+  fun aConnectedSelectedAgentShowsAgentStyleKeyWhileAttaching() {
+    val agent =
+      com.azusachino.cappuccino.core.AgentRow(
+        machineId = profile.machineId,
+        sessionId = "s1",
+        paneId = null,
+        label = "Agent 1",
+        agent = "pi",
+        status = "idle",
+        working = false,
+        branch = "main",
+        nativeSessionRef = "ref1",
+      )
+    val state = state(connection = ConnectionState.Connected, streamLive = false)
+    assertEquals("idle", state.sessionStatus(agent).styleKey(agent))
+  }
+
+  @Test
   fun reconnectingWithNothingToShowIsLoadingNotUnknown() {
     val reconnecting = state(connection = ConnectionState.Recovering, reconnectAttempt = 2)
     assertEquals(SessionStatus.Loading, reconnecting.sessionStatus(null))

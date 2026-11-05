@@ -59,6 +59,9 @@ fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnecti
     )
   else machines[profile.id] ?: MachineConnection()
 
+/** Failed refreshes in a row before the machine shows Offline; one failure is not an outage. */
+private const val OFFLINE_AFTER_FAILURES = 2
+
 /** Forward pages one catch-up may fetch before it waits for the next stream event. */
 private const val MAX_CATCH_UP_PAGES = 8
 
@@ -222,6 +225,8 @@ internal constructor(
   private val machineEpochs = mutableMapOf<String, Long>()
   private val lastRefreshAt = mutableMapOf<String, Long>()
   private val disconnectedMachines = mutableSetOf<String>()
+  // Consecutive failed refreshes per machine; a run of them, not one, makes the machine offline.
+  private val refreshFailures = mutableMapOf<String, Int>()
   private var addJob: Job? = null
   private var addEpoch = 0L
   private var operation: Job? = null
@@ -680,6 +685,7 @@ internal constructor(
       )
         return
       recordMachineName(profile, client.machineName, client.bridgeDetails)
+      refreshFailures.remove(profile.id)
       mutableState.value =
         mutableState.value.copy(
           machines =
@@ -730,6 +736,15 @@ internal constructor(
     } catch (error: Exception) {
       if (error is kotlinx.coroutines.CancellationException) throw error
       if (machineToken != machineEpochs[profile.id] || profile.id in disconnectedMachines) return
+      val failures = (refreshFailures[profile.id] ?: 0) + 1
+      refreshFailures[profile.id] = failures
+      val wasConnected =
+        mutableState.value.machineConnection(profile).connection == ConnectionState.Connected
+      if (failures < OFFLINE_AFTER_FAILURES && wasConnected) {
+        if (token == epoch && mutableState.value.activeProfileId == profile.id)
+          mutableState.value = mutableState.value.copy(busy = false)
+        return
+      }
       val failed =
         ConnectionState.Error(
           friendlyTransportMessage(error.message, displayName(profile)) ?: "Bridge unavailable"
@@ -845,8 +860,13 @@ internal constructor(
       do {
         conversationRequested = false
         try {
-          if (offlineHistory != null && client.verify(profile.machineId) != profile.machineId)
-            throw ProtocolException("Machine identity changed")
+          if (
+            offlineHistory != null &&
+              mutableState.value.machineConnection(profile).connection != ConnectionState.Connected
+          ) {
+            if (client.verify(profile.machineId) != profile.machineId)
+              throw ProtocolException("Machine identity changed")
+          }
           // Catch up from the log's forward position when it is valid; otherwise take the newest
           // page.
           val after = forwardAfter(agent.sessionId)

@@ -275,7 +275,7 @@ fun CappuccinoScreen(
   // sessionStatus in ConnectionStatus.kt.
   val session = state.sessionStatus(selected)
   val loadingBody = session is SessionStatus.Loading
-  val selectedStatus = session.styleKey()
+  val selectedStatus = session.styleKey(selected)
   val selectedIdle = selectedStatus !in setOf("working", "blocked")
   val agentControl =
     state.offlineSavedAt == null &&
@@ -1110,7 +1110,7 @@ fun CappuccinoScreen(
                           placeholder =
                             "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…",
                           disabledPlaceholder =
-                            if (loadingBody)
+                            if (loadingBody || state.connection == ConnectionState.Connected)
                               "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…"
                             else
                               (session as? SessionStatus.Link)?.status?.composerLabel()

@@ -98,16 +98,19 @@ internal fun ConnectedUiState.sessionStatus(selected: AgentRow?): SessionStatus 
     return SessionStatus.Loading
   }
   if (effective != ConnectionStatus.Connected) return SessionStatus.Link(effective)
-  if (!streamLive) return SessionStatus.Link(ConnectionStatus.Connecting)
+  if (!streamLive && selected == null) return SessionStatus.Link(ConnectionStatus.Connecting)
   if (stream.pendingPrompt != null) return SessionStatus.Agent("blocked")
   return SessionStatus.Agent((stream.agentStatus ?: selected?.status)?.lowercase() ?: "unknown")
 }
 
 /** The header badge key for a session status. */
-internal fun SessionStatus.styleKey(): String =
+internal fun SessionStatus.styleKey(selected: AgentRow? = null): String =
   when (this) {
-    SessionStatus.Loading -> "connecting"
-    is SessionStatus.Link -> this.status.styleKey
+    SessionStatus.Loading -> selected?.status?.lowercase() ?: "connecting"
+    is SessionStatus.Link ->
+      if (this.status == ConnectionStatus.Connecting && selected != null)
+        selected.status.lowercase()
+      else this.status.styleKey
     is SessionStatus.Agent -> this.key
   }
 

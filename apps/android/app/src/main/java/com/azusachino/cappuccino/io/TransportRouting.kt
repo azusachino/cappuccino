@@ -155,17 +155,21 @@ class MachineRouter<C : Any>(
     while (true) {
       val kind = nextKind(tried, mutation) ?: break
       tried += kind
+      val pathInfo = if (kind == TransportKind.IROH) " (${irohPath()})" else ""
+      val start = clock.nowMs()
       try {
         val result = attempt(kind, block)
+        val elapsed = clock.nowMs() - start
         recordSuccess(kind)
-        ConnectionLogger.log("ROUTER", "Transport $kind request succeeded")
+        ConnectionLogger.log("ROUTER", "Transport $kind$pathInfo request succeeded in ${elapsed}ms")
         return result
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
+        val elapsed = clock.nowMs() - start
         ConnectionLogger.log(
           "ROUTER",
-          "Transport $kind failed: ${error.javaClass.simpleName} (${error.message})",
+          "Transport $kind$pathInfo failed in ${elapsed}ms: ${error.javaClass.simpleName} (${error.message})",
           ConnectionLogLevel.WARN,
         )
         if (!isTransportFailure(error)) {
