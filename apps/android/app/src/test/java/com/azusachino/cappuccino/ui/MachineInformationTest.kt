@@ -73,7 +73,7 @@ class MachineInformationTest {
       ),
     )
     assertEquals(
-      "Not connected",
+      "Offline",
       machineInformationStatus(profile, connected.copy(activeProfileId = "other")),
     )
   }

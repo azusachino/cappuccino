@@ -208,7 +208,7 @@ fun ConversationTurnRow(
                 time =
                   turn.timestamp
                     ?.takeIf { isLastUserProse }
-                    ?.let { formatShortConversationTime(it, timeZone) },
+                    ?.let { formatConversationDateTime(it, timeZone) },
                 timeDescription =
                   turn.timestamp
                     ?.takeIf { isLastUserProse }
@@ -220,7 +220,7 @@ fun ConversationTurnRow(
               val formattedTime =
                 turn.timestamp
                   ?.takeIf { isLastProse }
-                  ?.let { formatShortConversationTime(it, timeZone) }
+                  ?.let { formatConversationDateTime(it, timeZone) }
               AgentResponseRow(
                 body = {
                   MessageBody(

@@ -34,8 +34,8 @@ sealed interface ConnectionStatus {
   }
 
   data object NotConnected : ConnectionStatus {
-    override val label = "Not connected"
-    override val styleKey = "disconnected"
+    override val label = "Offline"
+    override val styleKey = "offline"
   }
 
   data object Offline : ConnectionStatus {
@@ -122,7 +122,7 @@ internal fun ConnectionStatus.composerLabel(): String =
     ConnectionStatus.Offline -> "Offline"
     ConnectionStatus.ProtocolConflict -> "Protocol conflict"
     ConnectionStatus.Connected,
-    ConnectionStatus.NotConnected -> "Not connected"
+    ConnectionStatus.NotConnected -> "Offline"
   }
 
 /** The row's and sheet's status word for the machine behind [profile]. */

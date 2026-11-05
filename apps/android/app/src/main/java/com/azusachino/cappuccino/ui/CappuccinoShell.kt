@@ -1098,7 +1098,14 @@ fun CappuccinoScreen(
                           thinkingLevel = state.sessionStats?.thinkingLevel,
                           stats = state.sessionStats,
                           placeholder =
-                            "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…",
+                            when {
+                              state.connection is ConnectionState.Connecting ||
+                                state.connection is ConnectionState.Recovering -> "Connecting…"
+                              !state.canMutate || state.connection != ConnectionState.Connected ->
+                                "Offline"
+                              else ->
+                                "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…"
+                            },
                           enabled =
                             state.connection == ConnectionState.Connected &&
                               state.canMutate &&
@@ -1271,20 +1278,21 @@ fun CappuccinoScreen(
                               maxLines = 1,
                               overflow = TextOverflow.Ellipsis,
                             )
+                            val transportBadgeText =
+                              if (machine.connection == ConnectionState.Connected) {
+                                when (state.machineBadges[profile.id]) {
+                                  com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
+                                    "iroh direct"
+                                  com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
+                                    "iroh relayed"
+                                  com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
+                                    if (profile.endpoint.iroh != null) "tailnet (fallback)"
+                                    else "tailnet"
+                                  else -> null
+                                }
+                              } else null
                             val statusSubtitle =
-                              listOfNotNull(
-                                  machine.statusLabel(),
-                                  when (state.machineBadges[profile.id]) {
-                                    com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
-                                      "iroh direct"
-                                    com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
-                                      "iroh relayed"
-                                    com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
-                                      if (profile.endpoint.iroh != null) "tailnet (fallback)"
-                                      else "tailnet"
-                                    else -> null
-                                  },
-                                )
+                              listOfNotNull(machine.statusLabel(), transportBadgeText)
                                 .joinToString(" · ")
                             Text(
                               statusSubtitle,

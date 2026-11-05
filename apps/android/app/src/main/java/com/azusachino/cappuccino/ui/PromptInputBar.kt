@@ -218,7 +218,7 @@ fun PromptInputBar(
         text = { Text(slashCommandWarning(command)) },
         confirmButton = {
           TextButton(
-            enabled = !pending,
+            enabled = enabled && !pending,
             onClick = {
               val textToSend =
                 if (input.isNotBlank() && slashCommand(input) == command) input else command
@@ -338,7 +338,7 @@ fun PromptInputBar(
                 .focusRequester(focusRequester)
                 .onFocusChanged { isFocused = it.isFocused }
                 .testTag("promptInput"),
-            enabled = !pending,
+            enabled = enabled && !pending,
             maxLines = 6,
             textStyle =
               MaterialTheme.typography.bodyMedium.copy(color = colors.text, lineHeight = 20.sp),
@@ -607,44 +607,47 @@ fun PromptInputBar(
             }
           }
 
-          Spacer(Modifier.width(6.dp))
+          if (thinkingLevel != null) {
+            Spacer(Modifier.width(6.dp))
 
-          // Effort / Thinking pill
-          Box {
-            Surface(
-              shape = RoundedCornerShape(8.dp),
-              color = colors.card2.copy(alpha = 0.7f),
-              modifier = Modifier.clickable { effortMenuOpen = true },
-            ) {
-              Row(
-                Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            // Effort / Thinking pill
+            Box {
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = colors.card2.copy(alpha = 0.7f),
+                modifier = Modifier.clickable { effortMenuOpen = true },
               ) {
-                Text(
-                  thinkingLevel ?: "High",
-                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                  color = colors.text,
-                  maxLines = 1,
-                )
-                Icon(
-                  painterResource(R.drawable.ic_expand_more),
-                  contentDescription = null,
-                  modifier = Modifier.size(12.dp),
-                  tint = colors.muted,
-                )
+                Row(
+                  Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                  Text(
+                    thinkingLevel,
+                    style =
+                      MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    color = colors.text,
+                    maxLines = 1,
+                  )
+                  Icon(
+                    painterResource(R.drawable.ic_expand_more),
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = colors.muted,
+                  )
+                }
               }
-            }
-            DropdownMenu(
-              expanded = effortMenuOpen,
-              onDismissRequest = { effortMenuOpen = false },
-              properties = PopupProperties(focusable = false),
-            ) {
-              listOf("Off", "Low", "Medium", "High").forEach { level ->
-                DropdownMenuItem(
-                  text = { Text(level, style = MaterialTheme.typography.bodySmall) },
-                  onClick = { effortMenuOpen = false },
-                )
+              DropdownMenu(
+                expanded = effortMenuOpen,
+                onDismissRequest = { effortMenuOpen = false },
+                properties = PopupProperties(focusable = false),
+              ) {
+                listOf("Off", "Low", "Medium", "High").forEach { level ->
+                  DropdownMenuItem(
+                    text = { Text(level, style = MaterialTheme.typography.bodySmall) },
+                    onClick = { effortMenuOpen = false },
+                  )
+                }
               }
             }
           }

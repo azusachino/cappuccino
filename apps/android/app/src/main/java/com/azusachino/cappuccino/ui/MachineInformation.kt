@@ -490,11 +490,15 @@ internal fun MachineInformation(
           MachineDivider()
           val currentBadge = state.machineBadges[profile.id]
           val (activeText, activeColor) =
-            when (currentBadge) {
-              TransportBadge.TAILNET -> "Tailnet fallback" to colors.warn
-              TransportBadge.IROH_DIRECT -> "iroh direct (default)" to colors.ok
-              TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
-              else -> if (current) "Connected" to colors.ok else status.label to colors.muted
+            if (connection != ConnectionState.Connected) {
+              "None (${status.label})" to colors.muted
+            } else {
+              when (currentBadge) {
+                TransportBadge.TAILNET -> "Tailnet fallback" to colors.warn
+                TransportBadge.IROH_DIRECT -> "iroh direct (default)" to colors.ok
+                TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
+                else -> if (current) "Connected" to colors.ok else status.label to colors.muted
+              }
             }
           MachineDetailRow(
             "Active route",
@@ -524,10 +528,14 @@ internal fun MachineInformation(
           MachineDivider()
           val currentBadge = state.machineBadges[profile.id]
           val (activeText, activeColor) =
-            when (currentBadge) {
-              TransportBadge.IROH_DIRECT -> "iroh direct (default)" to colors.ok
-              TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
-              else -> if (current) "Connected" to colors.ok else status.label to colors.muted
+            if (connection != ConnectionState.Connected) {
+              "None (${status.label})" to colors.muted
+            } else {
+              when (currentBadge) {
+                TransportBadge.IROH_DIRECT -> "iroh direct (default)" to colors.ok
+                TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
+                else -> if (current) "Connected" to colors.ok else status.label to colors.muted
+              }
             }
           MachineDetailRow(
             "Active route",

@@ -167,6 +167,6 @@ class ConnectionStatusTest {
     assertEquals("Connecting…", ConnectionStatus.Connecting.composerLabel())
     assertEquals("Reconnecting…", ConnectionStatus.Reconnecting(1).composerLabel())
     assertEquals("Offline", ConnectionStatus.Offline.composerLabel())
-    assertEquals("Not connected", ConnectionStatus.NotConnected.composerLabel())
+    assertEquals("Offline", ConnectionStatus.NotConnected.composerLabel())
   }
 }
