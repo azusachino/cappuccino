@@ -179,6 +179,7 @@ fun PromptInputBar(
   enabled: Boolean,
   modifier: Modifier = Modifier,
   placeholder: String = "Message agent…",
+  disabledPlaceholder: String = "Not connected",
   onStop: (() -> Unit)? = null,
   model: String? = null,
   agent: String? = null,
@@ -347,7 +348,7 @@ fun PromptInputBar(
               Box {
                 if (input.isEmpty())
                   Text(
-                    if (enabled) placeholder else "Not connected",
+                    if (enabled) placeholder else disabledPlaceholder,
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.faint,
                   )

@@ -272,8 +272,17 @@ fun CappuccinoScreen(
     if (selected != null && actions.acceptsMutation(state.activeProfileId, selected)) send(actions)
   }
   val selectedProfile = state.profiles.firstOrNull { it.id == state.activeProfileId }
+  // The machine is connected but this session's stream has not attached yet: show loading, not
+  // "Unknown" or "Not connected".
+  val sessionLoading =
+    state.offlineSavedAt == null &&
+      state.connection == ConnectionState.Connected &&
+      !state.streamLive &&
+      state.conversationTurns.isEmpty() &&
+      state.stream.entries.isEmpty()
   val selectedStatus =
-    if (!state.streamLive) "unknown"
+    if (sessionLoading) "connecting"
+    else if (!state.streamLive) "unknown"
     else if (state.stream.pendingPrompt != null) "blocked"
     else (state.stream.agentStatus ?: selected?.status)?.lowercase()
   val selectedIdle = selectedStatus !in setOf("working", "blocked")
@@ -981,7 +990,26 @@ fun CappuccinoScreen(
                           )
                       }
                     }
-                    if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty()) {
+                    if (sessionLoading) {
+                      Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center,
+                      ) {
+                        Column(
+                          horizontalAlignment = Alignment.CenterHorizontally,
+                          verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                          CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                          Text(
+                            "Loading conversation…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.appColors.faint,
+                          )
+                        }
+                      }
+                    } else if (
+                      state.stream.entries.isEmpty() && state.conversationTurns.isEmpty()
+                    ) {
                       Box(
                         modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
                         contentAlignment = Alignment.Center,
@@ -1087,6 +1115,8 @@ fun CappuccinoScreen(
                           stats = state.sessionStats,
                           placeholder =
                             "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…",
+                          disabledPlaceholder =
+                            if (sessionLoading) "Connecting…" else "Not connected",
                           enabled =
                             state.connection == ConnectionState.Connected &&
                               state.canMutate &&
