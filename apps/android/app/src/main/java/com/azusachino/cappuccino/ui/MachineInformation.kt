@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -355,6 +356,7 @@ internal fun MachineInformation(
   state: ConnectedUiState,
   onDismiss: () -> Unit,
   onRename: () -> Unit,
+  onReconnect: (() -> Unit)? = null,
 ) {
   val colors = MaterialTheme.appColors
   val context = LocalContext.current
@@ -399,6 +401,34 @@ internal fun MachineInformation(
         )
         Spacer(Modifier.width(12.dp))
         StatusPill(text = status.label, color = statusColor)
+      }
+
+      if (connection != ConnectionState.Connected && onReconnect != null) {
+        val machineConn = state.machineConnection(profile)
+        val isBusy =
+          machineConn.busy ||
+            machineConn.connection == ConnectionState.Connecting ||
+            (state.activeProfileId == profile.id &&
+              (state.busy ||
+                state.connection is ConnectionState.Connecting ||
+                state.connection is ConnectionState.Recovering))
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+          horizontalArrangement = Arrangement.End,
+        ) {
+          FilledTonalButton(
+            onClick = onReconnect,
+            enabled = !isBusy,
+          ) {
+            Icon(
+              painterResource(com.azusachino.cappuccino.R.drawable.ic_refresh),
+              contentDescription = null,
+              modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(if (isBusy) "Connecting…" else "Reconnect")
+          }
+        }
       }
 
       if (connection is ConnectionState.Error) {

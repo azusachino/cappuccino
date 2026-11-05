@@ -443,6 +443,7 @@ fun CappuccinoScreen(
         machineNameDraft = detailsProfile.label
         namingMachine = true
       },
+      onReconnect = { actions.reconnectProfile(detailsProfile.id) },
     )
   }
 
@@ -648,11 +649,16 @@ fun CappuccinoScreen(
                       }
                     }
                   }
-                  if (
+                  val isConnecting =
                     state.offlineSavedAt == null &&
                       (state.connection is ConnectionState.Connecting ||
-                        state.connection is ConnectionState.Recovering)
-                  ) {
+                        state.connection is ConnectionState.Recovering ||
+                        currentProfile?.let {
+                          val conn = state.machineConnection(it)
+                          conn.busy || conn.connection is ConnectionState.Connecting
+                        } == true ||
+                        state.busy)
+                  if (isConnecting) {
                     LinearProgressIndicator(
                       modifier = Modifier.fillMaxWidth().height(2.dp),
                       color = MaterialTheme.appColors.warn,

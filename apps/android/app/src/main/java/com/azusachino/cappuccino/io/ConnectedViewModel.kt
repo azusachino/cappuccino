@@ -262,13 +262,22 @@ internal constructor(
   fun handleNetworkRegained() {
     ConnectionLogger.log("RECOVERY", "Network regained notification received")
     if (!foreground) return
+    if (pendingRestore && savedStateHandle.get<String>(SELECTED_PROFILE) != null) {
+      ConnectionLogger.log("RECOVERY", "Network regained; retrying restoreSelection")
+      activeProfile()?.let { profile ->
+        viewModelScope.launch { redialTransport?.invoke(profile.endpoint) }
+      }
+      restoreSelection()
+      return
+    }
     val selected = mutableState.value.selectedAgent
     val profile =
       mutableState.value.profiles.firstOrNull { it.id == mutableState.value.activeProfileId }
     if (selected != null && profile != null) {
       if (mutableState.value.connection != ConnectionState.Connected) {
         ConnectionLogger.log("RECOVERY", "Auto-reconnecting stream to ${selected.label}")
-        openStream(profile, selected)
+        viewModelScope.launch { redialTransport?.invoke(profile.endpoint) }
+        openStream(profile, selected, allowLegacyInitial = selected.nativeSessionRef == null)
       }
     } else {
       ConnectionLogger.log("RECOVERY", "Refreshing machines after network recovery")
@@ -654,6 +663,19 @@ internal constructor(
     profile.label.takeUnless { it == "iroh.invalid" } ?: "The machine"
 
   override fun reconnectProfile(id: String) {
+    if (id == mutableState.value.activeProfileId) {
+      mutableState.value =
+        mutableState.value.copy(
+          connection = ConnectionState.Connecting,
+          busy = true,
+        )
+      val profile = mutableState.value.profiles.firstOrNull { it.id == id }
+      val selected = mutableState.value.selectedAgent
+      if (profile != null && selected != null && foreground) {
+        cancelOwnedWork()
+        openStream(profile, selected, allowLegacyInitial = selected.nativeSessionRef == null)
+      }
+    }
     refreshProfile(id, background = false, redial = true)
   }
 
