@@ -327,6 +327,16 @@ class MachineRouterTest {
   }
 
   @Test
+  fun aCooldownThatTriesTailnetFirstStillReportsTheIrohFailure() = runTest {
+    val clock = FakeClock()
+    val router = MachineRouter(both, clock, RecordingIroh())
+    runCatching { router.request { client -> throw IOException("$client down") } }
+    clock.now = 1_000L // iroh is cooling: tailnet is tried first, then iroh
+    val error = runCatching { router.request { client -> throw IOException("$client down") } }
+    assertEquals("iroh down", error.exceptionOrNull()?.message)
+  }
+
+  @Test
   fun whenEveryTransportFailsTheFirstRouteErrorIsThrown() = runTest {
     val router = MachineRouter(both, FakeClock(), RecordingIroh())
     val error = runCatching {

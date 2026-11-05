@@ -148,9 +148,10 @@ class MachineRouter<C : Any>(
    */
   suspend fun <T> request(mutation: Boolean = false, block: suspend (C) -> T): T {
     val tried = mutableSetOf<TransportKind>()
-    // The first route's failure is the one the owner chose and can act on (iroh before tailnet);
-    // a fallback failure such as a tailnet DNS miss must not replace it.
-    var firstError: Exception? = null
+    // Each route keeps its own failure. What the owner sees is the failure of the route ranked
+    // highest in [order] (iroh before tailnet), whatever order they were tried in: a cooldown may
+    // try tailnet first, and that must not decide which failure is reported.
+    val failures = mutableMapOf<TransportKind, Exception>()
     while (true) {
       val kind = nextKind(tried, mutation) ?: break
       tried += kind
@@ -179,10 +180,11 @@ class MachineRouter<C : Any>(
             "The connection failed after the change was sent; it may have been applied. Check before retrying."
           )
         }
-        if (firstError == null) firstError = error
+        failures.putIfAbsent(kind, error)
       }
     }
-    throw firstError ?: IllegalStateException("Machine has no transport")
+    throw order.firstNotNullOfOrNull { failures[it] }
+      ?: IllegalStateException("Machine has no transport")
   }
 
   /**

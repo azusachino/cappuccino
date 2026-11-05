@@ -288,7 +288,7 @@ fun CappuccinoScreen(
           state.connection == ConnectionState.Disconnected
       )
         "offline"
-      else "unknown"
+      else if (state.connection == ConnectionState.Recovering) "reconnecting" else "unknown"
     } else if (state.stream.pendingPrompt != null) "blocked"
     else (state.stream.agentStatus ?: selected?.status)?.lowercase()
   val selectedIdle = selectedStatus !in setOf("working", "blocked")
