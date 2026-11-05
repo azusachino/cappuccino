@@ -280,17 +280,22 @@ fun CappuccinoScreen(
       !state.streamLive &&
       state.conversationTurns.isEmpty() &&
       state.stream.entries.isEmpty()
+  // One connection vocabulary (see connectionStatusKey): a session that is not live shows the
+  // connection it is waiting on, never a guess.
+  val loadingBody =
+    sessionLoading ||
+      (state.offlineSavedAt == null &&
+        state.conversationTurns.isEmpty() &&
+        state.stream.entries.isEmpty() &&
+        (state.connection == ConnectionState.Connecting ||
+          state.connection == ConnectionState.Recovering))
   val selectedStatus =
-    if (sessionLoading) "connecting"
-    else if (!state.streamLive) {
-      if (
-        state.connection is ConnectionState.Error ||
-          state.connection == ConnectionState.Disconnected
-      )
-        "offline"
-      else if (state.connection == ConnectionState.Recovering) "reconnecting" else "unknown"
-    } else if (state.stream.pendingPrompt != null) "blocked"
-    else (state.stream.agentStatus ?: selected?.status)?.lowercase()
+    when {
+      !state.streamLive || state.connection != ConnectionState.Connected ->
+        connectionStatusKey(state.connection)
+      state.stream.pendingPrompt != null -> "blocked"
+      else -> (state.stream.agentStatus ?: selected?.status)?.lowercase()
+    }
   val selectedIdle = selectedStatus !in setOf("working", "blocked")
   val agentControl =
     state.offlineSavedAt == null &&
@@ -996,7 +1001,7 @@ fun CappuccinoScreen(
                           )
                       }
                     }
-                    if (sessionLoading) {
+                    if (loadingBody) {
                       Box(
                         modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
                         contentAlignment = Alignment.Center,
@@ -1127,8 +1132,7 @@ fun CappuccinoScreen(
                           disabledPlaceholder =
                             if (sessionLoading)
                               "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…"
-                            else if (state.connection is ConnectionState.Error) "Offline"
-                            else "Not connected",
+                            else composerDisabledLabel(state.connection),
                           enabled =
                             state.connection == ConnectionState.Connected &&
                               state.canMutate &&
@@ -1773,5 +1777,24 @@ private fun ConnectionState.statusText(): String =
     ConnectionState.Connecting -> "Connecting"
     ConnectionState.Connected -> "Connected"
     ConnectionState.Recovering -> "Reconnecting"
-    is ConnectionState.Error -> "Connection error"
+    is ConnectionState.Error -> "Offline"
+  }
+
+/** The badge key for a session that is not live, from the machine's connection. */
+private fun connectionStatusKey(connection: ConnectionState): String =
+  when (connection) {
+    ConnectionState.Connected,
+    ConnectionState.Connecting -> "connecting"
+    ConnectionState.Recovering -> "reconnecting"
+    ConnectionState.Disconnected -> "disconnected"
+    is ConnectionState.Error -> "offline"
+  }
+
+/** The composer's placeholder while it is disabled, from the machine's connection. */
+private fun composerDisabledLabel(connection: ConnectionState): String =
+  when (connection) {
+    ConnectionState.Connecting -> "Connecting…"
+    ConnectionState.Recovering -> "Reconnecting…"
+    is ConnectionState.Error -> "Offline"
+    else -> "Not connected"
   }

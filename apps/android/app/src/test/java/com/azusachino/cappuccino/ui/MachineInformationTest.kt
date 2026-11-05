@@ -66,7 +66,7 @@ class MachineInformationTest {
       ),
     )
     assertEquals(
-      "Needs attention",
+      "Offline",
       machineInformationStatus(
         profile,
         connected.copy(connection = ConnectionState.Error("Prompt failed")),

@@ -71,7 +71,7 @@ internal fun machineInformationStatus(profile: MachineProfile, state: ConnectedU
     ConnectionState.Disconnected -> "Not connected"
     is ConnectionState.Error ->
       if (connection.message.startsWith("Incompatible bridge protocol")) "Protocol conflict"
-      else "Needs attention"
+      else "Offline"
   }
 
 internal fun machineInformationWarnings(
@@ -99,7 +99,7 @@ internal fun connectionStatusColor(status: String, colors: AppColors): Color =
     "Connecting",
     "Reconnecting" -> colors.warn
     "Protocol conflict",
-    "Needs attention" -> colors.err
+    "Offline" -> colors.err
     else -> colors.muted
   }
 
