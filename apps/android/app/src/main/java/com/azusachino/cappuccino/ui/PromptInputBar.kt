@@ -22,12 +22,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -80,24 +82,7 @@ fun PromptCardView(
         Modifier.padding(16.dp).heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text(text = prompt.title, style = MaterialTheme.typography.titleMedium)
-        Surface(
-          shape = CircleShape,
-          color = MaterialTheme.colorScheme.secondaryContainer,
-        ) {
-          Text(
-            text = prompt.type.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-          )
-        }
-      }
+      Text(text = prompt.title, style = MaterialTheme.typography.titleMedium)
 
       prompt.message?.let { msg ->
         Text(
@@ -105,6 +90,26 @@ fun PromptCardView(
           style = MaterialTheme.typography.bodyMedium,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+      }
+
+      // The exact command the agent wants to run. Shown in full so an approval is never blind.
+      prompt.command?.let { command ->
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = MaterialTheme.colorScheme.surfaceVariant,
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Text(
+            text = command,
+            style =
+              MaterialTheme.typography.bodyMedium.copy(
+                fontFamily = JetBrainsMono,
+                lineHeight = 20.sp,
+              ),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+          )
+        }
       }
 
       // Display only: the review's answers are shown here and never sent back by the phone.
@@ -127,28 +132,22 @@ fun PromptCardView(
           verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
           options.forEach { option ->
-            Surface(
-              shape = RoundedCornerShape(12.dp),
-              color = MaterialTheme.colorScheme.surfaceVariant,
-              modifier =
-                Modifier.fillMaxWidth().clickable(enabled = enabled) { onSelectOption(option.id) },
-            ) {
-              Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+            val onClick = { onSelectOption(option.id) }
+            if (option.id == prompt.defaultOptionId) {
+              Button(
+                onClick = onClick,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
               ) {
-                Text(
-                  text = option.label,
-                  style = MaterialTheme.typography.bodyMedium,
-                  fontWeight = FontWeight.Medium,
-                )
-                option.description?.let { desc ->
-                  Text(
-                    text = desc,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
-                }
+                Text(text = option.label, style = MaterialTheme.typography.labelLarge)
+              }
+            } else {
+              OutlinedButton(
+                onClick = onClick,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+              ) {
+                Text(text = option.label, style = MaterialTheme.typography.labelLarge)
               }
             }
           }
