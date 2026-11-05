@@ -525,7 +525,9 @@ internal constructor(
               addError = error.message ?: "Connection failed",
               connection =
                 if (mutableState.value.activeProfileId == null)
-                  ConnectionState.Error(error.message ?: "Connection failed")
+                  ConnectionState.Error(
+                    friendlyTransportMessage(error.message) ?: "Connection failed"
+                  )
                 else mutableState.value.connection,
               busy = false,
             )
@@ -617,15 +619,16 @@ internal constructor(
       }
   }
 
-  /** A user refresh joins the attempt already running for [id] instead of starting another. */
+  /**
+   * A user refresh always starts a fresh attempt: the one running (if any) is cancelled, and the
+   * machine shows Connecting at once, so a tap is never silent.
+   */
   override fun refreshProfile(id: String) {
-    if (machineJobs[id]?.isActive == true) return
     refreshProfile(id, background = false)
   }
 
   /** Reconnect now: like a refresh, but the attempt first drops the machine's cached transport. */
   override fun reconnectProfile(id: String) {
-    if (machineJobs[id]?.isActive == true) return
     refreshProfile(id, background = false, redial = true)
   }
 
@@ -720,7 +723,8 @@ internal constructor(
     } catch (error: Exception) {
       if (error is kotlinx.coroutines.CancellationException) throw error
       if (machineToken != machineEpochs[profile.id] || profile.id in disconnectedMachines) return
-      val failed = ConnectionState.Error(error.message ?: "Bridge unavailable")
+      val failed =
+        ConnectionState.Error(friendlyTransportMessage(error.message) ?: "Bridge unavailable")
       mutableState.value =
         mutableState.value.copy(
           machines = mutableState.value.machines + (profile.id to MachineConnection(failed))
@@ -1380,7 +1384,10 @@ internal constructor(
           if (error is ProtocolException || error is SSLException || error is BridgeStreamError) {
             mutableState.value =
               mutableState.value.copy(
-                connection = ConnectionState.Error(error.message ?: "Bridge protocol or TLS error")
+                connection =
+                  ConnectionState.Error(
+                    friendlyTransportMessage(error.message) ?: "Bridge protocol or TLS error"
+                  )
               )
             break
           }
@@ -1393,7 +1400,8 @@ internal constructor(
             )
             mutableState.value =
               mutableState.value.copy(
-                connection = ConnectionState.Error(error.message ?: "Stream failed")
+                connection =
+                  ConnectionState.Error(friendlyTransportMessage(error.message) ?: "Stream failed")
               )
             break
           }

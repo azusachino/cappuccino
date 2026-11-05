@@ -35,6 +35,10 @@ fun interface MonotonicClock {
  */
 const val IROH_REBUILD_AFTER_FAILURES = 3
 
+/** After an iroh failure, iroh is skipped for this long; each further failure doubles it. */
+const val IROH_COOLDOWN_MIN_MS = 5_000L
+const val IROH_COOLDOWN_MAX_MS = 60_000L
+
 /** A direct⇄relayed change must hold this long before the badge and poll cadence follow it. */
 const val BADGE_HOLD_DOWN_MS = 10_000L
 
@@ -128,6 +132,8 @@ class MachineRouter<C : Any>(
   private val order = TransportKind.entries.filter { it in clients }
   private var sticky: TransportKind? = null
   private var irohFailures = 0
+  private var irohCooldownMs = 0L
+  private var irohCooldownUntil = 0L
   private var inFlight: Deferred<*>? = null
   private var redialRequested = false
   private val holdDown = BadgeHoldDown(clock)
@@ -142,9 +148,11 @@ class MachineRouter<C : Any>(
    */
   suspend fun <T> request(mutation: Boolean = false, block: suspend (C) -> T): T {
     val tried = mutableSetOf<TransportKind>()
-    var lastError: Exception? = null
+    // The first route's failure is the one the owner chose and can act on (iroh before tailnet);
+    // a fallback failure such as a tailnet DNS miss must not replace it.
+    var firstError: Exception? = null
     while (true) {
-      val kind = nextKind(tried) ?: break
+      val kind = nextKind(tried, mutation) ?: break
       tried += kind
       try {
         val result = attempt(kind, block)
@@ -171,10 +179,10 @@ class MachineRouter<C : Any>(
             "The connection failed after the change was sent; it may have been applied. Check before retrying."
           )
         }
-        lastError = error
+        if (firstError == null) firstError = error
       }
     }
-    throw lastError ?: IllegalStateException("Machine has no transport")
+    throw firstError ?: IllegalStateException("Machine has no transport")
   }
 
   /**
@@ -183,6 +191,9 @@ class MachineRouter<C : Any>(
   fun onNetworkChanged() {
     synchronized(lock) {
       sticky = null
+      // A new network may make iroh work again: its cooldown does not outlive the change.
+      irohCooldownMs = 0L
+      irohCooldownUntil = 0L
       inFlight?.let {
         redialRequested = true
         it.cancel()
@@ -198,6 +209,9 @@ class MachineRouter<C : Any>(
     synchronized(lock) {
       sticky = null
       irohFailures = 0
+      // The owner asked to reconnect now: iroh is tried at once, not after its cooldown.
+      irohCooldownMs = 0L
+      irohCooldownUntil = 0L
     }
     iroh?.dropConnections()
   }
@@ -219,11 +233,20 @@ class MachineRouter<C : Any>(
       holdDown.observe(raw)
     }
 
-  private fun nextKind(tried: Set<TransportKind>): TransportKind? =
+  /**
+   * The next route to try. A route in cooldown is skipped while another untried route exists; when
+   * only cooling routes remain, the first of them is tried so a request is never left with nothing.
+   */
+  private fun nextKind(tried: Set<TransportKind>, mutation: Boolean): TransportKind? =
     synchronized(lock) {
       val sticky = sticky
-      if (sticky != null && sticky !in tried) sticky else order.firstOrNull { it !in tried }
+      if (sticky != null && sticky !in tried) return sticky
+      order.firstOrNull { it !in tried && (mutation || !coolingDown(it)) }
+        ?: order.firstOrNull { it !in tried }
     }
+
+  private fun coolingDown(kind: TransportKind): Boolean =
+    kind == TransportKind.IROH && clock.nowMs() < irohCooldownUntil
 
   private suspend fun <T> attempt(kind: TransportKind, block: suspend (C) -> T): T {
     val client = clients.getValue(kind)
@@ -252,7 +275,11 @@ class MachineRouter<C : Any>(
   private fun recordSuccess(kind: TransportKind) {
     synchronized(lock) {
       sticky = kind
-      if (kind == TransportKind.IROH) irohFailures = 0
+      if (kind == TransportKind.IROH) {
+        irohFailures = 0
+        irohCooldownMs = 0L
+        irohCooldownUntil = 0L
+      }
     }
   }
 
@@ -263,6 +290,10 @@ class MachineRouter<C : Any>(
         if (kind != TransportKind.IROH) {
           false
         } else {
+          irohCooldownMs =
+            if (irohCooldownMs == 0L) IROH_COOLDOWN_MIN_MS
+            else (irohCooldownMs * 2).coerceAtMost(IROH_COOLDOWN_MAX_MS)
+          irohCooldownUntil = clock.nowMs() + irohCooldownMs
           irohFailures += 1
           if (irohFailures >= IROH_REBUILD_AFTER_FAILURES) {
             irohFailures = 0
@@ -282,3 +313,16 @@ class MachineRouter<C : Any>(
     }
   }
 }
+
+/**
+ * Plain wording for the two transport failures a phone meets most. A raw socket or resolver message
+ * says nothing an owner can act on; other messages pass through unchanged.
+ */
+fun friendlyTransportMessage(message: String?): String? =
+  when {
+    message == null -> null
+    message.equals("timeout", ignoreCase = true) ||
+      message.contains("timed out", ignoreCase = true) -> "The Mac did not answer in time"
+    message.contains("Unable to resolve host") -> "The tailnet name does not resolve on this phone"
+    else -> message
+  }

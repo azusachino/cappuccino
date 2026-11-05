@@ -282,8 +282,14 @@ fun CappuccinoScreen(
       state.stream.entries.isEmpty()
   val selectedStatus =
     if (sessionLoading) "connecting"
-    else if (!state.streamLive) "unknown"
-    else if (state.stream.pendingPrompt != null) "blocked"
+    else if (!state.streamLive) {
+      if (
+        state.connection is ConnectionState.Error ||
+          state.connection == ConnectionState.Disconnected
+      )
+        "offline"
+      else "unknown"
+    } else if (state.stream.pendingPrompt != null) "blocked"
     else (state.stream.agentStatus ?: selected?.status)?.lowercase()
   val selectedIdle = selectedStatus !in setOf("working", "blocked")
   val agentControl =
@@ -1008,7 +1014,10 @@ fun CappuccinoScreen(
                         }
                       }
                     } else if (
-                      state.stream.entries.isEmpty() && state.conversationTurns.isEmpty()
+                      // The greeting means "connected, nothing yet"; an error shows only the error.
+                      state.connection == ConnectionState.Connected &&
+                        state.stream.entries.isEmpty() &&
+                        state.conversationTurns.isEmpty()
                     ) {
                       Box(
                         modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
@@ -1116,7 +1125,9 @@ fun CappuccinoScreen(
                           placeholder =
                             "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…",
                           disabledPlaceholder =
-                            if (sessionLoading) "Connecting…" else "Not connected",
+                            if (sessionLoading) "Connecting…"
+                            else if (state.connection is ConnectionState.Error) "Offline"
+                            else "Not connected",
                           enabled =
                             state.connection == ConnectionState.Connected &&
                               state.canMutate &&

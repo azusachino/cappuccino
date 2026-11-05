@@ -113,6 +113,7 @@ internal fun agentStatusStyle(status: String, dark: Boolean): AgentStatusStyle {
       "idle" -> (if (dark) Color(0xFFE3C48E) else Color(0xFF8F5D26)) to "Idle"
       "done" -> (if (dark) Color(0xFFA3D9B0) else Color(0xFF33774A)) to "Done"
       "blocked" -> (if (dark) Color(0xFFF09CA8) else Color(0xFFB3424E)) to "Blocked"
+      "offline" -> (if (dark) Color(0xFF4A3439) else Color(0xFFF3DCE0)) to "Offline"
       "connecting" -> (if (dark) Color(0xFF35404F) else Color(0xFFDDE2EA)) to "Connecting"
       else -> (if (dark) Color(0xFF35404F) else Color(0xFFDDE2EA)) to "Unknown"
     }

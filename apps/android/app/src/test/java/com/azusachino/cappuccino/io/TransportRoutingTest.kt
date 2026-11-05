@@ -262,13 +262,79 @@ class MachineRouterTest {
   }
 
   @Test
-  fun whenEveryTransportFailsTheLastErrorIsThrown() = runTest {
+  fun irohInCooldownIsSkippedWhileTailnetIsUntriedThenProbedAgainAfterIt() = runTest {
+    val clock = FakeClock()
+    val router = MachineRouter(both, clock, RecordingIroh())
+    val calls = mutableListOf<String>()
+    // Both fail once, so nothing is sticky and iroh enters its first 5s cooldown.
+    runCatching {
+      router.request { client ->
+        calls += client
+        throw IOException("$client down")
+      }
+    }
+    assertEquals(listOf("iroh", "tailnet"), calls)
+
+    calls.clear()
+    clock.now = 1_000L
+    assertEquals(
+      "tailnet",
+      router.request { client ->
+        calls += client
+        client
+      },
+    )
+    assertEquals("iroh skipped during its cooldown", listOf("tailnet"), calls)
+
+    calls.clear()
+    clock.now = 6_000L
+    router.request { client ->
+      calls += client
+      client
+    }
+    assertEquals(
+      "sticky tailnet keeps serving; iroh is not probed while it works",
+      listOf("tailnet"),
+      calls,
+    )
+  }
+
+  @Test
+  fun cooldownDoublesPerFailureAndManualRedialSkipsIt() = runTest {
+    val clock = FakeClock()
+    val router = MachineRouter(both, clock, RecordingIroh())
+    suspend fun failBoth() = runCatching {
+      router.request { client -> throw IOException("$client down") }
+    }
+    failBoth() // 5s cooldown from t=0
+    clock.now = 4_000L
+    failBoth() // still cooling; iroh is the only untried route left, so it is tried; cooldown 10s
+    val calls = mutableListOf<String>()
+    clock.now = 13_000L // 9s after the second failure: still inside the 10s window
+    router.request { client ->
+      calls += client
+      client
+    }
+    assertEquals("doubled cooldown still skips iroh", listOf("tailnet"), calls)
+
+    router.redial()
+    calls.clear()
+    router.request { client ->
+      calls += client
+      client
+    }
+    assertEquals("manual redial probes iroh at once", listOf("iroh"), calls)
+  }
+
+  @Test
+  fun whenEveryTransportFailsTheFirstRouteErrorIsThrown() = runTest {
     val router = MachineRouter(both, FakeClock(), RecordingIroh())
     val error = runCatching {
       router.request { client -> throw IOException("$client down") }
     }
       .exceptionOrNull()
-    assertEquals("tailnet down", error?.message)
+    // The fallback's failure (e.g. a tailnet DNS miss) must not hide the route the owner chose.
+    assertEquals("iroh down", error?.message)
   }
 
   @Test
