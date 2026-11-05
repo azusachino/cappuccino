@@ -1125,7 +1125,8 @@ fun CappuccinoScreen(
                           placeholder =
                             "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…",
                           disabledPlaceholder =
-                            if (sessionLoading) "Connecting…"
+                            if (sessionLoading)
+                              "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…"
                             else if (state.connection is ConnectionState.Error) "Offline"
                             else "Not connected",
                           enabled =
