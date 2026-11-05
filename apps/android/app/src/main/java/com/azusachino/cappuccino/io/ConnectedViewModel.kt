@@ -292,8 +292,28 @@ internal constructor(
       try {
         val (saved, bytes) =
           withContext(offlineDispatcher) {
-            history.list().map {
-              SavedConversationInfo(it.agent, it.savedAt, it.history.turns.size, it.conversationId)
+            history.list().map { saved ->
+              val preview =
+                saved.history.turns
+                  .firstOrNull { turn ->
+                    turn.role.equals("user", ignoreCase = true) &&
+                      (!turn.text.isNullOrBlank() ||
+                        turn.parts.any { p -> p is ConversationPart.Text })
+                  }
+                  ?.let { turn ->
+                    (turn.text
+                        ?: turn.parts.filterIsInstance<ConversationPart.Text>().firstOrNull()?.text)
+                      ?.trim()
+                      ?.replace('\n', ' ')
+                      ?.take(60)
+                  }
+              SavedConversationInfo(
+                saved.agent,
+                saved.savedAt,
+                saved.history.turns.size,
+                saved.conversationId,
+                preview,
+              )
             } to history.bytes()
           }
         mutableState.value =

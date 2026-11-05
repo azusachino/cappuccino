@@ -37,10 +37,10 @@ fun formatConversationDateTime(
     val zonedDateTime = Instant.parse(timestamp).atZone(zone)
     val nowDate = now.atZone(zone).toLocalDate()
     val turnDate = zonedDateTime.toLocalDate()
-    when {
-      turnDate == nowDate -> conversationShortTimeFormat.format(zonedDateTime)
-      turnDate.year == nowDate.year -> conversationDateTimeFormat.format(zonedDateTime)
-      else -> conversationFullDateTimeFormat.format(zonedDateTime)
+    if (turnDate.year == nowDate.year) {
+      conversationDateTimeFormat.format(zonedDateTime)
+    } else {
+      conversationFullDateTimeFormat.format(zonedDateTime)
     }
   } catch (_: Exception) {
     null

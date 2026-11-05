@@ -2,6 +2,7 @@ package com.azusachino.cappuccino.io
 
 import androidx.lifecycle.SavedStateHandle
 import com.azusachino.cappuccino.core.AgentRow
+import com.azusachino.cappuccino.core.ConversationPart
 import com.azusachino.cappuccino.core.ConversationTurn
 import com.azusachino.cappuccino.core.Endpoint
 import com.azusachino.cappuccino.core.MutationBinding
@@ -1627,22 +1628,31 @@ class ConnectedViewModelTest {
     runTest(dispatcher) {
       val directory = offlineFolder.newFolder("history")
       val cache = OfflineConversations(directory)
+      val userTurn =
+        ConversationTurn(
+          "user-1",
+          "user",
+          null,
+          "Hello agent",
+          listOf(ConversationPart.Text("Hello agent")),
+        )
       val turn = ConversationTurn("saved", "assistant", null, "Saved prose", emptyList())
       cache.save(
         machine,
         agent.copy(status = "working", working = true),
-        com.azusachino.cappuccino.core.boundedConversation(listOf(turn)),
+        com.azusachino.cappuccino.core.boundedConversation(listOf(userTurn, turn)),
         savedId,
       )
       viewModel = offlineViewModel(cache)
       advanceUntilIdle()
       assertEquals(1, viewModel.state.value.savedConversations.size)
+      assertEquals("Hello agent", viewModel.state.value.savedConversations.first().preview)
       viewModel.setForeground(false)
       viewModel = offlineViewModel(OfflineConversations(directory))
       viewModel.openSavedConversation(machine, savedId)
       advanceUntilIdle()
       val saved = viewModel.state.value
-      assertEquals(listOf(turn), saved.conversationTurns)
+      assertEquals(listOf(userTurn, turn), saved.conversationTurns)
       assertEquals("offline_snapshot", saved.conversationSource)
       assertEquals("unknown", saved.selectedAgent?.status)
       assertEquals(false, saved.selectedAgent?.working)
