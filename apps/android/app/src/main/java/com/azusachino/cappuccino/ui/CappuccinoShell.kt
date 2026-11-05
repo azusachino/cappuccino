@@ -95,7 +95,6 @@ import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ConnectionState
-import com.azusachino.cappuccino.io.MachineConnection
 import com.azusachino.cappuccino.io.agentDraftKey
 import com.azusachino.cappuccino.io.agentSendKey
 import com.azusachino.cappuccino.io.canMutate
@@ -272,30 +271,11 @@ fun CappuccinoScreen(
     if (selected != null && actions.acceptsMutation(state.activeProfileId, selected)) send(actions)
   }
   val selectedProfile = state.profiles.firstOrNull { it.id == state.activeProfileId }
-  // The machine is connected but this session's stream has not attached yet: show loading, not
-  // "Unknown" or "Not connected".
-  val sessionLoading =
-    state.offlineSavedAt == null &&
-      state.connection == ConnectionState.Connected &&
-      !state.streamLive &&
-      state.conversationTurns.isEmpty() &&
-      state.stream.entries.isEmpty()
-  // One connection vocabulary (see connectionStatusKey): a session that is not live shows the
-  // connection it is waiting on, never a guess.
-  val loadingBody =
-    sessionLoading ||
-      (state.offlineSavedAt == null &&
-        state.conversationTurns.isEmpty() &&
-        state.stream.entries.isEmpty() &&
-        (state.connection == ConnectionState.Connecting ||
-          state.connection == ConnectionState.Recovering))
-  val selectedStatus =
-    when {
-      !state.streamLive || state.connection != ConnectionState.Connected ->
-        connectionStatusKey(state.connection)
-      state.stream.pendingPrompt != null -> "blocked"
-      else -> (state.stream.agentStatus ?: selected?.status)?.lowercase()
-    }
+  // The session status decides the header badge, the loading body and the composer; see
+  // sessionStatus in ConnectionStatus.kt.
+  val session = state.sessionStatus(selected)
+  val loadingBody = session is SessionStatus.Loading
+  val selectedStatus = session.styleKey()
   val selectedIdle = selectedStatus !in setOf("working", "blocked")
   val agentControl =
     state.offlineSavedAt == null &&
@@ -590,7 +570,7 @@ fun CappuccinoScreen(
                   }
                   val status =
                     agentStatusStyle(
-                      selectedStatus ?: "unknown",
+                      selectedStatus,
                       MaterialTheme.colorScheme.background.luminance() < 0.5f,
                     )
                   Row(
@@ -1130,9 +1110,11 @@ fun CappuccinoScreen(
                           placeholder =
                             "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…",
                           disabledPlaceholder =
-                            if (sessionLoading)
+                            if (loadingBody)
                               "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…"
-                            else composerDisabledLabel(state.connection),
+                            else
+                              (session as? SessionStatus.Link)?.status?.composerLabel()
+                                ?: "Not connected",
                           enabled =
                             state.connection == ConnectionState.Connected &&
                               state.canMutate &&
@@ -1184,7 +1166,7 @@ fun CappuccinoScreen(
                       SettingsConnection(
                         id = profile.id,
                         label = profile.label,
-                        status = conn.statusText(),
+                        status = state.machineStatus(profile).label,
                         bridgeVersion = details?.version,
                         protocol = details?.protocol ?: conflictProto,
                       )
@@ -1764,37 +1746,3 @@ fun CappuccinoScreen(
     )
   }
 }
-
-/** The row's status word; a retry shows which attempt the stream is on. */
-private fun MachineConnection.statusLabel(): String =
-  if (connection == ConnectionState.Recovering && reconnectAttempt > 0)
-    "Reconnecting · attempt $reconnectAttempt"
-  else connection.statusText()
-
-private fun ConnectionState.statusText(): String =
-  when (this) {
-    ConnectionState.Disconnected -> "Not connected"
-    ConnectionState.Connecting -> "Connecting"
-    ConnectionState.Connected -> "Connected"
-    ConnectionState.Recovering -> "Reconnecting"
-    is ConnectionState.Error -> "Offline"
-  }
-
-/** The badge key for a session that is not live, from the machine's connection. */
-private fun connectionStatusKey(connection: ConnectionState): String =
-  when (connection) {
-    ConnectionState.Connected,
-    ConnectionState.Connecting -> "connecting"
-    ConnectionState.Recovering -> "reconnecting"
-    ConnectionState.Disconnected -> "disconnected"
-    is ConnectionState.Error -> "offline"
-  }
-
-/** The composer's placeholder while it is disabled, from the machine's connection. */
-private fun composerDisabledLabel(connection: ConnectionState): String =
-  when (connection) {
-    ConnectionState.Connecting -> "Connecting…"
-    ConnectionState.Recovering -> "Reconnecting…"
-    is ConnectionState.Error -> "Offline"
-    else -> "Not connected"
-  }
