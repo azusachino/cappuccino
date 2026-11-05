@@ -121,6 +121,10 @@ class MarkdownTextUiTest {
       """
         .trimIndent()
     )
+    // Markdown parses after composition; waitForIdle does not cover that work.
+    compose.waitUntil(5_000) {
+      compose.onAllNodesWithText("Title", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+    }
     compose.onNodeWithText("Title", useUnmergedTree = true).assertExists()
     compose.onNodeWithText("nested", useUnmergedTree = true).assertExists()
     compose.onNodeWithText("quoted", useUnmergedTree = true).assertExists()
