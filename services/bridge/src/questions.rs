@@ -194,6 +194,7 @@ pub fn form(screen: &str) -> Option<Form> {
                     id: format!("opt-{index}"),
                     label,
                     description,
+                    row: None,
                 })
                 .collect(),
         },
@@ -267,11 +268,13 @@ pub fn review(screen: &str) -> Option<PromptCard> {
             id: "submit".to_string(),
             label: "Submit answers".to_string(),
             description: None,
+            row: None,
         },
         PromptOption {
             id: "cancel".to_string(),
             label: "Cancel".to_string(),
             description: None,
+            row: None,
         },
     ];
     Some(PromptCard {
