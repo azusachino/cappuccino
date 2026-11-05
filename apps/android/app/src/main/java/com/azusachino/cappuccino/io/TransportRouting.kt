@@ -131,6 +131,7 @@ class MachineRouter<C : Any>(
   private val lock = Any()
   private val order = TransportKind.entries.filter { it in clients }
   private var sticky: TransportKind? = null
+  private val unreachable = mutableSetOf<TransportKind>()
   private var irohFailures = 0
   private var irohCooldownMs = 0L
   private var irohCooldownUntil = 0L
@@ -178,7 +179,7 @@ class MachineRouter<C : Any>(
           if (error is BridgeAnswered) recordSuccess(kind)
           throw error
         }
-        recordFailure(kind)
+        recordFailure(kind, error)
         if (mutation && !isBeforeSend(error)) {
           throw BridgeMutationOutcomeUnknownException(
             "The connection failed after the change was sent; it may have been applied. Check before retrying."
@@ -192,12 +193,15 @@ class MachineRouter<C : Any>(
   }
 
   /**
-   * Called on a default-network change: forget stickiness and redial any in-flight iroh attempt.
+   * Called on a default-network change: forget stickiness, unreachability, cooldowns, and redial
+   * any in-flight iroh attempt.
    */
   fun onNetworkChanged() {
     synchronized(lock) {
       sticky = null
-      // A new network may make iroh work again: its cooldown does not outlive the change.
+      unreachable.clear()
+      // A new network may make transports work again: cooldowns and unreachability do not outlive
+      // the change.
       irohCooldownMs = 0L
       irohCooldownUntil = 0L
       inFlight?.let {
@@ -209,13 +213,15 @@ class MachineRouter<C : Any>(
   }
 
   /**
-   * Forgets stickiness and the iroh failure count, and drops the connections: the next call dials.
+   * Forgets stickiness, unreachability, and the iroh failure count, and drops the connections: the
+   * next call dials.
    */
   suspend fun redial() {
     synchronized(lock) {
       sticky = null
+      unreachable.clear()
       irohFailures = 0
-      // The owner asked to reconnect now: iroh is tried at once, not after its cooldown.
+      // The owner asked to reconnect now: transports are tried at once, not after cooldowns.
       irohCooldownMs = 0L
       irohCooldownUntil = 0L
     }
@@ -240,15 +246,16 @@ class MachineRouter<C : Any>(
     }
 
   /**
-   * The next route to try. A route in cooldown is skipped while another untried route exists; when
-   * only cooling routes remain, the first of them is tried so a request is never left with nothing.
+   * The next route to try. Unreachable routes on the current network are skipped. A route in
+   * cooldown is skipped while another viable untried route exists; when only cooling routes remain,
+   * the first of them is tried so a request is never left with nothing.
    */
   private fun nextKind(tried: Set<TransportKind>, mutation: Boolean): TransportKind? =
     synchronized(lock) {
       val sticky = sticky
-      if (sticky != null && sticky !in tried) return sticky
-      order.firstOrNull { it !in tried && (mutation || !coolingDown(it)) }
-        ?: order.firstOrNull { it !in tried }
+      if (sticky != null && sticky !in tried && sticky !in unreachable) return sticky
+      val candidates = order.filter { it !in tried && it !in unreachable }
+      candidates.firstOrNull { mutation || !coolingDown(it) } ?: candidates.firstOrNull()
     }
 
   private fun coolingDown(kind: TransportKind): Boolean =
@@ -281,6 +288,7 @@ class MachineRouter<C : Any>(
   private fun recordSuccess(kind: TransportKind) {
     synchronized(lock) {
       sticky = kind
+      unreachable -= kind
       if (kind == TransportKind.IROH) {
         irohFailures = 0
         irohCooldownMs = 0L
@@ -289,18 +297,31 @@ class MachineRouter<C : Any>(
     }
   }
 
-  private suspend fun recordFailure(kind: TransportKind) {
+  private suspend fun recordFailure(kind: TransportKind, error: Exception) {
     val rebuild =
       synchronized(lock) {
         if (sticky == kind) sticky = null
+        if (error is UnknownHostException) {
+          unreachable += kind
+          ConnectionLogger.log(
+            "ROUTER",
+            "Transport $kind is unreachable on this network: ${error.message}",
+            ConnectionLogLevel.WARN,
+          )
+        }
         if (kind != TransportKind.IROH) {
           false
         } else {
-          irohCooldownMs =
-            if (irohCooldownMs == 0L) IROH_COOLDOWN_MIN_MS
-            else (irohCooldownMs * 2).coerceAtMost(IROH_COOLDOWN_MAX_MS)
-          irohCooldownUntil = clock.nowMs() + irohCooldownMs
+          val isDirect = irohPath() == IrohPathKind.DIRECT
           irohFailures += 1
+          // Don't penalize a live direct P2P path with an aggressive cooldown on a single transient
+          // timeout
+          if (!isDirect || irohFailures > 1) {
+            irohCooldownMs =
+              if (irohCooldownMs == 0L) IROH_COOLDOWN_MIN_MS
+              else (irohCooldownMs * 2).coerceAtMost(IROH_COOLDOWN_MAX_MS)
+            irohCooldownUntil = clock.nowMs() + irohCooldownMs
+          }
           if (irohFailures >= IROH_REBUILD_AFTER_FAILURES) {
             irohFailures = 0
             true

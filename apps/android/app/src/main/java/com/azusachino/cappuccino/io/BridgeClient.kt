@@ -535,9 +535,9 @@ class BridgeClient(
   companion object {
     fun defaultClient(): OkHttpClient =
       OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
-        .callTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.SECONDS)
         .followRedirects(false)
         .followSslRedirects(false)
         .cookieJar(okhttp3.CookieJar.NO_COOKIES)
