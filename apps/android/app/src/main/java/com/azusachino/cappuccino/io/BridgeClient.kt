@@ -405,8 +405,15 @@ class BridgeClient(
         .url(endpoint.stream(sessionId).toString())
         .header(PROTOCOL_HEADER, BRIDGE_PROTOCOL_VERSION.toString())
         .build()
+    val webSocketClient =
+      client
+        .newBuilder()
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .callTimeout(0, TimeUnit.MILLISECONDS)
+        .pingInterval(10, TimeUnit.SECONDS)
+        .build()
     val socket =
-      client.newWebSocket(
+      webSocketClient.newWebSocket(
         request,
         object : WebSocketListener() {
           override fun onMessage(webSocket: WebSocket, text: String) {
