@@ -526,7 +526,8 @@ internal constructor(
               connection =
                 if (mutableState.value.activeProfileId == null)
                   ConnectionState.Error(
-                    friendlyTransportMessage(error.message) ?: "Connection failed"
+                    friendlyTransportMessage(error.message, label.ifBlank { "The machine" })
+                      ?: "Connection failed"
                   )
                 else mutableState.value.connection,
               busy = false,
@@ -628,6 +629,10 @@ internal constructor(
   }
 
   /** Reconnect now: like a refresh, but the attempt first drops the machine's cached transport. */
+  // The name the owner gave the machine; the placeholder only applies to a machine with no label.
+  private fun displayName(profile: MachineProfile): String =
+    profile.label.takeUnless { it == "iroh.invalid" } ?: "The machine"
+
   override fun reconnectProfile(id: String) {
     refreshProfile(id, background = false, redial = true)
   }
@@ -724,7 +729,9 @@ internal constructor(
       if (error is kotlinx.coroutines.CancellationException) throw error
       if (machineToken != machineEpochs[profile.id] || profile.id in disconnectedMachines) return
       val failed =
-        ConnectionState.Error(friendlyTransportMessage(error.message) ?: "Bridge unavailable")
+        ConnectionState.Error(
+          friendlyTransportMessage(error.message, displayName(profile)) ?: "Bridge unavailable"
+        )
       mutableState.value =
         mutableState.value.copy(
           machines = mutableState.value.machines + (profile.id to MachineConnection(failed))
@@ -1386,7 +1393,8 @@ internal constructor(
               mutableState.value.copy(
                 connection =
                   ConnectionState.Error(
-                    friendlyTransportMessage(error.message) ?: "Bridge protocol or TLS error"
+                    friendlyTransportMessage(error.message, displayName(profile))
+                      ?: "Bridge protocol or TLS error"
                   )
               )
             break
@@ -1401,7 +1409,9 @@ internal constructor(
             mutableState.value =
               mutableState.value.copy(
                 connection =
-                  ConnectionState.Error(friendlyTransportMessage(error.message) ?: "Stream failed")
+                  ConnectionState.Error(
+                    friendlyTransportMessage(error.message, displayName(profile)) ?: "Stream failed"
+                  )
               )
             break
           }

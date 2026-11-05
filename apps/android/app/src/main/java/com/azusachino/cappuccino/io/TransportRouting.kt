@@ -320,11 +320,11 @@ class MachineRouter<C : Any>(
  * Plain wording for the two transport failures a phone meets most. A raw socket or resolver message
  * says nothing an owner can act on; other messages pass through unchanged.
  */
-fun friendlyTransportMessage(message: String?): String? =
+fun friendlyTransportMessage(message: String?, machine: String): String? =
   when {
     message == null -> null
     message.equals("timeout", ignoreCase = true) ||
-      message.contains("timed out", ignoreCase = true) -> "The Mac did not answer in time"
+      message.contains("timed out", ignoreCase = true) -> "$machine did not answer in time"
     message.contains("Unable to resolve host") -> "The tailnet name does not resolve on this phone"
     else -> message
   }
