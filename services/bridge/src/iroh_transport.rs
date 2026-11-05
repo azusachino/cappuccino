@@ -339,7 +339,10 @@ impl Pairing {
     /// when the global or per-id connection cap is already reached.
     fn track(&self, id: EndpointId, handle: WeakConnectionHandle) -> Result<(), &'static str> {
         let mut live = self.live.lock().unwrap();
-        live.retain(|(_, weak)| weak.upgrade().is_some());
+        live.retain(|(_, weak)| {
+            weak.upgrade()
+                .is_some_and(|connection| connection.close_reason().is_none())
+        });
         if live.len() >= limits().max_tunnel_connections {
             return Err("tunnel_connections");
         }
