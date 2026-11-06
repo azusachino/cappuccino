@@ -280,6 +280,9 @@ class IrohHttpClients(
       base
         .newBuilder()
         .socketFactory(IrohSocketFactory(addr) { transport.openStream(it) })
+        // Own pool: OkHttp matches pooled connections by host, and every iroh machine shares the
+        // placeholder host, so a shared pool would send one machine's request down another's.
+        .connectionPool(ConnectionPool())
         .dns(IROH_DNS)
         .proxy(Proxy.NO_PROXY)
         .build()

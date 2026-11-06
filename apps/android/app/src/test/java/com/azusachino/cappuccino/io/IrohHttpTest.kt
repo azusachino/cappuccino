@@ -77,3 +77,42 @@ class IrohHttpTest {
     assertEquals(addr, endpoint.iroh)
   }
 }
+
+/** Streams are TCP connections to whichever server stands in for the dialled endpoint. */
+private class PerEndpointTunnel(private val ports: Map<String, Int>) :
+  IrohTransport by TcpTunnelTransport(0) {
+  override suspend fun openStream(addr: IrohEndpointAddr, alpn: String): IrohBiStream =
+    TcpTunnelTransport(ports.getValue(addr.endpointId)).openStream(addr, alpn)
+}
+
+class IrohClientIsolationTest {
+  @Test
+  fun aRequestForOneMachineNeverRidesAnotherMachinesPooledConnection() {
+    MockWebServer().use { a ->
+      MockWebServer().use { b ->
+        a.enqueue(MockResponse.Builder().body("machine-a").build())
+        a.enqueue(MockResponse.Builder().body("machine-a-second").build())
+        b.enqueue(MockResponse.Builder().body("machine-b").build())
+        a.start()
+        b.start()
+        val addrA = IrohEndpointAddr("endpoint-a", null, emptyList())
+        val addrB = IrohEndpointAddr("endpoint-b", null, emptyList())
+        // One shared base client, as MachineTransports builds it from BridgeClient.defaultClient().
+        val clients =
+          IrohHttpClients(
+            PerEndpointTunnel(mapOf("endpoint-a" to a.port, "endpoint-b" to b.port)),
+            OkHttpClient(),
+          )
+        fun body(addr: IrohEndpointAddr) =
+          clients
+            .clientFor(addr)
+            .newCall(Request.Builder().url("http://iroh.invalid/api/v2/handshake").build())
+            .execute()
+            .use { it.body.string() }
+        assertEquals("machine-a", body(addrA))
+        // A's connection is idle in the pool now; B must dial its own.
+        assertEquals("machine-b", body(addrB))
+      }
+    }
+  }
+}
