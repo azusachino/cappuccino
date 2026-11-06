@@ -10,27 +10,30 @@ import org.junit.Test
 class QuestionFormTest {
   private fun question(multi: Boolean) =
     PromptQuestion(
+      "q-1",
       "H",
       "Q?",
       multi,
       listOf(PromptOption("opt-0", "A", null), PromptOption("opt-1", "B", null)),
     )
 
+  private fun answer(selected: List<String>, text: String?) = QuestionAnswer("q-1", selected, text)
+
   @Test
   fun singleSelectTakesExactlyOneChoiceOrText() {
     val single = question(multi = false)
-    assertTrue(answerComplete(single, QuestionAnswer(listOf(1), null)))
-    assertTrue(answerComplete(single, QuestionAnswer(emptyList(), "own")))
-    assertFalse(answerComplete(single, QuestionAnswer(emptyList(), null)))
-    assertFalse(answerComplete(single, QuestionAnswer(listOf(0), "own")))
-    assertFalse(answerComplete(single, QuestionAnswer(listOf(0, 1), null)))
+    assertTrue(answerComplete(single, answer(listOf("opt-1"), null)))
+    assertTrue(answerComplete(single, answer(emptyList(), "own")))
+    assertFalse(answerComplete(single, answer(emptyList(), null)))
+    assertFalse(answerComplete(single, answer(listOf("opt-0"), "own")))
+    assertFalse(answerComplete(single, answer(listOf("opt-0", "opt-1"), null)))
   }
 
   @Test
   fun multiSelectTakesAtLeastOne() {
     val multi = question(multi = true)
-    assertTrue(answerComplete(multi, QuestionAnswer(listOf(0, 1), "own")))
-    assertTrue(answerComplete(multi, QuestionAnswer(emptyList(), "own")))
-    assertFalse(answerComplete(multi, QuestionAnswer(emptyList(), null)))
+    assertTrue(answerComplete(multi, answer(listOf("opt-0", "opt-1"), "own")))
+    assertTrue(answerComplete(multi, answer(emptyList(), "own")))
+    assertFalse(answerComplete(multi, answer(emptyList(), null)))
   }
 }

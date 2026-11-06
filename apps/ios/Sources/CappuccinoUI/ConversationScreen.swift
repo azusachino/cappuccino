@@ -24,9 +24,14 @@ import SwiftUI
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 14) {
           if session.omittedTurns > 0 {
-            Text("Older messages aren't loaded.")
-              .font(.footnote)
-              .foregroundStyle(palette.muted)
+            Button {
+              session.loadOlderConversation()
+            } label: {
+              Text("Older messages aren't loaded. Load older")
+                .font(.footnote)
+                .foregroundStyle(palette.muted)
+            }
+            .buttonStyle(.plain)
           }
           if session.isLoadingHistory, session.turns.isEmpty {
             HStack(spacing: 8) {

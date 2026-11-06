@@ -9,6 +9,7 @@ import com.azusachino.cappuccino.core.PromptCard
 import com.azusachino.cappuccino.core.PromptOption
 import com.azusachino.cappuccino.core.StreamEntry
 import com.azusachino.cappuccino.core.StreamEvent
+import com.azusachino.cappuccino.core.SyncPage
 import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
@@ -135,7 +136,6 @@ class ConnectedViewModelTest {
                     null,
                     null,
                     listOf(PromptOption("a", "Yes", null)),
-                    0,
                   ),
                 )
               )
@@ -184,7 +184,6 @@ class ConnectedViewModelTest {
                       null,
                       null,
                       listOf(PromptOption("a", "Yes", null)),
-                      0,
                     ),
                   )
                 )
@@ -357,7 +356,6 @@ class ConnectedViewModelTest {
                     null,
                     null,
                     listOf(PromptOption("a", "Yes", null)),
-                    0,
                   ),
                 )
               )
@@ -469,7 +467,7 @@ class ConnectedViewModelTest {
                   machine,
                   "1",
                   1,
-                  mapOf("agent_control" to advertised, "mutation_binding" to true),
+                  mapOf("agent_control" to advertised, "prompt_input" to true),
                 )
               return machine
             }
@@ -517,7 +515,7 @@ class ConnectedViewModelTest {
         // A refused answer is reported on its own; the connection stays usable.
         viewModel.answerQuestions(
           "q-1",
-          listOf(com.azusachino.cappuccino.core.QuestionAnswer(listOf(0), null)),
+          listOf(com.azusachino.cappuccino.core.QuestionAnswer("q-1", listOf("opt-0"), null)),
         )
         advanceUntilIdle()
         assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
@@ -567,6 +565,84 @@ class ConnectedViewModelTest {
       advanceUntilIdle()
       assertEquals(secondProfile.id, viewModel.state.value.activeProfileId)
       assertEquals(listOf(newAgent), viewModel.state.value.agents)
+    }
+
+  @Test
+  fun catchUpFollowsTheForwardCursorAndBackfillFollowsTheBackwardOne() =
+    runTest(dispatcher) {
+      val queries = mutableListOf<Pair<String?, String?>>()
+      fun turn(id: String) = ConversationTurn(id, "agent", null, id, emptyList())
+      val pages =
+        mapOf(
+          null to
+            SyncPage(
+              "append",
+              listOf(turn("t5"), turn("t6")),
+              "A1",
+              true,
+              "B1",
+              true,
+              true,
+              savedId,
+            ),
+          "A1" to SyncPage("append", listOf(turn("t7")), "A2", true, null, false, false, null),
+          "A2" to SyncPage("append", listOf(turn("t8")), "A3", true, null, false, true, null),
+          "B1" to
+            SyncPage(
+              "append",
+              listOf(turn("t3"), turn("t4")),
+              null,
+              false,
+              null,
+              true,
+              true,
+              savedId,
+            ),
+        )
+      val transport =
+        object : BridgeTransport {
+          override suspend fun verify(expectedMachine: UUID?): UUID = machine
+
+          override suspend fun agents(machine: UUID): List<AgentRow> = listOf(agent)
+
+          override suspend fun conversationPage(
+            sessionId: String,
+            after: String?,
+            before: String?,
+          ): ConversationPage {
+            queries += after to before
+            val page = pages.getValue(after ?: before)
+            return ConversationPage(
+              ConversationSnapshot(page.upserts, "canonical_log", page.conversationId, machine),
+              page,
+            )
+          }
+
+          override fun stream(sessionId: String): Flow<StreamEvent> = flow {
+            kotlinx.coroutines.awaitCancellation()
+          }
+        }
+      viewModel = ConnectedViewModel(store, { transport }, {}, savedTarget())
+      viewModel.setForeground(true)
+      advanceUntilIdle()
+      // The first sync takes the newest page; a later load catches up from the forward token.
+      assertEquals(listOf(null to null), queries)
+      viewModel.loadConversation()
+      advanceUntilIdle()
+      assertEquals(
+        listOf("t5", "t6", "t7", "t8"),
+        viewModel.state.value.conversationTurns.map { it.id },
+      )
+      assertEquals(listOf(null to null, "A1" to null, "A2" to null), queries)
+      // Forward pages name no conversation, so the identity from the newest page must survive.
+      assertEquals(savedId, viewModel.state.value.conversationId)
+      viewModel.loadOlderConversation()
+      advanceUntilIdle()
+      assertEquals(
+        listOf("t3", "t4", "t5", "t6", "t7", "t8"),
+        viewModel.state.value.conversationTurns.map { it.id },
+      )
+      assertEquals(listOf(null to null, "A1" to null, "A2" to null, null to "B1"), queries)
     }
 
   @Test
@@ -1575,7 +1651,7 @@ class ConnectedViewModelTest {
       advanceUntilIdle()
       val before = viewModel.state.value
       viewModel.submitPrompt("Never send this")
-      viewModel.answerPrompt("not-live", 0, null, null)
+      viewModel.answerPrompt("not-live", null, null)
       viewModel.retry()
       viewModel.loadConversation()
       advanceUntilIdle()
@@ -1836,11 +1912,11 @@ class ConnectedViewModelTest {
     listOf(
       { it.submitPrompt("original draft") },
       { it.controlAgent("interrupt") },
-      { it.answerPrompt("p-1", 0, "reject", "select_option") },
+      { it.answerPrompt("p-1", "reject", null) },
       {
         it.answerQuestions(
           "p-1",
-          listOf(com.azusachino.cappuccino.core.QuestionAnswer(listOf(0), null)),
+          listOf(com.azusachino.cappuccino.core.QuestionAnswer("q-1", listOf("opt-0"), null)),
         )
       },
     )
@@ -1893,7 +1969,6 @@ class ConnectedViewModelTest {
           null,
           null,
           listOf(PromptOption("reject", "Reject", null)),
-          0,
         )
       for (failure in
         listOf(
@@ -2017,7 +2092,7 @@ class ConnectedViewModelTest {
           "1",
           1,
           mapOf("agent_control" to true) +
-            (bindingCapability?.let { mapOf("mutation_binding" to it) } ?: emptyMap()),
+            (bindingCapability?.let { mapOf("prompt_input" to it) } ?: emptyMap()),
         )
 
       private suspend fun dispatch(
@@ -2046,7 +2121,6 @@ class ConnectedViewModelTest {
       override suspend fun answerPrompt(
         sessionId: String,
         promptId: String,
-        optionIndex: Int?,
         optionId: String?,
         action: String?,
         binding: MutationBinding,
@@ -2104,8 +2178,7 @@ class ConnectedViewModelTest {
               conversationMachine,
             )
 
-          override val bridgeDetails =
-            BridgeDetails(machine, "1", 1, mapOf("mutation_binding" to true))
+          override val bridgeDetails = BridgeDetails(machine, "1", 1, mapOf("prompt_input" to true))
 
           override suspend fun submitPrompt(
             sessionId: String,
@@ -2117,7 +2190,6 @@ class ConnectedViewModelTest {
           override suspend fun answerPrompt(
             sessionId: String,
             promptId: String,
-            optionIndex: Int?,
             optionId: String?,
             action: String?,
             binding: MutationBinding,

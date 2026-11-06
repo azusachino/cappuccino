@@ -75,7 +75,7 @@ class ForegroundRecoveryTest {
                 machine,
                 "fixture",
                 1,
-                mapOf("mutation_binding" to true),
+                mapOf("prompt_input" to true),
               )
 
             override suspend fun verify(expectedMachine: UUID?): UUID {

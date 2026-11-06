@@ -6,13 +6,16 @@ import org.junit.Test
 class RecentHistoryTest {
   @Test
   fun messagesAreBoundedInOriginalOrderWithoutMutatingInput() {
-    val input = (0..220).map { ConversationTurn("t$it", "agent", null, "reply $it", emptyList()) }
+    val input =
+      (0 until MAX_RECENT_MESSAGES + 21).map {
+        ConversationTurn("t$it", "agent", null, "reply $it", emptyList())
+      }
     val recent = boundedConversation(input)
-    assertEquals(200, recent.turns.size)
+    assertEquals(MAX_RECENT_MESSAGES, recent.turns.size)
     assertEquals(21, recent.omittedMessages)
     assertEquals("t21", recent.turns.first().id)
-    assertEquals("t220", recent.turns.last().id)
-    assertEquals(221, input.size)
+    assertEquals("t${MAX_RECENT_MESSAGES + 20}", recent.turns.last().id)
+    assertEquals(MAX_RECENT_MESSAGES + 21, input.size)
   }
 
   @Test
@@ -115,7 +118,7 @@ class RecentHistoryTest {
   @Test
   fun omittedToolsIncludeOperationsLostOutsideTheMessageWindow() {
     val input =
-      (0 until 350).map { index ->
+      (0 until MAX_RECENT_MESSAGES + 150).map { index ->
         ConversationTurn(
           "t$index",
           "agent",
@@ -127,12 +130,12 @@ class RecentHistoryTest {
     val recent = boundedConversation(input)
     val tools = recent.turns.flatMap { it.parts }.filterIsInstance<ConversationPart.ToolCall>()
     assertEquals(100, tools.size)
-    assertEquals(250, recent.omittedTools)
+    assertEquals(550, recent.omittedTools)
     assertEquals(150, recent.omittedMessages)
-    assertEquals("tool250", tools.first().name)
-    assertEquals("tool349", tools.last().name)
-    assertEquals(350, tools.size + recent.omittedTools)
-    assertEquals(350, input.size)
+    assertEquals("tool550", tools.first().name)
+    assertEquals("tool649", tools.last().name)
+    assertEquals(MAX_RECENT_MESSAGES + 150, tools.size + recent.omittedTools)
+    assertEquals(MAX_RECENT_MESSAGES + 150, input.size)
   }
 
   @Test
@@ -146,7 +149,10 @@ class RecentHistoryTest {
           null,
           listOf(ConversationPart.ToolCall("read", "", null)),
         )
-      ) + (0 until 201).map { ConversationTurn("text$it", "agent", null, "reply", emptyList()) }
+      ) +
+        (0 until MAX_RECENT_MESSAGES + 1).map {
+          ConversationTurn("text$it", "agent", null, "reply", emptyList())
+        }
     val recent = boundedConversation(input)
     assertEquals(1, recent.omittedTools)
     assertTrue(recent.turns.flatMap { it.parts }.none { it is ConversationPart.ToolCall })

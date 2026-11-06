@@ -56,14 +56,20 @@ fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnecti
       )
     else MachineConnection()
 
+/** Forward pages one catch-up may fetch before it waits for the next stream event. */
+private const val MAX_CATCH_UP_PAGES = 8
+
 data class PromptSendState(val text: String, val outcome: String? = null)
 
-/** Live observation and an advertised binding contract are both required for writes. */
+/**
+ * Live observation and an agreed prompt input are both required for writes. Every v2 write carries
+ * its session binding, so the binding needs no capability of its own.
+ */
 val ConnectedUiState.canMutate: Boolean
   get() =
     connection == ConnectionState.Connected &&
       streamLive &&
-      bridgeDetails[activeProfileId]?.capabilities?.get("mutation_binding") == true &&
+      bridgeDetails[activeProfileId]?.capabilities?.get("prompt_input") == true &&
       selectedAgent?.let { MutationBinding.from(it) } != null
 
 /**
@@ -93,6 +99,11 @@ data class ConnectedUiState(
    */
   val streamLive: Boolean = false,
   val conversationTurns: List<ConversationTurn> = emptyList(),
+  /**
+   * Replication position of [conversationTurns]; it is valid only for [conversationCursorSession].
+   */
+  val conversationCursor: SyncCursor? = null,
+  val conversationCursorSession: String? = null,
   val omittedConversationTurns: Int = 0,
   val omittedToolOperations: Int = 0,
   val conversationSource: String? = null,
@@ -169,9 +180,12 @@ interface ConnectedActions {
     answers: List<com.azusachino.cappuccino.core.QuestionAnswer>,
   ) = Unit
 
-  fun answerPrompt(promptId: String, optionIndex: Int?, optionId: String?, action: String?)
+  fun answerPrompt(promptId: String, optionId: String?, action: String?)
 
   fun loadConversation()
+
+  /** Backfills older turns before the log's first turn, on the owner's request. */
+  fun loadOlderConversation() = Unit
 
   fun deleteSavedConversation(machineId: UUID, conversationId: String) = Unit
 
@@ -758,21 +772,51 @@ internal constructor(
     }
   }
 
-  private fun applyConversationSnapshot(snapshot: ConversationSnapshot) =
-    com.azusachino.cappuccino.core
-      .boundedConversation(if (snapshot.source == "canonical_log") snapshot.turns else emptyList())
-      .also { recent ->
-        mutableState.value =
-          mutableState.value.copy(
-            conversationTurns = recent.turns,
-            omittedConversationTurns = recent.omittedMessages,
-            omittedToolOperations = recent.omittedTools,
-            conversationSource = snapshot.source,
-            sessionStats = snapshot.stats,
-            conversationId = snapshot.conversationId,
-            offlineSavedAt = null,
-          )
+  /** The forward position to catch up from, when the log is valid for this session. */
+  private fun forwardAfter(session: String): String? {
+    val current = mutableState.value
+    return current.conversationCursor
+      ?.takeIf {
+        current.conversationCursorSession == session && current.conversationTurns.isNotEmpty()
       }
+      ?.after
+  }
+
+  /**
+   * Applies one sync page to the replicated log (contract §7). A forward page merges after the
+   * log's newest turn, a backward page before its oldest, and a resync or scrollback replaces it.
+   */
+  private fun applyConversationSnapshot(
+    page: ConversationPage,
+    direction: SyncDirection,
+    session: String,
+  ): RecentConversation {
+    val snapshot = page.snapshot
+    val current = mutableState.value
+    val prior = current.conversationCursor.takeIf { current.conversationCursorSession == session }
+    val (merged, cursor) =
+      if (snapshot.source == "canonical_log")
+        applySyncPage(current.conversationTurns, prior, direction, page.sync)
+      else emptyList<ConversationTurn>() to null
+    return boundedConversation(merged).also { recent ->
+      mutableState.value =
+        mutableState.value.copy(
+          conversationTurns = recent.turns,
+          conversationCursor = cursor,
+          conversationCursorSession = if (cursor == null) null else session,
+          omittedConversationTurns = recent.omittedMessages,
+          omittedToolOperations = recent.omittedTools,
+          conversationSource = snapshot.source,
+          // Forward pages carry no identity or stats; they keep what the newest page set.
+          sessionStats =
+            snapshot.stats ?: current.sessionStats.takeIf { direction != SyncDirection.Newest },
+          conversationId =
+            snapshot.conversationId
+              ?: current.conversationId.takeIf { direction != SyncDirection.Newest },
+          offlineSavedAt = null,
+        )
+    }
+  }
 
   override fun loadConversation() {
     if (mutableState.value.offlineSavedAt != null) return
@@ -784,12 +828,18 @@ internal constructor(
     val client = bridgeFor(profile.endpoint)
     val token = epoch
     conversationJob = viewModelScope.launch {
+      var catchUpPages = 0
       do {
         conversationRequested = false
         try {
           if (offlineHistory != null && client.verify(profile.machineId) != profile.machineId)
             throw ProtocolException("Machine identity changed")
-          val snapshot = client.conversationSnapshot(agent.sessionId)
+          // Catch up from the log's forward position when it is valid; otherwise take the newest
+          // page.
+          val after = forwardAfter(agent.sessionId)
+          val direction = if (after != null) SyncDirection.Forward else SyncDirection.Newest
+          val page = client.conversationPage(agent.sessionId, after = after)
+          val snapshot = page.snapshot
           if (
             (snapshot.machineId != null && snapshot.machineId != profile.machineId) ||
               (snapshot.conversationId != null && snapshot.machineId != profile.machineId)
@@ -813,7 +863,18 @@ internal constructor(
                 !snapshot.conversationId.startsWith("${agent.agent}:"))
           )
             throw ProtocolException("Canonical conversation provider mismatch")
-          val recent = applyConversationSnapshot(snapshot)
+          val recent = applyConversationSnapshot(page, direction, agent.sessionId)
+          // A forward page that stopped short of the file's end leaves more records to fetch, while
+          // its token moves. The pass count is bounded; the next stream event starts another pass.
+          if (direction == SyncDirection.Forward) catchUpPages++
+          if (
+            direction == SyncDirection.Forward &&
+              !page.sync.caughtUp &&
+              page.sync.afterToken != null &&
+              page.sync.afterToken != after &&
+              catchUpPages < MAX_CATCH_UP_PAGES
+          )
+            conversationRequested = true
           if (
             snapshot.source == "canonical_log" &&
               offlineHistory != null &&
@@ -859,6 +920,50 @@ internal constructor(
           }
         }
       } while (isActive && conversationRequested && token == epoch && foreground)
+    }
+  }
+
+  override fun loadOlderConversation() {
+    if (mutableState.value.offlineSavedAt != null) return
+    val profile = activeProfile() ?: return
+    val agent = mutableState.value.selectedAgent ?: return
+    val current = mutableState.value
+    val cursor = current.conversationCursor
+    if (
+      !foreground ||
+        cursor == null ||
+        cursor.startReached ||
+        cursor.before == null ||
+        current.conversationCursorSession != agent.sessionId ||
+        current.conversationTurns.isEmpty() ||
+        // The in-memory window is capped; backfill stops at the cap rather than trimming new turns.
+        current.conversationTurns.size >= MAX_RECENT_MESSAGES
+    )
+      return
+    val client = bridgeFor(profile.endpoint)
+    val token = epoch
+    viewModelScope.launch {
+      try {
+        val page = client.conversationPage(agent.sessionId, before = cursor.before)
+        val latest = mutableState.value
+        val live = latest.selectedAgent
+        if (
+          token != epoch ||
+            !foreground ||
+            live == null ||
+            live.sessionId != agent.sessionId ||
+            live.machineId != agent.machineId
+        )
+          return@launch
+        applyConversationSnapshot(page, SyncDirection.Backward, agent.sessionId)
+      } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        ConnectionLogger.log(
+          "SYNC",
+          "Older history failed: ${error.message}",
+          ConnectionLogLevel.ERROR,
+        )
+      }
     }
   }
 
@@ -955,14 +1060,9 @@ internal constructor(
     }
   }
 
-  override fun answerPrompt(
-    promptId: String,
-    optionIndex: Int?,
-    optionId: String?,
-    action: String?,
-  ) =
+  override fun answerPrompt(promptId: String, optionId: String?, action: String?) =
     runAgentAction("Failed to answer prompt") { client, agent, binding ->
-      client.answerPrompt(agent.sessionId, promptId, optionIndex, optionId, action, binding)
+      client.answerPrompt(agent.sessionId, promptId, optionId, action, binding)
     }
 
   override fun answerQuestions(
@@ -1178,11 +1278,15 @@ internal constructor(
             conversationJob = null
             conversationRequested = false
             val expectedConversation = mutableState.value.conversationId
-            val snapshot = client.conversationSnapshot(agent.sessionId)
+            val after = forwardAfter(agent.sessionId)
+            val page = client.conversationPage(agent.sessionId, after = after)
+            val snapshot = page.snapshot
             if (!isActive || token != epoch || !foreground) return@launch
             if (snapshot.source != "canonical_log")
               throw java.io.IOException("Canonical history unavailable; retry to enable actions")
-            val identity = snapshot.conversationId
+            // A forward page names no conversation; the identity the phone already holds stands.
+            val identity =
+              snapshot.conversationId ?: mutableState.value.conversationId.takeIf { after != null }
             if (
               snapshot.machineId != profile.machineId ||
                 identity == null ||
@@ -1191,7 +1295,11 @@ internal constructor(
                 (expectedConversation != null && identity != expectedConversation)
             )
               throw ProtocolException("Recovery history identity changed or is unavailable")
-            applyConversationSnapshot(snapshot)
+            applyConversationSnapshot(
+              page,
+              if (after != null) SyncDirection.Forward else SyncDirection.Newest,
+              agent.sessionId,
+            )
           }
           hasAttached = true
           var opened = false
@@ -1212,6 +1320,8 @@ internal constructor(
             }
             if (event is StreamEvent.AgentStatus && !opened)
               throw ProtocolException("Agent status arrived before stream_open")
+            // The stream carries no turns; a hint means a sync request now.
+            if (event is StreamEvent.ConversationChanged) loadConversation()
             val current = mutableState.value
             val reduced = reduce(current.stream, event, agent.sessionId)
             val streamError = (event as? StreamEvent.Error)?.let { "${it.code}: ${it.message}" }

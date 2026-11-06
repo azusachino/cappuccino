@@ -121,12 +121,16 @@ class MarkdownTextUiTest {
       """
         .trimIndent()
     )
-    compose.onNodeWithText("Title").assertExists()
-    compose.onNodeWithText("nested").assertExists()
-    compose.onNodeWithText("quoted").assertExists()
+    // Markdown parses after composition; waitForIdle does not cover that work.
+    compose.waitUntil(5_000) {
+      compose.onAllNodesWithText("Title", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+    }
+    compose.onNodeWithText("Title", useUnmergedTree = true).assertExists()
+    compose.onNodeWithText("nested", useUnmergedTree = true).assertExists()
+    compose.onNodeWithText("quoted", useUnmergedTree = true).assertExists()
     // Table cells merge into one table text node; match a cell value as a bounded substring.
-    compose.onNodeWithText("1", substring = true).assertExists()
-    compose.onNodeWithText("fenced()").assertExists()
+    compose.onNodeWithText("1", substring = true, useUnmergedTree = true).assertExists()
+    compose.onNodeWithText("fenced()", useUnmergedTree = true).assertExists()
   }
 
   @Test
@@ -341,10 +345,15 @@ class MarkdownTextUiTest {
       org.junit.Assert.assertEquals(1, handler.opened.size)
       handler.opened.clear()
       compose
-        .onNodeWithText("ParagraphGlyph [Image: morning alt] and [Image: evening alt]")
+        .onNodeWithText(
+          "ParagraphGlyph [Image: morning alt] and [Image: evening alt]",
+          useUnmergedTree = true,
+        )
         .assertExists()
-      compose.onNodeWithText("[Image: p|ipe]", substring = true).assertExists()
-      compose.onNodeWithText("[Image: collision]").assertExists()
+      compose
+        .onNodeWithText("[Image: p|ipe]", substring = true, useUnmergedTree = true)
+        .assertExists()
+      compose.onNodeWithText("[Image: collision]", useUnmergedTree = true).assertExists()
       capture("MarkdownNativeGlyphBefore")
       var taps = 0
       for (label in

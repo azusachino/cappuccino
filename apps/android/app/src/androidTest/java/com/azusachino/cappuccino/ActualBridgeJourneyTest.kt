@@ -120,9 +120,8 @@ class ActualBridgeJourneyTest {
             else ->
               vm.answerPrompt(
                 requireNotNull(card).promptId,
-                card.options.lastIndex,
                 card.options.last().id,
-                "select_option",
+                null,
               )
           }
         }
@@ -196,7 +195,7 @@ class ActualBridgeJourneyTest {
         assertFalse(vm.state.value.canMutate)
         vm.submitPrompt("Must not send during missing history")
         vm.controlAgent("interrupt")
-        vm.answerPrompt("old-card", 0, "reject", "select_option")
+        vm.answerPrompt("old-card", "reject", null)
       }
       assertEquals(1, fixture().getJSONArray("journal").length())
       fixture("""{"history":true}""")

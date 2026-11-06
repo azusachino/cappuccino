@@ -3,7 +3,7 @@ import Foundation
 /// Ports core/RecentHistory.kt: bounds the conversation shown, and decides which
 /// content counts as a new answer to follow.
 
-let maximumRecentMessages = 200
+let maximumRecentMessages = 500
 let maximumRecentTools = 100
 
 extension ConversationPart {

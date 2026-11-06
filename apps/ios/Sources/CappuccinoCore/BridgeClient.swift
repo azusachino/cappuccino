@@ -11,14 +11,15 @@ public struct BridgeClient: Sendable {
   static let protocolHeader = "X-Cappuccino-Protocol"
   /// Capabilities this app implements; each is declared at version 1 in the handshake.
   static let clientCapabilities = [
-    "agent_discovery", "live_output", "conversation_history", "prompt_input",
-    "prompt_answers", "agent_control", "mutation_binding", "completion_signals",
+    "agent_discovery", "conversation_sync", "live_output", "prompt_input",
+    "prompt_answers", "agent_control", "completion_signals",
   ]
   static var handshakeBody: [String: Any] {
     [
       "protocol_min": 2,
       "protocol_max": 2,
-      "capabilities": Dictionary(uniqueKeysWithValues: clientCapabilities.map { ($0, 1) }),
+      "offered_capabilities": Dictionary(
+        uniqueKeysWithValues: clientCapabilities.map { ($0, ["version": 1]) }),
     ]
   }
 
@@ -105,7 +106,7 @@ public struct BridgeClient: Sendable {
 
   /// Fetches structured conversation turns for an agent session
   public func fetchConversation(base url: URL, session: String) async throws -> [String: Any] {
-    let endpoint = agentURL(url, session: session, "conversation")
+    let endpoint = agentURL(url, session: session, "conversation/sync")
     return try await get(endpoint)
   }
 
@@ -129,7 +130,6 @@ public struct BridgeClient: Sendable {
     session: String,
     binding: SessionBinding,
     promptID: String,
-    optionIndex: Int? = nil,
     optionID: String? = nil,
     action: String? = nil
   ) async throws {
@@ -139,7 +139,6 @@ public struct BridgeClient: Sendable {
       "prompt_id": promptID,
       "expected_session": binding.json,
     ]
-    if let optionIndex { body["option_index"] = optionIndex }
     if let optionID { body["option_id"] = optionID }
     if let action { body["action"] = action }
     _ = try await post(endpoint, body: body)
@@ -241,20 +240,33 @@ extension BridgeClient {
   /// the locator must echo back, and a canonical identity needs its canonical_log
   /// source, a machine and, when `agent` is known, that agent's provider prefix.
   public func conversationSnapshot(
-    base url: URL, session: String, agent: String? = nil
+    base url: URL, session: String, agent: String? = nil, machineID: UUID? = nil
   ) async throws -> ConversationSnapshot {
-    let json = BridgeJSON(try await get(agentURL(url, session: session, "conversation")))
-    guard try json.string("session_id") == session else {
-      throw BridgeError.protocolError("Conversation belongs to a different locator")
+    try await conversationPage(
+      base: url, session: session, agent: agent, machineID: machineID
+    ).snapshot
+  }
+
+  /// One sync request: the newest page (no token), a catch-up after a forward token, or backfill
+  /// before a backward token. The page carries the tokens the replicated log keeps (contract §7).
+  public func conversationPage(
+    base url: URL, session: String, agent: String? = nil, machineID: UUID? = nil,
+    after: String? = nil, before: String? = nil
+  ) async throws -> ConversationPage {
+    guard after == nil || before == nil else {
+      throw BridgeError.protocolError("Sync takes one of after or before")
     }
-    let source = try json.string("source")
+    var endpoint = agentURL(url, session: session, "conversation/sync")
+    if let token = after ?? before {
+      var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: true)!
+      components.queryItems = [URLQueryItem(name: after != nil ? "after" : "before", value: token)]
+      endpoint = components.url!
+    }
+    let json = BridgeJSON(try await get(endpoint))
+    // The sync response names no machine or session: the caller's verified machine is the
+    // identity, and the locator is the one requested.
+    let source = try json.string("mode") == "scrollback" ? "scrollback" : "canonical_log"
     let identity = try json.optionalString("conversation_id")
-    let machineID = try json.optionalString("machine_id").map { raw in
-      guard let id = UUID(uuidString: raw) else {
-        throw BridgeError.protocolError("Invalid machine identity")
-      }
-      return id
-    }
     if let identity {
       let canonical =
         agent.map { CanonicalConversationID.isCanonical(identity, agent: $0) }
@@ -274,9 +286,18 @@ extension BridgeClient {
     } else {
       stats = nil
     }
-    return ConversationSnapshot(
-      turns: try parseConversationTurns(json), source: source, conversationID: identity,
-      machineID: machineID, stats: stats)
+    let turns = try parseConversationTurns(json)
+    return ConversationPage(
+      snapshot: ConversationSnapshot(
+        turns: turns, source: source, conversationID: identity, machineID: machineID, stats: stats),
+      sync: SyncPage(
+        mode: try json.string("mode"), upserts: turns,
+        afterToken: try json.optionalString("after_token"),
+        hasAfter: json.fields["after_token"] != nil,
+        beforeToken: try json.optionalString("before_token"),
+        hasBefore: json.fields["before_token"] != nil,
+        caughtUp: json.fields["caught_up"] as? Bool ?? true,
+        conversationID: identity))
   }
 
   /// Owner control (`interrupt` or `new_session`). A bridge that advertises
@@ -299,8 +320,10 @@ extension BridgeClient {
     answers: [QuestionAnswer]
   ) async throws {
     let rows: [[String: Any]] = answers.map { answer in
-      var row: [String: Any] = ["selected": answer.selected]
-      if let other = answer.other { row["other"] = other }
+      var row: [String: Any] = [
+        "question_id": answer.questionID, "selected_option_ids": answer.selectedOptionIDs,
+      ]
+      if let freeText = answer.freeText { row["free_text"] = freeText }
       return row
     }
     _ = try await post(
@@ -319,7 +342,7 @@ extension BridgeClient {
     return URL(string: "/api/v2/agents/\(component)/\(leaf)", relativeTo: base)!.absoluteURL
   }
 
-  private static let locatorCharacters = CharacterSet.alphanumerics.union(
+  static let locatorCharacters = CharacterSet.alphanumerics.union(
     CharacterSet(charactersIn: "-._~"))
 }
 

@@ -486,7 +486,6 @@ class MachinesJourneyTest {
 
     override fun answerPrompt(
       promptId: String,
-      optionIndex: Int?,
       optionId: String?,
       action: String?,
     ) = Unit

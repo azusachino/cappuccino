@@ -4,8 +4,11 @@ import Observation
 /// The calls the app model makes to one bridge. Each request gets a fresh client from the
 /// model's factory, as Android's ConnectedViewModel does.
 public protocol AgentSessionServing: Sendable {
-  func conversationSnapshot(base: URL, session: String, agent: String?) async throws
-    -> ConversationSnapshot
+  func conversationSnapshot(base: URL, session: String, agent: String?, machineID: UUID?)
+    async throws -> ConversationSnapshot
+  func conversationPage(
+    base: URL, session: String, agent: String?, machineID: UUID?, after: String?, before: String?
+  ) async throws -> ConversationPage
   func events(base: URL, session: String) -> AsyncThrowingStream<AgentStreamEvent, Error>
   func verifyBinding(base: URL, machineID: UUID, agent: AgentRow) async throws -> Bool
   func controlAgent(
@@ -16,7 +19,7 @@ public protocol AgentSessionServing: Sendable {
     base: URL, session: String, binding: SessionBinding, text: String, confirmed: Bool
   ) async throws
   func answerPrompt(
-    base: URL, session: String, binding: SessionBinding, promptID: String, optionIndex: Int?,
+    base: URL, session: String, binding: SessionBinding, promptID: String,
     optionID: String?, action: String?
   ) async throws
   func answerQuestions(
@@ -26,6 +29,20 @@ public protocol AgentSessionServing: Sendable {
 }
 
 extension AgentSessionServing {
+  /// A transport without sync tokens answers its whole snapshot as one page.
+  public func conversationPage(
+    base: URL, session: String, agent: String?, machineID: UUID?, after: String?, before: String?
+  ) async throws -> ConversationPage {
+    let snapshot = try await conversationSnapshot(
+      base: base, session: session, agent: agent, machineID: machineID)
+    return ConversationPage(
+      snapshot: snapshot,
+      sync: SyncPage(
+        mode: snapshot.source == "scrollback" ? "scrollback" : "append", upserts: snapshot.turns,
+        afterToken: nil, hasAfter: false, beforeToken: nil, hasBefore: false, caughtUp: true,
+        conversationID: snapshot.conversationID))
+  }
+
   /// Clients without authoritative discovery cannot establish a recovery binding.
   public func verifyBinding(base: URL, machineID: UUID, agent: AgentRow) async throws -> Bool {
     false
@@ -74,6 +91,9 @@ public final class SessionModel {
   @ObservationIgnored private var streamTask: Task<Void, Never>?
   @ObservationIgnored private var conversationTask: Task<Void, Never>?
   @ObservationIgnored private var conversationRequested = false
+  /// Replication position of `turns`; it is valid only for `syncCursorSession`.
+  @ObservationIgnored private var syncCursor: SyncCursor?
+  @ObservationIgnored private var syncCursorSession: String?
   @ObservationIgnored var retryPause: @Sendable (Int) async throws -> Void = {
     try await Task.sleep(nanoseconds: UInt64($0) * 1_000_000)
   }
@@ -128,6 +148,8 @@ public final class SessionModel {
     selectedProfileID = profileID ?? selectedProfileID
     selectedAgent = nil
     turns = []
+    syncCursor = nil
+    syncCursorSession = nil
     omittedTurns = 0
     omittedTools = 0
     conversationSource = nil
@@ -187,6 +209,31 @@ public final class SessionModel {
     }
   }
 
+  /// Backfills older turns before the log's first turn, on the owner's request. It stops at the
+  /// start of the file, and at the window cap rather than trimming the newest turns.
+  public func loadOlderConversation() {
+    guard foreground, let agent = selectedAgent, let profile = selectedProfile,
+      let cursor = syncCursor, syncCursorSession == agent.sessionID, !cursor.startReached,
+      let before = cursor.before, !turns.isEmpty, turns.count < maximumRecentMessages
+    else { return }
+    let token = epoch
+    Task { [weak self] in
+      guard let self else { return }
+      do {
+        let client = self.makeClient()
+        let page = try await self.machines.request(profile) { base in
+          try await client.conversationPage(
+            base: base, session: agent.sessionID, agent: agent.provider,
+            machineID: profile.machineID, after: nil, before: before)
+        }
+        guard token == self.epoch, !Task.isCancelled else { return }
+        self.applyConversation(page, direction: .backward, session: agent.sessionID)
+      } catch {
+        // The turns already shown stay; the owner can ask for older history again.
+      }
+    }
+  }
+
   /// Waits for the current stream to end. Tests use this to observe the reducer deterministically.
   func awaitStreamForTesting() async {
     await streamTask?.value
@@ -196,15 +243,32 @@ public final class SessionModel {
     await conversationTask?.value
   }
 
-  private func applyConversation(_ snapshot: ConversationSnapshot) {
-    let recent = boundedConversation(snapshot.source == "canonical_log" ? snapshot.turns : [])
+  /// Applies one sync page to the replicated log (contract §7). A forward page merges after the
+  /// log's newest turn, a backward page before its oldest, and a resync or scrollback replaces it.
+  private func applyConversation(
+    _ page: ConversationPage, direction: SyncDirection, session: String
+  ) {
+    let snapshot = page.snapshot
+    let prior = syncCursorSession == session ? syncCursor : nil
+    let result: (turns: [ConversationTurn], cursor: SyncCursor?) =
+      snapshot.source == "canonical_log"
+      ? applySyncPage(turns, cursor: prior, direction: direction, page: page.sync) : ([], nil)
+    let recent = boundedConversation(result.turns)
     turns = recent.turns
+    syncCursor = result.cursor
+    syncCursorSession = result.cursor == nil ? nil : session
     omittedTurns = recent.omittedMessages
     omittedTools = recent.omittedTools
     conversationSource = snapshot.source
     conversationID = snapshot.conversationID
     stats = snapshot.stats
     saveHistory(recent, snapshot)
+  }
+
+  /// The forward position to catch up from, while the log belongs to this session and has turns.
+  private func forwardAfter(session: String) -> String? {
+    guard syncCursorSession == session, !turns.isEmpty else { return nil }
+    return syncCursor?.after
   }
 
   /// Keeps the canonical transcript for History. Best-effort: a failed write never touches the
@@ -224,16 +288,25 @@ public final class SessionModel {
     guard let agent = selectedAgent, let profile = selectedProfile else { return }
     do {
       let client = makeClient()
-      let snapshot = try await machines.request(profile) { base in
-        try await client.conversationSnapshot(
-          base: base, session: agent.sessionID, agent: agent.provider)
+      // Catch up from the forward position when the log is valid; otherwise take the newest page.
+      let after = forwardAfter(session: agent.sessionID)
+      let page = try await machines.request(profile) { base in
+        try await client.conversationPage(
+          base: base, session: agent.sessionID, agent: agent.provider, machineID: profile.machineID,
+          after: after, before: nil)
       }
-      if let machine = snapshot.machineID, machine != profile.machineID {
+      if let machine = page.snapshot.machineID, machine != profile.machineID {
         throw BridgeError.protocolError("Conversation machine identity changed")
       }
       guard token == epoch, !Task.isCancelled else { return }
       // Terminal snapshots arrive through the stream; only canonical history is shown here.
-      applyConversation(snapshot)
+      applyConversation(
+        page, direction: after == nil ? .newest : .forward, session: agent.sessionID)
+      // A forward page that stopped short of the file's end leaves more records to fetch, while its
+      // token moves. An equal token means a held turn is still waiting, so the next event retries.
+      if let after, !page.sync.caughtUp, let next = page.sync.afterToken, next != after {
+        conversationRequested = true
+      }
     } catch {
       // Keep the turns already shown. A failed first load falls back to scrollback.
       guard token == epoch, !Task.isCancelled else { return }
@@ -285,22 +358,27 @@ public final class SessionModel {
           conversationTask = nil
           conversationRequested = false
           let expectedConversation = conversationID
-          let snapshot = try await machines.request(profile) { base in
-            try await client.conversationSnapshot(
-              base: base, session: agent.sessionID, agent: agent.provider)
+          let after = forwardAfter(session: agent.sessionID)
+          let page = try await machines.request(profile) { base in
+            try await client.conversationPage(
+              base: base, session: agent.sessionID, agent: agent.provider,
+              machineID: profile.machineID, after: after, before: nil)
           }
+          let snapshot = page.snapshot
           guard token == epoch, !Task.isCancelled else { return }
           guard snapshot.source == "canonical_log" else {
             throw BridgeError.unreachable("Canonical history unavailable; retry to enable actions")
           }
           guard snapshot.machineID == profile.machineID,
-            let identity = snapshot.conversationID, let provider = agent.provider,
+            let identity = snapshot.conversationID ?? (after == nil ? nil : conversationID),
+            let provider = agent.provider,
             CanonicalConversationID.isCanonical(identity, agent: provider),
             expectedConversation == nil || identity == expectedConversation
           else {
             throw BridgeError.protocolError("Recovery history identity changed or is unavailable")
           }
-          applyConversation(snapshot)
+          applyConversation(
+            page, direction: after == nil ? .newest : .forward, session: agent.sessionID)
         }
         attached = true
         var opened = false
@@ -390,9 +468,9 @@ public final class SessionModel {
     }
   }
 
-  /// Answers a screen prompt by option index, id or action.
+  /// Answers a screen prompt by option id, or cancels it.
   public func answerPrompt(
-    _ promptID: String, optionIndex: Int? = nil, optionID: String? = nil, action: String? = nil
+    _ promptID: String, optionID: String? = nil, action: String? = nil
   ) async {
     await perform(
       "Failed to answer prompt", supported: capabilities?["prompt_answers"] != false,
@@ -400,7 +478,6 @@ public final class SessionModel {
     ) { client, base, session, binding in
       try await client.answerPrompt(
         base: base, session: session, binding: binding, promptID: promptID,
-        optionIndex: optionIndex,
         optionID: optionID, action: action)
     }
   }

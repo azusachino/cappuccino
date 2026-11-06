@@ -21,7 +21,7 @@ fun conversationFollowContent(turns: List<ConversationTurn>): List<ConversationT
     }
     .takeLast(1) // Older-window eviction is not a new answer to follow.
 
-const val MAX_RECENT_MESSAGES = 200
+const val MAX_RECENT_MESSAGES = 500
 const val MAX_RECENT_TOOLS = 100
 
 data class RecentConversation(

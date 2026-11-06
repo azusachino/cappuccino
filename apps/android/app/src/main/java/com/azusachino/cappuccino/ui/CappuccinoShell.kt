@@ -922,8 +922,10 @@ fun CappuccinoScreen(
                                 ) { turn ->
                                   if (historyOmitted && turn.id == chatTurns.firstOrNull()?.id) {
                                     Text(
-                                      "Older messages aren't loaded.",
-                                      Modifier.padding(vertical = 12.dp),
+                                      "Older messages aren't loaded. Load older",
+                                      Modifier.padding(vertical = 12.dp).clickable {
+                                        actions.loadOlderConversation()
+                                      },
                                       style = MaterialTheme.typography.bodySmall,
                                       color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -1029,18 +1031,18 @@ fun CappuccinoScreen(
                               mutate { it.answerQuestions(card.promptId, answers) }
                             },
                             onCancel = {
-                              mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                              mutate { it.answerPrompt(card.promptId, null, "cancel") }
                             },
                           )
                         else
                           PromptCardView(
                             prompt = card,
                             enabled = answersEnabled,
-                            onSelectOption = { idx, optId ->
-                              mutate { it.answerPrompt(card.promptId, idx, optId, "select_option") }
+                            onSelectOption = { optId ->
+                              mutate { it.answerPrompt(card.promptId, optId, null) }
                             },
                             onCancel = {
-                              mutate { it.answerPrompt(card.promptId, null, null, "cancel") }
+                              mutate { it.answerPrompt(card.promptId, null, "cancel") }
                             },
                           )
                       }

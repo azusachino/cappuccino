@@ -33,9 +33,9 @@ import com.azusachino.cappuccino.core.QuestionAnswer
 
 /** Whether one question's answer is complete: one choice or text alone, or at least one of many. */
 internal fun answerComplete(question: PromptQuestion, answer: QuestionAnswer): Boolean {
-  val text = !answer.other.isNullOrBlank()
-  return if (question.multiSelect) answer.selected.isNotEmpty() || text
-  else (answer.selected.size == 1) != text
+  val text = !answer.freeText.isNullOrBlank()
+  return if (question.multiSelect) answer.selectedOptionIds.isNotEmpty() || text
+  else (answer.selectedOptionIds.size == 1) != text
 }
 
 /**
@@ -55,8 +55,12 @@ fun QuestionFormCard(
   val selected = remember(prompt.promptId) { prompt.questions.map { mutableStateListOf<Int>() } }
   val other = remember(prompt.promptId) { mutableStateListOf(*Array(prompt.questions.size) { "" }) }
   val answers =
-    prompt.questions.indices.map { index ->
-      QuestionAnswer(selected[index].toList(), other[index].trim().ifEmpty { null })
+    prompt.questions.mapIndexed { index, question ->
+      QuestionAnswer(
+        question.id,
+        selected[index].map { question.options[it].id },
+        other[index].trim().ifEmpty { null },
+      )
     }
   val complete =
     prompt.questions.zip(answers).all { (question, answer) -> answerComplete(question, answer) }

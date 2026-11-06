@@ -127,7 +127,6 @@ class CappuccinoShellTest {
                   mapOf(
                     "prompt_input" to true,
                     "agent_control" to true,
-                    "mutation_binding" to true,
                   ),
                 )
             ),
@@ -604,7 +603,8 @@ class CappuccinoShellTest {
         nativeSessionRef = "synthetic-question-native",
       )
     val options = listOf("Red", "Blue", "Green").map { PromptOption(it.lowercase(), it, null) }
-    val question = PromptQuestion("Color", "Which color should the theme use?", false, options)
+    val question =
+      PromptQuestion("q-color", "Color", "Which color should the theme use?", false, options)
     val state =
       mutableStateOf(
         ConnectedUiState(
@@ -632,7 +632,7 @@ class CappuccinoShellTest {
                   null,
                   null,
                   options,
-                  0,
+                  null,
                   listOf(question),
                 ),
             ),
@@ -713,8 +713,8 @@ class CappuccinoShellTest {
           profile.machineId,
           "fixture",
           1,
-          mapOf("prompt_input" to true, "prompt_answers" to true, "agent_control" to true) +
-            (advertised?.let { mapOf("mutation_binding" to it) } ?: emptyMap()),
+          mapOf("prompt_answers" to true, "agent_control" to true) +
+            (advertised?.let { mapOf("prompt_input" to it) } ?: emptyMap()),
         )
     )
 
@@ -936,7 +936,6 @@ class CappuccinoShellTest {
 
     override fun answerPrompt(
       promptId: String,
-      optionIndex: Int?,
       optionId: String?,
       action: String?,
     ) = Unit

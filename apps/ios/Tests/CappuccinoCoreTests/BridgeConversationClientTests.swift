@@ -15,38 +15,39 @@ extension BridgeClientTests {
   private var base: URL { URL(string: "http://127.0.0.1:7392")! }
 
   private var machine: String { "11111111-1111-4111-8111-111111111111" }
+  private var machineID: UUID { UUID(uuidString: machine)! }
 
   @Test func conversationIdentityFollowsTheLocatorNotTheIdentity() async throws {
     let digest = String(repeating: "a", count: 64)
     StubURLProtocol.handler = { request in
-      #expect(request.url?.path == "/api/v2/agents/chosen/conversation")
+      #expect(request.url?.path == "/api/v2/agents/chosen/conversation/sync")
       return (
         200,
         Data(
-          #"{"session_id":"chosen","source":"canonical_log","machine_id":"\#(machine)","conversation_id":"pi:\#(digest)","turns":[]}"#
+          #"{"session_id":"chosen","mode":"append","machine_id":"\#(machine)","conversation_id":"pi:\#(digest)","upserts":[]}"#
             .utf8)
       )
     }
     let snapshot = try await client().conversationSnapshot(
-      base: base, session: "chosen", agent: "pi")
+      base: base, session: "chosen", agent: "pi", machineID: machineID)
     #expect(snapshot.conversationID == "pi:\(digest)")
     #expect(snapshot.source == "canonical_log")
     #expect(snapshot.machineID?.uuidString.lowercased() == machine)
   }
 
-  @Test func rejectsWrongLocatorMalformedIdentityAndScrollbackIdentityClaims() async {
+  @Test func rejectsMalformedIdentityAndScrollbackIdentityClaims() async {
     let digest = String(repeating: "a", count: 64)
     for body in [
-      #"{"session_id":"other","source":"canonical_log","machine_id":"\#(machine)","conversation_id":"pi:\#(digest)","turns":[]}"#,
-      #"{"session_id":"chosen","source":"canonical_log","conversation_id":"pi:\#(digest)","turns":[]}"#,
-      #"{"session_id":"chosen","source":"canonical_log","machine_id":"\#(machine)","conversation_id":"pane","turns":[]}"#,
-      #"{"session_id":"chosen","source":"scrollback","machine_id":"\#(machine)","conversation_id":"pi:\#(digest)","turns":[]}"#,
-      #"{"session_id":"chosen","source":"canonical_log","machine_id":"\#(machine)","conversation_id":123,"turns":[]}"#,
-      #"{"session_id":"chosen","source":"canonical_log","machine_id":"\#(machine)","conversation_id":"claude:\#(digest)","turns":[]}"#,
+
+      #"{"session_id":"chosen","mode":"append","machine_id":"\#(machine)","conversation_id":"pane","upserts":[]}"#,
+      #"{"session_id":"chosen","mode":"scrollback","machine_id":"\#(machine)","conversation_id":"pi:\#(digest)","upserts":[]}"#,
+      #"{"session_id":"chosen","mode":"append","machine_id":"\#(machine)","conversation_id":123,"upserts":[]}"#,
+      #"{"session_id":"chosen","mode":"append","machine_id":"\#(machine)","conversation_id":"claude:\#(digest)","upserts":[]}"#,
     ] {
       StubURLProtocol.handler = { _ in (200, Data(body.utf8)) }
       await #expect(throws: BridgeError.self) {
-        try await client().conversationSnapshot(base: base, session: "chosen", agent: "pi")
+        try await client().conversationSnapshot(
+          base: base, session: "chosen", agent: "pi", machineID: machineID)
       }
     }
   }
@@ -56,29 +57,32 @@ extension BridgeClientTests {
       (
         200,
         Data(
-          #"{"session_id":"s-1","source":"canonical_log","turns":[],"stats":{"model":"glm","thinking_level":"low","context_tokens":1100,"cache_percent":60}}"#
+          #"{"session_id":"s-1","mode":"append","upserts":[],"stats":{"model":"glm","thinking_level":"low","context_tokens":1100,"cache_percent":60}}"#
             .utf8)
       )
     }
-    let snapshot = try await client().conversationSnapshot(base: base, session: "s-1")
+    let snapshot = try await client().conversationSnapshot(
+      base: base, session: "s-1", machineID: machineID)
     #expect(
       snapshot.stats
         == SessionStats(
           model: "glm", thinkingLevel: "low", contextTokens: 1100, contextWindow: nil,
           cachePercent: 60))
     StubURLProtocol.handler = { _ in
-      (200, Data(#"{"session_id":"s-1","source":"canonical_log","turns":[]}"#.utf8))
+      (200, Data(#"{"session_id":"s-1","mode":"append","upserts":[]}"#.utf8))
     }
-    #expect(try await client().conversationSnapshot(base: base, session: "s-1").stats == nil)
+    #expect(
+      try await client().conversationSnapshot(base: base, session: "s-1", machineID: machineID)
+        .stats == nil)
   }
 
   @Test func locatorWithColonIsOnePercentEncodedPathComponent() async throws {
     StubURLProtocol.handler = { request in
-      #expect(request.url?.path == "/api/v2/agents/w1:p3K/conversation")
+      #expect(request.url?.path == "/api/v2/agents/w1:p3K/conversation/sync")
       #expect(request.url?.absoluteString.contains("w1%3Ap3K") == true)
-      return (200, Data(#"{"session_id":"w1:p3K","source":"scrollback","turns":[]}"#.utf8))
+      return (200, Data(#"{"session_id":"w1:p3K","mode":"scrollback","upserts":[]}"#.utf8))
     }
-    _ = try await client().conversationSnapshot(base: base, session: "w1:p3K")
+    _ = try await client().conversationSnapshot(base: base, session: "w1:p3K", machineID: machineID)
   }
 
   @Test func fetchesConversationTurnsAndParts() async throws {
@@ -86,11 +90,13 @@ extension BridgeClientTests {
       (
         200,
         Data(
-          #"{"session_id":"s-1","source":"canonical_log","turns":[{"id":"t1","role":"user","text":"hello"}]}"#
+          #"{"session_id":"s-1","mode":"append","upserts":[{"id":"t1","role":"user","text":"hello"}]}"#
             .utf8)
       )
     }
-    let turns = try await client().conversationSnapshot(base: base, session: "s-1").turns
+    let turns = try await client().conversationSnapshot(
+      base: base, session: "s-1", machineID: machineID
+    ).turns
     #expect(
       turns == [ConversationTurn(id: "t1", role: "user", timestamp: nil, text: "hello", parts: [])])
   }
@@ -106,17 +112,38 @@ extension BridgeClientTests {
     try await client().answerQuestions(
       base: base, session: "s-1", binding: binding, promptID: "q-toolu_1",
       answers: [
-        QuestionAnswer(selected: [1], other: nil),
-        QuestionAnswer(selected: [0, 2], other: "a \"bird\""),
+        QuestionAnswer(questionID: "q-1", selectedOptionIDs: ["opt-1"], freeText: nil),
+        QuestionAnswer(
+          questionID: "q-2", selectedOptionIDs: ["opt-0", "opt-2"], freeText: "a \"bird\""),
       ])
     let sent = try JSONSerialization.jsonObject(with: recorder.bodies[0]) as? [String: Any]
     #expect(sent?["type"] as? String == "answer_question")
     #expect(sent?["prompt_id"] as? String == "q-toolu_1")
     #expect((sent?["expected_session"] as? [String: String])?["pane_id"] == binding.paneID)
     let answers = sent?["answers"] as? [[String: Any]]
-    #expect(answers?[0]["selected"] as? [Int] == [1])
-    #expect(answers?[0]["other"] == nil)
-    #expect(answers?[1]["other"] as? String == "a \"bird\"")
+    #expect(answers?[0]["selected_option_ids"] as? [String] == ["opt-1"])
+    #expect(answers?[0]["free_text"] == nil)
+    #expect(answers?[1]["free_text"] as? String == "a \"bird\"")
+  }
+
+  @Test func conversationPageSendsOneCursorAndReadsTheTokens() async throws {
+    StubURLProtocol.handler = { request in
+      #expect(request.url?.path == "/api/v2/agents/s-1/conversation/sync")
+      #expect(request.url?.query == "after=AB")
+      return (
+        200,
+        Data(
+          #"{"mode":"append","upserts":[{"id":"t2","role":"agent","parts":[]}],"after_token":"AF","caught_up":false}"#
+            .utf8)
+      )
+    }
+    let page = try await client().conversationPage(
+      base: base, session: "s-1", agent: nil, machineID: machineID, after: "AB", before: nil)
+    #expect(page.sync.afterToken == "AF")
+    #expect(page.sync.hasAfter)
+    #expect(!page.sync.hasBefore)
+    #expect(!page.sync.caughtUp)
+    #expect(page.sync.upserts.map(\.id) == ["t2"])
   }
 
   @Test func refusalReasonFromTheEnvelopeReachesTheOwner() async {
@@ -129,7 +156,7 @@ extension BridgeClientTests {
     do {
       try await client().answerQuestions(
         base: base, session: "s-1", binding: binding, promptID: "q",
-        answers: [QuestionAnswer(selected: [0], other: nil)])
+        answers: [QuestionAnswer(questionID: "q", selectedOptionIDs: ["opt-0"], freeText: nil)])
       Issue.record("a refused answer must throw")
     } catch {
       #expect(error as? BridgeError == .protocolError("answer it in the terminal"))

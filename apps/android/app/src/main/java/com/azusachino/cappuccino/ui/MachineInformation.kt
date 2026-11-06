@@ -85,7 +85,7 @@ internal fun machineInformationWarnings(
   return listOf(
       "agent_discovery" to "Agent discovery is unavailable.",
       "live_output" to "Live output is unavailable.",
-      "conversation_history" to "Conversation history is unavailable.",
+      "conversation_sync" to "Conversation history is unavailable.",
       "prompt_input" to "Prompt input is unavailable on this bridge.",
       "prompt_answers" to "Approval and question answers are unavailable.",
     )

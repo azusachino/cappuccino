@@ -38,7 +38,7 @@ public enum BridgeStream {
   /// deriving the WebSocket scheme from the transport security: http→ws,
   /// https→wss. Any other (or missing) scheme is a configuration mistake and
   /// throws — a TLS tailnet endpoint must never be silently downgraded.
-  public static func endpointURL(from machineURL: URL, session: String?) throws -> URL {
+  public static func endpointURL(from machineURL: URL, session: String) throws -> URL {
     guard var components = URLComponents(url: machineURL, resolvingAgainstBaseURL: false),
       let scheme = components.scheme?.lowercased()
     else {
@@ -56,10 +56,11 @@ public enum BridgeStream {
       throw BridgeError.protocolError(
         "stream URL scheme must be http or https, got '\(scheme)'")
     }
-    components.path = "/api/v2/stream"
-    if let session {
-      components.queryItems = [URLQueryItem(name: "session", value: session)]
-    }
+    // The locator is one path component, encoded the same way as every other agent route.
+    let component =
+      session.addingPercentEncoding(withAllowedCharacters: BridgeClient.locatorCharacters)
+      ?? session
+    components.percentEncodedPath = "/api/v2/agents/\(component)/stream"
     guard let endpoint = components.url else {
       throw BridgeError.protocolError("stream URL is malformed")
     }

@@ -41,12 +41,11 @@ const val PROTOCOL_HEADER = "X-Cappuccino-Protocol"
 val CLIENT_CAPABILITIES =
   listOf(
     "agent_discovery",
+    "conversation_sync",
     "live_output",
-    "conversation_history",
     "prompt_input",
     "prompt_answers",
     "agent_control",
-    "mutation_binding",
     "completion_signals",
   )
 
@@ -149,7 +148,7 @@ class Endpoint private constructor(val base: URI, val iroh: IrohEndpointAddr? = 
 
   fun stream(sessionId: String): URI =
     URI.create(
-      "${if (base.scheme == "https") "wss" else "ws"}://${base.rawAuthority}/api/v2/stream?session=${encodeQuery(sessionId)}"
+      "${if (base.scheme == "https") "wss" else "ws"}://${base.rawAuthority}/api/v2/agents/${encodeQuery(sessionId)}/stream"
     )
 
   private fun encodeQuery(value: String): String =
@@ -194,6 +193,9 @@ sealed interface StreamEvent {
   data class PromptRequest(val sessionId: String, val prompt: PromptCard) : StreamEvent
 
   data class PromptResolved(val sessionId: String, val promptId: String) : StreamEvent
+
+  /** A hint that the session's conversation changed; the app runs a sync request. */
+  data class ConversationChanged(val sessionId: String) : StreamEvent
 }
 
 data class PromptOption(
@@ -201,6 +203,9 @@ data class PromptOption(
   val label: String,
   val description: String?,
 )
+
+/** One answered question on a review card; display only, the bridge never takes it back. */
+data class ReviewAnswer(val questionId: String, val answer: String)
 
 data class PromptCard(
   val promptId: String,
@@ -210,20 +215,28 @@ data class PromptCard(
   val toolName: String?,
   val command: String?,
   val options: List<PromptOption>,
-  val selectedIndex: Int,
+  /** The option the screen highlights, or null when the card has none. */
+  val defaultOptionId: String? = null,
   /** AskUserQuestion's questions; empty for prompts read off the screen. */
   val questions: List<PromptQuestion> = emptyList(),
+  /** The answers shown on a question review card. */
+  val reviewAnswers: List<ReviewAnswer> = emptyList(),
 )
 
 data class PromptQuestion(
+  val id: String,
   val header: String,
   val question: String,
   val multiSelect: Boolean,
   val options: List<PromptOption>,
 )
 
-/** One question's answer: chosen option indexes and/or one line of own text. */
-data class QuestionAnswer(val selected: List<Int>, val other: String?)
+/** One question's answer: chosen option ids and/or one line of own text. */
+data class QuestionAnswer(
+  val questionId: String,
+  val selectedOptionIds: List<String>,
+  val freeText: String?,
+)
 
 data class ConversationTurn(
   val id: String,
@@ -291,10 +304,11 @@ data class StreamState(
   }
 }
 
+/** Reads a v2 `handshake_accepted` response and returns the machine it names. */
 fun parsePaired(json: JsonObject): UUID {
-  if (json.string("event") != "paired" || json.string("plugin") != BRIDGE_PLUGIN_ID)
+  if (json.string("event") != "handshake_accepted")
     throw ProtocolException("Unsupported bridge session response")
-  val protocol = json.long("protocol")
+  val protocol = json.long("protocol_version")
   if (protocol != 2L)
     throw ProtocolException("Incompatible bridge protocol v$protocol; app requires v2")
   return uuid(json.string("machine_id"))
@@ -352,7 +366,6 @@ fun parsePromptCard(json: JsonObject): PromptCard {
         description = opt.optionalString("description"),
       )
     }
-  val selectedIndex = json.long("selected_index").toInt()
   return PromptCard(
     promptId = promptId,
     type = type,
@@ -361,12 +374,13 @@ fun parsePromptCard(json: JsonObject): PromptCard {
     toolName = toolName,
     command = command,
     options = options,
-    selectedIndex = selectedIndex,
+    defaultOptionId = json.optionalString("default_option_id"),
     questions =
       if (json.fields["questions"] == null) emptyList()
       else
         json.array("questions").map { question ->
           PromptQuestion(
+            id = question.string("id"),
             header = question.optionalString("header").orEmpty(),
             question = question.string("question"),
             multiSelect = question.boolean("multi_select"),
@@ -380,11 +394,17 @@ fun parsePromptCard(json: JsonObject): PromptCard {
               },
           )
         },
+    reviewAnswers =
+      if (json.fields["answers"] == null) emptyList()
+      else
+        json.array("answers").map { answer ->
+          ReviewAnswer(answer.string("question_id"), answer.string("answer"))
+        },
   )
 }
 
 fun parseConversationResponse(json: JsonObject): List<ConversationTurn> {
-  val turnsJson = json.array("turns")
+  val turnsJson = json.array("upserts")
   return turnsJson.map { turnObj ->
     val id = turnObj.string("id")
     val role = turnObj.string("role")
@@ -446,7 +466,7 @@ fun parseStreamEvent(json: JsonObject): StreamEvent =
     "stream_open" -> {
       val session = json.string("session_id")
       if (session.isBlank()) throw ProtocolException("Stream locator is empty")
-      StreamEvent.Open(session, nonNegative(json.long("generation"), "generation"))
+      StreamEvent.Open(session, nonNegative(json.long("stream_generation"), "stream_generation"))
     }
     "entries" ->
       StreamEvent.Entries(
@@ -465,7 +485,9 @@ fun parseStreamEvent(json: JsonObject): StreamEvent =
           )
         }
       )
-    "stream_reset" -> StreamEvent.Reset(nonNegative(json.long("generation"), "generation"))
+    "stream_reset" ->
+      StreamEvent.Reset(nonNegative(json.long("stream_generation"), "stream_generation"))
+    "conversation_changed" -> StreamEvent.ConversationChanged(json.string("session_id"))
     "error" -> StreamEvent.Error(json.string("code"), json.string("message"))
     "agent_status" -> {
       val session = json.string("session_id")
@@ -568,6 +590,8 @@ fun reduce(state: StreamState, event: StreamEvent, selectedSession: String): Str
         state
       else state.copy(pendingPrompt = null)
     }
+    // A hint only: the view model runs the sync request, the live rows do not change.
+    is StreamEvent.ConversationChanged -> state
   }
 
 internal fun uuid(value: String): UUID =

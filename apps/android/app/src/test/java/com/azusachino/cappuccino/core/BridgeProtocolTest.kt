@@ -89,9 +89,12 @@ class BridgeProtocolTest {
   fun streamQueryEncodesLocator() {
     val uri = Endpoint.parse("https://bridge.example").stream("w1:p6F a&?雪#")
     assertEquals("wss", uri.scheme)
-    assertTrue(uri.rawQuery!!.contains("%26%3F"))
-    assertTrue(uri.rawQuery!!.contains("%E9%9B%AA"))
-    assertFalse(uri.rawQuery!!.contains("#"))
+    assertTrue(uri.rawPath.startsWith("/api/v2/agents/"))
+    assertTrue(uri.rawPath.endsWith("/stream"))
+    assertTrue(uri.rawPath.contains("%26%3F"))
+    assertTrue(uri.rawPath.contains("%E9%9B%AA"))
+    assertFalse(uri.rawPath.contains("#"))
+    assertEquals(null, uri.rawQuery)
   }
 
   @Test
@@ -100,8 +103,8 @@ class BridgeProtocolTest {
       machine,
       parsePaired(
         obj(
-          "event" to s("paired"),
-          "protocol" to n(2),
+          "event" to s("handshake_accepted"),
+          "protocol_version" to n(2),
           "machine_id" to s(machine.toString()),
           "plugin" to s(BRIDGE_PLUGIN_ID),
         )
@@ -110,8 +113,8 @@ class BridgeProtocolTest {
     assertThrows(ProtocolException::class.java) {
       parsePaired(
         obj(
-          "event" to s("paired"),
-          "protocol" to n(1),
+          "event" to s("handshake_accepted"),
+          "protocol_version" to n(1),
           "machine_id" to s(machine.toString()),
           "plugin" to s(BRIDGE_PLUGIN_ID),
         )
@@ -242,7 +245,7 @@ class BridgeProtocolTest {
     val event =
       parseStreamEvent(
         parseJsonObject(
-          """{"event":"prompt_request","session_id":"s-1","prompt":{"prompt_id":"q-toolu_1","type":"ask_user_question","title":"Pick a color?","tool_name":"AskUserQuestion","options":[],"selected_index":0,"questions":[{"header":"Color","question":"Pick a color?","multi_select":false,"options":[{"id":"opt-0","label":"Red","description":"warm"},{"id":"opt-1","label":"Blue"}]},{"header":"Pets","question":"Which pets?","multi_select":true,"options":[{"id":"opt-0","label":"Cat"}]}]}}"""
+          """{"event":"prompt_request","session_id":"s-1","prompt":{"prompt_id":"q-toolu_1","type":"ask_user_question","title":"Pick a color?","tool_name":"AskUserQuestion","options":[],"questions":[{"id":"q-color","header":"Color","question":"Pick a color?","multi_select":false,"options":[{"id":"opt-0","label":"Red","description":"warm"},{"id":"opt-1","label":"Blue"}]},{"id":"q-pets","header":"Pets","question":"Which pets?","multi_select":true,"options":[{"id":"opt-0","label":"Cat"}]}]}}"""
         )
       )
         as StreamEvent.PromptRequest
@@ -250,6 +253,7 @@ class BridgeProtocolTest {
     assertEquals(2, questions.size)
     assertEquals(
       PromptQuestion(
+        "q-color",
         "Color",
         "Pick a color?",
         false,
@@ -341,7 +345,7 @@ class BridgeProtocolTest {
     assertEquals("working", state.agentStatus)
     assertEquals("compiling", state.agentStatusDetail)
 
-    val card = PromptCard("p-1", "confirm", "Confirm action", null, null, null, emptyList(), 0)
+    val card = PromptCard("p-1", "confirm", "Confirm action", null, null, null, emptyList())
     state = reduce(state, StreamEvent.PromptRequest("s-1", card), "s-1")
     assertEquals(card, state.pendingPrompt)
 
@@ -354,7 +358,7 @@ class BridgeProtocolTest {
     val turns =
       parseConversationResponse(
         parseJsonObject(
-          """{"turns":[{"id":"entry","role":"agent","parts":[{"type":"tool_call","name":"bash","input":{"command":"printf \"hello\"","timeout":10,"nested":[true,null]},"output":"hello"}]}]}"""
+          """{"upserts":[{"id":"entry","role":"agent","parts":[{"type":"tool_call","name":"bash","input":{"command":"printf \"hello\"","timeout":10,"nested":[true,null]},"output":"hello"}]}]}"""
         )
       )
     val tool = turns.single().parts.single() as ConversationPart.ToolCall
@@ -369,7 +373,7 @@ class BridgeProtocolTest {
     val parts =
       parseConversationResponse(
           parseJsonObject(
-            """{"turns":[{"id":"t","role":"agent","parts":[{"type":"tool_call","name":"Read","input":{"file_path":"shot.png"},"output":"","images":2},{"type":"tool_call","name":"Read","input":"file"}]}]}"""
+            """{"upserts":[{"id":"t","role":"agent","parts":[{"type":"tool_call","name":"Read","input":{"file_path":"shot.png"},"output":"","images":2},{"type":"tool_call","name":"Read","input":"file"}]}]}"""
           )
         )
         .single()
@@ -384,7 +388,7 @@ class BridgeProtocolTest {
       obj(
         "session_id" to s("s-1"),
         "source" to s("canonical_log"),
-        "turns" to
+        "upserts" to
           JsonValue.Array(
             listOf(
               JsonValue.Object(

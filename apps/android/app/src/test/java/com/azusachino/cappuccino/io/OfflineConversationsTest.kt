@@ -191,7 +191,9 @@ class OfflineConversationsTest {
       }
       val tooMany =
         RecentConversation(
-          (0..200).map { ConversationTurn("t$it", "agent", null, null, emptyList()) },
+          (0..MAX_RECENT_MESSAGES).map {
+            ConversationTurn("t$it", "agent", null, null, emptyList())
+          },
           0,
           0,
         )

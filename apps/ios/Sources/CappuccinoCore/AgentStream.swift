@@ -91,11 +91,12 @@ public func parseStreamFrame(_ text: String) throws -> AgentStreamEvent {
 func parseStreamEvent(_ json: BridgeJSON) throws -> AgentStreamEvent {
   switch try json.string("event") {
   case "stream_open":
-    return .open(sessionID: try locator(json), generation: try nonNegative(json, "generation"))
+    return .open(
+      sessionID: try locator(json), generation: try nonNegative(json, "stream_generation"))
   case "entries":
     return .entries(try json.array("entries").map(parseEntry))
   case "stream_reset":
-    return .reset(generation: try nonNegative(json, "generation"))
+    return .reset(generation: try nonNegative(json, "stream_generation"))
   case "error":
     return .error(code: try json.string("code"), message: try json.string("message"))
   case "agent_status":

@@ -50,8 +50,8 @@ struct FakeBridgeConnector: BridgeWebSocketConnecting {
   let socket: FakeBridgeWebSocket
 
   func connect(url: URL) async throws -> BridgeWebSocket {
-    #expect(url.path.hasSuffix("/api/v2/stream"))
-    #expect(url.query?.contains("session=cap-spike-agent") == true)
+    #expect(url.path.hasSuffix("/api/v2/agents/cap-spike-agent/stream"))
+    #expect(url.query == nil)
     return socket
   }
 }
@@ -63,8 +63,8 @@ struct FakeBridgeConnector: BridgeWebSocketConnecting {
     #expect(endpoint.scheme == "ws")
     #expect(endpoint.host == "127.0.0.1")
     #expect(endpoint.port == 7392)
-    #expect(endpoint.path == "/api/v2/stream")
-    #expect(endpoint.query?.contains("session=s") == true)
+    #expect(endpoint.path.hasPrefix("/api/v2/agents/") && endpoint.path.hasSuffix("/stream"))
+    #expect(endpoint.query == nil)
   }
 
   @Test func httpsMapsToWSS() throws {
@@ -72,18 +72,18 @@ struct FakeBridgeConnector: BridgeWebSocketConnecting {
       from: URL(string: "https://host.tailnet.ts.net")!, session: "cap-spike-agent")
     #expect(endpoint.scheme == "wss")
     #expect(endpoint.host == "host.tailnet.ts.net")
-    #expect(endpoint.path == "/api/v2/stream")
-    #expect(endpoint.query?.contains("session=cap-spike-agent") == true)
+    #expect(endpoint.path.hasPrefix("/api/v2/agents/") && endpoint.path.hasSuffix("/stream"))
+    #expect(endpoint.query == nil)
   }
 
   @Test func unsupportedOrMissingSchemeThrowsProtocolError() {
     #expect(
       throws: BridgeError.protocolError("stream URL scheme must be http or https, got 'ftp'")
     ) {
-      try BridgeStream.endpointURL(from: URL(string: "ftp://127.0.0.1:7392")!, session: nil)
+      try BridgeStream.endpointURL(from: URL(string: "ftp://127.0.0.1:7392")!, session: "s")
     }
     #expect(throws: BridgeError.protocolError("stream URL is malformed")) {
-      try BridgeStream.endpointURL(from: URL(string: "no-scheme")!, session: nil)
+      try BridgeStream.endpointURL(from: URL(string: "no-scheme")!, session: "s")
     }
   }
 }
@@ -109,7 +109,7 @@ struct FakeBridgeConnector: BridgeWebSocketConnecting {
     let entry =
       #"{"event":"entries","entries":[{"id":"e1","seq":1,"kind":"output","text":"hi","complete":true}]}"#
     let (events, failure) = await collect([
-      #"{"event":"stream_open","session_id":"cap-spike-agent","generation":0}"#, entry, nil,
+      #"{"event":"stream_open","session_id":"cap-spike-agent","stream_generation":0}"#, entry, nil,
     ])
     #expect(failure as? BridgeError == .unreachable("bridge closed the stream"))
     #expect(events.count == 2)
@@ -118,7 +118,7 @@ struct FakeBridgeConnector: BridgeWebSocketConnecting {
 
   @Test func aMalformedFrameEndsTheStreamWithItsReason() async {
     let (events, failure) = await collect([
-      #"{"event":"stream_open","session_id":"cap-spike-agent","generation":0}"#,
+      #"{"event":"stream_open","session_id":"cap-spike-agent","stream_generation":0}"#,
       #"{"event":"mystery"}"#,
     ])
     #expect(events.count == 1)

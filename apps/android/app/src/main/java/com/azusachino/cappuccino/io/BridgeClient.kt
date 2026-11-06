@@ -54,6 +54,9 @@ data class ConversationSnapshot(
   val stats: SessionStats? = null,
 )
 
+/** One sync response: the snapshot the screen shows, and the page the replicated log applies. */
+data class ConversationPage(val snapshot: ConversationSnapshot, val sync: SyncPage)
+
 /** A quota window such as 5h or 7d and its current consumption. */
 data class RateLimitWindow(
   val window: String,
@@ -98,6 +101,31 @@ interface BridgeTransport {
   suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
     ConversationSnapshot(conversation(sessionId), "canonical_log")
 
+  /**
+   * One sync request: the newest page (both null), or catch-up after a forward token, or backfill
+   * before a backward token. Transports without tokens answer a whole snapshot as one page.
+   */
+  suspend fun conversationPage(
+    sessionId: String,
+    after: String? = null,
+    before: String? = null,
+  ): ConversationPage {
+    val snapshot = conversationSnapshot(sessionId)
+    return ConversationPage(
+      snapshot,
+      SyncPage(
+        mode = if (snapshot.source == "scrollback") "scrollback" else "append",
+        upserts = snapshot.turns,
+        afterToken = null,
+        hasAfter = false,
+        beforeToken = null,
+        hasBefore = false,
+        caughtUp = true,
+        conversationId = snapshot.conversationId,
+      ),
+    )
+  }
+
   /** Sends [text]; [confirmed] says the owner approved the agent command it starts with. */
   suspend fun submitPrompt(
     sessionId: String,
@@ -126,7 +154,6 @@ interface BridgeTransport {
   suspend fun answerPrompt(
     sessionId: String,
     promptId: String,
-    optionIndex: Int?,
     optionId: String?,
     action: String?,
     binding: MutationBinding,
@@ -173,9 +200,16 @@ class BridgeClient(
         put("protocol_min", kotlinx.serialization.json.JsonPrimitive(BRIDGE_PROTOCOL_VERSION))
         put("protocol_max", kotlinx.serialization.json.JsonPrimitive(BRIDGE_PROTOCOL_VERSION))
         put(
-          "capabilities",
+          "offered_capabilities",
           kotlinx.serialization.json.buildJsonObject {
-            CLIENT_CAPABILITIES.forEach { put(it, kotlinx.serialization.json.JsonPrimitive(1)) }
+            CLIENT_CAPABILITIES.forEach {
+              put(
+                it,
+                kotlinx.serialization.json.buildJsonObject {
+                  put("version", kotlinx.serialization.json.JsonPrimitive(1))
+                },
+              )
+            }
           },
         )
       }
@@ -188,17 +222,28 @@ class BridgeClient(
     conversationSnapshot(sessionId).turns
 
   override suspend fun conversationSnapshot(sessionId: String): ConversationSnapshot =
+    conversationPage(sessionId, after = null, before = null).snapshot
+
+  override suspend fun conversationPage(
+    sessionId: String,
+    after: String?,
+    before: String?,
+  ): ConversationPage =
     withContext(Dispatchers.IO) {
-      val json = parseJsonObject(get("api/v2/agents/$sessionId/conversation"))
-      if (json.string("session_id") != sessionId)
-        throw ProtocolException("Conversation belongs to a different locator")
-      val source = json.string("source")
+      require(after == null || before == null) { "Sync takes one of after or before" }
+      // The sync response names no machine: it is the verified bridge's, so take that identity.
+      val machine = bridgeDetails?.machineId ?: verify()
+      val query =
+        when {
+          after != null -> "?after=${encodeToken(after)}"
+          before != null -> "?before=${encodeToken(before)}"
+          else -> ""
+        }
+      val json = parseJsonObject(get("api/v2/agents/$sessionId/conversation/sync$query"))
+      val source =
+        if (json.optionalString("mode") == "scrollback") "scrollback" else "canonical_log"
       val identity = json.optionalString("conversation_id")
-      val machine = json.optionalString("machine_id")?.let(::uuid)
-      if (
-        identity != null &&
-          (source != "canonical_log" || machine == null || !isCanonicalConversationId(identity))
-      )
+      if (identity != null && (source != "canonical_log" || !isCanonicalConversationId(identity)))
         throw ProtocolException("Invalid canonical conversation identity")
       val stats =
         json.optionalObject("stats")?.let {
@@ -229,8 +274,25 @@ class BridgeClient(
             rateLimits,
           )
         }
-      ConversationSnapshot(parseConversationResponse(json), source, identity, machine, stats)
+      val turns = parseConversationResponse(json)
+      ConversationPage(
+        snapshot = ConversationSnapshot(turns, source, identity, machine, stats),
+        sync =
+          SyncPage(
+            mode = json.string("mode"),
+            upserts = turns,
+            afterToken = json.optionalString("after_token"),
+            hasAfter = json.fields.containsKey("after_token"),
+            beforeToken = json.optionalString("before_token"),
+            hasBefore = json.fields.containsKey("before_token"),
+            caughtUp = (json.fields["caught_up"] as? JsonValue.BooleanValue)?.value ?: true,
+            conversationId = identity,
+          ),
+      )
     }
+
+  /** Tokens are opaque hex, but they still go in a query, so they are encoded like any value. */
+  private fun encodeToken(token: String): String = java.net.URLEncoder.encode(token, "UTF-8")
 
   override suspend fun submitPrompt(
     sessionId: String,
@@ -283,13 +345,16 @@ class BridgeClient(
             kotlinx.serialization.json.JsonArray(
               answers.map { answer ->
                 kotlinx.serialization.json.buildJsonObject {
+                  put("question_id", kotlinx.serialization.json.JsonPrimitive(answer.questionId))
                   put(
-                    "selected",
+                    "selected_option_ids",
                     kotlinx.serialization.json.JsonArray(
-                      answer.selected.map { kotlinx.serialization.json.JsonPrimitive(it) }
+                      answer.selectedOptionIds.map { kotlinx.serialization.json.JsonPrimitive(it) }
                     ),
                   )
-                  answer.other?.let { put("other", kotlinx.serialization.json.JsonPrimitive(it)) }
+                  answer.freeText?.let {
+                    put("free_text", kotlinx.serialization.json.JsonPrimitive(it))
+                  }
                 }
               }
             ),
@@ -301,7 +366,6 @@ class BridgeClient(
   override suspend fun answerPrompt(
     sessionId: String,
     promptId: String,
-    optionIndex: Int?,
     optionId: String?,
     action: String?,
     binding: MutationBinding,
@@ -313,7 +377,6 @@ class BridgeClient(
           put("type", kotlinx.serialization.json.JsonPrimitive("answer_prompt"))
           put("prompt_id", kotlinx.serialization.json.JsonPrimitive(promptId))
           put("expected_session", bindingJson(binding))
-          optionIndex?.let { put("option_index", kotlinx.serialization.json.JsonPrimitive(it)) }
           optionId?.let { put("option_id", kotlinx.serialization.json.JsonPrimitive(it)) }
           action?.let { put("action", kotlinx.serialization.json.JsonPrimitive(it)) }
         }
@@ -322,8 +385,8 @@ class BridgeClient(
 
   private suspend fun requireMutation(binding: MutationBinding, capability: String) {
     verify(binding.machineId)
-    val flags = bridgeDetails?.capabilities
-    if (flags?.get("mutation_binding") != true || flags[capability] == false)
+    // The handshake's agreed set is the only gate: a capability must be agreed to be called.
+    if (bridgeDetails?.capabilities?.get(capability) != true)
       throw BridgeMutationUnsupportedException("Session-bound actions unsupported by this bridge")
   }
 

@@ -91,7 +91,7 @@ class BackgroundPollerTest {
     server.enqueue(
       MockResponse.Builder()
         .body(
-          """{"event":"paired","machine_id":"$machine","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"""
+          """{"event":"handshake_accepted","machine_id":"$machine","protocol_version":2,"offered_capabilities":{},"agreed_capabilities":{}}"""
         )
         .build()
     )

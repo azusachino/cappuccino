@@ -64,7 +64,7 @@ final class StubURLProtocol: URLProtocol {
           return (
             200,
             Data(
-              #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"#
+              #"{"event":"handshake_accepted","machine_id":"11111111-1111-4111-8111-111111111111","protocol_version":2,"plugin":"cappuccino-bridge","offered_capabilities":{},"agreed_capabilities":{}}"#
                 .utf8)
           )
         }
@@ -104,7 +104,7 @@ final class StubURLProtocol: URLProtocol {
       #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
       return (
         200,
-        #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"#
+        #"{"event":"handshake_accepted","machine_id":"11111111-1111-4111-8111-111111111111","protocol_version":2,"plugin":"cappuccino-bridge","offered_capabilities":{},"agreed_capabilities":{}}"#
           .data(using: .utf8)!
       )
     }
@@ -116,10 +116,10 @@ final class StubURLProtocol: URLProtocol {
   @Test func rejectsInvalidPairingAndUnexpectedMachineIdentity() async {
     let base = URL(string: "https://machine.example")!
     for payload in [
-      #"{"event":"paired","machine_id":"invalid","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"#,
-      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":3,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"#,
-      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":true,"plugin":"cappuccino-bridge"}"#,
-      #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":1,"plugin":"wrong"}"#,
+      #"{"event":"handshake_accepted","machine_id":"invalid","protocol_version":2,"plugin":"cappuccino-bridge","offered_capabilities":{},"agreed_capabilities":{}}"#,
+      #"{"event":"handshake_accepted","machine_id":"11111111-1111-4111-8111-111111111111","protocol_version":3,"plugin":"cappuccino-bridge","offered_capabilities":{},"agreed_capabilities":{}}"#,
+      #"{"event":"handshake_accepted","machine_id":"11111111-1111-4111-8111-111111111111","protocol_version":true,"plugin":"cappuccino-bridge"}"#,
+      #"{"event":"handshake_accepted","machine_id":"11111111-1111-4111-8111-111111111111","protocol_version":1,"plugin":"wrong"}"#,
     ] {
       StubURLProtocol.handler = { _ in (200, Data(payload.utf8)) }
       await #expect(throws: BridgeError.self) {
@@ -130,7 +130,7 @@ final class StubURLProtocol: URLProtocol {
       (
         200,
         Data(
-          #"{"event":"paired","machine_id":"11111111-1111-4111-8111-111111111111","protocol":2,"plugin":"cappuccino-bridge","capabilities":{},"agreed":{}}"#
+          #"{"event":"handshake_accepted","machine_id":"11111111-1111-4111-8111-111111111111","protocol_version":2,"plugin":"cappuccino-bridge","offered_capabilities":{},"agreed_capabilities":{}}"#
             .utf8)
       )
     }
@@ -246,17 +246,17 @@ final class StubURLProtocol: URLProtocol {
 
   @Test func fetchConversationReturnsTurns() async throws {
     StubURLProtocol.handler = { request in
-      #expect(request.url?.path == "/api/v2/agents/s-aurora/conversation")
+      #expect(request.url?.path == "/api/v2/agents/s-aurora/conversation/sync")
       return (
         200,
-        #"{"session_id":"s-aurora","source":"canonical_log","turns":[{"id":"t1","role":"user","text":"hello"}]}"#
+        #"{"session_id":"s-aurora","mode":"append","upserts":[{"id":"t1","role":"user","text":"hello"}]}"#
           .data(using: .utf8)!
       )
     }
     let result = try await stubbedClient().fetchConversation(
       base: URL(string: "http://127.0.0.1:7392")!, session: "s-aurora")
-    #expect(result["session_id"] as? String == "s-aurora")
-    #expect((result["turns"] as? [[String: Any]])?.count == 1)
+
+    #expect((result["upserts"] as? [[String: Any]])?.count == 1)
   }
 
   @Test func submitPromptSendsJsonBody() async throws {
@@ -313,9 +313,9 @@ final class StubURLProtocol: URLProtocol {
       session: "s-aurora",
       binding: binding,
       promptID: "p123",
-      optionIndex: 0,
+
       optionID: "opt-1",
-      action: "select_option"
+      action: nil
     )
   }
 }
