@@ -44,7 +44,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class MachinesJourneyTest {
   @get:Rule val compose = createAndroidComposeRule<MainActivity>()
-  private val STATUS_TEXT = "Connection error · iroh relayed"
+  private val STATUS_TEXT = "Offline · iroh relayed"
 
   @Test
   fun failedAddStaysOpenAndSuccessfulVerificationDismissesDialog() {

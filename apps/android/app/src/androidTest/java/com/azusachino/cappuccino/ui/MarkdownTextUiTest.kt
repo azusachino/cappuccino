@@ -344,6 +344,16 @@ class MarkdownTextUiTest {
       handler.openUri("https://example.invalid/uri-calibration")
       org.junit.Assert.assertEquals(1, handler.opened.size)
       handler.opened.clear()
+      // Markdown parses after composition; waitForIdle does not cover that work.
+      compose.waitUntil(5_000) {
+        compose
+          .onAllNodesWithText(
+            "ParagraphGlyph [Image: morning alt] and [Image: evening alt]",
+            useUnmergedTree = true,
+          )
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
       compose
         .onNodeWithText(
           "ParagraphGlyph [Image: morning alt] and [Image: evening alt]",
