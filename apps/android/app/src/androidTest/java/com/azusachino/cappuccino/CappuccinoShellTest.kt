@@ -517,6 +517,7 @@ class CappuccinoShellTest {
             listOf(ConversationTurn("t31", "assistant", null, "Other machine latest", emptyList())),
         )
     }
+    awaitDisplayed("Other machine latest")
     compose.onNodeWithText("Other machine latest").assertIsDisplayed()
     compose.onNodeWithTag("jumpToLatest").assertDoesNotExist()
   }
