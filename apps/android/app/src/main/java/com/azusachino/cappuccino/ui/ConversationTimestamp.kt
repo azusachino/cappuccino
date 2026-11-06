@@ -34,14 +34,7 @@ fun formatConversationDateTime(
   now: Instant = Instant.now(),
 ): String? =
   try {
-    val zonedDateTime = Instant.parse(timestamp).atZone(zone)
-    val nowDate = now.atZone(zone).toLocalDate()
-    val turnDate = zonedDateTime.toLocalDate()
-    if (turnDate.year == nowDate.year) {
-      conversationDateTimeFormat.format(zonedDateTime)
-    } else {
-      conversationFullDateTimeFormat.format(zonedDateTime)
-    }
+    conversationFullDateTimeFormat.format(Instant.parse(timestamp).atZone(zone))
   } catch (_: Exception) {
     null
   }

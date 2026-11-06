@@ -33,11 +33,11 @@ class ConversationTimestampTest {
     )
     val now = java.time.Instant.parse("2026-10-08T12:00:00Z")
     assertEquals(
-      "10-08 01:02",
+      "2026-10-08 01:02",
       formatConversationDateTime("2026-10-07T16:02:00Z", ZoneId.of("Asia/Tokyo"), now),
     )
     assertEquals(
-      "10-06 14:00",
+      "2026-10-06 14:00",
       formatConversationDateTime("2026-10-06T05:00:00Z", ZoneId.of("Asia/Tokyo"), now),
     )
     assertEquals(
