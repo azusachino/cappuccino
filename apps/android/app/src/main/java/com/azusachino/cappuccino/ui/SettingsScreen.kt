@@ -166,11 +166,11 @@ internal fun SettingsScreen(
           val detailText =
             when {
               isConflict ->
-                if (connection.protocol != null && connection.protocol > 1)
-                  "Bridge uses v${connection.protocol}; app requires v1. Update Cappuccino."
-                else if (connection.protocol != null && connection.protocol < 1)
-                  "Bridge uses v${connection.protocol}; app requires v1. Update cappuccino-bridge."
-                else "App requires bridge API v1. Update required."
+                if (connection.protocol != null && connection.protocol > 2)
+                  "Bridge uses v${connection.protocol}; app requires v2. Update Cappuccino."
+                else if (connection.protocol != null && connection.protocol < 2)
+                  "Bridge uses v${connection.protocol}; app requires v2. Update cappuccino-bridge."
+                else "App requires bridge API v2. Update required."
               connection.bridgeVersion != null -> "Bridge v${connection.bridgeVersion}"
               else -> null
             }
@@ -418,7 +418,7 @@ internal fun AboutCappuccinoSheet(onDismiss: () -> Unit) {
           color = colors.text,
         )
         Text(
-          "Version ${BuildConfig.VERSION_NAME} • Bridge API v1",
+          "Version ${BuildConfig.VERSION_NAME} • Bridge API v2",
           style = MaterialTheme.typography.bodySmall,
           color = colors.muted,
         )

@@ -136,17 +136,35 @@ class MarkdownTextUiTest {
   @Test
   fun rendersBlockImageAltTextPassively() {
     setContent("![a sunset photo](https://example.invalid/sunset.png)")
-    compose.onNodeWithText("[Image: a sunset photo]").assertExists()
+    compose.waitUntil(5_000) {
+      compose
+        .onAllNodesWithText("[Image: a sunset photo]", substring = true, useUnmergedTree = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
+    compose.onNodeWithText("[Image: a sunset photo]", useUnmergedTree = true).assertExists()
   }
 
   @Test
   fun rendersInlineImageAltInsideParagraphWithEmphasis() {
     setContent("Read **this** ![alt text](https://example.invalid/i.png) now.")
+    compose.waitUntil(5_000) {
+      compose
+        .onAllNodesWithText("this", substring = true, useUnmergedTree = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
     // Emphasis merges into the paragraph text node; bounded substring match.
-    compose.onNodeWithText("this", substring = true).assertExists()
+    compose.onNodeWithText("this", substring = true, useUnmergedTree = true).assertExists()
     // The pre-pass replaces the image span in the source, so the caption is native paragraph text
     // merged into the paragraph's single semantics node; match the precise merged text.
-    compose.onNodeWithText("Read this [Image: alt text] now.", substring = true).assertExists()
+    compose
+      .onNodeWithText(
+        "Read this [Image: alt text] now.",
+        substring = true,
+        useUnmergedTree = true,
+      )
+      .assertExists()
   }
 
   @Test
@@ -154,14 +172,21 @@ class MarkdownTextUiTest {
     setContentPassive(
       "See [the docs](https://example.invalid/docs) then ![sky alt](https://example.invalid/sky.png)."
     )
+    compose.waitUntil(5_000) {
+      compose
+        .onAllNodesWithText("the docs", substring = true, useUnmergedTree = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
     // Caption and link are one merged native paragraph text node after source normalization.
     compose
       .onNodeWithText(
         "See the docs then [Image: sky alt].",
         substring = true,
+        useUnmergedTree = true,
       )
       .assertExists()
-    compose.onNodeWithText("the docs", substring = true).assertExists()
+    compose.onNodeWithText("the docs", substring = true, useUnmergedTree = true).assertExists()
   }
 
   @Test
@@ -171,6 +196,12 @@ class MarkdownTextUiTest {
       "See [the docs](https://example.invalid/docs) ![morning alt](https://example.invalid/same.png)" +
         " and ![evening alt](https://example.invalid/same.png)"
     )
+    compose.waitUntil(5_000) {
+      compose
+        .onAllNodesWithText("the docs", substring = true, useUnmergedTree = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
     // The whole paragraph is one merged native text node after source normalization; assert its
     // exact visible text: link label kept, both distinct captions in source order.
     compose
@@ -180,7 +211,7 @@ class MarkdownTextUiTest {
         useUnmergedTree = true,
       )
       .assertExists()
-    compose.onNodeWithText("the docs", substring = true).assertExists()
+    compose.onNodeWithText("the docs", substring = true, useUnmergedTree = true).assertExists()
   }
 
   @Test
@@ -195,21 +226,48 @@ class MarkdownTextUiTest {
       """
         .trimIndent()
     )
-    compose.onNodeWithText("[Image: table alt]", substring = true).assertExists()
-    compose.onNodeWithText("[Image: list alt]", substring = true).assertExists()
+    compose.waitUntil(5_000) {
+      compose
+        .onAllNodesWithText("[Image: table alt]", substring = true, useUnmergedTree = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
+    compose
+      .onNodeWithText("[Image: table alt]", substring = true, useUnmergedTree = true)
+      .assertExists()
+    compose
+      .onNodeWithText("[Image: list alt]", substring = true, useUnmergedTree = true)
+      .assertExists()
   }
 
   @Test
   fun rendersReferenceImageAlt() {
     setContent("![ref alt][logo]\n\n[logo]: https://example.invalid/logo.png")
-    compose.onNodeWithText("[Image: ref alt]").assertExists()
+    compose.waitUntil(5_000) {
+      compose
+        .onAllNodesWithText("[Image: ref alt]", substring = true, useUnmergedTree = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
+    compose.onNodeWithText("[Image: ref alt]", useUnmergedTree = true).assertExists()
   }
 
   @Test
   fun codeFenceImageSyntaxStaysLiteral() {
     setContent("```\n![not an image](https://example.invalid/x.png)\n```")
-    compose.onNodeWithText("![not an image](https://example.invalid/x.png)").assertExists()
-    compose.onNodeWithText("[Image: not an image]").assertDoesNotExist()
+    compose.waitUntil(5_000) {
+      compose
+        .onAllNodesWithText(
+          "![not an image](https://example.invalid/x.png)",
+          useUnmergedTree = true,
+        )
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
+    compose
+      .onNodeWithText("![not an image](https://example.invalid/x.png)", useUnmergedTree = true)
+      .assertExists()
+    compose.onNodeWithText("[Image: not an image]", useUnmergedTree = true).assertDoesNotExist()
   }
 
   @Test
@@ -344,6 +402,16 @@ class MarkdownTextUiTest {
       handler.openUri("https://example.invalid/uri-calibration")
       org.junit.Assert.assertEquals(1, handler.opened.size)
       handler.opened.clear()
+      // Markdown parses after composition; waitForIdle does not cover that work.
+      compose.waitUntil(5_000) {
+        compose
+          .onAllNodesWithText(
+            "ParagraphGlyph [Image: morning alt] and [Image: evening alt]",
+            useUnmergedTree = true,
+          )
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
       compose
         .onNodeWithText(
           "ParagraphGlyph [Image: morning alt] and [Image: evening alt]",

@@ -95,7 +95,7 @@ class ConversationPresentationTest {
           }
         }
       }
-      compose.onAllNodesWithText("01:02").assertCountEquals(2)
+      compose.onAllNodes(hasText("01:02", substring = true)).assertCountEquals(2)
       compose.onAllNodesWithContentDescription("2026-10-08 01:02:03").assertCountEquals(2)
       compose
         .onNodeWithText("Synthetic heading")

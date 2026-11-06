@@ -4,6 +4,7 @@ import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketException
 import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -262,13 +263,89 @@ class MachineRouterTest {
   }
 
   @Test
-  fun whenEveryTransportFailsTheLastErrorIsThrown() = runTest {
+  fun irohInCooldownIsSkippedWhileTailnetIsUntriedThenProbedAgainAfterIt() = runTest {
+    val clock = FakeClock()
+    val router = MachineRouter(both, clock, RecordingIroh())
+    val calls = mutableListOf<String>()
+    // Both fail once, so nothing is sticky and iroh enters its first 5s cooldown.
+    runCatching {
+      router.request { client ->
+        calls += client
+        throw IOException("$client down")
+      }
+    }
+    assertEquals(listOf("iroh", "tailnet"), calls)
+
+    calls.clear()
+    clock.now = 1_000L
+    assertEquals(
+      "tailnet",
+      router.request { client ->
+        calls += client
+        client
+      },
+    )
+    assertEquals("iroh skipped during its cooldown", listOf("tailnet"), calls)
+
+    calls.clear()
+    clock.now = 6_000L
+    router.request { client ->
+      calls += client
+      client
+    }
+    assertEquals(
+      "sticky tailnet keeps serving; iroh is not probed while it works",
+      listOf("tailnet"),
+      calls,
+    )
+  }
+
+  @Test
+  fun cooldownDoublesPerFailureAndManualRedialSkipsIt() = runTest {
+    val clock = FakeClock()
+    val router = MachineRouter(both, clock, RecordingIroh())
+    suspend fun failBoth() = runCatching {
+      router.request { client -> throw IOException("$client down") }
+    }
+    failBoth() // 5s cooldown from t=0
+    clock.now = 4_000L
+    failBoth() // still cooling; iroh is the only untried route left, so it is tried; cooldown 10s
+    val calls = mutableListOf<String>()
+    clock.now = 13_000L // 9s after the second failure: still inside the 10s window
+    router.request { client ->
+      calls += client
+      client
+    }
+    assertEquals("doubled cooldown still skips iroh", listOf("tailnet"), calls)
+
+    router.redial()
+    calls.clear()
+    router.request { client ->
+      calls += client
+      client
+    }
+    assertEquals("manual redial probes iroh at once", listOf("iroh"), calls)
+  }
+
+  @Test
+  fun aCooldownThatTriesTailnetFirstStillReportsTheIrohFailure() = runTest {
+    val clock = FakeClock()
+    val router = MachineRouter(both, clock, RecordingIroh())
+    runCatching { router.request { client -> throw IOException("$client down") } }
+    clock.now = 1_000L // iroh is cooling: tailnet is tried first, then iroh
+    val error = runCatching { router.request { client -> throw IOException("$client down") } }
+    assertEquals("iroh down", error.exceptionOrNull()?.message)
+  }
+
+  @Test
+  fun whenEveryTransportFailsTheFirstRouteErrorIsThrown() = runTest {
     val router = MachineRouter(both, FakeClock(), RecordingIroh())
     val error = runCatching {
       router.request { client -> throw IOException("$client down") }
     }
       .exceptionOrNull()
-    assertEquals("tailnet down", error?.message)
+    // The fallback's failure (e.g. a tailnet DNS miss) must not hide the route the owner chose.
+    assertEquals("iroh down", error?.message)
   }
 
   @Test
@@ -283,6 +360,112 @@ class MachineRouterTest {
     assertEquals(TransportBadge.IROH_DIRECT, router.badge())
     clock.now = 11_000
     assertEquals(TransportBadge.IROH_RELAYED, router.badge())
+  }
+
+  @Test
+  fun unknownHostExceptionMarksTailnetUnreachableAndStopsProbingIt() = runTest {
+    val clock = FakeClock()
+    val router = MachineRouter(both, clock, RecordingIroh())
+    val calls = mutableListOf<String>()
+
+    // First request: Iroh fails with generic IOException, fallthrough to Tailnet fails with
+    // UnknownHostException
+    val error = runCatching {
+      router.request { client ->
+        calls += client
+        if (client == "iroh") throw IOException("iroh transient timeout")
+        if (client == "tailnet") throw UnknownHostException("harus-mini.ts.net")
+        client
+      }
+    }
+      .exceptionOrNull()
+    assertEquals("iroh transient timeout", error?.message)
+    assertEquals(listOf("iroh", "tailnet"), calls)
+
+    // Second request at t=1_000 (Iroh would be cooling down, but Tailnet is unreachable):
+    // Tailnet is NOT probed; only Iroh is probed.
+    calls.clear()
+    clock.now = 1_000L
+    val result = router.request { client ->
+      calls += client
+      client
+    }
+    assertEquals("iroh", result)
+    assertEquals("unreachable tailnet is skipped even when iroh was cooling", listOf("iroh"), calls)
+  }
+
+  @Test
+  fun networkChangeClearsTailnetUnreachability() = runTest {
+    val clock = FakeClock()
+    val router = MachineRouter(both, clock, RecordingIroh())
+    val calls = mutableListOf<String>()
+
+    // Tailnet DNS fails, marking it unreachable
+    runCatching {
+      router.request { client ->
+        calls += client
+        if (client == "iroh") throw IOException("iroh down")
+        if (client == "tailnet") throw UnknownHostException("harus-mini.ts.net")
+        client
+      }
+    }
+    assertEquals(listOf("iroh", "tailnet"), calls)
+
+    // Next request skips Tailnet
+    calls.clear()
+    clock.now = 1_000L
+    runCatching {
+      router.request { client ->
+        calls += client
+        throw IOException("$client down")
+      }
+    }
+    assertEquals(listOf("iroh"), calls)
+
+    // Network changes (e.g. connected to Tailscale VPN)
+    router.onNetworkChanged()
+
+    // Now Tailnet is probed again on fallback
+    calls.clear()
+    val result = router.request { client ->
+      calls += client
+      if (client == "iroh") throw IOException("iroh down")
+      client
+    }
+    assertEquals("tailnet", result)
+    assertEquals(listOf("iroh", "tailnet"), calls)
+  }
+
+  @Test
+  fun directIrohPathDoesNotTriggerCooldownOnSingleFailure() = runTest {
+    val clock = FakeClock()
+    val iroh = RecordingIroh(IrohPathKind.DIRECT)
+    val router = MachineRouter(both, clock, iroh, irohPath = { iroh.path })
+    val calls = mutableListOf<String>()
+
+    // Single request failure on Iroh Direct
+    var irohFails = true
+    runCatching {
+      router.request { client ->
+        calls += client
+        if (client == "iroh" && irohFails) throw IOException("read timeout")
+        if (client == "tailnet") throw IOException("tailnet down")
+        client
+      }
+    }
+    assertEquals(listOf("iroh", "tailnet"), calls)
+
+    // Next request at t=1_000: Iroh Direct was not given a 5s cooldown because it is DIRECT
+    // and only failed once, so it is still probed first!
+    calls.clear()
+    clock.now = 1_000L
+    irohFails = false
+    val result = router.request { client ->
+      calls += client
+      client
+    }
+    assertEquals("iroh", result)
+    assertEquals("iroh direct is probed first without 5s cooldown", listOf("iroh"), calls)
   }
 }
 

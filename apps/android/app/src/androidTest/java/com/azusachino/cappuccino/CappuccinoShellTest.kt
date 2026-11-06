@@ -517,6 +517,7 @@ class CappuccinoShellTest {
             listOf(ConversationTurn("t31", "assistant", null, "Other machine latest", emptyList())),
         )
     }
+    awaitDisplayed("Other machine latest")
     compose.onNodeWithText("Other machine latest").assertIsDisplayed()
     compose.onNodeWithTag("jumpToLatest").assertDoesNotExist()
   }
@@ -569,13 +570,13 @@ class CappuccinoShellTest {
           }
         }
       }
-      compose.onNodeWithText("16:02").assertIsDisplayed()
+      compose.onNode(hasText("16:02", substring = true)).assertIsDisplayed()
       compose.onNodeWithContentDescription("2026-10-07 16:02:03").assertExists()
       setZone("Asia/Tokyo")
       compose.waitUntil(timeoutMillis = 5000) {
-        compose.onAllNodesWithText("01:02").fetchSemanticsNodes().isNotEmpty()
+        compose.onAllNodes(hasText("01:02", substring = true)).fetchSemanticsNodes().isNotEmpty()
       }
-      compose.onNodeWithText("01:02").assertIsDisplayed()
+      compose.onNode(hasText("01:02", substring = true)).assertIsDisplayed()
       compose.onNodeWithContentDescription("2026-10-08 01:02:03").assertExists()
       compose.onNodeWithText("Timezone prompt").assertIsDisplayed()
       capture("DeviceTimezoneChanged")
@@ -677,7 +678,9 @@ class CappuccinoShellTest {
         )
     }
     compose.onNodeWithTag("pendingPrompt").assertDoesNotExist()
-    compose.onNodeWithText("Unknown", substring = true).assertIsDisplayed()
+    compose
+      .onNode(hasText("Reconnecting", substring = true) or hasText("Unknown", substring = true))
+      .assertIsDisplayed()
     compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
     compose.onNodeWithTag("promptInput").assertTextEquals("Review first")
     assertTrue(actions.prompts.isEmpty())

@@ -9,6 +9,7 @@ import java.util.UUID
 import javax.net.ssl.SSLException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,17 +45,23 @@ data class MachineConnection(
   val reconnectReason: String? = null,
 )
 
+/**
+ * The machine's connection. The active machine reads the session's connection, the field every
+ * write path keeps current; a copy in [machines] for it can go stale and is never read.
+ */
 fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnection =
-  machines[profile.id]
-    ?: if (activeProfileId == profile.id)
-      MachineConnection(
-        connection,
-        agents.filter { it.machineId == profile.machineId },
-        busy,
-        reconnectAttempt,
-        reconnectReason,
-      )
-    else MachineConnection()
+  if (activeProfileId == profile.id)
+    MachineConnection(
+      connection,
+      agents.filter { it.machineId == profile.machineId },
+      busy,
+      reconnectAttempt,
+      reconnectReason,
+    )
+  else machines[profile.id] ?: MachineConnection()
+
+/** Failed refreshes in a row before the machine shows Offline; one failure is not an outage. */
+private const val OFFLINE_AFTER_FAILURES = 2
 
 /** Forward pages one catch-up may fetch before it waits for the next stream event. */
 private const val MAX_CATCH_UP_PAGES = 8
@@ -192,6 +199,16 @@ interface ConnectedActions {
   fun clearSavedConversations(machineId: UUID? = null) = Unit
 }
 
+private data class SessionCacheEntry(
+  val turns: List<ConversationTurn>,
+  val cursor: SyncCursor?,
+  val omittedConversationTurns: Int = 0,
+  val omittedToolOperations: Int = 0,
+  val sessionStats: SessionStats? = null,
+  val conversationId: String? = null,
+  val conversationSource: String? = null,
+)
+
 class ConnectedViewModel
 internal constructor(
   private val store: MachineProfileStore,
@@ -219,12 +236,15 @@ internal constructor(
   private val machineEpochs = mutableMapOf<String, Long>()
   private val lastRefreshAt = mutableMapOf<String, Long>()
   private val disconnectedMachines = mutableSetOf<String>()
+  // Consecutive failed refreshes per machine; a run of them, not one, makes the machine offline.
+  private val refreshFailures = mutableMapOf<String, Int>()
   private var addJob: Job? = null
   private var addEpoch = 0L
   private var operation: Job? = null
   private var streamJob: Job? = null
   private var conversationJob: Job? = null
   private var conversationRequested = false
+  private val sessionCache = mutableMapOf<String, SessionCacheEntry>()
   private var foreground = false
   private var epoch = 0L
   private var pendingRestore = savedStateHandle.get<String>(SELECTED_PROFILE) != null
@@ -242,13 +262,22 @@ internal constructor(
   fun handleNetworkRegained() {
     ConnectionLogger.log("RECOVERY", "Network regained notification received")
     if (!foreground) return
+    if (pendingRestore && savedStateHandle.get<String>(SELECTED_PROFILE) != null) {
+      ConnectionLogger.log("RECOVERY", "Network regained; retrying restoreSelection")
+      activeProfile()?.let { profile ->
+        viewModelScope.launch { redialTransport?.invoke(profile.endpoint) }
+      }
+      restoreSelection()
+      return
+    }
     val selected = mutableState.value.selectedAgent
     val profile =
       mutableState.value.profiles.firstOrNull { it.id == mutableState.value.activeProfileId }
     if (selected != null && profile != null) {
       if (mutableState.value.connection != ConnectionState.Connected) {
         ConnectionLogger.log("RECOVERY", "Auto-reconnecting stream to ${selected.label}")
-        openStream(profile, selected)
+        viewModelScope.launch { redialTransport?.invoke(profile.endpoint) }
+        openStream(profile, selected, allowLegacyInitial = selected.nativeSessionRef == null)
       }
     } else {
       ConnectionLogger.log("RECOVERY", "Refreshing machines after network recovery")
@@ -263,8 +292,28 @@ internal constructor(
       try {
         val (saved, bytes) =
           withContext(offlineDispatcher) {
-            history.list().map {
-              SavedConversationInfo(it.agent, it.savedAt, it.history.turns.size, it.conversationId)
+            history.list().map { saved ->
+              val preview =
+                saved.history.turns
+                  .firstOrNull { turn ->
+                    turn.role.equals("user", ignoreCase = true) &&
+                      (!turn.text.isNullOrBlank() ||
+                        turn.parts.any { p -> p is ConversationPart.Text })
+                  }
+                  ?.let { turn ->
+                    (turn.text
+                        ?: turn.parts.filterIsInstance<ConversationPart.Text>().firstOrNull()?.text)
+                      ?.trim()
+                      ?.replace('\n', ' ')
+                      ?.take(60)
+                  }
+              SavedConversationInfo(
+                saved.agent,
+                saved.savedAt,
+                saved.history.turns.size,
+                saved.conversationId,
+                preview,
+              )
             } to history.bytes()
           }
         mutableState.value =
@@ -525,7 +574,10 @@ internal constructor(
               addError = error.message ?: "Connection failed",
               connection =
                 if (mutableState.value.activeProfileId == null)
-                  ConnectionState.Error(error.message ?: "Connection failed")
+                  ConnectionState.Error(
+                    friendlyTransportMessage(error.message, label.ifBlank { "The machine" })
+                      ?: "Connection failed"
+                  )
                 else mutableState.value.connection,
               busy = false,
             )
@@ -617,15 +669,33 @@ internal constructor(
       }
   }
 
-  /** A user refresh joins the attempt already running for [id] instead of starting another. */
+  /**
+   * A user refresh always starts a fresh attempt: the one running (if any) is cancelled, and the
+   * machine shows Connecting at once, so a tap is never silent.
+   */
   override fun refreshProfile(id: String) {
-    if (machineJobs[id]?.isActive == true) return
     refreshProfile(id, background = false)
   }
 
   /** Reconnect now: like a refresh, but the attempt first drops the machine's cached transport. */
+  // The name the owner gave the machine; the placeholder only applies to a machine with no label.
+  private fun displayName(profile: MachineProfile): String =
+    profile.label.takeUnless { it == "iroh.invalid" } ?: "The machine"
+
   override fun reconnectProfile(id: String) {
-    if (machineJobs[id]?.isActive == true) return
+    if (id == mutableState.value.activeProfileId) {
+      mutableState.value =
+        mutableState.value.copy(
+          connection = ConnectionState.Connecting,
+          busy = true,
+        )
+      val profile = mutableState.value.profiles.firstOrNull { it.id == id }
+      val selected = mutableState.value.selectedAgent
+      if (profile != null && selected != null && foreground) {
+        cancelOwnedWork()
+        openStream(profile, selected, allowLegacyInitial = selected.nativeSessionRef == null)
+      }
+    }
     refreshProfile(id, background = false, redial = true)
   }
 
@@ -669,6 +739,7 @@ internal constructor(
       )
         return
       recordMachineName(profile, client.machineName, client.bridgeDetails)
+      refreshFailures.remove(profile.id)
       mutableState.value =
         mutableState.value.copy(
           machines =
@@ -706,8 +777,7 @@ internal constructor(
             when {
               replacedLocators ->
                 ConnectionState.Error("Selected session was replaced; select it again")
-              old == null -> ConnectionState.Connected
-              else -> mutableState.value.connection
+              else -> ConnectionState.Connected
             },
           busy = false,
           stream = if (replacedLocators) StreamState() else mutableState.value.stream,
@@ -720,7 +790,19 @@ internal constructor(
     } catch (error: Exception) {
       if (error is kotlinx.coroutines.CancellationException) throw error
       if (machineToken != machineEpochs[profile.id] || profile.id in disconnectedMachines) return
-      val failed = ConnectionState.Error(error.message ?: "Bridge unavailable")
+      val failures = (refreshFailures[profile.id] ?: 0) + 1
+      refreshFailures[profile.id] = failures
+      val wasConnected =
+        mutableState.value.machineConnection(profile).connection == ConnectionState.Connected
+      if (failures < OFFLINE_AFTER_FAILURES && wasConnected) {
+        if (token == epoch && mutableState.value.activeProfileId == profile.id)
+          mutableState.value = mutableState.value.copy(busy = false)
+        return
+      }
+      val failed =
+        ConnectionState.Error(
+          friendlyTransportMessage(error.message, displayName(profile)) ?: "Bridge unavailable"
+        )
       mutableState.value =
         mutableState.value.copy(
           machines = mutableState.value.machines + (profile.id to MachineConnection(failed))
@@ -748,14 +830,20 @@ internal constructor(
         )
       return
     }
+    val cached = agent?.let { sessionCache[it.sessionId] }
     mutableState.value =
       mutableState.value.copy(
         selectedAgent = agent,
         stream = StreamState(),
         streamLive = false,
-        conversationTurns = emptyList(),
-        conversationSource = null,
-        sessionStats = null,
+        conversationTurns = cached?.turns ?: emptyList(),
+        conversationCursor = cached?.cursor,
+        conversationCursorSession = if (cached?.cursor != null) agent.sessionId else null,
+        omittedConversationTurns = cached?.omittedConversationTurns ?: 0,
+        omittedToolOperations = cached?.omittedToolOperations ?: 0,
+        conversationSource = cached?.conversationSource,
+        sessionStats = cached?.sessionStats,
+        conversationId = cached?.conversationId,
         actionError = null,
       )
     if (agent == null) clearSavedSelection()
@@ -799,6 +887,21 @@ internal constructor(
         applySyncPage(current.conversationTurns, prior, direction, page.sync)
       else emptyList<ConversationTurn>() to null
     return boundedConversation(merged).also { recent ->
+      val resolvedStats =
+        snapshot.stats ?: current.sessionStats.takeIf { direction != SyncDirection.Newest }
+      val resolvedId =
+        snapshot.conversationId
+          ?: current.conversationId.takeIf { direction != SyncDirection.Newest }
+      sessionCache[session] =
+        SessionCacheEntry(
+          turns = recent.turns,
+          cursor = cursor,
+          omittedConversationTurns = recent.omittedMessages,
+          omittedToolOperations = recent.omittedTools,
+          sessionStats = resolvedStats,
+          conversationId = resolvedId,
+          conversationSource = snapshot.source,
+        )
       mutableState.value =
         mutableState.value.copy(
           conversationTurns = recent.turns,
@@ -808,11 +911,8 @@ internal constructor(
           omittedToolOperations = recent.omittedTools,
           conversationSource = snapshot.source,
           // Forward pages carry no identity or stats; they keep what the newest page set.
-          sessionStats =
-            snapshot.stats ?: current.sessionStats.takeIf { direction != SyncDirection.Newest },
-          conversationId =
-            snapshot.conversationId
-              ?: current.conversationId.takeIf { direction != SyncDirection.Newest },
+          sessionStats = resolvedStats,
+          conversationId = resolvedId,
           offlineSavedAt = null,
         )
     }
@@ -832,8 +932,13 @@ internal constructor(
       do {
         conversationRequested = false
         try {
-          if (offlineHistory != null && client.verify(profile.machineId) != profile.machineId)
-            throw ProtocolException("Machine identity changed")
+          if (
+            offlineHistory != null &&
+              mutableState.value.machineConnection(profile).connection != ConnectionState.Connected
+          ) {
+            if (client.verify(profile.machineId) != profile.machineId)
+              throw ProtocolException("Machine identity changed")
+          }
           // Catch up from the log's forward position when it is valid; otherwise take the newest
           // page.
           val after = forwardAfter(agent.sessionId)
@@ -918,6 +1023,9 @@ internal constructor(
                 conversationSource = mutableState.value.conversationSource ?: "terminal_scrollback"
               )
           }
+        }
+        if (conversationRequested) {
+          delay(300)
         }
       } while (isActive && conversationRequested && token == epoch && foreground)
     }
@@ -1380,7 +1488,11 @@ internal constructor(
           if (error is ProtocolException || error is SSLException || error is BridgeStreamError) {
             mutableState.value =
               mutableState.value.copy(
-                connection = ConnectionState.Error(error.message ?: "Bridge protocol or TLS error")
+                connection =
+                  ConnectionState.Error(
+                    friendlyTransportMessage(error.message, displayName(profile))
+                      ?: "Bridge protocol or TLS error"
+                  )
               )
             break
           }
@@ -1393,7 +1505,10 @@ internal constructor(
             )
             mutableState.value =
               mutableState.value.copy(
-                connection = ConnectionState.Error(error.message ?: "Stream failed")
+                connection =
+                  ConnectionState.Error(
+                    friendlyTransportMessage(error.message, displayName(profile)) ?: "Stream failed"
+                  )
               )
             break
           }

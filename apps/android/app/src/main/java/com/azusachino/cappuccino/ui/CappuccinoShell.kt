@@ -95,7 +95,6 @@ import com.azusachino.cappuccino.io.ConnectedActions
 import com.azusachino.cappuccino.io.ConnectedUiState
 import com.azusachino.cappuccino.io.ConnectedViewModel
 import com.azusachino.cappuccino.io.ConnectionState
-import com.azusachino.cappuccino.io.MachineConnection
 import com.azusachino.cappuccino.io.agentDraftKey
 import com.azusachino.cappuccino.io.agentSendKey
 import com.azusachino.cappuccino.io.canMutate
@@ -272,10 +271,11 @@ fun CappuccinoScreen(
     if (selected != null && actions.acceptsMutation(state.activeProfileId, selected)) send(actions)
   }
   val selectedProfile = state.profiles.firstOrNull { it.id == state.activeProfileId }
-  val selectedStatus =
-    if (!state.streamLive) "unknown"
-    else if (state.stream.pendingPrompt != null) "blocked"
-    else (state.stream.agentStatus ?: selected?.status)?.lowercase()
+  // The session status decides the header badge, the loading body and the composer; see
+  // sessionStatus in ConnectionStatus.kt.
+  val session = state.sessionStatus(selected)
+  val loadingBody = session is SessionStatus.Loading
+  val selectedStatus = session.styleKey(selected)
   val selectedIdle = selectedStatus !in setOf("working", "blocked")
   val agentControl =
     state.offlineSavedAt == null &&
@@ -288,9 +288,8 @@ fun CappuccinoScreen(
   val namingProfile = state.profiles.firstOrNull { it.id == namingProfileId } ?: selectedProfile
   var namingMachine by rememberSaveable { mutableStateOf(false) }
   var machineNameDraft by rememberSaveable { mutableStateOf("") }
-  val scopedConversation = selected?.let {
-    state.conversationId ?: it.nativeSessionRef ?: it.sessionId
-  }
+  val scopedConversation =
+    if (state.offlineSavedAt != null) state.conversationId else selected?.let { it.sessionId }
   val outputIdentity = Triple(state.activeProfileId, selected?.machineId, scopedConversation)
   val conversationKey = "${state.activeProfileId}|${selected?.machineId}|$scopedConversation"
   val outputStates =
@@ -324,7 +323,7 @@ fun CappuccinoScreen(
         val last = layout.visibleItemsInfo.lastOrNull()
         !outputListState.canScrollForward ||
           (last != null &&
-            last.index == layout.totalItemsCount - 1 &&
+            last.index >= layout.totalItemsCount - 2 &&
             last.offset + last.size - layout.viewportEndOffset <= followSlack)
       }
     }
@@ -380,7 +379,6 @@ fun CappuccinoScreen(
   }
   LaunchedEffect(
     followContent,
-    displayedContent.size,
     textLayoutRevision,
     outputIdentity,
     followingOutput,
@@ -441,6 +439,7 @@ fun CappuccinoScreen(
         machineNameDraft = detailsProfile.label
         namingMachine = true
       },
+      onReconnect = { actions.reconnectProfile(detailsProfile.id) },
     )
   }
 
@@ -551,98 +550,116 @@ fun CappuccinoScreen(
               val currentAgent = selected ?: lastSelectedAgent
               val currentProfile = selectedProfile ?: lastSelectedProfile
               if (currentAgent != null) {
-                Row(
-                  Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
-                  verticalAlignment = Alignment.CenterVertically,
-                ) {
-                  IconButton(
-                    onClick = {
-                      if (state.offlineSavedAt != null) actions.closeSavedConversation()
-                      else actions.selectAgent(null)
-                    },
-                    modifier = Modifier.pressScale().size(40.dp),
-                  ) {
-                    Icon(
-                      painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
-                      contentDescription =
-                        if (state.offlineSavedAt != null) "Back to history" else "Back",
-                    )
-                  }
-                  val status =
-                    agentStatusStyle(
-                      selectedStatus ?: "unknown",
-                      MaterialTheme.colorScheme.background.luminance() < 0.5f,
-                    )
+                Column(Modifier.fillMaxWidth()) {
                   Row(
-                    Modifier.weight(1f)
-                      .clip(RoundedCornerShape(8.dp))
-                      .clickable(enabled = currentProfile != null) {
-                        detailsProfileId = currentProfile?.id
-                        showingConnection = true
-                      }
-                      .padding(horizontal = 6.dp, vertical = 2.dp),
+                    Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                   ) {
-                    AgentAvatar(currentAgent.agent, 32.dp)
-                    Column(
-                      Modifier.weight(1f),
-                      verticalArrangement = Arrangement.spacedBy(1.dp),
+                    IconButton(
+                      onClick = {
+                        if (state.offlineSavedAt != null) actions.closeSavedConversation()
+                        else actions.selectAgent(null)
+                      },
+                      modifier = Modifier.pressScale().size(40.dp),
                     ) {
-                      Text(
-                        currentAgent.label,
-                        style =
-                          MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.SemiBold
-                          ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                      Icon(
+                        painter = painterResource(com.azusachino.cappuccino.R.drawable.ic_back),
+                        contentDescription =
+                          if (state.offlineSavedAt != null) "Back to history" else "Back",
                       )
-                      // Status keeps its color as a square beside its word, never color alone.
-                      Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    }
+                    val status =
+                      agentStatusStyle(
+                        selectedStatus,
+                        MaterialTheme.colorScheme.background.luminance() < 0.5f,
+                      )
+                    Row(
+                      Modifier.weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = currentProfile != null) {
+                          detailsProfileId = currentProfile?.id
+                          showingConnection = true
+                        }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                      AgentAvatar(currentAgent.agent, 32.dp)
+                      Column(
+                        Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(1.dp),
                       ) {
-                        if (state.offlineSavedAt != null) {
-                          StatusSquare(MaterialTheme.appColors.muted)
-                          Text(
-                            "Saved history · Read-only",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.appColors.muted,
-                          )
-                        } else {
-                          StatusSquare(status.background)
-                          Text(
-                            status.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.appColors.muted,
-                          )
+                        Text(
+                          currentAgent.label,
+                          style =
+                            MaterialTheme.typography.titleSmall.copy(
+                              fontWeight = FontWeight.SemiBold
+                            ),
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis,
+                        )
+                        // Status keeps its color as a square beside its word, never color alone.
+                        Row(
+                          verticalAlignment = Alignment.CenterVertically,
+                          horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                          if (state.offlineSavedAt != null) {
+                            StatusSquare(MaterialTheme.appColors.muted)
+                            Text(
+                              "Saved history · Read-only",
+                              style = MaterialTheme.typography.labelSmall,
+                              color = MaterialTheme.appColors.muted,
+                            )
+                          } else {
+                            StatusSquare(status.background)
+                            Text(
+                              status.label,
+                              style = MaterialTheme.typography.labelSmall,
+                              color = MaterialTheme.appColors.muted,
+                            )
+                          }
                         }
                       }
                     }
+                    if (currentProfile != null) {
+                      IconButton(
+                        onClick = { showingHistory = true },
+                        modifier = Modifier.testTag("conversationHistoryButton").size(40.dp),
+                      ) {
+                        Icon(
+                          painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
+                          contentDescription = "Conversation history",
+                        )
+                      }
+                      IconButton(
+                        onClick = {
+                          detailsProfileId = currentProfile.id
+                          showingConnection = true
+                        },
+                        modifier = Modifier.size(40.dp),
+                      ) {
+                        Icon(
+                          painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
+                          contentDescription = "Connection details",
+                        )
+                      }
+                    }
                   }
-                  if (currentProfile != null) {
-                    IconButton(
-                      onClick = { showingHistory = true },
-                      modifier = Modifier.testTag("conversationHistoryButton").size(40.dp),
-                    ) {
-                      Icon(
-                        painterResource(com.azusachino.cappuccino.R.drawable.ic_history),
-                        contentDescription = "Conversation history",
-                      )
-                    }
-                    IconButton(
-                      onClick = {
-                        detailsProfileId = currentProfile.id
-                        showingConnection = true
-                      },
-                      modifier = Modifier.size(40.dp),
-                    ) {
-                      Icon(
-                        painterResource(com.azusachino.cappuccino.R.drawable.ic_more),
-                        contentDescription = "Connection details",
-                      )
-                    }
+                  val isConnecting =
+                    state.offlineSavedAt == null &&
+                      (state.connection is ConnectionState.Connecting ||
+                        state.connection is ConnectionState.Recovering ||
+                        currentProfile?.let {
+                          val conn = state.machineConnection(it)
+                          conn.busy || conn.connection is ConnectionState.Connecting
+                        } == true ||
+                        state.busy)
+                  if (isConnecting) {
+                    LinearProgressIndicator(
+                      modifier = Modifier.fillMaxWidth().height(2.dp),
+                      color = MaterialTheme.appColors.warn,
+                      trackColor = androidx.compose.ui.graphics.Color.Transparent,
+                    )
                   }
                 }
               }
@@ -850,36 +867,11 @@ fun CappuccinoScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                       )
                   }
-                  val bannerInset =
-                    if (
-                      state.connection is ConnectionState.Connecting ||
-                        state.connection is ConnectionState.Recovering ||
-                        state.connection is ConnectionState.Error
-                    )
-                      12.dp
-                    else chromeTop
+                  val bannerInset = chromeTop
+
                   when (val connection = state.connection) {
-                    ConnectionState.Connecting ->
-                      Column(
-                        Modifier.fillMaxWidth()
-                          .padding(top = chromeTop)
-                          .padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                      ) {
-                        Text(
-                          "Connecting…",
-                          style = MaterialTheme.typography.bodyMedium,
-                          color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
-                      }
-                    ConnectionState.Recovering ->
-                      WarningBanner(
-                        "Reconnecting; earlier output may be missing",
-                        Modifier.padding(top = chromeTop),
-                      )
                     is ConnectionState.Error ->
-                      ErrorBanner(connection.message, Modifier.padding(top = chromeTop))
+                      ErrorBanner(connection.message, Modifier.padding(top = bannerInset))
                     else -> Unit
                   }
 
@@ -981,7 +973,29 @@ fun CappuccinoScreen(
                           )
                       }
                     }
-                    if (state.stream.entries.isEmpty() && state.conversationTurns.isEmpty()) {
+                    if (loadingBody) {
+                      Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center,
+                      ) {
+                        Column(
+                          horizontalAlignment = Alignment.CenterHorizontally,
+                          verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                          CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                          Text(
+                            "Loading conversation…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.appColors.faint,
+                          )
+                        }
+                      }
+                    } else if (
+                      // The greeting means "connected, nothing yet"; an error shows only the error.
+                      state.connection == ConnectionState.Connected &&
+                        state.stream.entries.isEmpty() &&
+                        state.conversationTurns.isEmpty()
+                    ) {
                       Box(
                         modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
                         contentAlignment = Alignment.Center,
@@ -1086,7 +1100,14 @@ fun CappuccinoScreen(
                           thinkingLevel = state.sessionStats?.thinkingLevel,
                           stats = state.sessionStats,
                           placeholder =
-                            "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…",
+                            when {
+                              state.connection is ConnectionState.Connecting ||
+                                state.connection is ConnectionState.Recovering -> "Connecting…"
+                              !state.canMutate || state.connection != ConnectionState.Connected ->
+                                "Offline"
+                              else ->
+                                "Message ${currentSelected.agent.replaceFirstChar { it.uppercase() }}…"
+                            },
                           enabled =
                             state.connection == ConnectionState.Connected &&
                               state.canMutate &&
@@ -1129,16 +1150,25 @@ fun CappuccinoScreen(
                       val conn = state.machineConnection(profile).connection
                       val conflictProto =
                         if (conn is ConnectionState.Error) {
-                          Regex("""protocol v?(\d+)""")
-                            .find(conn.message)
-                            ?.groupValues
-                            ?.get(1)
-                            ?.toLongOrNull()
+                          if (conn.message.contains("predates protocol")) {
+                            1L
+                          } else {
+                            Regex("""bridge protocol v?(\d+)""")
+                              .find(conn.message)
+                              ?.groupValues
+                              ?.get(1)
+                              ?.toLongOrNull()
+                              ?: Regex("""protocol v?(\d+)""")
+                                .find(conn.message)
+                                ?.groupValues
+                                ?.get(1)
+                                ?.toLongOrNull()
+                          }
                         } else null
                       SettingsConnection(
                         id = profile.id,
                         label = profile.label,
-                        status = conn.statusText(),
+                        status = state.machineStatus(profile).label,
                         bridgeVersion = details?.version,
                         protocol = details?.protocol ?: conflictProto,
                       )
@@ -1259,20 +1289,19 @@ fun CappuccinoScreen(
                               maxLines = 1,
                               overflow = TextOverflow.Ellipsis,
                             )
+                            val transportBadgeText =
+                              when (state.machineBadges[profile.id]) {
+                                com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
+                                  "iroh direct"
+                                com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
+                                  "iroh relayed"
+                                com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
+                                  if (profile.endpoint.iroh != null) "tailnet (fallback)"
+                                  else "tailnet"
+                                else -> null
+                              }
                             val statusSubtitle =
-                              listOfNotNull(
-                                  machine.statusLabel(),
-                                  when (state.machineBadges[profile.id]) {
-                                    com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
-                                      "iroh direct"
-                                    com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
-                                      "iroh relayed"
-                                    com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
-                                      if (profile.endpoint.iroh != null) "tailnet (fallback)"
-                                      else "tailnet"
-                                    else -> null
-                                  },
-                                )
+                              listOfNotNull(machine.statusLabel(), transportBadgeText)
                                 .joinToString(" · ")
                             Text(
                               statusSubtitle,
@@ -1718,18 +1747,3 @@ fun CappuccinoScreen(
     )
   }
 }
-
-/** The row's status word; a retry shows which attempt the stream is on. */
-private fun MachineConnection.statusLabel(): String =
-  if (connection == ConnectionState.Recovering && reconnectAttempt > 0)
-    "Reconnecting · attempt $reconnectAttempt"
-  else connection.statusText()
-
-private fun ConnectionState.statusText(): String =
-  when (this) {
-    ConnectionState.Disconnected -> "Not connected"
-    ConnectionState.Connecting -> "Connecting"
-    ConnectionState.Connected -> "Connected"
-    ConnectionState.Recovering -> "Reconnecting"
-    is ConnectionState.Error -> "Connection error"
-  }

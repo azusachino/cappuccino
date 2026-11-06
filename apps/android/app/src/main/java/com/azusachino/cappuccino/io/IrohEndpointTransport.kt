@@ -123,30 +123,32 @@ class IrohEndpointTransport private constructor(private val keyFile: File) : Iro
     private val alpn: String,
   ) : IrohPollConnection {
     private var connection: Connection? = null
-    private var closed = false
+    @Volatile private var closed = false
+    private val connMutex = Mutex()
 
     override suspend fun openStream(): IrohBiStream {
-      val bi = mutex.withLock {
+      check(!closed) { "poll connection is closed" }
+      val current = connMutex.withLock {
         check(!closed) { "poll connection is closed" }
-        val current =
-          connection?.takeIf { it.closeReason() == null }
-            ?: run {
-              val ep = endpointLocked()
-              val dialed = addr.toIroh().use { ep.connect(it, alpn.toByteArray(Charsets.UTF_8)) }
-              connection = dialed
-              dialed
-            }
-        val opened = current.openBi()
+        connection?.takeIf { it.closeReason() == null }
+          ?: run {
+            val ep = mutex.withLock { endpointLocked() }
+            val dialed = addr.toIroh().use { ep.connect(it, alpn.toByteArray(Charsets.UTF_8)) }
+            connection = dialed
+            dialed
+          }
+      }
+      val opened = current.openBi()
+      mutex.withLock {
         openStreams += 1
         idleJob?.cancel()
         idleJob = null
-        opened
       }
-      return AndroidBiStream(bi) { onStreamReleased() }
+      return AndroidBiStream(opened) { onStreamReleased() }
     }
 
     override suspend fun close() {
-      mutex.withLock {
+      connMutex.withLock {
         closed = true
         connection?.let { runCatching { it.close(0L, ByteArray(0)) } }
         connection = null
@@ -154,24 +156,38 @@ class IrohEndpointTransport private constructor(private val keyFile: File) : Iro
     }
   }
 
-  private suspend fun openBi(addr: IrohEndpointAddr, alpn: String): BiStream = mutex.withLock {
-    val connection = connectionLocked(addr, alpn)
-    connection.openBi()
+  private suspend fun openBi(addr: IrohEndpointAddr, alpn: String): BiStream {
+    val connection = getOrCreateConnection(addr, alpn)
+    return connection.openBi()
   }
 
-  private suspend fun connectionLocked(addr: IrohEndpointAddr, alpn: String): Connection {
+  private suspend fun getOrCreateConnection(addr: IrohEndpointAddr, alpn: String): Connection {
     val key = key(addr, alpn)
     connections[key]
       ?.takeIf { it.closeReason() == null }
       ?.let {
         return it
       }
-    connections.remove(key)?.let { oldConn -> runCatching { oldConn.close(0L, ByteArray(0)) } }
-    val ep = endpointLocked()
+    val ep = mutex.withLock {
+      connections[key]
+        ?.takeIf { it.closeReason() == null }
+        ?.let {
+          return it
+        }
+      connections.remove(key)?.let { oldConn -> runCatching { oldConn.close(0L, ByteArray(0)) } }
+      endpointLocked()
+    }
     val target = addr.toIroh()
-    val connection = target.use { ep.connect(it, alpn.toByteArray(Charsets.UTF_8)) }
-    connections[key] = connection
-    return connection
+    val dialed = target.use { ep.connect(it, alpn.toByteArray(Charsets.UTF_8)) }
+    mutex.withLock {
+      val existing = connections[key]?.takeIf { it.closeReason() == null }
+      if (existing != null) {
+        runCatching { dialed.close(0L, ByteArray(0)) }
+        return existing
+      }
+      connections[key] = dialed
+    }
+    return dialed
   }
 
   private suspend fun endpointLocked(): Endpoint {

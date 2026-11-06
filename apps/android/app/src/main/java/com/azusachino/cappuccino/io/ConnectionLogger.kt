@@ -40,6 +40,8 @@ object ConnectionLogger {
         category = category,
         message = message,
       )
+    // Mirrored to logcat (System.out) so a session can be read off the device.
+    println("CappuccinoConn $formatted $level [$category] $message")
     logs.addLast(entry)
     while (logs.size > MAX_LOGS) {
       logs.pollFirst()

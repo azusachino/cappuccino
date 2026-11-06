@@ -812,7 +812,13 @@ pub async fn submit_agent_prompt(
                     "option_id must name one option on the card",
                 );
             };
-            let Some(row) = prompt::screen_row(&card.card_type, &option_id, index) else {
+            // The dialog's own numbering wins; the position rule covers cards without one.
+            let row = card
+                .options
+                .get(index)
+                .and_then(|option| option.row)
+                .or_else(|| prompt::screen_row(&card.card_type, &option_id, index));
+            let Some(row) = row else {
                 return error_response(
                     StatusCode::BAD_REQUEST,
                     "bad_answer",

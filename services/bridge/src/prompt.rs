@@ -57,6 +57,10 @@ pub struct PromptOption {
     pub label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The digit row this option presses, when the dialog's own numbering says so. Never sent to
+    /// clients; without it the position rule in [`screen_row`] applies.
+    #[serde(skip)]
+    pub row: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -233,6 +237,9 @@ pub fn parse_prompt_from_screen(screen_text: &str) -> Option<PromptCard> {
 
     // 1. Tool Approval Detection
     // Signatures: "Approve tool call", "Allow ... to run", "Execute command?"
+    if let Some(card) = detect_agy_approval(&lines) {
+        return Some(card);
+    }
     if let Some(card) = detect_tool_approval(&lines) {
         return Some(card);
     }
@@ -244,6 +251,71 @@ pub fn parse_prompt_from_screen(screen_text: &str) -> Option<PromptCard> {
     }
 
     None
+}
+
+/// Agy's permission dialog: "Requesting permission for:" and the command, then "Run this command?"
+/// over a numbered menu. Row 1 runs it once; the cancel row rejects it. Its "always allow" rows are
+/// never offered, so a phone answer cannot create a persistent grant.
+fn detect_agy_approval(lines: &[&str]) -> Option<PromptCard> {
+    let question_idx = lines
+        .iter()
+        .rposition(|line| *line == "Run this command?")?;
+    let request_idx = lines[..question_idx]
+        .iter()
+        .rposition(|line| *line == "Requesting permission for:")?;
+    if request_idx + 1 >= question_idx {
+        return None;
+    }
+    let command = lines[request_idx + 1].to_string();
+
+    let mut allow_row = None;
+    let mut cancel_row = None;
+    for line in &lines[question_idx + 1..] {
+        let item = line.trim_start_matches(|c: char| matches!(c, '>' | '❯' | '│' | ' ' | '\t'));
+        let Some((digit, text)) = item.split_once(". ") else {
+            break;
+        };
+        let Ok(row) = digit.parse::<usize>() else {
+            break;
+        };
+        if text.starts_with("Yes, run command") && allow_row.is_none() {
+            allow_row = Some(row);
+        } else if text.starts_with("No, cancel") {
+            cancel_row = Some(row);
+        }
+    }
+    let (allow_row, cancel_row) = (allow_row?, cancel_row?);
+
+    let options = vec![
+        PromptOption {
+            id: "allow_once".to_string(),
+            label: "Allow once".to_string(),
+            description: None,
+            row: Some(allow_row),
+        },
+        PromptOption {
+            id: "reject".to_string(),
+            label: "Reject".to_string(),
+            description: None,
+            row: Some(cancel_row),
+        },
+    ];
+    let title = "Tool Permission Approval".to_string();
+    let prompt_id = compute_prompt_id(&title, Some(&command), &options);
+    Some(PromptCard {
+        prompt_id,
+        card_type: "tool_approval".to_string(),
+        title,
+        message: Some("Run this command?".to_string()),
+        tool_name: Some("run_command".to_string()),
+        command: Some(command),
+        options,
+        default_option_id: Some("allow_once".to_string()),
+        questions: Vec::new(),
+        question_number: None,
+        question_count: None,
+        answers: Vec::new(),
+    })
 }
 
 fn detect_tool_approval(lines: &[&str]) -> Option<PromptCard> {
@@ -290,11 +362,13 @@ fn detect_tool_approval(lines: &[&str]) -> Option<PromptCard> {
             id: "allow_once".to_string(),
             label: "Allow once".to_string(),
             description: None,
+            row: None,
         },
         PromptOption {
             id: "reject".to_string(),
             label: "Reject".to_string(),
             description: None,
+            row: None,
         },
     ];
 
@@ -356,6 +430,7 @@ fn detect_choice_menu(lines: &[&str]) -> Option<PromptCard> {
                     id: format!("opt-{}", options.len()),
                     label,
                     description: None,
+                    row: None,
                 });
             }
         } else if clean.starts_with('(') && clean.contains(')') {
@@ -370,6 +445,7 @@ fn detect_choice_menu(lines: &[&str]) -> Option<PromptCard> {
                 id: format!("opt-{}", options.len()),
                 label: clean.to_string(),
                 description: None,
+                row: None,
             });
         }
     }
@@ -468,6 +544,51 @@ All tests completed in 0.4s
     }
 
     const APPROVAL: &str = "Approve tool call: run_command\n$ git push origin main\n1. Allow once\n2. Allow always\n3. Reject\n";
+
+    /// Agy's dialog as the pane shows it (blank rows are already dropped by the parser).
+    const AGY_APPROVAL: &str = "Requesting permission for:\n   cd vendor/harus-aeron-rs && git merge-base --is-ancestor b48c16b origin/main\nRun this command?\n> 1. Yes, run command\n  2. Yes, and always allow in this conversation for commands that start with 'git merge-base'\n  3. Yes, and always allow for commands that start with 'git merge-base' (Persist to settings.json)\n  4. No, cancel\n\n  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command\n";
+
+    #[test]
+    fn agy_approval_offers_run_once_and_cancel_at_their_own_rows() {
+        let card = parse_prompt_from_screen(AGY_APPROVAL).expect("agy dialog is a prompt");
+        assert_eq!(card.card_type, "tool_approval");
+        assert_eq!(
+            card.command.as_deref(),
+            Some("cd vendor/harus-aeron-rs && git merge-base --is-ancestor b48c16b origin/main")
+        );
+        let ids: Vec<&str> = card.options.iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["allow_once", "reject"],
+            "always-allow is never offered"
+        );
+        assert_eq!(card.options[0].row, Some(1));
+        assert_eq!(
+            card.options[1].row,
+            Some(4),
+            "cancel is row 4 in agy's menu"
+        );
+        assert!(card
+            .options
+            .iter()
+            .all(|o| !o.label.to_lowercase().contains("always")));
+    }
+
+    #[test]
+    fn agy_approval_without_a_cancel_row_is_not_offered() {
+        let without_cancel = AGY_APPROVAL.replace("  4. No, cancel\n", "");
+        assert!(
+            parse_prompt_from_screen(&without_cancel).is_none(),
+            "fail closed"
+        );
+    }
+
+    #[test]
+    fn agy_row_numbers_are_not_sent_to_clients() {
+        let card = parse_prompt_from_screen(AGY_APPROVAL).expect("agy dialog is a prompt");
+        let json = serde_json::to_string(&card.options[1]).expect("serialize option");
+        assert!(!json.contains("row"), "row stays internal: {json}");
+    }
 
     #[test]
     fn ignores_approval_text_quoted_in_output() {

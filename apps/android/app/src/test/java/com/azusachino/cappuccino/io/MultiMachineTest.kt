@@ -124,6 +124,9 @@ class MultiMachineTest {
       miniFails = true
       vm.refreshProfile(mini.id)
       advanceUntilIdle()
+      assertEquals(ConnectionState.Connected, vm.state.value.machineConnection(mini).connection)
+      vm.refreshProfile(mini.id)
+      advanceUntilIdle()
       assertTrue(vm.state.value.machineConnection(mini).connection is ConnectionState.Error)
       assertEquals(mac.id, vm.state.value.activeProfileId)
       assertEquals(mac.machineId, vm.state.value.selectedAgent?.machineId)

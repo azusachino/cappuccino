@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,17 +64,6 @@ import com.azusachino.cappuccino.io.MachineProfile
 import com.azusachino.cappuccino.io.TransportBadge
 import com.azusachino.cappuccino.io.machineConnection
 
-internal fun machineInformationStatus(profile: MachineProfile, state: ConnectedUiState): String =
-  when (val connection = state.machineConnection(profile).connection) {
-    ConnectionState.Connected -> "Connected"
-    ConnectionState.Connecting -> "Connecting"
-    ConnectionState.Recovering -> "Reconnecting"
-    ConnectionState.Disconnected -> "Not connected"
-    is ConnectionState.Error ->
-      if (connection.message.startsWith("Incompatible bridge protocol")) "Protocol conflict"
-      else "Needs attention"
-  }
-
 internal fun machineInformationWarnings(
   profile: MachineProfile,
   state: ConnectedUiState,
@@ -93,14 +83,15 @@ internal fun machineInformationWarnings(
     .map { it.second }
 }
 
-internal fun connectionStatusColor(status: String, colors: AppColors): Color =
+internal fun connectionStatusColor(status: ConnectionStatus, colors: AppColors): Color =
   when (status) {
-    "Connected" -> colors.ok
-    "Connecting",
-    "Reconnecting" -> colors.warn
-    "Protocol conflict",
-    "Needs attention" -> colors.err
-    else -> colors.muted
+    ConnectionStatus.Connected -> colors.ok
+    ConnectionStatus.Connecting,
+    is ConnectionStatus.Reconnecting -> colors.warn
+    ConnectionStatus.ConnectionError,
+    ConnectionStatus.ProtocolConflict -> colors.err
+    ConnectionStatus.NotConnected,
+    ConnectionStatus.Offline -> colors.muted
   }
 
 @Composable
@@ -365,13 +356,14 @@ internal fun MachineInformation(
   state: ConnectedUiState,
   onDismiss: () -> Unit,
   onRename: () -> Unit,
+  onReconnect: (() -> Unit)? = null,
 ) {
   val colors = MaterialTheme.appColors
   val context = LocalContext.current
   val details = state.bridgeDetails[profile.id]?.takeIf { it.machineId == profile.machineId }
   val connection = state.machineConnection(profile).connection
   val current = connection == ConnectionState.Connected
-  val status = machineInformationStatus(profile, state)
+  val status = state.machineStatus(profile)
   val statusColor = connectionStatusColor(status, colors)
 
   var previewItem by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -408,19 +400,52 @@ internal fun MachineInformation(
           overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.width(12.dp))
-        StatusPill(text = status, color = statusColor)
+        StatusPill(text = status.label, color = statusColor)
+      }
+
+      if (connection != ConnectionState.Connected && onReconnect != null) {
+        val machineConn = state.machineConnection(profile)
+        val isBusy =
+          machineConn.busy ||
+            machineConn.connection == ConnectionState.Connecting ||
+            (state.activeProfileId == profile.id &&
+              (state.busy ||
+                state.connection is ConnectionState.Connecting ||
+                state.connection is ConnectionState.Recovering))
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+          horizontalArrangement = Arrangement.End,
+        ) {
+          FilledTonalButton(
+            onClick = onReconnect,
+            enabled = !isBusy,
+          ) {
+            Icon(
+              painterResource(com.azusachino.cappuccino.R.drawable.ic_refresh),
+              contentDescription = null,
+              modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(if (isBusy) "Connecting…" else "Reconnect")
+          }
+        }
       }
 
       if (connection is ConnectionState.Error) {
         val bannerText =
-          if (status == "Protocol conflict") {
+          if (status == ConnectionStatus.ProtocolConflict) {
             val bridgeProto =
               Regex("""bridge protocol v?(\d+)""").find(connection.message)?.groupValues?.get(1)
-            val num = bridgeProto?.toIntOrNull() ?: 1
-            if (num > 1) {
-              "Protocol conflict: this bridge uses v$bridgeProto (newer than app v1). Please update Cappuccino to the latest version."
+                ?: Regex("""protocol v?(\d+)""").find(connection.message)?.groupValues?.get(1)
+            val num = bridgeProto?.toIntOrNull()
+            if (num != null && num > 2) {
+              "Protocol conflict: this bridge uses v$num (newer than app v2). Please update Cappuccino to the latest version."
+            } else if (num != null && num < 2) {
+              "Protocol conflict: this bridge uses v$num (older than app v2). Please update cappuccino-bridge on your machine."
+            } else if (connection.message.contains("predates protocol")) {
+              "Protocol conflict: this bridge predates app v2. Please update cappuccino-bridge on your machine."
             } else {
-              "Protocol conflict: this bridge uses v$bridgeProto (older than app v1). Please update cappuccino-bridge on your machine."
+              "Protocol conflict: this bridge protocol is incompatible with app v2. Please update cappuccino-bridge on your machine."
             }
           } else connection.message
         ErrorBanner(
@@ -470,11 +495,15 @@ internal fun MachineInformation(
           MachineDivider()
           val currentBadge = state.machineBadges[profile.id]
           val (activeText, activeColor) =
-            when (currentBadge) {
-              TransportBadge.TAILNET -> "Tailnet fallback" to colors.warn
-              TransportBadge.IROH_DIRECT -> "iroh direct (default)" to colors.ok
-              TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
-              else -> if (current) "Connected" to colors.ok else status to colors.muted
+            if (connection != ConnectionState.Connected) {
+              "None (${status.label})" to colors.muted
+            } else {
+              when (currentBadge) {
+                TransportBadge.TAILNET -> "Tailnet fallback" to colors.warn
+                TransportBadge.IROH_DIRECT -> "iroh direct (default)" to colors.ok
+                TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
+                else -> if (current) "Connected" to colors.ok else status.label to colors.muted
+              }
             }
           MachineDetailRow(
             "Active route",
@@ -504,10 +533,14 @@ internal fun MachineInformation(
           MachineDivider()
           val currentBadge = state.machineBadges[profile.id]
           val (activeText, activeColor) =
-            when (currentBadge) {
-              TransportBadge.IROH_DIRECT -> "iroh direct (default)" to colors.ok
-              TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
-              else -> if (current) "Connected" to colors.ok else status to colors.muted
+            if (connection != ConnectionState.Connected) {
+              "None (${status.label})" to colors.muted
+            } else {
+              when (currentBadge) {
+                TransportBadge.IROH_DIRECT -> "iroh direct (default)" to colors.ok
+                TransportBadge.IROH_RELAYED -> "iroh relay (default)" to colors.ok
+                else -> if (current) "Connected" to colors.ok else status.label to colors.muted
+              }
             }
           MachineDetailRow(
             "Active route",

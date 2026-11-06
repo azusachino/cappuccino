@@ -183,6 +183,16 @@ internal fun HistoryScreen(
                 StatusPill(text = "Active", color = colors.accent)
               }
             }
+            if (!saved.preview.isNullOrBlank()) {
+              Spacer(Modifier.height(2.dp))
+              Text(
+                saved.preview,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.text,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+              )
+            }
             Spacer(Modifier.height(2.dp))
             Text(
               "$machineName · $turnsLabel",

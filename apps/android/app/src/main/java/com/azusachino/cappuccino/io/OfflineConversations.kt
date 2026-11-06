@@ -22,6 +22,7 @@ data class SavedConversationInfo(
   val savedAt: Long,
   val messageCount: Int,
   val conversationId: String,
+  val preview: String? = null,
 )
 
 internal data class SavedConversation(

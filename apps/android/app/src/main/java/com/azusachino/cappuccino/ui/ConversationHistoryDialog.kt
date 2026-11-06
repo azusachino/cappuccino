@@ -98,7 +98,10 @@ internal fun ConversationHistoryDialog(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
               ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                  modifier = Modifier.weight(1f),
+                  verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
                   Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -123,9 +126,18 @@ internal fun ConversationHistoryDialog(
                       }
                     }
                   }
+                  if (!saved.preview.isNullOrBlank()) {
+                    Text(
+                      saved.preview,
+                      style = MaterialTheme.typography.bodySmall,
+                      color = colors.text,
+                      maxLines = 1,
+                      overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                  }
                   Text(
                     "$machineName · Saved $formattedTime · $turnsLabel",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = colors.muted,
                   )
                 }
