@@ -63,6 +63,9 @@ fun ConnectedUiState.machineConnection(profile: MachineProfile): MachineConnecti
 /** Failed refreshes in a row before the machine shows Offline; one failure is not an outage. */
 private const val OFFLINE_AFTER_FAILURES = 2
 
+/** How long a stream must stay live before a loss counts as a new incident, not a retry. */
+private const val STREAM_STABLE_MS = 30_000L
+
 /** Forward pages one catch-up may fetch before it waits for the next stream event. */
 private const val MAX_CATCH_UP_PAGES = 8
 
@@ -787,6 +790,16 @@ internal constructor(
             if (replacedLocators) null else mutableState.value.conversationSource,
           sessionStats = if (replacedLocators) null else mutableState.value.sessionStats,
         )
+      // The machine answers again but the selected session's stream is gone (its retries ran
+      // out): Connected must not mean a dead stream, so reopen it.
+      if (
+        selected != null &&
+          !replacedLocators &&
+          foreground &&
+          !mutableState.value.streamLive &&
+          streamJob?.isActive != true
+      )
+        openStream(profile, selected, allowLegacyInitial = selected.nativeSessionRef == null)
     } catch (error: Exception) {
       if (error is kotlinx.coroutines.CancellationException) throw error
       if (machineToken != machineEpochs[profile.id] || profile.id in disconnectedMachines) return
@@ -1317,6 +1330,7 @@ internal constructor(
     streamJob = viewModelScope.launch {
       val retryBudget = StreamRetryBudget()
       var hasAttached = false
+      var liveSince: Long? = null
       while (foreground && token == epoch) {
         // Invalidate before any suspending handshake, not only after it succeeds.
         mutableState.value =
@@ -1410,6 +1424,7 @@ internal constructor(
             )
           }
           hasAttached = true
+          liveSince = null
           var opened = false
           client.stream(agent.sessionId).collect { event ->
             val selected = mutableState.value.selectedAgent
@@ -1438,6 +1453,7 @@ internal constructor(
             }
             val freshBaseline =
               event is StreamEvent.AgentStatus && event.sessionId == agent.sessionId
+            if (freshBaseline && liveSince == null) liveSince = clock()
             mutableState.value =
               current.copy(
                 stream = reduced,
@@ -1496,6 +1512,11 @@ internal constructor(
               )
             break
           }
+          // A stream that stayed live for a while earns a fresh budget, so losses spread over a
+          // long
+          // session do not add up to a permanent failure; a stream that flaps still runs out.
+          if (liveSince?.let { clock() - it >= STREAM_STABLE_MS } == true) retryBudget.reset()
+          liveSince = null
           val nextDelay = retryBudget.nextDelayMillis()
           if (nextDelay == null || !foreground || token != epoch) {
             ConnectionLogger.log(
