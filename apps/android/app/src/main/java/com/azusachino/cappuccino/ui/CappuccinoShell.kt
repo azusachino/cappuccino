@@ -359,7 +359,6 @@ fun CappuccinoScreen(
   var textLayoutRevision by remember(outputIdentity) { mutableStateOf(0) }
   val onTextLayoutChanged: () -> Unit = remember(outputIdentity) { { textLayoutRevision += 1 } }
   var observedFollowContent by remember(outputIdentity) { mutableStateOf<List<*>?>(null) }
-  var observedDisplayedSize by remember(outputIdentity) { mutableStateOf(-1) }
   var observedTextLayoutRevision by remember(outputIdentity) { mutableStateOf(textLayoutRevision) }
   val outputScope = rememberCoroutineScope()
 
@@ -380,19 +379,16 @@ fun CappuccinoScreen(
   }
   LaunchedEffect(
     followContent,
-    displayedContent.size,
     textLayoutRevision,
     outputIdentity,
     followingOutput,
   ) {
-    val contentChanged =
-      observedFollowContent != followContent || observedDisplayedSize != displayedContent.size
+    val newContent = observedFollowContent != followContent
     val layoutChanged = observedTextLayoutRevision != textLayoutRevision
     observedFollowContent = followContent
-    observedDisplayedSize = displayedContent.size
     observedTextLayoutRevision = textLayoutRevision
-    if (selected != null && displayedContent.isNotEmpty()) {
-      if (followingOutput && (contentChanged || layoutChanged)) {
+    if (selected != null && followContent.isNotEmpty()) {
+      if (followingOutput && (newContent || layoutChanged)) {
         automaticScroll = true
         try {
           // A bottom marker handles tall last turns and collapsed stream rows alike.
@@ -401,7 +397,7 @@ fun CappuccinoScreen(
         } finally {
           automaticScroll = false
         }
-      } else if (contentChanged) {
+      } else if (newContent) {
         hasNewOutput = true
       }
     }
@@ -873,6 +869,12 @@ fun CappuccinoScreen(
                   }
                   val bannerInset = chromeTop
 
+                  when (val connection = state.connection) {
+                    is ConnectionState.Error ->
+                      ErrorBanner(connection.message, Modifier.padding(top = bannerInset))
+                    else -> Unit
+                  }
+
                   if (state.conversationSource == "scrollback") {
                     Text(
                       "Live terminal output · canonical session unavailable",
@@ -1279,18 +1281,16 @@ fun CappuccinoScreen(
                               overflow = TextOverflow.Ellipsis,
                             )
                             val transportBadgeText =
-                              if (machine.connection == ConnectionState.Connected) {
-                                when (state.machineBadges[profile.id]) {
-                                  com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
-                                    "iroh direct"
-                                  com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
-                                    "iroh relayed"
-                                  com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
-                                    if (profile.endpoint.iroh != null) "tailnet (fallback)"
-                                    else "tailnet"
-                                  else -> null
-                                }
-                              } else null
+                              when (state.machineBadges[profile.id]) {
+                                com.azusachino.cappuccino.io.TransportBadge.IROH_DIRECT ->
+                                  "iroh direct"
+                                com.azusachino.cappuccino.io.TransportBadge.IROH_RELAYED ->
+                                  "iroh relayed"
+                                com.azusachino.cappuccino.io.TransportBadge.TAILNET ->
+                                  if (profile.endpoint.iroh != null) "tailnet (fallback)"
+                                  else "tailnet"
+                                else -> null
+                              }
                             val statusSubtitle =
                               listOfNotNull(machine.statusLabel(), transportBadgeText)
                                 .joinToString(" · ")
