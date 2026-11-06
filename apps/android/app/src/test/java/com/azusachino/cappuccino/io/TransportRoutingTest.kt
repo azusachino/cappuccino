@@ -109,6 +109,29 @@ class MachineRouterTest {
   }
 
   @Test
+  fun networkChangeDuringAMutationNeverResendsItAndSurfacesOutcomeUnknown() = runTest {
+    val router = MachineRouter(both, FakeClock(), RecordingIroh())
+    val attempts = mutableListOf<String>()
+    val stuck = CompletableDeferred<String>()
+    val result = async {
+      runCatching {
+        router.request(mutation = true) { client ->
+          attempts += client
+          // The change is on the wire when the network changes; nothing says it was not applied.
+          stuck.await()
+        }
+      }
+    }
+    runCurrent()
+    router.onNetworkChanged()
+    assertEquals(
+      BridgeMutationOutcomeUnknownException::class.java,
+      result.await().exceptionOrNull()?.javaClass,
+    )
+    assertEquals(listOf("iroh"), attempts)
+  }
+
+  @Test
   fun networkChangeCancelsAnInFlightIrohDialAndRedialsAtOnce() = runTest {
     val iroh = RecordingIroh()
     val router = MachineRouter(both, FakeClock(), iroh)

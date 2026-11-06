@@ -178,7 +178,7 @@ class MachineRouter<C : Any>(
       val pathInfo = if (kind == TransportKind.IROH) " (${irohPath()})" else ""
       val start = clock.nowMs()
       try {
-        val result = attempt(kind, block)
+        val result = attempt(kind, mutation, block)
         val elapsed = clock.nowMs() - start
         recordSuccess(kind)
         ConnectionLogger.log("ROUTER", "Transport $kind$pathInfo request succeeded in ${elapsed}ms")
@@ -280,7 +280,11 @@ class MachineRouter<C : Any>(
   private fun coolingDown(kind: TransportKind): Boolean =
     kind == TransportKind.IROH && clock.nowMs() < irohCooldownUntil
 
-  private suspend fun <T> attempt(kind: TransportKind, block: suspend (C) -> T): T {
+  private suspend fun <T> attempt(
+    kind: TransportKind,
+    mutation: Boolean,
+    block: suspend (C) -> T,
+  ): T {
     val client = clients.getValue(kind)
     if (kind == TransportKind.TAILNET) return block(client)
     while (true) {
@@ -300,6 +304,10 @@ class MachineRouter<C : Any>(
         val redial = synchronized(lock) { redialRequested.also { redialRequested = false } }
         if (!redial) throw error
         iroh?.dropConnections()
+        // A change cancelled mid-flight may already have reached the bridge: never send it again.
+        // Surfaced as a transport failure that is not before-send, so [request] reports the
+        // outcome as unknown.
+        if (mutation) throw IOException("Network changed while the change was in flight")
       }
     }
   }
