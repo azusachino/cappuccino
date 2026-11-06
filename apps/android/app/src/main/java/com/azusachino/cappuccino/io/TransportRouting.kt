@@ -39,6 +39,24 @@ const val IROH_REBUILD_AFTER_FAILURES = 3
 const val IROH_COOLDOWN_MIN_MS = 5_000L
 const val IROH_COOLDOWN_MAX_MS = 60_000L
 
+/** An iroh success this recent, on any machine, shows the shared endpoint is alive. */
+const val IROH_ENDPOINT_ALIVE_MS = 60_000L
+
+/**
+ * When any machine last completed an iroh request. The endpoint is shared, so one machine's
+ * failures must not restart it while another machine is being served over it.
+ */
+class SharedIrohHealth(private val clock: MonotonicClock) {
+  @Volatile private var lastSuccessMs: Long? = null
+
+  fun markSuccess() {
+    lastSuccessMs = clock.nowMs()
+  }
+
+  fun endpointAlive(): Boolean =
+    lastSuccessMs?.let { clock.nowMs() - it < IROH_ENDPOINT_ALIVE_MS } == true
+}
+
 /** A direct⇄relayed change must hold this long before the badge and poll cadence follow it. */
 const val BADGE_HOLD_DOWN_MS = 10_000L
 
@@ -127,6 +145,7 @@ class MachineRouter<C : Any>(
   private val clock: MonotonicClock,
   private val iroh: IrohTransport? = null,
   private val irohPath: () -> IrohPathKind = { IrohPathKind.NONE },
+  private val health: SharedIrohHealth = SharedIrohHealth(clock),
 ) {
   private val lock = Any()
   private val order = TransportKind.entries.filter { it in clients }
@@ -159,7 +178,7 @@ class MachineRouter<C : Any>(
       val pathInfo = if (kind == TransportKind.IROH) " (${irohPath()})" else ""
       val start = clock.nowMs()
       try {
-        val result = attempt(kind, block)
+        val result = attempt(kind, mutation, block)
         val elapsed = clock.nowMs() - start
         recordSuccess(kind)
         ConnectionLogger.log("ROUTER", "Transport $kind$pathInfo request succeeded in ${elapsed}ms")
@@ -170,7 +189,8 @@ class MachineRouter<C : Any>(
         val elapsed = clock.nowMs() - start
         ConnectionLogger.log(
           "ROUTER",
-          "Transport $kind$pathInfo failed in ${elapsed}ms: ${error.javaClass.simpleName} (${error.message})",
+          "Transport $kind$pathInfo failed in ${elapsed}ms: ${error.javaClass.simpleName} (${error.message})" +
+            (error.cause?.let { " <- ${it.javaClass.name}: ${it.message}" } ?: ""),
           ConnectionLogLevel.WARN,
         )
         if (!isTransportFailure(error)) {
@@ -261,7 +281,11 @@ class MachineRouter<C : Any>(
   private fun coolingDown(kind: TransportKind): Boolean =
     kind == TransportKind.IROH && clock.nowMs() < irohCooldownUntil
 
-  private suspend fun <T> attempt(kind: TransportKind, block: suspend (C) -> T): T {
+  private suspend fun <T> attempt(
+    kind: TransportKind,
+    mutation: Boolean,
+    block: suspend (C) -> T,
+  ): T {
     val client = clients.getValue(kind)
     if (kind == TransportKind.TAILNET) return block(client)
     while (true) {
@@ -281,6 +305,10 @@ class MachineRouter<C : Any>(
         val redial = synchronized(lock) { redialRequested.also { redialRequested = false } }
         if (!redial) throw error
         iroh?.dropConnections()
+        // A change cancelled mid-flight may already have reached the bridge: never send it again.
+        // Surfaced as a transport failure that is not before-send, so [request] reports the
+        // outcome as unknown.
+        if (mutation) throw IOException("Network changed while the change was in flight")
       }
     }
   }
@@ -290,6 +318,7 @@ class MachineRouter<C : Any>(
       sticky = kind
       unreachable -= kind
       if (kind == TransportKind.IROH) {
+        health.markSuccess()
         irohFailures = 0
         irohCooldownMs = 0L
         irohCooldownUntil = 0L
@@ -324,7 +353,9 @@ class MachineRouter<C : Any>(
           }
           if (irohFailures >= IROH_REBUILD_AFTER_FAILURES) {
             irohFailures = 0
-            true
+            // Another machine was served recently, so the endpoint is fine and this machine is
+            // the problem; restarting would cut the others' streams.
+            !health.endpointAlive()
           } else {
             false
           }

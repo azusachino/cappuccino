@@ -32,7 +32,7 @@ auto_apply = false
 
 - `iroh.enabled`: strict boolean (`true`/`false`). Any other value stops startup.
 - `iroh.relay_url`: optional absolute `https` URL for a custom relay. Omit it to use
-  n0's default public relays (such as `aps1` in Tokyo), which provide full UDP NAT
+  n0's default public relays (such as `aps1` in Singapore), which provide full UDP NAT
   traversal and require no manual allowlists. See [Custom relay](#custom-relay).
 - `serve.auto_apply`: `false` stops the bridge from touching Tailscale Serve.
   Use it when you do not want `start` or `status` to change Serve.
@@ -166,7 +166,7 @@ A plain bridge restart does not require a new pairing.
 ## Custom relay
 
 By default, the bridge and phone use n0's public relays (automatically selecting
-the nearest node, e.g. Tokyo `aps1`). Because iroh traffic is end-to-end encrypted
+the nearest node, e.g. Singapore `aps1`). Because iroh traffic is end-to-end encrypted
 with ed25519 keys and TLS 1.3 / QUIC, public relays only forward opaque ciphertexts
 and never have access to session data, tokens, or agent payloads.
 

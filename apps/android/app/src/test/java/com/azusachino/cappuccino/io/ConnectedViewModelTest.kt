@@ -162,6 +162,44 @@ class ConnectedViewModelTest {
     }
 
   @Test
+  fun aStreamThatWentLiveGetsAFreshRetryBudgetOnEachLoss() =
+    runTest(dispatcher) {
+      var attempts = 0
+      var now = 0L
+      val delays = mutableListOf<Long>()
+      viewModel =
+        createViewModel(
+          pause = { delays += it },
+          clock = { now },
+          streamFactory = { session ->
+            flow {
+              attempts++
+              emit(StreamEvent.Open(session, attempts.toLong()))
+              emit(StreamEvent.AgentStatus(session, "idle", null))
+              // The stream stays live past the stability window before each loss.
+              now += 31_000L
+              // Six losses in one session, each after the stream proved live: more than one
+              // budget's worth, so a budget that never resets would end the stream for good.
+              if (attempts <= 6) {
+                emit(StreamEvent.Error("upstream_unavailable", "The agent stream source is down."))
+              }
+              kotlinx.coroutines.awaitCancellation()
+            }
+          },
+        )
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      runCurrent()
+      advanceUntilIdle()
+      assertEquals(7, attempts)
+      assertEquals(List(6) { 1_000L }, delays)
+      assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
+      assertTrue(viewModel.state.value.streamLive)
+    }
+
+  @Test
   fun upstreamUnavailableRetriesWithinBudgetClearsStalePromptAndRequiresFreshStatus() =
     runTest(dispatcher) {
       var attempts = 0
@@ -2178,6 +2216,7 @@ class ConnectedViewModelTest {
     offlineHistory: OfflineConversations? = null,
     conversationIdentity: String? = savedId,
     conversationMachine: UUID? = machine,
+    clock: () -> Long = { System.currentTimeMillis() },
     streamFactory: (String) -> Flow<StreamEvent>,
   ): ConnectedViewModel =
     ConnectedViewModel(
@@ -2226,6 +2265,7 @@ class ConnectedViewModelTest {
       SavedStateHandle(),
       offlineHistory,
       dispatcher,
+      clock = clock,
     )
 
   @Test
@@ -2265,6 +2305,39 @@ class ConnectedViewModelTest {
 
       assertEquals(ConnectionState.Connected, viewModel.state.value.connection)
       assertEquals(6, streamConnections)
+    }
+
+  @Test
+  fun aSuccessfulRefreshReopensTheStreamOfTheSelectedAgentAfterItsRetriesRanOut() =
+    runTest(dispatcher) {
+      var streamConnections = 0
+      viewModel =
+        createViewModel(
+          pause = {},
+          streamFactory = {
+            streamConnections++
+            flow {
+              emit(StreamEvent.Open(agent.sessionId, streamConnections.toLong()))
+              emit(StreamEvent.AgentStatus(agent.sessionId, "idle", null))
+              // The first five connections drop at once, which runs the retry budget out.
+              if (streamConnections <= 5) throw IOException("simulated connection drop")
+              kotlinx.coroutines.awaitCancellation()
+            }
+          },
+        )
+      viewModel.setForeground(true)
+      viewModel.selectProfile(profile.id)
+      advanceUntilIdle()
+      viewModel.selectAgent(agent)
+      advanceUntilIdle()
+      assertTrue(viewModel.state.value.connection is ConnectionState.Error)
+      assertEquals(5, streamConnections)
+
+      // The machine answers again; Connected must not leave the session with a dead stream.
+      viewModel.refresh()
+      advanceUntilIdle()
+      assertEquals(6, streamConnections)
+      assertTrue(viewModel.state.value.streamLive)
     }
 
   private class MemoryProfiles(initial: MachineProfile) : MachineProfileStore {

@@ -275,11 +275,23 @@ class IrohHttpClients(
 ) {
   private val clients = ConcurrentHashMap<IrohEndpointAddr, OkHttpClient>()
 
+  /**
+   * Drops every idle pooled socket. OkHttp cannot tell that an iroh stream died with its
+   * connection, so after the endpoint stops or its connections drop, a pooled socket would be
+   * reused and fail once per socket before a fresh dial.
+   */
+  fun evictAll() {
+    clients.values.forEach { it.connectionPool.evictAll() }
+  }
+
   fun clientFor(addr: IrohEndpointAddr): OkHttpClient =
     clients.getOrPut(addr) {
       base
         .newBuilder()
         .socketFactory(IrohSocketFactory(addr) { transport.openStream(it) })
+        // Own pool: OkHttp matches pooled connections by host, and every iroh machine shares the
+        // placeholder host, so a shared pool would send one machine's request down another's.
+        .connectionPool(ConnectionPool())
         .dns(IROH_DNS)
         .proxy(Proxy.NO_PROXY)
         .build()
@@ -301,4 +313,23 @@ class IrohHttpClients(
       .proxy(Proxy.NO_PROXY)
       .connectionPool(ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
       .build()
+}
+
+/**
+ * An [IrohTransport] that evicts the pooled sockets of [clients] whenever the endpoint stops or its
+ * connections drop, so no request rides a stream that died with them.
+ */
+class PoolEvictingIrohTransport(
+  private val delegate: IrohTransport,
+  private val clients: IrohHttpClients,
+) : IrohTransport by delegate {
+  override suspend fun stop() {
+    delegate.stop()
+    clients.evictAll()
+  }
+
+  override suspend fun dropConnections() {
+    delegate.dropConnections()
+    clients.evictAll()
+  }
 }

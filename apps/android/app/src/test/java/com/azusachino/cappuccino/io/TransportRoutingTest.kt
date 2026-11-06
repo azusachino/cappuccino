@@ -109,6 +109,29 @@ class MachineRouterTest {
   }
 
   @Test
+  fun networkChangeDuringAMutationNeverResendsItAndSurfacesOutcomeUnknown() = runTest {
+    val router = MachineRouter(both, FakeClock(), RecordingIroh())
+    val attempts = mutableListOf<String>()
+    val stuck = CompletableDeferred<String>()
+    val result = async {
+      runCatching {
+        router.request(mutation = true) { client ->
+          attempts += client
+          // The change is on the wire when the network changes; nothing says it was not applied.
+          stuck.await()
+        }
+      }
+    }
+    runCurrent()
+    router.onNetworkChanged()
+    assertEquals(
+      BridgeMutationOutcomeUnknownException::class.java,
+      result.await().exceptionOrNull()?.javaClass,
+    )
+    assertEquals(listOf("iroh"), attempts)
+  }
+
+  @Test
   fun networkChangeCancelsAnInFlightIrohDialAndRedialsAtOnce() = runTest {
     val iroh = RecordingIroh()
     val router = MachineRouter(both, FakeClock(), iroh)
@@ -212,6 +235,33 @@ class MachineRouterTest {
 
     val irohOnly = MachineRouter(mapOf(TransportKind.IROH to "iroh"), FakeClock(), iroh)
     repeat(IROH_REBUILD_AFTER_FAILURES) { runCatching { irohOnly.request(block = block) } }
+    assertEquals(1, iroh.stops)
+  }
+
+  @Test
+  fun oneMachineFailingDoesNotRestartTheSharedEndpointWhileAnotherMachineIsServed() = runTest {
+    // Both routers share one process endpoint, as MachineTransports builds them.
+    val iroh = RecordingIroh()
+    val clock = FakeClock()
+    val health = SharedIrohHealth(clock)
+    val offline =
+      MachineRouter(mapOf(TransportKind.IROH to "offline"), clock, iroh, health = health)
+    val healthy =
+      MachineRouter(mapOf(TransportKind.IROH to "healthy"), clock, iroh, health = health)
+    assertEquals("healthy", healthy.request { it })
+    repeat(IROH_REBUILD_AFTER_FAILURES) {
+      runCatching {
+        offline.request<String> { throw SocketTimeoutException("iroh connect timed out") }
+      }
+    }
+    // Restarting the shared endpoint would cut the healthy machine's live streams.
+    assertEquals(0, iroh.stops)
+
+    // Once nobody has been served for a while the endpoint may be wedged, so it restarts.
+    clock.now += IROH_ENDPOINT_ALIVE_MS
+    repeat(IROH_REBUILD_AFTER_FAILURES) {
+      runCatching { offline.request<String> { throw SocketTimeoutException("timed out") } }
+    }
     assertEquals(1, iroh.stops)
   }
 
