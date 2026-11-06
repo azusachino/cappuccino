@@ -1150,11 +1150,20 @@ fun CappuccinoScreen(
                       val conn = state.machineConnection(profile).connection
                       val conflictProto =
                         if (conn is ConnectionState.Error) {
-                          Regex("""protocol v?(\d+)""")
-                            .find(conn.message)
-                            ?.groupValues
-                            ?.get(1)
-                            ?.toLongOrNull()
+                          if (conn.message.contains("predates protocol")) {
+                            1L
+                          } else {
+                            Regex("""bridge protocol v?(\d+)""")
+                              .find(conn.message)
+                              ?.groupValues
+                              ?.get(1)
+                              ?.toLongOrNull()
+                              ?: Regex("""protocol v?(\d+)""")
+                                .find(conn.message)
+                                ?.groupValues
+                                ?.get(1)
+                                ?.toLongOrNull()
+                          }
                         } else null
                       SettingsConnection(
                         id = profile.id,

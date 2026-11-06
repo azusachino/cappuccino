@@ -45,7 +45,7 @@ class ConnectionStatusTest {
       state(connection = ConnectionState.Error("timeout"), streamLive = true).let {
         it.copy(stream = it.stream.copy(agentStatus = "working"))
       }
-    assertEquals(SessionStatus.Link(ConnectionStatus.Offline), broken.sessionStatus(null))
+    assertEquals(SessionStatus.Link(ConnectionStatus.ConnectionError), broken.sessionStatus(null))
   }
 
   @Test
@@ -117,7 +117,7 @@ class ConnectionStatusTest {
   @Test
   fun aMissingMachineEntryFallsBackToTheSessionConnection() {
     assertEquals(
-      SessionStatus.Link(ConnectionStatus.Offline),
+      SessionStatus.Link(ConnectionStatus.ConnectionError),
       state(connection = ConnectionState.Error("boom")).sessionStatus(null),
     )
   }
@@ -127,13 +127,13 @@ class ConnectionStatusTest {
     val other =
       state(connection = ConnectionState.Connected, machine = ConnectionState.Error("x"))
         .copy(activeProfileId = "other")
-    assertEquals(ConnectionStatus.Offline, other.machineStatus(profile))
+    assertEquals(ConnectionStatus.ConnectionError, other.machineStatus(profile))
   }
 
   @Test
   fun protocolConflictIsNotReportedAsOffline() {
     val conflict =
-      state(connection = ConnectionState.Error("Incompatible bridge protocol v2; app requires v1"))
+      state(connection = ConnectionState.Error("Incompatible bridge protocol v1; app requires v2"))
     assertEquals(ConnectionStatus.ProtocolConflict, conflict.machineStatus(profile))
   }
 
@@ -151,6 +151,7 @@ class ConnectionStatusTest {
         ConnectionStatus.Reconnecting(1),
         ConnectionStatus.NotConnected,
         ConnectionStatus.Offline,
+        ConnectionStatus.ConnectionError,
         ConnectionStatus.ProtocolConflict,
       )
     for (status in keys) {

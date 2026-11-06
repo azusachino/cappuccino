@@ -61,12 +61,12 @@ class MachineInformationTest {
       machineInformationStatus(
         profile,
         connected.copy(
-          connection = ConnectionState.Error("Incompatible bridge protocol v2; app requires v1")
+          connection = ConnectionState.Error("Incompatible bridge protocol v1; app requires v2")
         ),
       ),
     )
     assertEquals(
-      "Offline",
+      "Connection error",
       machineInformationStatus(
         profile,
         connected.copy(connection = ConnectionState.Error("Prompt failed")),

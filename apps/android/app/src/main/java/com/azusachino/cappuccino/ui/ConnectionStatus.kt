@@ -43,6 +43,11 @@ sealed interface ConnectionStatus {
     override val styleKey = "offline"
   }
 
+  data object ConnectionError : ConnectionStatus {
+    override val label = "Connection error"
+    override val styleKey = "offline"
+  }
+
   data object ProtocolConflict : ConnectionStatus {
     override val label = "Protocol conflict"
     override val styleKey = "offline"
@@ -60,6 +65,12 @@ sealed interface SessionStatus {
   data class Agent(val key: String) : SessionStatus
 }
 
+internal fun isProtocolConflict(message: String): Boolean =
+  message.contains("Incompatible bridge protocol") ||
+    message.contains("predates protocol") ||
+    message.contains("protocol_unsupported") ||
+    message.contains("speaks protocol 2 only")
+
 internal fun ConnectionState.toStatus(attempt: Int = 0): ConnectionStatus =
   when (this) {
     ConnectionState.Connected -> ConnectionStatus.Connected
@@ -67,8 +78,8 @@ internal fun ConnectionState.toStatus(attempt: Int = 0): ConnectionStatus =
     ConnectionState.Recovering -> ConnectionStatus.Reconnecting(attempt)
     ConnectionState.Disconnected -> ConnectionStatus.NotConnected
     is ConnectionState.Error ->
-      if (message.startsWith("Incompatible bridge protocol")) ConnectionStatus.ProtocolConflict
-      else ConnectionStatus.Offline
+      if (isProtocolConflict(message)) ConnectionStatus.ProtocolConflict
+      else ConnectionStatus.ConnectionError
   }
 
 /** The status of [profile]'s machine: its own connection, never the session's. */
@@ -121,6 +132,7 @@ internal fun ConnectionStatus.composerLabel(): String =
     is ConnectionStatus.Reconnecting -> "Reconnecting…"
     ConnectionStatus.Offline -> "Offline"
     ConnectionStatus.ProtocolConflict -> "Protocol conflict"
+    ConnectionStatus.ConnectionError,
     ConnectionStatus.Connected,
     ConnectionStatus.NotConnected -> "Offline"
   }

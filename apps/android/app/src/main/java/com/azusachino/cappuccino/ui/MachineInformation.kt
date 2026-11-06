@@ -88,10 +88,10 @@ internal fun connectionStatusColor(status: ConnectionStatus, colors: AppColors):
     ConnectionStatus.Connected -> colors.ok
     ConnectionStatus.Connecting,
     is ConnectionStatus.Reconnecting -> colors.warn
-    ConnectionStatus.Offline,
+    ConnectionStatus.ConnectionError,
     ConnectionStatus.ProtocolConflict -> colors.err
     ConnectionStatus.NotConnected,
-    ConnectionStatus.Connected -> colors.muted
+    ConnectionStatus.Offline -> colors.muted
   }
 
 @Composable
@@ -436,11 +436,16 @@ internal fun MachineInformation(
           if (status == ConnectionStatus.ProtocolConflict) {
             val bridgeProto =
               Regex("""bridge protocol v?(\d+)""").find(connection.message)?.groupValues?.get(1)
-            val num = bridgeProto?.toIntOrNull() ?: 1
-            if (num > 1) {
-              "Protocol conflict: this bridge uses v$bridgeProto (newer than app v1). Please update Cappuccino to the latest version."
+                ?: Regex("""protocol v?(\d+)""").find(connection.message)?.groupValues?.get(1)
+            val num = bridgeProto?.toIntOrNull()
+            if (num != null && num > 2) {
+              "Protocol conflict: this bridge uses v$num (newer than app v2). Please update Cappuccino to the latest version."
+            } else if (num != null && num < 2) {
+              "Protocol conflict: this bridge uses v$num (older than app v2). Please update cappuccino-bridge on your machine."
+            } else if (connection.message.contains("predates protocol")) {
+              "Protocol conflict: this bridge predates app v2. Please update cappuccino-bridge on your machine."
             } else {
-              "Protocol conflict: this bridge uses v$bridgeProto (older than app v1). Please update cappuccino-bridge on your machine."
+              "Protocol conflict: this bridge protocol is incompatible with app v2. Please update cappuccino-bridge on your machine."
             }
           } else connection.message
         ErrorBanner(
