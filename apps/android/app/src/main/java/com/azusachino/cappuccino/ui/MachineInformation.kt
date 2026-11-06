@@ -513,8 +513,7 @@ internal fun MachineInformation(
             onLongClick = { onCopy("Active route", activeText) },
           )
           MachineDivider()
-          val host =
-            profile.endpoint.base.authority ?: profile.endpoint.base.toString().removeSuffix("/")
+          val host = profile.endpoint.base.toString().removeSuffix("/")
           MachineDetailField(
             "Tailnet address",
             host,
@@ -558,8 +557,7 @@ internal fun MachineInformation(
             onLongClick = { onCopy("Primary route", primary) },
           )
           MachineDivider()
-          val host =
-            profile.endpoint.base.authority ?: profile.endpoint.base.toString().removeSuffix("/")
+          val host = profile.endpoint.base.toString().removeSuffix("/")
           MachineDetailField(
             "Tailnet address",
             host,
