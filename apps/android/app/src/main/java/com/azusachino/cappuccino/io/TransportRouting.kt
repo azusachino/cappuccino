@@ -189,7 +189,8 @@ class MachineRouter<C : Any>(
         val elapsed = clock.nowMs() - start
         ConnectionLogger.log(
           "ROUTER",
-          "Transport $kind$pathInfo failed in ${elapsed}ms: ${error.javaClass.simpleName} (${error.message})",
+          "Transport $kind$pathInfo failed in ${elapsed}ms: ${error.javaClass.simpleName} (${error.message})" +
+            (error.cause?.let { " <- ${it.javaClass.name}: ${it.message}" } ?: ""),
           ConnectionLogLevel.WARN,
         )
         if (!isTransportFailure(error)) {
