@@ -116,3 +116,32 @@ class IrohClientIsolationTest {
     }
   }
 }
+
+class IrohPoolEvictionTest {
+  private val addr = IrohEndpointAddr("bridge-id", null, emptyList())
+
+  @Test
+  fun stopAndDropClearPooledSocketsSoNoRequestRidesAStreamThatDiedWithTheConnection() {
+    MockWebServer().use { server ->
+      server.enqueue(MockResponse.Builder().body("ok").build())
+      server.enqueue(MockResponse.Builder().body("ok").build())
+      server.start()
+      val clients = IrohHttpClients(TcpTunnelTransport(server.port), OkHttpClient())
+      val transport = PoolEvictingIrohTransport(TcpTunnelTransport(server.port), clients)
+      val client = clients.clientFor(addr)
+      fun call() =
+        client
+          .newCall(Request.Builder().url("http://iroh.invalid/api/v2/handshake").build())
+          .execute()
+          .use { it.body.string() }
+      call()
+      assertEquals(1, client.connectionPool.connectionCount())
+      kotlinx.coroutines.runBlocking { transport.dropConnections() }
+      assertEquals(0, client.connectionPool.connectionCount())
+      call()
+      assertEquals(1, client.connectionPool.connectionCount())
+      kotlinx.coroutines.runBlocking { transport.stop() }
+      assertEquals(0, client.connectionPool.connectionCount())
+    }
+  }
+}

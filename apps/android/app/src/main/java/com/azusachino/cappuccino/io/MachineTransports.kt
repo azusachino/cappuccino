@@ -26,6 +26,9 @@ import kotlinx.coroutines.flow.flow
 class MachineTransports private constructor(context: Context) {
   private val iroh: IrohTransport = IrohEndpointTransport.shared(context)
   private val irohClients = IrohHttpClients(iroh, BridgeClient.defaultClient())
+  // Routers stop and drop through this, so a restart also clears the sockets pooled over the old
+  // connections.
+  private val resettingIroh = PoolEvictingIrohTransport(iroh, irohClients)
   private val irohHealth = SharedIrohHealth(clock)
   private val routers = ConcurrentHashMap<Endpoint, MachineRouter<BridgeTransport>>()
   private val poller =
@@ -97,7 +100,7 @@ class MachineTransports private constructor(context: Context) {
           put(TransportKind.IROH, BridgeClient(Endpoint.iroh(addr), irohClients.clientFor(addr)))
           endpoint.tailnetOnly()?.let { put(TransportKind.TAILNET, BridgeClient(it)) }
         }
-      MachineRouter(clients, clock, iroh, { iroh.pathKind(addr) }, irohHealth)
+      MachineRouter(clients, clock, resettingIroh, { iroh.pathKind(addr) }, irohHealth)
     }
 
   private fun onNetworkChanged() {
