@@ -48,7 +48,9 @@ prerequisites remain blocked.
 ## Next steps
 
 1. Verify canonical transcripts for Pi, Claude Code and Agy against a
-   task-owned disposable session, including its active branch.
+   task-owned disposable session, including its active branch. Bridge-level
+   check done 2026-11-05 on live sessions (canonical `append` history; Pi tail
+   matches its file). Active-branch runtime proof and phone UI remain open.
 2. Run the connected iPhone journey end to end on a physical device with one
    paired machine, then broaden to several machines with per-machine failure
    states.

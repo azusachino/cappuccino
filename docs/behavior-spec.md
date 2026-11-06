@@ -34,7 +34,7 @@ Do not map Herdr's prompt acknowledgement to `sent` or `confirmed`, and do not c
 
 ## History and reconciliation
 
-**Status:** the bridge serves canonical transcripts for Pi, Claude Code and Agy when Herdr reports a usable session, and labeled scrollback otherwise. The UI tests use scripted fixtures, and live canonical Pi parity is not verified. Do not treat the scripted tests as live-history proof.
+**Status:** the bridge serves canonical transcripts for Pi, Claude Code and Agy when Herdr reports a usable session, and labeled scrollback otherwise. The UI tests use scripted fixtures. A read-only check on 2026-11-05 against the running bridge found canonical `append` history for one live Pi, two Claude Code and one Agy session, each with a distinct conversation id; the Pi page's last agent turn matched the tail of its session file. That is bridge-level evidence for one moment. Runtime active-branch observation (D1), the phone UI, and the Agy and Claude Code transcript content remain unverified. Do not treat the scripted tests as live-history proof.
 
 - Initial load returns the session's durable active-branch history; streaming appends only confirmed-complete entries.
 - Transcript presentation: rendered in a Telegram-style chat layout. Outgoing user prompts are right-aligned bubble cards hugging text with bottom-right timestamps; incoming agent turns are left-aligned with bot headers and bottom-right timestamps. Consecutive tool executions and state transitions are grouped into centered collapsible service pill badges. Empty streaming text segments are filtered to prevent hollow cards and activity fracturing.
